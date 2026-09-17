@@ -275,18 +275,21 @@ private:
     //   网格件（tileFor / farmlandHydrBrightMul / sunShadowAt / blockAtWorld / stateAtWorld 与
     //   buildMesh 体）自本类**搬移**（非复制）进 meshbuilder（快照访问器同名同语义承接数据来源
     //   替换）；Q_PROPERTY/信号面零变化（验收④：旧 QtQuick3DAdapter 消费形态保持）。
-    //   §29.5-W4（r2026）bake→worker 网格化：buildMesh 升级为「路径选择器」——仅 sparse 流式
-    //   世界（World 桥 sink 已绑定，通电条件头注释见 submitMeshJobAsync）先走异步提交（定格
-    //   快照 → 提交 → 返回，网格由收割拍交付应用）；提交被拒（队列满载 / 执行器已停 / 桥未
-    //   就绪）→ 同步内联回退（计数可见）。fixed 世界 sink 恒未绑定 → 同步内联路径逐位原样
-    //  （零变化墙——本方法同步分支体零改动）。
+    //   §29.5-W4（r2026）bake→worker 网格化：buildMesh 升级为「路径选择器」——通电世界先走
+    //   异步提交（定格快照 → 提交 → 返回，网格由收割拍交付应用）；提交被拒（队列满载 /
+    //   执行器已停 / 桥未就绪）→ 同步内联回退（计数可见）。通电条件 = World::chunkMeshAsync
+    //   Active()（sink 已绑定 [sparse 流式会话] 或 fixed 使能异步烘培[§29.7 t1060——生产挂点
+    //   = StreamingBridge fixed 进入分支，收割拍 = StreamingBridge::pumpTick 薄收割槽]）。
+    //   未通电世界（裸 fixed / env 回退 QTVOXEL_SYNC_BAKE≠0）→ 同步内联路径逐位原样（零变化
+    //   墙——本方法同步分支体零改动）。
     void buildMesh(RebuildReason reason);
     // §29.5-W4 异步提交半边（主线程 Only）：采集稠密快照（与同步路径同一采集调用）→
     //   requestId 派生 → 上一在途作业显式注销（latest-snapshot-wins 路由层半边）→ 经 World 桥
     //   提交。被接受 → true（m_pendingRequestId 在途，网格等收割拍交付）；被拒 / 空快照
     //  （无 chunk——构建产物恒空，无作业必要）→ false（调用方走同步内联回退；拒绝面计数可见）。
-    //   **通电条件**：World::chunkMeshAsyncActive()（sink 已绑定 ⟺ sparse ∧ 流式会话在）由调用
-    //   方先行判定；本方法内 world 空指针防御返回 false。
+    //   **通电条件**：World::chunkMeshAsyncActive()（sink 已绑定 [⟺ sparse 流式会话在] 或
+    //   fixed 世界已使能异步烘培[§29.7 t1060——World 惰性执行器 + StreamingBridge::pumpTick
+    //   收割拍]）由调用方先行判定；本方法内 world 空指针防御返回 false。
     bool submitMeshJobAsync(RebuildReason reason);
     // §29.5-W4 应用半边（同步/异步两路共用的收尾链，禁两份灌注逻辑并存）：统计镜像 → 灌
     //   QQuick3D（文档序逐行原样）→ 烘焙账本（bakedSunDir/bakedDayMul = **采集时刻定格值**——

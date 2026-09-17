@@ -79,6 +79,16 @@ World::World(const SparseWorldParams &sp, QObject *parent) : QObject(parent)
 // 体 = 原 sparse ctor 逐字移入（零语义变化）——m_spawnPreGenerateRadius 归一化复用既有单一权威。
 void World::reinitializeAsSparse(const SparseWorldParams &sp)
 {
+    // ── §29.7 t1060 双归零点之一（fixed → sparse 模式切换）：异步烘培态全归零——先解绑
+    // sink（可能是本类惰性自绑定缝[捕获执行器裸指针]或已消亡流式会话的悬垂残留引用——两态
+    // 都必须在此结构性置换），再拆执行器（unique_ptr reset：stop + 队内未开工请求逐条丢弃
+    // 计数 + join 有界绝不挂死——meshworker.h 退出语义），最后清在途交付注册表（fixed 时代
+    // 的 waiter 已无可达产出；几何侧迟到 cancel 落空注册表 = 幂等 no-op）。sparse 世界的
+    // 执行器由随后的流式会话构造绑入（W4 既有接线，StreamingBridge 调用序承重）。
+    m_fixedAsyncBakeDesired = false;
+    m_chunkMeshBuildSink = {};
+    m_fixedMeshWorker.reset();
+    m_chunkMeshWaiters.clear();
     m_seed = sp.seed;
     m_width = std::max(0, sp.coreWidth);
     m_depth = std::max(0, sp.coreDepth);
@@ -91,6 +101,14 @@ void World::reinitializeAsSparse(const SparseWorldParams &sp)
 // World 侧表族卫生由调用序契约的后续 beginLoad / regenerate 全量重置承担，此处刻意不做。
 void World::reinitializeAsFixed(int width, int depth, int height)
 {
+    // ── §29.7 t1060 双归零点之二（sparse → fixed 模式切换）：同 reinitializeAsSparse 口径
+    // （本调用序下 sink 只可能是已消亡流式会话的悬垂残留引用——W5b enterWorld「先 detach 会话
+    // 后归位」调用序契约的对应面，此处置换即悬垂提交缝的结构性收口；fixed 世界的异步使能由
+    // caller 随后重新 enableFixedAsyncBake——本方法只归零不复位使能）。
+    m_fixedAsyncBakeDesired = false;
+    m_chunkMeshBuildSink = {};
+    m_fixedMeshWorker.reset();
+    m_chunkMeshWaiters.clear();
     m_width = std::max(0, width);
     m_depth = std::max(0, depth);
     m_height = std::max(0, height);
@@ -612,9 +630,14 @@ bool World::releaseStreamingChunk(int cx, int cz)
 // 提交：sink 未绑定 = 执行器未就绪（kErrChunkMeshSinkUnbound 防御面——正常调用方先查
 // chunkMeshAsyncActive()）；绑定即值转发（满载/已停拒绝原样穿透 = 调用方同步回退面），被
 // 接受才注册回调（主线程单写者——收割拍同线程，提交→注册间无交错的窗口不存在）。
+// §29.7 t1060：提交缝惰性化——fixed 使能世界首次提交先 ensureFixedMeshWorker（构造执行器 +
+// 自绑定提交缝，主线程单点与提交同域零锁面）；sparse 世界（会话 sink 域）与未使能 fixed 不进
+// 此缝，行为逐位原样。
 Result<void> World::submitChunkMeshJob(const ChunkMeshSnapshot &snap, quint64 requestId,
                                        std::function<void(quint64, ChunkMeshData &&)> waiter)
 {
+    if (!m_chunkMeshBuildSink && m_fixedAsyncBakeDesired)
+        ensureFixedMeshWorker();
     if (!m_chunkMeshBuildSink)
         return Result<void>::fail(kErrChunkMeshSinkUnbound, "chunk mesh build sink unbound");
     const Result<void> r = m_chunkMeshBuildSink(snap, requestId);
@@ -642,6 +665,78 @@ void World::deliverBuiltChunkMesh(quint64 requestId, ChunkMeshData &&mesh)
     auto fn = std::move(it->second);
     m_chunkMeshWaiters.erase(it);
     fn(requestId, std::move(mesh));
+}
+
+// ── §29.7 t1060 fixed 世界 bake 异步化（四实现；选型与摊平语义立证见 world.h 声明注释）──────
+
+// env 回退读面：QTVOXEL_SYNC_BAKE≠0 → 全同步内联（实机异常自救面）。qEnvironmentVariable
+// 进程初读一次（static local 初始化恰一次——r2020「测试缝/生产缝构造定格」同门口径）。
+static bool syncBakeEnvRequested()
+{
+    static const bool syncBake = qEnvironmentVariable("QTVOXEL_SYNC_BAKE").toInt() != 0;
+    return syncBake;
+}
+
+bool World::enableFixedAsyncBake(int meshWorkerQueueCapacity)
+{
+    if (isSparse())
+        return false; // 执行器归流式会话域（sparse 世界的 World 侧永不双起执行器线程）
+    if (syncBakeEnvRequested())
+        return false; // env 回退：拒绝使能 → chunkMeshAsyncActive 恒假 → bake 全同步内联（旧行为逐位）
+    if (m_fixedAsyncBakeDesired)
+        return true; // 幂等（重复使能不重建不换容量——fixed→fixed 重复进入安全）
+    m_fixedAsyncBakeDesired = true;
+    m_fixedMeshWorkerQueueCapacity = meshWorkerQueueCapacity; // 惰性构造时消费（>0 = 矩阵满载缝）
+    return true;
+}
+
+MeshWorker *World::ensureFixedMeshWorker()
+{
+    if (!m_fixedAsyncBakeDesired)
+        return nullptr;
+    if (!m_fixedMeshWorker) {
+        // 构造即起真线程（meshworker.h 退出语义：析构 stop + 丢弃计数 + join 有界绝不挂死；
+        // 容量取使能时定格值——-1 = 生产默认 64，0 = 退化满载缝[MeshWorker 原生钳制]，
+        // >0 = 压小缝；零时序依赖的确定性满载面 = r2020b 同门）。
+        m_fixedMeshWorker = std::make_unique<MeshWorker>(
+            nullptr, m_fixedMeshWorkerQueueCapacity >= 0 ? m_fixedMeshWorkerQueueCapacity
+                                                         : MeshWorker::kMaxQueuedTasks);
+        // 自绑定提交缝：lambda 捕获执行器裸指针（生命周期 = 本类成员——两归零点「先置空 sink
+        // 再 reset 执行器」的成员序承重，悬垂提交不可能）。受理计数在缝内精确归账（F3 stream
+        // 行 sub 域的 fixed 侧源——只记真正经由本执行器的受理，sparse 会话 sub 域=驱动器 stats
+        // 差分独占不串账）。
+        MeshWorker *w = m_fixedMeshWorker.get();
+        m_chunkMeshBuildSink = [w](const ChunkMeshSnapshot &snap, quint64 requestId) -> Result<void> {
+            const Result<void> r = w->submit(snap, requestId);
+            if (r.isOk())
+                FrameProfiler::instance()->addCount("streamSub", 1); // t1059 stream 行 sub 域（fixed 侧）
+            return r;
+        };
+    }
+    return m_fixedMeshWorker.get();
+}
+
+int World::fixedMeshHarvestableCount() const
+{
+    return m_fixedMeshWorker ? m_fixedMeshWorker->builtCount() : 0;
+}
+
+int World::harvestBuiltChunkMeshes()
+{
+    if (!m_fixedMeshWorker)
+        return 0; // 未使能/未构造（或已随模式切换拆毁）——薄收割拍零动作
+    MeshBuiltItem built;
+    int applied = 0;
+    // 单拍应用上界（kFixedMeshHarvestPerBeat——风暴摊平静量，world.h 头注）：余量留队 FIFO
+    // 序不变，下一收割拍续排（排干收敛）；逐条 deliverBuiltChunkMesh 路由（W4 模式复用：
+    // 注册表命中灌注 / miss 可见丢弃 / latest-wins 双保险原样）。
+    while (applied < kFixedMeshHarvestPerBeat && m_fixedMeshWorker->takeBuilt(built)) {
+        deliverBuiltChunkMesh(built.requestId, std::move(built.mesh));
+        ++applied;
+    }
+    if (applied > 0)
+        FrameProfiler::instance()->addCount("streamMesh", applied); // t1059 stream 行 mesh 域（fixed 侧）
+    return applied;
 }
 
 // t176 存档加载入口：重置到目标 seed 的零填充分区网格（不走 generate —— 由 WorldStore 写 chunk blob

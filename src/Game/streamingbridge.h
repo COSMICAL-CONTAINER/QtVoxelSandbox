@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QMetaObject>
+#include <QPointer> // §29.7：fixed 收割宿主的世界引用（QPointer——世界随 QML/矩阵腿存亡，悬垂自动归零）
 #include <QString>
 #include <QtQml/qqml.h>
 
@@ -107,6 +108,18 @@ private:
     void ensureFeedHook(PlayerController *player);
 
     std::unique_ptr<GameSession> m_session; // 流式会话（sparse 独占；fixed/未进入恒 null = 零活动墙）
+    // ── §29.7 t1060 fixed 世界收割宿主（r2034；C1 完全体）───────────────────────────────
+    // fixed 世界 bake 异步化的收割拍宿主 = 本桥既有泵拍：WorldClock::ticked 既有拍上的薄收割
+    //   槽（C++ 槽挂接——fixed 进入分支 ensurePumpHook 复用与流式泵同一连接；QML 零改动、零
+    //   第二计时器）。pumpTick 无会话（fixed）时调 World::harvestBuiltChunkMeshes()（单拍应用
+    //   有界——黎明星空→白天 dayMul 跨门重烘风暴分帧摊平）。**宿主选型立证**：候选二
+    //   「ChunkGeometry 帧驱动拉取」被否——QQuick3DGeometry 无每帧回调沿，500 段各自拉取 =
+    //   500 个收割点（与 W4「收割拍单点收口」纪律相悖）；候选一胜出与 W5b 泵拍同宿（同一
+    //   ticked 沿、同一连接、fixed/流式两态在 pumpTick 内分派）——不阻塞主线程（收割只灌注
+    //   已产出网格）、延迟有界 ≤ 一拍（100ms）、QML 零改动三准绳全合。
+    //   引用持 QPointer：世界归 QML/矩阵腿所有，跨世界/跨腿销毁后悬垂自动归零（pumpTick 静
+    //   默跳过），无 dangling harvest 面。
+    QPointer<World> m_fixedWorld;           // fixed 收割宿主的世界引用（未进入/流式态 = null）
     QMetaObject::Connection m_pumpConn;     // clock.ticked → pumpTick（幂等挂钩）
     QMetaObject::Connection m_feedConn;     // player.playerChunkChanged → notePlayerChunk（W2 生产链）
     WorldClock *m_pumpClock = nullptr;      // 已挂泵拍源（重入防御读面）

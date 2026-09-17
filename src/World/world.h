@@ -16,8 +16,12 @@
 #include "blockregistry.h" // isCollidable 走 BlockDef.solid（t88 火把 non-solid 不挡玩家）
 #include "chunkmanager.h" // 内部多 chunk 存储（World 层，不外泄到 QML）
 #include "meshbuilder.h" // §29.5-W4：ChunkMeshSnapshot/ChunkMeshData 值面（R20.13 单一权威）——
-                         //   仅值类型入桥；网格执行器类型不入 World（W2「驱动器/worker 不入
-                         //   World」职责面纪律同门，提交/收割全经会话注入的 std::function 缝）
+                         //   仅值类型入桥；W4 流式会话的执行器仍经 std::function 缝注入（类型
+                         //   不入本头）
+#include "meshworker.h" // §29.7 t1060：fixed 世界惰性执行器所有权（unique_ptr<MeshWorker> 成员
+                        //   ——执行器记号全树白名单随本单同变更修订：{meshworker.h, gamesession.h
+                        //   [W4 会话宿主], world.h/world.cpp[fixed 归属宿主]}；r2020d 探针纠偏
+                        //   留痕非放宽——chunkgeometry 双件/Main.qml 仍禁出）
 #include "terraingen.h" // R20.12 纯地形生成单一权威（Perlin/fBm/群系/海域/列体——World 委托到 m_terrain）
 
 // §29.5-W2：worker 自持体素输出缓冲（backgroundgeneration.h；World 面只以 const 引用承接——
@@ -176,9 +180,13 @@ public:
     {
         m_chunkMeshBuildSink = std::move(sink);
     }
-    // 异步网格化通电读面（bake 发起点的门）：sink 已绑定 ⟺ sparse 流式会话在。fixed 世界恒
-    // false（ChunkGeometry 走现行同步内联路径——零变化墙）。
-    bool chunkMeshAsyncActive() const { return bool(m_chunkMeshBuildSink); }
+    // 异步网格化通电读面（bake 发起点的门）：sink 已绑定（⟺ sparse 流式会话在——GameSession
+    //   构造内 isSparse() 门绑定）**或** fixed 世界已显式使能异步烘培（§29.7 t1060：
+    //   enableFixedAsyncBake——生产挂点 = StreamingBridge fixed 进入分支；env 回退在使能缝
+    //   拒绝，故 desired 为真蕴含 env 未关）。两判据模式互斥（reinitialize* 归零切换）——
+    //   任一为真 → ChunkGeometry bake 走异步提交；全假 → 同步内联路径（逐位旧行为；
+    //   裸 fixed 世界默认态 = r2026a 零变化墙延续）。
+    bool chunkMeshAsyncActive() const { return bool(m_chunkMeshBuildSink) || m_fixedAsyncBakeDesired; }
     // 提交一个异步网格作业（主线程 Only）：快照值转发 sink（满载/已停拒绝原样穿透 = 调用方
     // 同步回退面）；被接受 → 注册交付回调（requestId 键，insert_or_assign = 同键重复提交
     // 覆盖旧回调的防御面——正常路径重提交方先显式 cancel，见上覆盖语义）。
@@ -195,6 +203,53 @@ public:
     // 观测读面（矩阵腿 / 诊断；fixed 恒 0 / 0）：交付 miss 累计 + 在途注册表深度。
     int droppedBuiltMeshCount() const { return m_droppedBuiltMeshes; }
     int pendingChunkMeshJobCount() const { return int(m_chunkMeshWaiters.size()); }
+
+    // ── §29.7 t1060 fixed 世界 bake 异步化（C1 完全体；filter 词 r2034）───────────────────
+    // 调研路线 C1（vulkan-rhi-and-simd-survey-2026-08-21 路线 C1 worker meshing）的完全体：W4 已把
+    //   MeshWorker 接入流式世界，本面把同一模式推广到 fixed 世界（当前唯一生产模式）——用户
+    //   2026-08-22 亲测确诊的黎明 sun 重烘风暴（dayMul 跨门 → ~225 段同步重烘 ≈ 100ms 主线程
+    //   尖刺 → 10fps）自本面起后台化摊平。
+    // **执行器归属选型（头注释立证）**：fixed 专属执行器归本类惰性单例（首次异步提交构造，
+    //   见 ensureFixedMeshWorker）。与 W4 流式会话执行器（GameSession::m_meshWorker）的关系 =
+    //   **模式互斥的两份所有权、并存不可能**：fixed 世界连流式会话件都不构造（D2 零活动墙，
+    //   无可复用对象），sparse 世界本类惰性执行器恒 null（reinitializeAsSparse 随模式切换
+    //   销毁 + 使能标志仅 fixed 可置）→「fixed 与流式不重复起线程」结构性成立（任一时刻本类
+    //   至多一个执行器在活）。ChunkGeometry 共享静态案被否：跨世界活状态 + 生命周期与世界
+    //   脱钩（世界换代线程不随行）+ 主线程单写者契约面（提交/收割同域）被静态共享破坏。
+    // 使能 fixed 世界异步烘培（生产唯一挂点 = StreamingBridge::enterWorld fixed 分支——W5b
+    //   进入链既有 C++ 面，QML 零改动；矩阵腿直调）。sparse 世界拒绝（执行器归流式会话域）；
+    //   env 回退 QTVOXEL_SYNC_BAKE≠0 拒绝（保持全同步内联 = 旧路径逐位——实机异常自救面；
+    //   qEnvironmentVariable 进程初读一次）。meshWorkerQueueCapacity 缝：缺省 -1 = 生产默认
+    //  容量（MeshWorker::kMaxQueuedTasks 64）；0 = 退化满载缝（每提交必 kErrQueueFull——
+    //   r2020b 退化确定性满载同门，零时序依赖）；>0 = 压小请求队列（确定性满载面）。
+    //   幂等（重复使能不重建不换容量——生产进入链 fixed→fixed 重复进入安全）。
+    bool enableFixedAsyncBake(int meshWorkerQueueCapacity = -1);
+    // 使能读面（chunkMeshAsyncActive 第二判据；reinitializeAsSparse/reinitializeAsFixed
+    //   双归零点——模式切换即回裸同步态，再使能由 caller 重发）。
+    bool fixedAsyncBakeDesired() const { return m_fixedAsyncBakeDesired; }
+    // fixed 执行器读面（单实例钉 / 线程身份对账——r2012a/r2020 先例同门；未使能未构造恒
+    //   null = 零线程）。sparse 世界恒 null（不双起线程的直接实证面）。
+    const MeshWorker *fixedMeshWorker() const { return m_fixedMeshWorker.get(); }
+    // 已产出未收割条目数（fixed 执行器账面直读；确定性收敛缝——r2034b 单拍上界断言的
+    //   「build 全部完成」等对锚，避免收割与构建竞速的瞬态窗）。
+    int fixedMeshHarvestableCount() const;
+    // 收割拍（fixed 世界）：每次至多排干 kFixedMeshHarvestPerBeat 条 built → 逐条
+    //   deliverBuiltChunkMesh 注册表路由回几何灌注（W4 模式复用——latest-wins 双保险/可见
+    //   丢弃语义原样）。**单拍应用成本有界**：黎明星空→白天 dayMul 跨门重烘风暴从「单帧
+    //   ~100ms 同步尖刺 → 10fps」变「分帧应用数秒完成」= MC 天光/光照更新渐进同款观感
+    //  （引证三元组 2026-09-17 实读：minecraft.wiki/w/Light History「Sunlight now has its
+    //   own light array and optimizations to make dawn and dusk smoother.」+ 同页 Beta 1.8
+    //   「Day/night cycles no longer require chunk updates and have a smooth transition.」
+    //   + modrinth.com/mod/phosphor「works to optimize one of game's most inefficient
+    //   areas -- the lighting engine」/「nastier frame stutters ... simply vanish」——
+    //   光照重算大面摊平渐进是 MC 本位的加载/过渡形态）。余量留队 FIFO 序不变，下一收割拍
+    //   续排（排干收敛；生产消费方 = StreamingBridge::pumpTick 挂 WorldClock::ticked 既有拍
+    //   的薄收割槽——10Hz、非阻塞、延迟有界 ≤ 一拍、QML 零改动；矩阵腿直调同体）。返回本拍
+    //   应用数（每应用恰推 F3 stream 行 mesh 域 +1——fixed 也走 worker 的观测实证面）。
+    int harvestBuiltChunkMeshes();
+    // 单收割拍应用上界（摊平静量：16 段 × ~0.1ms 灌注 ≈ 1.6ms ≪ 16.6ms 帧预算；10Hz 拍 →
+    //   ≤160 段/s 渐进——进世界首建数百段 ~数秒渐显、黎明 ~225 段风暴 ~1.5s 渐变）。
+    static constexpr int kFixedMeshHarvestPerBeat = 16;
 
     int width() const  { return m_width; }
     int depth() const  { return m_depth; }
@@ -2178,12 +2233,30 @@ private:
     int m_residentChunkRevision = 0;
 
     // ── §29.5-W4 异步网格作业桥私有面（纯主线程；零锁——提交/取消/交付全在 GUI 线程）────
-    //   会话注入的构建 sink（null = fixed 世界/未通电 → 调用方同步回退）；在途回调注册表
-    //   （requestId → 交付回调——每个被接受的请求恰一产出恰一次交付擦除，有界性见 deliver
-    //   头注）；交付 miss 累计（可见丢弃）。世界换代（recreate/析构）随对象整体清零。
+    //   会话注入的构建 sink（null = 未通电世界 → 调用方同步回退；fixed 使能世界经
+    //   ensureFixedMeshWorker 惰性自绑定）；在途回调注册表（requestId → 交付回调——每个被
+    //   接受的请求恰一产出恰一次交付擦除，有界性见 deliver 头注）；交付 miss 累计（可见
+    //   丢弃）。世界换代（recreate/析构）随对象整体清零。
     std::function<Result<void>(const ChunkMeshSnapshot &, quint64)> m_chunkMeshBuildSink;
     std::unordered_map<quint64, std::function<void(quint64, ChunkMeshData &&)>> m_chunkMeshWaiters;
     int m_droppedBuiltMeshes = 0;
+
+    // ── §29.7 fixed 世界异步烘培私有面（纯主线程编排；线程原语零新增落点——执行器类型复用
+    //   meshworker.h 既有线程件[t1023c 双文件白名单零扩]，本类只持 unique_ptr 所有权）────
+    //   使能标志（门第二判据）+ 压小容量缝（enable 时定格，惰性构造消费）+ 惰性执行器。
+    //   归零点 = reinitializeAsSparse / reinitializeAsFixed（模式切换即拆执行器 join 有界 +
+    //   解绑 sink + 清在途注册表——§29.7 双归零口径）。成员声明序无锁/队列前置约束
+    //  （MeshWorker 内部自洽：其锁/队列先于其线程体——meshworker.h 头注纪律原文）。
+    bool m_fixedAsyncBakeDesired = false;          // 使能标志（env 回退在使能缝拒绝）
+    int m_fixedMeshWorkerQueueCapacity = -1;       // 使能时定格的队列容量（-1 = 生产默认 64）
+    std::unique_ptr<MeshWorker> m_fixedMeshWorker; // fixed 世界惰性执行器（首次异步提交构造）
+
+private:
+    // 惰性执行器缝（§29.7；主线程 Only——与提交/收割同域零锁）：使能且未构造 → 构造（容量
+    //   取使能时定格值）+ 自绑定提交缝（lambda 捕获执行器裸指针——生命周期 = 本类成员，先于
+    //   sink 解绑不得销毁的序由两归零点「先置空 sink 再 reset 执行器」承重）。返回执行器
+    //   （未使能 = nullptr——调用方提交缝走 kErrChunkMeshSinkUnbound 防御面）。
+    MeshWorker *ensureFixedMeshWorker();
 };
 
 #endif // WORLD_H

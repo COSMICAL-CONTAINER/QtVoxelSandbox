@@ -102,6 +102,7 @@ bool StreamingBridge::enterWorld(World *world, WorldStore *store, WorldClock *cl
         // fixed 存档（或标志读败 = 诚实降级走 fixed，qWarning 留痕见 readMetaFlag 消费面）：
         // 清流式残留 + 空网格归位 → caller 走既有 fixed 进入链（逐字节原样 = 默认关零变化墙）。
         detachWorld(); // 旧会话先于模式迁移消亡（线程 join 有界——析构序承重选择）
+        m_fixedWorld = nullptr; // §29.7：收割宿主引用随态复位（下方 fixed 分支重设）
         if (world->isSparse()) {
             // 上一局流式世界跨世界残留：归位 fixed 空网格（调用序契约——caller 随后 beginLoad /
             //   regenerate 全量卫生重置，见 world.h reinitializeAsFixed 头注）。dims 取宿主当前值
@@ -109,12 +110,23 @@ bool StreamingBridge::enterWorld(World *world, WorldStore *store, WorldClock *cl
             //   所取同源 dims）。
             world->reinitializeAsFixed(world->width(), world->depth(), world->height());
         }
+        // ── §29.7 t1060 fixed 世界异步烘培使能 + 收割拍挂钩（C1 完全体；QML 零改动）─────────
+        // 生产使能点 = 本 fixed 进入分支（W5b 进入链既有 C++ 面在内侧，Main.qml 分流逐字节
+        //   原样）。env 回退（QTVOXEL_SYNC_BAKE≠0）在使能缝拒绝 → 世界保持全同步内联（旧路径
+        //   逐位 = 实机自救面）。收割宿主 = 本桥既有泵拍：ensurePumpHook 复用与流式泵同一
+        //   ticked 连接——pumpTick 无会话（fixed）时拍内薄收割 World::harvestBuiltChunkMeshes
+        //   （单拍应用有界 = 风暴摊平；10Hz、非阻塞、延迟 ≤ 一拍）。引用持 QPointer（世界随
+        //   QML/矩阵腿存亡——销毁后悬垂自动归零，pumpTick 静默跳过）。
+        world->enableFixedAsyncBake();
+        ensurePumpHook(clock);
+        m_fixedWorld = world;
         return false;
     }
 
     // ── 流式进入链（D2 新世界与 D3 转换世界同门）：sparse 重构 → 会话通电 → 绑定 → overlay 读档
     //    → 泵拍 / 位置沿挂钩。五拍全在主线程同步完成（返回即「进入即通电」事实）。──────────────
     detachWorld(); // 跨世界切换：旧会话（含线程件）先于世界重构消亡
+    m_fixedWorld = nullptr; // §29.7：流式态收割宿主让位（拍内收割归会话 pumpStreamingFrame 独占）
     World::SparseWorldParams sp;
     sp.seed = seed;
     sp.coreWidth = meta.coreW > 0 ? meta.coreW : world->width(); // 行缺席 dims 的防御回退（正常行恒有）
@@ -149,8 +161,16 @@ bool StreamingBridge::flushForSave()
 
 void StreamingBridge::pumpTick()
 {
-    if (m_session)
-        m_session->pumpStreamingFrame(); // tick 尾流式收割拍（fixed/无会话 = 零动作墙，D2 同门）
+    if (m_session) {
+        m_session->pumpStreamingFrame(); // tick 尾流式收割拍（W4 ⑤ 段排干语义不变，r2026）
+        return;
+    }
+    // §29.7 t1060 fixed 收割拍（C1 完全体）：无会话（fixed 世界已使能异步烘培）→ 薄收割槽
+    //   World::harvestBuiltChunkMeshes（单拍应用有界——黎明星空→白天 dayMul 跨门重烘风暴分帧
+    //   摊平；未使能世界该拍恒零动作返回）。世界已亡（矩阵腿间/退出世界）/未进入 → QPointer
+    //   空 = 零动作（无悬垂收割面）。
+    if (m_fixedWorld)
+        m_fixedWorld->harvestBuiltChunkMeshes();
 }
 
 void StreamingBridge::detachWorld()

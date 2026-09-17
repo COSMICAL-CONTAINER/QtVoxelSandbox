@@ -122,14 +122,18 @@ void FrameProfiler::flush()
     const qint64 meshNS = meshReasonN("meshNsun");
     const qint64 meshNW = meshReasonN("meshNwater");
     // §29.5-W4（r2026）worker 列：本窗口经收割交付应用的网格数（chunkgeometry.cpp 交付回调
-    //   计数；同步内联/回退路径不计）。fixed 世界恒 0（无执行器构造）；sparse 流式世界 > 0 =
-    //   meshing 异步化可见面（构建段在 worker 线程，win 行 mesh ms 只余采集+灌注两主线程段）。
+    //   计数；同步内联/回退路径不计）。未通电世界恒 0；通电世界 > 0 = meshing 异步化可见面
+    //  （构建段在 worker 线程，win 行 mesh ms 只余采集+灌注两主线程段）。§29.7 t1060 起
+    //   fixed 使能世界（World 惰性执行器 + StreamingBridge::pumpTick 薄收割槽）同列非零。
     const qint64 meshNWorker = meshReasonN("meshNworker");
     // t1059 P5 观测前置：流式生成观测行（§29.5.4 风险登记「生成风暴…F3 排队观测行」同门兑现）。
     //   数据源 = GameSession 推送面（gamesession.h 头注 t1059 段：泵拍心跳 + 驱动器 stats 差分
-    //   + 收割拍增量 + 驱逐轨迹五分域逐条计数——键名 stream*）。本层只读桶拼行、不产生语义：
-    //   s 位 = 窗内有泵拍（流式在画）；fixed 世界无推送 → 全部键缺席读 0 → 行恒在全零（与
-    //   win 行 worker 列恒 0 先例同门——不做条件显行，格式恒定可 grep）。
+    //   + 收割拍增量 + 驱逐轨迹五分域逐条计数——键名 stream*）+ §29.7 t1060 起 fixed 侧推送面
+    //  （world.cpp 自绑定提交缝受理计数入 sub 域、World::harvestBuiltChunkMeshes 应用计数入
+    //   mesh 域——fixed 也走 worker 的 F3 实证面；s 位仍=流式泵拍心跳，fixed 收割拍不推 s）。
+    //   本层只读桶拼行、不产生语义：s 位 = 窗内有流式泵拍（流式在画）；未通电世界无推送 →
+    //   全部键缺席读 0 → 行恒在全零（与 win 行 worker 列恒 0 先例同门——不做条件显行，格式
+    //   恒定可 grep）。
     const auto streamCnt = [this](const char *key) {
         auto it = m_counts.find(key);
         return it == m_counts.end() ? qint64(0) : it->second;
