@@ -26,8 +26,13 @@
 // ── ChunkMeshSnapshot 稠密域设计（自持 / 可独立复制 / 无 QObject / 无指针成员）──────────
 //   块·state·光域：pad=2 外扩（覆盖网格循环的最大查询触达——面邻格 ±1、AO 三探针自邻格再 ±1、
 //   流向/栅栏/铁轨/红石粉水平探针 ±1），域宽 kDim = 16+2×2 = 20，x/z ∈ [origin-2, origin+17]，
-//   y ∈ [0, H)。列顶域（PCF 软影采样源）：kMaxShadow=2 步进 + floor/ceil PCF 半格 → 列触达
-//   [origin-2, origin+18]，域宽 kTopDim = 21。accessor 与 World 同名查询**同 OOB 语义**
+//   y ∈ [0, H)。列顶域（PCF 软影采样源）：顶点 x/z ∈ [origin, origin+kChunk]（右/下边界面
+//   顶点恰落 origin+16），沿太阳水平单位向步进 ≤ kMaxShadow=2 格，PCF 每步采样 floor(落点)
+//   与 floor(落点)+1 两列（半格列贡献 0.5）→ 前向最大探测列 = origin+16+2+1 = origin+19
+//   （t1056 #9：floor 后 +1 半格触达多占 1 列，旧 21 宽域 [origin-2, origin+18] 差此 1 列 →
+//   域外 -1 不遮挡而 World 真值路径照常遮挡 = chunk 边缘极端姿态影偏亮）；后向最小探测列 =
+//   origin-2（floor 不下探，恰落 -kMaxShadow）。域宽 kTopDim = 22（[origin-2, origin+19]，
+//   两端恰紧）。accessor 与 World 同名查询**同 OOB 语义**
 //   （blockAtWorld/stateAtWorld 域外/y 界外 → 0 空气；skyLightAt y≥H → 15 开阔天空、余 0；
 //   blockLightAt y≥H → 0；columnTopAt 域外 → -1 不遮挡）——域内逐位等于 World 应答（采集即
 //   现查），域外等价 World 越界面（移动机械替换后语义不变式）。
@@ -35,7 +40,7 @@
 //   greedyMeshing/六段路由开关）+ 原点/世界高——「dayMul/sunDir 等 ChunkGeometry 状态在采集时
 //   进快照元数据」（任务书），MeshBuilder 据此烘顶点色，自身零可变状态。
 //   **采集成本如实登记**：每次重建新增一次 16×16×H（pad 域 20×20×H）列扫 = 4 数组 ×~38.4k 格查
-//   + 21×21 列顶查（≈15 万次 Facade 查询）。旧路径同量级查询散布在循环里（每格被自身 + 6 邻
+//   + 22×22 列顶查（≈15 万次 Facade 查询；t1056 #9 域宽 21→22 同步如实化）。旧路径同量级查询散布在循环里（每格被自身 + 6 邻
 //   重复读），采集把它们前移为一次性顺序扫——总量同阶、位置集中；这是后续 worker meshing 的
 //   输入形态预演（快照可跨线程，网格算法纯函数于快照）。
 //
@@ -88,8 +93,8 @@ struct ChunkMeshSnapshot
     static constexpr int kChunk = 16;  // chunk 边长（= Chunk::kSize）
     static constexpr int kPad = 2;     // 块/state/光域外扩（AO 探针 ±2 最大触达；PCF 步进见 kTopLo）
     static constexpr int kDim = kChunk + 2 * kPad; // 20：块·state·光方域宽
-    static constexpr int kTopLo = -2;              // 列顶域下界（PCF floor 下探）
-    static constexpr int kTopDim = 21;             // 列顶域宽（[-2, +18]）
+    static constexpr int kTopLo = -2;              // 列顶域下界（PCF 后向探测恰 -kMaxShadow；floor 不下探）
+    static constexpr int kTopDim = 22;             // 列顶域宽（[-2, +19]；t1056 #9：PCF 半格触达前向 +19）
 
     // ── 元数据（采集时定格；含 ChunkGeometry 烘焙状态——MeshBuilder 零外部可变输入）──
     int originX = 0; // chunk 世界起点（cx * kChunk）
@@ -177,7 +182,9 @@ struct ChunkMeshSnapshot
             return 0;
         return blockLight[cellIndex(lx, wy, lz)];
     }
-    // 列顶实面（ChunkManager::columnTopSurfaceY 同语义：域外 → -1 不遮挡）。
+    // 列顶实面（ChunkManager::columnTopSurfaceY 同语义：域外 → -1 不遮挡）。t1056 #9 起域
+    // [kTopLo, kTopLo+kTopDim) 已盖满 PCF 全部探测触达——域外 -1 分支保留为纯防御（正常路径恒不触），
+    // 域外即返回 -1 的行为面由矩阵 r2030a 以真实快照逐探测列对 World 真值核验。
     float columnTopAt(int wx, int wz) const
     {
         const int lx = wx - originX, lz = wz - originZ;

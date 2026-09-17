@@ -27,6 +27,22 @@ static_assert(ChunkMeshSnapshot::kChunk == Chunk::kSize,
               "ChunkMeshSnapshot::kChunk must match Chunk::kSize (R20.13)");
 static_assert(VoxelLight::kMaxShadow <= ChunkMeshSnapshot::kPad,
               "PCF kMaxShadow grew past snapshot pad - widen ChunkMeshSnapshot (R20.13)");
+// t1056（agent-review-2026-09-16 #9）列顶域 × PCF 半格触达互钉：PCF 每步采样 floor(落点) 与
+// floor(落点)+1 两列（半格列），顶点恰在 chunk 右/下缘 origin+kChunk → 前向探测越过 chunk
+// 缘 kMaxShadow+1 列，须 ≤ 列顶域在缘外的余量（kTopLo + kTopDim - kChunk = 域前向半宽）；
+// 后向探测 = floor 恰落 -kMaxShadow（不下探），域下界须触达。旧 21 宽域缺这两条断言面
+//（推导漏 floor 后 +1 半格 → 域差 1 列，#9 病灶本体）——本两条把「kMaxShadow 增大须同步
+// 扩 kTopDim/kTopLo」的耦合纳入编译期。列顶域对探测带的**精确覆盖**（last index ≥
+// kChunk+kMaxShadow+1 与 kTopLo ≤ -kMaxShadow 两端恰紧）由矩阵 r2030a 运行时推导腿钉：
+// 编译期紧式会把 NEG-1 恰红轮的 kTopDim 回退（21）直接变编译错误——阴性轮须红在测试面
+// 而非断编译，选型留痕（t1056）。
+static_assert(VoxelLight::kMaxShadow + 1 <= ChunkMeshSnapshot::kTopLo + ChunkMeshSnapshot::kTopDim
+                  - ChunkMeshSnapshot::kChunk,
+              "PCF half-cell probe (kMaxShadow + 1 columns past the chunk edge) must fit the"
+              " forward column-top headroom - widen kTopDim with kMaxShadow (t1056 #9)");
+static_assert(ChunkMeshSnapshot::kTopLo <= -VoxelLight::kMaxShadow,
+              "column-top domain must reach the backward PCF probe (-kMaxShadow; floor never"
+              " dips below the exact landing) - widen kTopLo with kMaxShadow (t1056 #9)");
 
 // MeshBuilder::Reason 与 ChunkGeometry::RebuildReason 镜像互钉（值域恒等——适配层 int 转发的
 // 语义不变式）。
