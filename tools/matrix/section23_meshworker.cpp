@@ -635,8 +635,11 @@ void MatrixRun::section23_meshworker()
             diag += QStringLiteral("[whitelist unsanctioned=%1 bg=%2 mw=%3 %4] ")
                         .arg(unsanctioned).arg(bgHits).arg(mwHits).arg(sweepDetail);
 
-        // ④ 零生产接线：全 src 树「MeshWorker」记号只许出现在 meshworker.h；chunkgeometry 双件
-        //    显式反探（现行同步 bake 路径零触碰）；Main.qml 零记号（QML 零迁移不变量）。
+        // ④ 接线宿主白名单（§29.5-W4 同变更修订——纠偏留痕非放宽，t1023c/r2018d/r2019d 先例）：
+        //    r2020 交付态 = 全树「执行器」记号只许出现在本头（组件先行零接线）；W4 起生产接线
+        //    落地 = 接线宿主 gamesession.h 转正入白名单（unique_ptr 成员 + World 桥提交缝——
+        //    计划原文授权的接线点）。World/chunkgeometry 双件/Main.qml 仍禁出（几何经 World 桥
+        //    std::function 缝可达执行器，类型零泄漏；chunkgeometry 双件显式反探原样保留）。
         int mwSelfHits = 0, mwElsewhere = 0;
         QString wiringDetail;
         QDirIterator it2(srcRoot, { QStringLiteral("*.cpp"), QStringLiteral("*.h") },
@@ -649,7 +652,9 @@ void MatrixRun::section23_meshworker()
                 continue;
             const QString rel = QDir(srcRoot).relativeFilePath(it2.filePath());
             if (rel == QStringLiteral("World/meshworker.h"))
-                ++mwSelfHits;
+                ++mwSelfHits; // 组件本体（记号权威落点）
+            else if (rel == QStringLiteral("Game/gamesession.h"))
+                ; // W4 接线宿主（§29.5-W4 同变更转正——构造 + World 桥提交缝）
             else {
                 ++mwElsewhere;
                 wiringDetail += rel + QStringLiteral(" ");
@@ -694,16 +699,20 @@ void MatrixRun::section23_meshworker()
 
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                          << "| r2020d structure pins + whitelist self-cert + zero wiring +"
-                             " thread identity: the meshworker.h surface holds under"
-                             " comment-stripped pins, reverse probes prove zero QObject face,"
-                             " zero Qt threading facilities, zero copied mesh logic and zero"
-                             " World read face; the in-section sweep re-certifies the amended"
-                             " dual-file threading whitelist (std::thread only in"
-                             " backgroundgeneration.h + meshworker.h) and zero production"
-                             " wiring (MeshWorker token lives in meshworker.h only; Main.qml"
-                             " clean); the executor thread identity reconciles against the"
-                             " caller thread"
+                          << "| r2020d structure pins + whitelist self-cert + wiring-host"
+                             " whitelist (W4 amendment) + thread identity: the meshworker.h"
+                             " surface holds under comment-stripped pins, reverse probes prove"
+                             " zero QObject face, zero Qt threading facilities, zero copied"
+                             " mesh logic and zero World read face; the in-section sweep"
+                             " re-certifies the dual-file threading whitelist (std::thread"
+                             " only in backgroundgeneration.h + meshworker.h) and the"
+                             " token whitelist amended in the same change for the W4 wiring"
+                             " host (token lives in meshworker.h + gamesession.h only - the"
+                             " session host owns the executor and binds the World bridge"
+                             " submit seam; World/chunkgeometry/Main.qml still token-free,"
+                             " geometry reaches async meshing token-free via the bridge);"
+                             " the executor thread identity reconciles against the caller"
+                             " thread"
                           << (ok ? QString() : diag);
     });
 }
