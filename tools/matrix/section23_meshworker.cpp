@@ -530,9 +530,9 @@ void MatrixRun::section23_meshworker()
                           << (ok ? QString() : diag);
     });
 
-    // ── r2020d：结构钉 + 白名单修订自证 + 零接线反探 + 线程身份（组件先行零生产接线守）──────
-    runLeg(QStringLiteral("r2020d structure pins + amended threading-whitelist self-cert + zero"
-        " production wiring + thread identity: comment-stripped pins hold the meshworker.h"
+    // ── r2020d：结构钉 + 白名单修订自证 + 零接线反探 + 线程身份（W4/§29.7 随变更如实化）──────
+    runLeg(QStringLiteral("r2020d structure pins + amended threading-whitelist self-cert +"
+        " sanctioned-wiring whitelist + thread identity: comment-stripped pins hold the meshworker.h"
         " surface (submit/takeBuilt entries, capacity 64, the single-authority executor call"
         " MeshBuilder::build(t.snap, Reason::Dirty), the std::thread primitive, both cv wakes,"
         " the MeshBuiltItem QObjectFree pin and the destructor drop accounting) while reverse"
@@ -543,7 +543,9 @@ void MatrixRun::section23_meshworker()
         " an in-section sweep re-certifies the amended dual-file threading whitelist (thread"
         " tokens live in exactly two sanctioned sites, backgroundgeneration.h plus"
         " meshworker.h, one or more each, nowhere else) and"
-        " proves zero production wiring (the MeshWorker token appears in meshworker.h only -"
+        " re-certifies the sanctioned wiring hosts (the MeshWorker token lives in meshworker.h"
+        " + the W4 session host gamesession.h + the fixed ownership host world.h/world.cpp per"
+        " §29.7 t1060 -"
         " chunkgeometry.{h,cpp} explicitly probed, Main.qml clean); behaviorally the executor"
         " thread identity reconciles (worker thread != caller thread, observed exec thread =="
         " worker thread)"), [&]() {
@@ -636,10 +638,12 @@ void MatrixRun::section23_meshworker()
             diag += QStringLiteral("[whitelist unsanctioned=%1 bg=%2 mw=%3 %4] ")
                         .arg(unsanctioned).arg(bgHits).arg(mwHits).arg(sweepDetail);
 
-        // ④ 接线宿主白名单（§29.5-W4 同变更修订——纠偏留痕非放宽，t1023c/r2018d/r2019d 先例）：
-        //    r2020 交付态 = 全树「执行器」记号只许出现在本头（组件先行零接线）；W4 起生产接线
-        //    落地 = 接线宿主 gamesession.h 转正入白名单（unique_ptr 成员 + World 桥提交缝——
-        //    计划原文授权的接线点）。World/chunkgeometry 双件/Main.qml 仍禁出（几何经 World 桥
+        // ④ 接线宿主白名单（W4 转正 + §29.7 t1060 同变更修订——纠偏留痕非放宽，t1023c/r2018d/
+        //    r2019d/r2026d 先例）：r2020 交付态 = 全树「执行器」记号只许出现在本头（组件先行零
+        //    接线）；W4 起 = 接线宿主 gamesession.h 转正（unique_ptr 成员 + World 桥提交缝）；
+        //    §29.7 t1060 起 = fixed 归属宿主 world.h/world.cpp 转正（World 侧惰性单例 unique_ptr
+        //    + 自绑定提交缝 + fixed 收割拍——与流式会话执行器模式互斥不并存，「fixed 与流式不
+        //    重复起线程」结构性成立）。chunkgeometry 双件/Main.qml 仍禁出（几何经 World 桥
         //    std::function 缝可达执行器，类型零泄漏；chunkgeometry 双件显式反探原样保留）。
         int mwSelfHits = 0, mwElsewhere = 0;
         QString wiringDetail;
@@ -656,6 +660,9 @@ void MatrixRun::section23_meshworker()
                 ++mwSelfHits; // 组件本体（记号权威落点）
             else if (rel == QStringLiteral("Game/gamesession.h"))
                 ; // W4 接线宿主（§29.5-W4 同变更转正——构造 + World 桥提交缝）
+            else if (rel == QStringLiteral("World/world.h")
+                     || rel == QStringLiteral("World/world.cpp"))
+                ; // §29.7 t1060 fixed 归属宿主（惰性单例 + 提交缝 + 收割拍——同变更转正）
             else {
                 ++mwElsewhere;
                 wiringDetail += rel + QStringLiteral(" ");
@@ -701,16 +708,19 @@ void MatrixRun::section23_meshworker()
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| r2020d structure pins + whitelist self-cert + wiring-host"
-                             " whitelist (W4 amendment) + thread identity: the meshworker.h"
+                             " whitelist (W4 amendment, fixed-host amendment) + thread"
+                             " identity: the meshworker.h"
                              " surface holds under comment-stripped pins, reverse probes prove"
                              " zero QObject face, zero Qt threading facilities, zero copied"
                              " mesh logic and zero World read face; the in-section sweep"
                              " re-certifies the dual-file threading whitelist (std::thread"
                              " only in backgroundgeneration.h + meshworker.h) and the"
                              " token whitelist amended in the same change for the W4 wiring"
-                             " host (token lives in meshworker.h + gamesession.h only - the"
-                             " session host owns the executor and binds the World bridge"
-                             " submit seam; World/chunkgeometry/Main.qml still token-free,"
+                             " host and the fixed ownership host (token lives in meshworker.h"
+                             " + gamesession.h + world.h/world.cpp - the session host owns the"
+                             " streaming executor and binds the World bridge submit seam, the"
+                             " fixed host owns the lazy per-world executor and the fixed"
+                             " harvest beat; World/chunkgeometry/Main.qml still token-free,"
                              " geometry reaches async meshing token-free via the bridge);"
                              " the executor thread identity reconciles against the caller"
                              " thread"

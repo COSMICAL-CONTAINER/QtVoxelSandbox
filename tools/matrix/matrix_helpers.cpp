@@ -142,6 +142,7 @@ void MatrixRun::runAll()
     section32_residual_sweep(); // t1055 残余清偿合集一 + t1056 合集二（置尾先例沿用：r2029a detachWorker 销账守卫/r2029b lastDirtyChunks 值快照语义/r2029c submitAsync fail-fast 默认/r2029d weather 0 值回落 qInfo 诊断 + r2030a 软影列顶域扩 PCF 半格触达[kTopDim 22+紧覆盖推导+真实快照逐探测列对真值]/r2030b generate 首循环回填群系 memo[全列已填+纯函数直连零变化+懒填兜底]，rig 零接触）
     section33_savebridge_wiring(); // t1057 SaveCoordinator 生产接线（置尾先例沿用：r2031a Clean 路径零变化墙[真链三写段置换+计数观测+参数透传+旧档 Fresh 回归]/r2031b marker→complete 往返+中断恢复收敛[真保存走桥+两键 raw 直读+FaultHook 经桥注入+戳权威]/r2031c #5② 开库失败可区分[真锁占 open-error+拒存不重编+open 级失败]/r2031d 结构钉[worldstore 零触碰反探+additive 正面钉+QML 两处例外面钉+生产零挂载]，真 QQmlEngine real-chain × 真桥单例，rig 零接触）
     section34_observation_lines(); // t1059 P5 观测前置（置尾先例沿用：r2033a fixed 全零行+行格式钉[行恒在零值+解析钉+拼行/推送源码钉]/r2033b 流式行计数与权威面逐项恒等[四窗 flush 界定：初载 8/取消 9/网格收割/驱逐 evP1 evE4 evS4]/r2033c dt 负/NaN 分域计数[三类精确+零变化墙+读面钉]，sparse fresh 小世界族+真临时库，rig 零接触）
+    section35_fixed_async_bake(); // §29.7 t1060 fixed 世界 bake 异步化（置尾先例沿用：r2034a fixed 异步≡同步逐位等价承重墙[四形态：地形/流体水段/异形 cross/世界边界 + 单实例线程身份 + F3 sub/mesh/worker 面 + 驻留零沿] / r2034b 风暴摊平[dayMul 跨门 → 提交数==非空段数 + 单拍应用恰上界 + 后续拍排干收敛 + 终态逐位==同步参照 + F3 面对账] / r2034c 回退与卫生[env 全同步门 + 容量缝 0 退化满载内联回退逐位 + 析构 join 有界 + 再构造再用] / r2034d 结构钉[env 缝正面钉 + 惰性单例源序 + 单实例/不双起线程行为柱 + 收割宿主单点收口扫略 + 真桥 enterWorld/pumpTick 生产链行为柱 + 单一权威反探兼容 + QML 零触碰]，fixed 小世界族 96×96×96 s82 + 48×48×96 s82 + 真临时库，rig 零接触）
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
