@@ -9,6 +9,8 @@
 #include "world.h" // Q_PROPERTY(World*) + 路由（World 层只读）
 #include "worldfacade.h" // R20.08 WorldFacade：chunk 脏门/存在门查询走收窄面（不再直取 Chunk*）
 
+class QElapsedTimer; // §29.5-W4 applyChunkMeshData 形参（const ref——前向声明足够）
+
 // 体素区块几何（纯视图，per-chunk，t03）：每个 ChunkGeometry 负责一个 chunk（cx,cz）的
 // 局部 culled meshing。从注入的 World（经 blockAt 跨 chunk 路由）取体素 + 邻居判定，
 // 只生成「邻居为空气」的可见面。顶点为 chunk 局部坐标；QML 把 Model 摆到 chunk 世界起点
@@ -273,11 +275,40 @@ private:
     //   网格件（tileFor / farmlandHydrBrightMul / sunShadowAt / blockAtWorld / stateAtWorld 与
     //   buildMesh 体）自本类**搬移**（非复制）进 meshbuilder（快照访问器同名同语义承接数据来源
     //   替换）；Q_PROPERTY/信号面零变化（验收④：旧 QtQuick3DAdapter 消费形态保持）。
+    //   §29.5-W4（r2026）bake→worker 网格化：buildMesh 升级为「路径选择器」——仅 sparse 流式
+    //   世界（World 桥 sink 已绑定，通电条件头注释见 submitMeshJobAsync）先走异步提交（定格
+    //   快照 → 提交 → 返回，网格由收割拍交付应用）；提交被拒（队列满载 / 执行器已停 / 桥未
+    //   就绪）→ 同步内联回退（计数可见）。fixed 世界 sink 恒未绑定 → 同步内联路径逐位原样
+    //  （零变化墙——本方法同步分支体零改动）。
     void buildMesh(RebuildReason reason);
+    // §29.5-W4 异步提交半边（主线程 Only）：采集稠密快照（与同步路径同一采集调用）→
+    //   requestId 派生 → 上一在途作业显式注销（latest-snapshot-wins 路由层半边）→ 经 World 桥
+    //   提交。被接受 → true（m_pendingRequestId 在途，网格等收割拍交付）；被拒 / 空快照
+    //  （无 chunk——构建产物恒空，无作业必要）→ false（调用方走同步内联回退；拒绝面计数可见）。
+    //   **通电条件**：World::chunkMeshAsyncActive()（sink 已绑定 ⟺ sparse ∧ 流式会话在）由调用
+    //   方先行判定；本方法内 world 空指针防御返回 false。
+    bool submitMeshJobAsync(RebuildReason reason);
+    // §29.5-W4 应用半边（同步/异步两路共用的收尾链，禁两份灌注逻辑并存）：统计镜像 → 灌
+    //   QQuick3D（文档序逐行原样）→ 烘焙账本（bakedSunDir/bakedDayMul = **采集时刻定格值**——
+    //   异步路径采集与应用之间 sun/dayMul 可能已前移，账本必须记「实际烘进顶点色的值」，否则
+    //   sun 量化门会误判已烘）→ vo.render 观测 + meshRebuilt 通知。同步路径传当前成员值
+    //  （= 采集时刻值，与旧行为逐位一致）。
+    void applyChunkMeshData(ChunkMeshData mesh, RebuildReason reason,
+                            const QVector3D &bakedSunDir, float bakedDayMul,
+                            const QElapsedTimer &bt);
+    // §29.5-W4 requestId 派生（(cx,cz,段) 基座 + 提交代次，选型头注释立证于 .cpp 定义处）。
+    static quint64 deriveMeshJobRequestId(int cx, int cz, int segIndex, quint32 submitGen);
+    // 本几何的段位（六段路由折叠：terrain=0 / water=1 / lava=2 / glass=3 / ice=4 / cutout=5）——
+    //   同 chunk 的各段是相互独立的网格作业（快照烘焙参数互异），requestId 基座须含段位。
+    int segmentIndex() const
+    {
+        return m_waterOnly ? 1 : m_lavaOnly ? 2 : m_glassOnly ? 3 : m_iceOnly ? 4
+            : m_cutoutOnly ? 5 : 0;
+    }
     // tXXX sun-step 粗量化门：判定本次 sunDir / dayMul 变化是否需要重烘顶点色（否则只更新值不重建）。
     //   重烘事件：影淡入/淡出带穿越（y 跨 kSunMin/kSunMax）| 仰角/方位角累计变超阈值 | dayMul 累计变超
     //   kDayMulThresh | 距上次重烘超硬顶。昼夜天光（dayMul）现烘进顶点色天空分量（PLAN §2-H），故 dayMul 累计
-    //   变化超阈值亦触发重烘（保持昼夜过渡可见、但不 10Hz 全量重建）；block 项不受影响（方块光时间不变）。
+    //   变化超阈值亦触发重烘（保持昼夜过渡可见、但不 10Hz 全量重建）。
     bool sunRebuildDue(const QVector3D &dir, float dayMul) const;
     // R20.08 WorldFacade 门查询（示范迁移点）：本几何负责的 chunk 的存在/脏/流体专用脏三门，
     //   经 WorldFacade 收窄面查询（worldfacade.h chunkExistsAt/chunkDirtyAt/chunkFluidOnlyDirtyAt
@@ -326,6 +357,11 @@ private:
     // t972 窗外欠账标记（呈现层渐进同步队列的排空依据；buildMesh / clearMesh 双清）：
     bool m_deferredRebuild = false; // onWorldChanged 窗外跳过时 chunk 确为脏 → 内容重建欠账
     bool m_lightStale = false;      // setSunDir/setDayMul 窗外静默跟随且 sunRebuildDue 判定该烘 → 光照欠账
+    // §29.5-W4 异步网格作业在途账（主线程 Only）：最新提交的作业键（0 = 无在途——交付回调
+    //   的 latest-wins 判据锚）+ 提交代次（同段连发互异在途键的低位源；mod 8192 回绕周期 ≫
+    //   在途上界 128，选型论证见 deriveMeshJobRequestId 定义处头注释）。
+    quint64 m_pendingRequestId = 0;
+    quint32 m_meshSubmitGen = 0;
 };
 
 #endif // CHUNKGEOMETRY_H

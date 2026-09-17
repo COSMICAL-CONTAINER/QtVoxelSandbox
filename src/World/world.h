@@ -8,11 +8,16 @@
 #include <QtGlobal> // quint32（hashColumn 确定性哈希返回类型）/ quint64（树叶衰减队列键）
 #include <QtQml/qqml.h>
 
+#include <functional> // §29.5-W4：异步网格作业桥（提交 sink + 交付回调——std::function 注入缝）
 #include <unordered_set> // t325 树叶渐进衰减队列 m_decayingLeaves（坐标打包键的去重集合）
+#include <unordered_map> // §29.5-W4：在途网格作业注册表（requestId → 交付回调）
 #include <vector>
 
 #include "blockregistry.h" // isCollidable 走 BlockDef.solid（t88 火把 non-solid 不挡玩家）
 #include "chunkmanager.h" // 内部多 chunk 存储（World 层，不外泄到 QML）
+#include "meshbuilder.h" // §29.5-W4：ChunkMeshSnapshot/ChunkMeshData 值面（R20.13 单一权威）——
+                         //   仅值类型入桥；网格执行器类型不入 World（W2「驱动器/worker 不入
+                         //   World」职责面纪律同门，提交/收割全经会话注入的 std::function 缝）
 #include "terraingen.h" // R20.12 纯地形生成单一权威（Perlin/fBm/群系/海域/列体——World 委托到 m_terrain）
 
 // §29.5-W2：worker 自持体素输出缓冲（backgroundgeneration.h；World 面只以 const 引用承接——
@@ -131,6 +136,52 @@ public:
     // 账（本体在 ChunkManager——单漏斗标记面见其头注释；转发使 GameSession 接线零策略细节）。
     bool chunkHasUnsavedEdits(int cx, int cz) const { return m_chunks.chunkHasUnsavedEdits(cx, cz); }
     bool clearChunkUnsavedEdits(int cx, int cz) { return m_chunks.clearUnsavedEdits(cx, cz); }
+
+    // ── §29.5-W4 bake→worker 网格化（r2026）：异步网格作业桥（C++ only，全部非 Q_INVOKABLE
+//    ——r2022d「新面禁 Q_INVOKABLE 形态」同门；fixed 世界零绑定零调用 = 零变化墙）────────────
+    // 职责面 = 主线程两件纯编排事，**零线程零队列**（worker 执行器归 GameSession 流式会话，
+    // R20.07 编排壳纪律 + W2 同门；本类只承接「bake 发起点可达」与「收割拍可达」两端）：
+    //   · 提交转发：bake 发起点（ChunkGeometry::buildMesh，主线程）经本桥把定格快照递给会话
+    //     侧注入的构建 sink（setChunkMeshBuildSink——Renderer→World→会话 std::function 注入，
+    //     worker 类型不泄漏进 World/Renderer 头；通电条件 = sink 已绑定 ⟺ sparse 流式会话在，
+    //     GameSession 构造内 isSparse() 门绑定，fixed 世界恒 null = 连绑定都不发生）。
+    //   · 收割交付：收割拍（GameSession pumpStreamingTick 单点）把 worker 产出按 requestId
+    //     路由回注册的交付回调。QML 零新暴露（消费面全走既有 vertexCount/meshRebuilt 面）。
+    // **requestId 幂等/覆盖语义（路由层双保险之一，头注释立证）**：组件执行器对 requestId
+    //   不解释、不查重、不合并（见 meshworker.h 头注「requestId 语义全权归调用方」——同 id
+    //   在途重复提交各产一条 built）；覆盖语义全权落本层：重提交方先 cancelChunkMeshJob 注销
+    //   旧在途回调（旧产出到达时交付 miss → 可见丢弃计数），交付回调再自证 requestId（几何侧
+    //   pending-id 门）——**latest-snapshot-wins** 两道闸串联，误应用结构性不可能。
+    // **交付 miss = 可见丢弃**（事件可见性同门）：已取消 / 几何已亡 / 最新胜淘汰三条路径全部
+    //   计入 m_droppedBuiltMeshes（droppedBuiltMeshCount 读面），禁静默消失。
+    // 2xx 执行域错误码续位（201 后台生成 worker 停 / 202 网格执行器停之后；本桥 sink 未绑定
+    // = 执行器未就绪同语义——正常调用方先查 chunkMeshAsyncActive()，此码纯防御面）。
+    static constexpr int kErrChunkMeshSinkUnbound = 203;
+    // 绑定构建 sink（生产 = GameSession 流式会话构造内 isSparse() 门；null/std::function()
+    // = 解绑，恢复全同步——测试回退面）。仅主线程调用（与提交/收割同域，无锁面）。
+    void setChunkMeshBuildSink(std::function<Result<void>(const ChunkMeshSnapshot &, quint64)> sink)
+    {
+        m_chunkMeshBuildSink = std::move(sink);
+    }
+    // 异步网格化通电读面（bake 发起点的门）：sink 已绑定 ⟺ sparse 流式会话在。fixed 世界恒
+    // false（ChunkGeometry 走现行同步内联路径——零变化墙）。
+    bool chunkMeshAsyncActive() const { return bool(m_chunkMeshBuildSink); }
+    // 提交一个异步网格作业（主线程 Only）：快照值转发 sink（满载/已停拒绝原样穿透 = 调用方
+    // 同步回退面）；被接受 → 注册交付回调（requestId 键，insert_or_assign = 同键重复提交
+    // 覆盖旧回调的防御面——正常路径重提交方先显式 cancel，见上覆盖语义）。
+    Result<void> submitChunkMeshJob(const ChunkMeshSnapshot &snap, quint64 requestId,
+                                    std::function<void(quint64, ChunkMeshData &&)> waiter);
+    // 注销在途作业（latest-snapshot-wins 的显式取消半边 + 几何换代/清空防陈旧应用）。幂等
+    //（不存在即 no-op）；已产出未收割条目由收割拍交付时 miss → 可见丢弃计数收口。
+    void cancelChunkMeshJob(quint64 requestId);
+    // 收割拍交付（主线程 Only，生产消费方 = GameSession 收割单点）：requestId 查注册表 →
+    // 命中即 erase + 回调移交 owning 网格（回调内自证 requestId——latest-wins 第二道闸）；
+    // miss → ++m_droppedBuiltMeshes（可见丢弃）。注册表自清：每被接受请求恰一次交付擦除，
+    // 在途上界 ≤ 执行器受理上界（有界性论证见 meshworker.h 容量策略）。
+    void deliverBuiltChunkMesh(quint64 requestId, ChunkMeshData &&mesh);
+    // 观测读面（矩阵腿 / 诊断；fixed 恒 0 / 0）：交付 miss 累计 + 在途注册表深度。
+    int droppedBuiltMeshCount() const { return m_droppedBuiltMeshes; }
+    int pendingChunkMeshJobCount() const { return int(m_chunkMeshWaiters.size()); }
 
     int width() const  { return m_width; }
     int depth() const  { return m_depth; }
@@ -2089,6 +2140,14 @@ private:
     QVector<QPair<int, int>> residentChunkKeysOrdered() const;
     // 驻留集 revision（成员集变化沿 +1；唯一写点 = setChunkLifecycle forwarder，选型注释在该处）。
     int m_residentChunkRevision = 0;
+
+    // ── §29.5-W4 异步网格作业桥私有面（纯主线程；零锁——提交/取消/交付全在 GUI 线程）────
+    //   会话注入的构建 sink（null = fixed 世界/未通电 → 调用方同步回退）；在途回调注册表
+    //   （requestId → 交付回调——每个被接受的请求恰一产出恰一次交付擦除，有界性见 deliver
+    //   头注）；交付 miss 累计（可见丢弃）。世界换代（recreate/析构）随对象整体清零。
+    std::function<Result<void>(const ChunkMeshSnapshot &, quint64)> m_chunkMeshBuildSink;
+    std::unordered_map<quint64, std::function<void(quint64, ChunkMeshData &&)>> m_chunkMeshWaiters;
+    int m_droppedBuiltMeshes = 0;
 };
 
 #endif // WORLD_H

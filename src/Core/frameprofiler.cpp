@@ -121,6 +121,10 @@ void FrameProfiler::flush()
     const qint64 meshND = meshReasonN("meshNdirty");
     const qint64 meshNS = meshReasonN("meshNsun");
     const qint64 meshNW = meshReasonN("meshNwater");
+    // §29.5-W4（r2026）worker 列：本窗口经收割交付应用的网格数（chunkgeometry.cpp 交付回调
+    //   计数；同步内联/回退路径不计）。fixed 世界恒 0（无执行器构造）；sparse 流式世界 > 0 =
+    //   meshing 异步化可见面（构建段在 worker 线程，win 行 mesh ms 只余采集+灌注两主线程段）。
+    const qint64 meshNWorker = meshReasonN("meshNworker");
     // w 前缀桶：World 10 个 tick 函数（wWater/wLava/wCrop/wSug/wFarm/wSap/wIce/wLeaf/wWeath + t495 wIceMelt）。
     struct WEnt { const char *key; const char *label; };
     static const WEnt wEntries[] = {
@@ -153,6 +157,9 @@ void FrameProfiler::flush()
         + "sim " + QString::number(simMs, 'f', 2)
         + "  mesh " + QString::number(meshMs, 'f', 2) + "(" + QString::number(meshN) + "reb"
         + " [" + QString::number(meshND) + "d " + QString::number(meshNS) + "s " + QString::number(meshNW) + "w])"
+        // §29.5-W4（r2026）：F3 mesh 行 worker 列（格式变化钉面 = r2026d 正面钉；既有字段
+        //   逐字保留，列恒在——fixed 世界恒 worker 0）。
+        + "  worker " + QString::number(meshNWorker)
         + "  world " + QString::number(worldMs, 'f', 2)
         + "  bp " + QString::number(double(bucketLocked("bp")) / 1e6, 'f', 2)
         + "  [wat " + QString::number(wMs[0], 'f', 1)

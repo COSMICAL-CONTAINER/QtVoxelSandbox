@@ -92,12 +92,38 @@
 //   登记非目标：跨会话 blob×附加表 overlay 合并（W5/D3 域）；ChunkStore 生产 bind（W5 存档
 //     入口接线——未 bind 时 dirty 候选中止驱逐 = 宁驻留不误删 fail-safe）；hasChunk 逐查询
 //     开闭连接的经济学（W5/P5 优化面）；despawn 半径语义（不引入，见实体移除头注释）。
+//
+// ── §29.5-W4 bake→worker 网格化（r2026；D6 网格执行器自本单起生产接线）──────────────────
+// 计划原文（refactor-plan §29.5.2 W4）：「ChunkGeometry bake 段改提交快照 + 收割应用；同步
+// 内联回退开关；F3 mesh 行加 worker 列。QML 零改动（池已动态）」。接线宿主 = 本流式会话
+//（R20.07 编排壳纪律 + W2「驱动编排归会话」同门；bake 发起点可达 + 收割拍可达两准绳的
+// 承重面）。三件生产绑定（头注释立证）：
+//   · 执行器所有权 = m_meshWorker（构造即起真线程；**仅 sparse 世界构造**——isSparse() 门内，
+//     fixed 世界连构造都不发生 = D2 零活动墙延续，app 冒烟同面实证）。它不入 World（W2
+//     「驱动器/worker 不入 World」职责面纪律）也不入 ChunkGeometry（Renderer 只达 World）：
+//     「bake 发起点可达」经 World 桥提交缝（setChunkMeshBuildSink——std::function 注入，执行
+//     器类型零泄漏进 World/Renderer 头）；「收割拍可达」= 本壳 pumpStreamingTick tick 尾
+//     单点（W2 既有收割拍同宿，延迟有界 ≤ 一个 tick、零阻塞、QML 零改动）。
+//   · bake 异步化 = ChunkGeometry 主线程定格快照 → World 桥提交（requestId=(cx,cz,段,代次)
+//     派生——基座+代次选型立证见 chunkgeometry.cpp deriveMeshJobRequestId）→ 本壳收割拍
+//     takeBuilt 排干 → World::deliverBuiltChunkMesh 按注册表路由回几何灌注。**latest-snapshot-
+//     wins 双保险**：几何重提交先显式注销旧在途（World 侧注册表 miss = 可见丢弃）+ 交付回调
+//     自证最新在途键（几何侧第二道闸）；执行器组件对 requestId 不查重不合并（meshworker.h
+//     头注语义原样），覆盖语义全权落路由层。
+//   · 同步回退 = 执行器满载（kErrQueueFull）/已停（kErrMeshWorkerStopped）拒绝时几何走现行
+//     同步内联路径（网格仍正确产出；拒绝面计数可见 + 告警）。worker 析构（会话终）丢弃在途
+//     = droppedCount 组件可见、join 有界绝不挂死（meshworker.h 退出语义）。
+// 登记非目标：多 worker 扩并发 / 优先级调度（后续单）；W3 驱逐×在途网格竞态（在途网格按
+//   现有可见性门自然失效——QPointer 守卫交付丢弃，行为登记）；QML 任何改动（F3 worker 列在
+//   FrameProfiler win 行——C++ 面）。
 
 #include "chunk.h"     // Chunk::kSize（chunk 路由参数——单一权威，不写魔法 16）
 #include "command.h"   // Command / CommandQueue（R20.06 队列——GameSession 首个生产消费方）
 #include "editbuffer.h" // R20.09 EditBuffer / DirtyChunkSet（Tick 内编辑合并收口——本类首个消费方）
 #include "event.h"     // Event / WorldDelta / EventQueue（编辑面表达）
 #include "mathtypes.h" // Tick::kClockTickMs / BlockPos / ChunkKey
+#include "meshworker.h" // §29.5-W4：D6 网格执行器（r2020 组件的 W4 生产接线——r2020d 全树
+                        //   记号反探同变更修订：接线宿主白名单 = meshworker.h + 本文件）
 #include "result.h"    // Result<void>（满载拒绝失败面穿透）
 #include "world.h"     // World：tick 家族（模拟泵——见下「选型」）+ setBlock 写实现权威
 #include "worldfacade.h" // R20.08 WorldFacade：查询/写入收窄面（命令写 + 编辑后回读走此面）
@@ -198,6 +224,12 @@ public:
                                                 scanExtentChunks);
     }
 
+    // ── §29.5-W4 网格收割观测面（C++ only；fixed 世界恒 null / 0）─────────────────────────
+    // 网格执行器读面（线程身份对账 / 队列账面——r2012a/r2020 先例；fixed 恒 null = D2 墙）。
+    const MeshWorker *meshWorker() const { return m_meshWorker.get(); }
+    // 收割拍网格交付累计（每被接受请求恰一条——恰一产出铁律的会话侧对账锚）。
+    int meshHarvestedCount() const { return m_meshHarvestedCount; }
+
     // ── §29.5-W3 驱逐 + Edits-on-evict 接线面（C++ only；fixed 世界恒 null / 空 / no-op）──
     // 附加表绑定（生产 = W5 存档入口接线；矩阵 = fresh 临时库[r2015 先例，绝触 saves/]）。
     // 未 bind：persist 缝恒失败（dirty 候选中止驱逐 = 宁驻留不误删）、savedContentQuery 恒
@@ -284,6 +316,10 @@ private:
     // BackgroundGenerationWorker 构造即起真线程——fixed 世界连构造都不发生（app 冒烟同面实证）。
     std::unique_ptr<BackgroundGenerationWorker> m_streamWorker; // R20.12 真线程件（W2 首个生产消费者）
     std::unique_ptr<ChunkStreamDriver> m_streamDriver;          // P2 位置沿编排器（W2 生产通电）
+    // ── §29.5-W4 网格执行器（sparse 独占构造；独立线程件，与 driver/worker 对无交叉引用
+    // ——声明序无析构序约束；构造即起真线程，fixed 世界连构造都不发生 = D2 零活动墙延续）。
+    std::unique_ptr<MeshWorker> m_meshWorker; // D6 网格执行器（W4 生产接线宿主面）
+    int m_meshHarvestedCount = 0;             // 收割拍网格交付累计（恰一产出对账锚）
     // ── §29.5-W3 驱逐件（sparse 独占构造；纯值组件零线程——声明序无析构序约束）──────────
     std::unique_ptr<ChunkStore> m_chunkStore; // D5 选型 (a)：per-chunk 编辑附加表（默认未 bind）
     ChunkEvictor m_chunkEvictor;              // P3 驱逐编排器（三缝生产绑定；构造后惰性）
@@ -383,6 +419,16 @@ inline GameSession::GameSession(World &world, QObject *parent)
         // savedContentQuery = 附加表存在性（D5 回灌：命中 → Load kind job；未 bind 恒 miss）。
         m_streamDriver->setSavedContentQuery([this](int cx, int cz) {
             return m_chunkStore && m_chunkStore->isBound() && m_chunkStore->hasChunk(cx, cz);
+        });
+
+        // ── §29.5-W4 bake→worker 生产接线（执行器构造 + World 桥提交缝绑定）────────────────
+        // 构造即起真线程（meshworker.h 退出语义：析构 stop+丢弃计数+join 有界绝不挂死；生产
+        // 零参 = 默认队列容量 64）。提交缝 = std::function 注入 World（执行器类型零泄漏进
+        // World/Renderer 头——bake 发起点经 World::chunkMeshAsyncActive/submitChunkMeshJob
+        // 可达；fixed 世界不进本分支 = 连 sink 绑定都不发生 → 几何全同步内联，零变化墙）。
+        m_meshWorker = std::make_unique<MeshWorker>();
+        m_world.setChunkMeshBuildSink([this](const ChunkMeshSnapshot &snap, quint64 requestId) {
+            return m_meshWorker->submit(snap, requestId);
         });
     }
 }
@@ -565,6 +611,18 @@ inline void GameSession::pumpStreamingTick()
                 m_world.adoptGeneratedChunk(data->key.cx, data->key.cz, *data);
         }
         ++m_streamAdoptedCount;
+    }
+    // ⑤ W4 网格收割拍（tick 尾单点收口——「收割拍单点收口」r2026d 钉面；与 ④ 数据面同拍
+    //    并列排干，防收割队列无界积压）：每被接受请求恰一条 built（恰一产出铁律）→ 按
+    //    requestId 经 World 注册表路由回几何（交付回调内自证最新在途键 = latest-wins 第二道
+    //    闸；miss = 已取消/几何已亡 → 可见丢弃计数）。主线程非阻塞轮询：延迟有界 ≤ 一个
+    //    tick、零 QML 改动。fixed 世界无执行器 = 本段零动作（D2 零活动墙）。
+    if (m_meshWorker) {
+        MeshBuiltItem built;
+        while (m_meshWorker->takeBuilt(built)) {
+            m_world.deliverBuiltChunkMesh(built.requestId, std::move(built.mesh));
+            ++m_meshHarvestedCount;
+        }
     }
 }
 

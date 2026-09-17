@@ -6,11 +6,17 @@
 // src/World/backgroundgeneration.h（std::thread + mutex + cv、析构 stop+discard+join、
 // 队列 64 满载 kErrQueueFull 可见拒绝、worker 侧零 QObject）——r2012 同门。
 //
-// ── 组件先行零生产接线（本单最高铁律）──────────────────────────────────────────────
-//   ChunkGeometry 现行同步构建路径（采集 → MeshBuilder::build → 灌 QQuick3D，chunkgeometry.cpp
-//   buildMesh）**零变化**：本组件不被任何生产 TU include（矩阵 r2020d 全 src 树反探常驻：
-//   「MeshWorker」记号只允许出现在本文件）。生产接线（bake 路径切换、requestId = chunk key
-//   派生）= 后续单 / §29.4-P4 前登记非目标；QML 零迁移不变量不动；app 侧行为零变化。
+// ── 组件先行 → §29.5-W4 生产接线（r2026；本段登记随接线同变更如实化）──────────────────────
+//   r2020 交付态 = 组件先行零生产接线（ChunkGeometry 同步构建路径零变化，「本组件」记号全
+//   src 树只出现在本文件——矩阵 r2020d 全树反探）。**§29.5-W4 起（r2026）生产接线落地**：
+//   接线宿主 = GameSession 流式会话（unique_ptr 成员 + World 桥提交缝——「执行器」记号的全
+//   src 树白名单随接线同变更修订为 {本文件, gamesession.h}，r2020d 探针纠偏留痕非放宽；
+//   World/ChunkGeometry/Main.qml 仍零记号——几何经 World 桥的 std::function 缝可达执行器，
+//   执行器类型零泄漏进 Renderer/世界头）。bake 链 = ChunkGeometry 主线程定格快照 → World
+//   桥提交（requestId=(cx,cz,段,代次) 派生）→ GameSession pumpStreamingTick 收割拍 takeBuilt
+//   → World 注册表路由回几何灌注；同步内联回退 = 满载/已停拒绝时几何走旧路径（拒绝面计数
+//   可见）。仅 sparse 流式世界接线（fixed 世界连执行器构造都不发生——D2 零活动墙延续）；
+//   QML 零迁移不变量不动。
 //
 // ── 确定性承重（单一权威不回流的透传形态）──────────────────────────────────────────
 //   worker 执行体 = **MeshBuilder::build(snapshot) 唯一调用**（R20.13 网格算法单一权威，
@@ -55,9 +61,9 @@
 //   死。成员声明序 = 构造序：锁 / 队列 / 标志先于线程（threadLoop 在全量就绪后才可能触碰它们）。
 //
 // ── 登记非目标 ────────────────────────────────────────────────────────────────────
-//   生产接线（ChunkGeometry bake 路径切换 = 后续单 / P4 前）；快照采集线程化（World 非线程
-//   安全——采集恒调用者线程）；多 worker 并发（单线程起步，扩并发 = 后续单）；优先级调度
-//   （FIFO 提交序即序）；结果缓存 / 去重（requestId 语义全权归调用方）。
+//   快照采集线程化（World 非线程安全——采集恒调用者线程）；多 worker 并发（单线程起步，
+//   扩并发 = 后续单）；优先级调度（FIFO 提交序即序）；结果缓存 / 去重（requestId 语义全权
+//   归调用方——W4 路由层覆盖语义见 gamesession.h/chunkgeometry 头注释）。
 //
 // ── 分层 / 线程原语白名单 ──────────────────────────────────────────────────────────
 //   World 层 header-only，非 QObject 无 AUTOMOC，无信号槽 / Q_INVOKABLE / Q_PROPERTY（D6 组件
