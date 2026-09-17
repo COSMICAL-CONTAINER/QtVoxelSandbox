@@ -14494,6 +14494,9 @@ Window {
         // perf 帧时间分解叠层（FrameProfiler：C++ 各热路径 Scope 累加 → 每 ~1s flush 报告字符串）。
         //   tick 行 = 60Hz tickImpl 各阶段 ms/frame（env/item/xp/boat/mob/pickup/phys/ray/input）；
         //   win 行 = 1s 窗口内 mesh 总 ms（含 rebuild 次数）+ world tick 各总 ms；
+        //   stream 行（t1059）= 流式生成观测（s=本窗流式在画 / sub=受理 / can=取消 / rej=满载拒绝 /
+        //     out=结果 / adopt=采纳 / mesh=网格收割 / ev[P E S F R]=驱逐轨迹成功三域+失败两域）——
+        //     1s 窗增量口径，固定世界恒全零（行恒在）；生成速率 / 队列背压尖峰的调参读数；
         //   frame 行 = 帧时间切分桶（main_total / render_cpu，ms/frame）—— 区分 GUI 主线程 vs 渲染线程瓶颈：
         //     - main_total = frameSwapped 间隔（GUI 线程帧周期；含 sim + QML binding/scenegraph update + 同步等待）；
         //     - render_cpu = beforeRendering → afterRendering（渲染线程 CPU 侧编码 + GPU 提交阻塞；**非**真 GPU 时间，
