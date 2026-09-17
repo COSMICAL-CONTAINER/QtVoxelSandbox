@@ -137,6 +137,7 @@ void MatrixRun::runAll()
     section27_streaming_wiring(); // §29.5-W2 位置源 + 驱动接线（置尾先例沿用：fixed 零活动承重墙/通电走查承重/真线程收割+#7 契约+背压/结构钉，rig 零接触）
     section28_eviction_persistence(); // §29.5-W3 驱逐 + Edits-on-evict 落盘（置尾先例沿用：fixed 零活动墙[无附加表构造]/驱逐回灌承重[真临时库]/失败中止+实体先移除/结构钉，rig 零接触）
     section29_wiring_meshworker(); // §29.5-W4 bake→worker 网格化（置尾先例沿用：fixed 零变化墙[无 worker 构造]/异步等价承重墙[真执行器+收割拍逐位恒等]/回退+卫生[满载/已停回退+最新快照胜]/结构钉[F3 worker 列+单点收口]，rig 零接触）
+    section30_streaming_persistence(); // §29.5-W5 后端 流式世界持久化 + D2/D3 标志 + overlay 合并（置尾先例沿用：fixed 零活动墙[保存/读档全语义逐位不动+库面零流式表]/流式存读往返承重墙[保存含冲洗+销毁重建逐位恒等+二次幂等，真临时库]/D3 转换往返[blob 物化+代次对代次仲裁+逆翻照旧]/结构钉[worldstore 禁触反探+additive 正面钉+冲洗失败不谎报+QML 零触碰]，rig 零接触）
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
