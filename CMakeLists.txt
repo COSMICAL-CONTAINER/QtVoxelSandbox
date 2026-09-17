@@ -1081,6 +1081,19 @@ add_executable(redstone_matrix_test
     #   源码钉。随段直编 src/World/chunkstore.{h,cpp}（per-chunk 附加表，r2015 additive 先例
     #   同款——独立命名连接零 bump；worldstore.{h,cpp} 一行禁触）。
     tools/matrix/section28_eviction_persistence.cpp
+    # §29.5-W4 bake→worker 网格化 探针段（置尾先例沿用：runAll 末执行，filter 词 r2026；
+    #   4 腿 r2026a-d = fixed 零变化墙[无 worker 构造 + 全同步内联 + F3 计数恒零]/异步等价
+    #   承重墙[sparse 流式世界真执行器线程 + tick 尾收割拍 → 收割应用 ≡ 同步直调
+    #   MeshBuilder::build 逐位恒等（4 段几何全顶点/索引缓冲）+ residentChunkRevision 沿
+    #   零漂移 + 执行器账面对账]/回退+卫生[满载/已停拒绝 → 内联回退计数可见 + 最新快照胜
+    #  （路由层注销 miss 可见 + 交付回调自证）+ 解绑回固定门 + clearMesh 注销卫生]/结构钉
+    #   [F3 win 行 worker 列正面钉 + 行为级 flush 报告钉 + QML 零触碰反探 + 收割拍单点
+    #   收口 + fixed 零构造源序钉 + World 桥面钉 + 单一权威兼容反探]。
+    #   r2026a/b/d 自建 fresh 小世界族（sparse 80×80×96 s42 radius 0 + fixed 48×48×96 s82
+    #   孪生）；r2026c 独立执行器 + 手工收割（不经会话收割拍——NEG-1 独立性设计）；真线程
+    #   收敛全走 deadline 轮询（防 flake），rig 世界 w 零接触；无新增 .cpp——chunkgeometry/
+    #   gamesession/world 系源文件已列）。
+    tools/matrix/section29_wiring_meshworker.cpp
     src/World/chunkstore.cpp
     src/World/chunkstore.h
     src/Core/blockregistry.cpp

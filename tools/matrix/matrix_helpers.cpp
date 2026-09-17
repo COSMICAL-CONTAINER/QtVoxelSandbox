@@ -136,6 +136,7 @@ void MatrixRun::runAll()
     section26_sparse_population(); // §29.5-W1b sparse population parity（置尾先例沿用：fixed 零变化墙/parity 承重墙/加载顺序无关/结构钉，rig 零接触）
     section27_streaming_wiring(); // §29.5-W2 位置源 + 驱动接线（置尾先例沿用：fixed 零活动承重墙/通电走查承重/真线程收割+#7 契约+背压/结构钉，rig 零接触）
     section28_eviction_persistence(); // §29.5-W3 驱逐 + Edits-on-evict 落盘（置尾先例沿用：fixed 零活动墙[无附加表构造]/驱逐回灌承重[真临时库]/失败中止+实体先移除/结构钉，rig 零接触）
+    section29_wiring_meshworker(); // §29.5-W4 bake→worker 网格化（置尾先例沿用：fixed 零变化墙[无 worker 构造]/异步等价承重墙[真执行器+收割拍逐位恒等]/回退+卫生[满载/已停回退+最新快照胜]/结构钉[F3 worker 列+单点收口]，rig 零接触）
 
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {

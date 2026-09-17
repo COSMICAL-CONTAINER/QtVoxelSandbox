@@ -335,4 +335,14 @@ private:
                                   //   恒等 + population 跳过）/ r2025c 失败中止（真锁注入）
                                   //   + 实体先移除语义 / r2025d 结构钉——80×80×96 fresh
                                   //   sparse 小世界族，rig 世界 w 零接触，接 section27）
+    void section29_wiring_meshworker(); // §29.5-W4 bake→worker 网格化 探针（置尾先例沿用：
+                                  //   r2026a fixed 零变化墙（无 worker 构造 + 全同步内联）/
+                                  //   r2026b 异步等价承重墙（真执行器线程 + tick 尾收割拍 →
+                                  //   收割应用 ≡ 同步直调逐位恒等 + 账面对账）/ r2026c 回退
+                                  //   与卫生（满载/已停拒绝 → 内联回退计数可见 + 最新快照胜
+                                  //   + 注销卫生）/ r2026d 结构钉（F3 worker 列 + QML 零触碰
+                                  //   反探 + 收割拍单点收口 + 单一权威兼容反探）——
+                                  //   80×80×96 fresh sparse 小世界族 + 48×48×96 fixed 小世界
+                                  //   + 真线程收割（防 flake deadline 有界），rig 世界 w
+                                  //   零接触，接 section28）
 };

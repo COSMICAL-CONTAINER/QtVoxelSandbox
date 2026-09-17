@@ -146,24 +146,25 @@ void MatrixRun::section08_recent()
                                              .arg(okFlat).arg(okRt).arg(diagAo));
     });
 
-    // (c) meshing 线程模式事实钉（t906 复核；R20.12 同变更修订；r2020/D6 再修订 = 纠偏留痕非
-    //     放宽——纪律原文已预见「含 R20.13 mesher 线程化」的修订路径）：src/ 全树 *.cpp/*.h 的
-    //     线程原语命中**只允许**落在双文件白名单 {src/World/backgroundgeneration.h（R20.12 后台
-    //     GenerationJob worker）, src/World/meshworker.h（D6 worker meshing——MeshBuilder 线程化
-    //     执行器，组件先行生产零接线）} 且只允许 std::thread（两 worker 均禁 QObject，选型依据
-    //     见各自头注）与 Main.qml F3 行 `threads: 0/0 (sync meshing)` 互锁——mesher 生产路径仍
-    //     同步（MeshWorker 不被任何生产 TU include，F3 行照常成立），任何**新增**线程原语文件/
-    //     记号（含 t1023 §1.3 后续面）仍必须同变更更新本探针，防「F3 谎报 / 野线程潜入」。
-    runLegMulti({ "t1023c sync-meshing fact pin (t906 recheck; R20.12 amended, dual-site): src tree"
-        " threading-primitive hits (QThreadPool/QThread/QtConcurrent/QFuture/moveToThread/st"
-        "d::thread/std::async) are sanctioned only in the dual-file whitelist"
-        " World/backgroundgeneration.h (background generation worker) + World/meshworker.h"
-        " (worker meshing executor, production-unwired) with std::thread (both workers ban"
-        " QObject, see their headers), and the F3 line 'threads: 0/0 (sync meshing)' stays"
-        " pinned (meshing is still synchronous on the GUI thread via ChunkGeometry"
-        " direct-connected slots; the worker-meshing component is not included by any"
-        " production TU); any new primitive site (incl. mesher threading per t1023 report"
-        " section 1.3) must update both the F3 line and this probe in the same changediag"
+    // (c) meshing 线程模式事实钉（t906 复核；R20.12 同变更修订；r2020/D6 再修订；r2026/W4 三修
+    //     = 纠偏留痕非放宽——本单起网格执行器经 W4 接线宿主（gamesession.h，sparse 流式会话）
+    //     生产构造，F3 `threads: 0/0 (sync meshing)` 行如实表意为 **fixed 世界**（app 现行唯一
+    //     世界模式）GUI 线程同步 meshing 事实；sparse 流式世界的异步 meshing 可见面 = win 行
+    //     mesh 段的 worker 列[chunkgeometry 交付回调计数 meshNworker]。白名单扫描零变化：仍
+    //     仅 std::thread、仍仅双文件白名单——W4 零新增线程原语落点[复用 meshworker.h]；任何
+    //     新增线程原语文件/记号仍必须同变更更新本探针，防「F3 谎报 / 野线程潜入」。
+    runLegMulti({ "t1023c sync-meshing fact pin (t906 recheck; R20.12 amended, dual-site; W4"
+        " amended): src tree threading-primitive hits (QThreadPool/QThread/QtConcurrent/QF"
+        "uture/moveToThread/std::thread/std::async) are sanctioned only in the dual-file wh"
+        "itelist World/backgroundgeneration.h (background generation worker) + World/meshw"
+        "orker.h (worker meshing executor, now production-wired by the W4 sparse-session ho"
+        "st gamesession.h -- zero new primitive sites) with std::thread (both workers ban Q"
+        "Object, see their headers), and the F3 line 'threads: 0/0 (sync meshing)' stays p"
+        "inned as the FIXED-world fact (the app's only world mode until W5: meshing is sti"
+        "ll synchronous on the GUI thread via ChunkGeometry direct-connected slots; sparse"
+        " streaming worlds report their async meshing via the win-line worker column counte"
+        "d at harvest delivery); any new primitive site (incl. mesher threading per t1023 r"
+        "eport section 1.3) must update both the F3 line and this probe in the same changediag"
         " files=%1 hits=%2 f3=%3 %4" }, [&]() {
         const QString exeDir = QCoreApplication::applicationDirPath();
         const QString srcRoot = QDir(exeDir + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src"));
@@ -219,19 +220,21 @@ void MatrixRun::section08_recent()
             if (!okThreadPin) ++totalFail;
             qInfo().noquote() << (okThreadPin ? "PASS" : "FAIL")
                               << "| t1023c sync-meshing fact pin (t906 recheck; R20.12 amended,"
-                                 " dual-site): src tree threading-primitive hits are sanctioned"
-                                 " only in the dual-file whitelist World/backgroundgeneration.h"
-                                 " (background generation worker) + World/meshworker.h (worker"
-                                 " meshing executor, production-unwired) with std::thread (both"
-                                 " workers ban QObject), across"
+                                 " dual-site; W4 amended): src tree threading-primitive hits"
+                                 " are sanctioned only in the dual-file whitelist"
+                                 " World/backgroundgeneration.h (background generation"
+                                 " worker) + World/meshworker.h (worker meshing executor,"
+                                 " production-wired by the W4 sparse-session host"
+                                 " gamesession.h - zero new primitive sites) with std::thread"
+                                 " (both workers ban QObject), across"
                               << files
-                              << "files, and the F3 line 'threads: 0/0 (sync meshing)' stays pinned"
-                                 " (meshing is still synchronous on the GUI thread via"
-                                 " ChunkGeometry direct-connected slots; the worker-meshing"
-                                 " component is not included by any production TU); any new"
-                                 " primitive site (incl. mesher threading, t1023 report section"
-                                 " 1.3) must update both the F3 line and this probe in the same"
-                                 " change"
+                              << "files, and the F3 line 'threads: 0/0 (sync meshing)' stays"
+                                 " pinned as the FIXED-world fact (meshing still synchronous"
+                                 " on the GUI thread there; sparse streaming worlds report"
+                                 " async meshing via the win-line worker column); any new"
+                                 " primitive site (incl. mesher threading, t1023 report"
+                                 " section 1.3) must update both the F3 line and this probe"
+                                 " in the same change"
                               << (okThreadPin ? QString()
                                               : QStringLiteral("diag files=%1 hits=%2 f3=%3 every=%4 %5")
                                                     .arg(files).arg(hits).arg(f3Present)
