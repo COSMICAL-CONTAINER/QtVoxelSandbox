@@ -87,7 +87,8 @@ void MatrixRun::section23_meshworker()
         return QPair<int, QPair<int, int>>(-1, QPair<int, int>(-1, -1));
     };
 
-    // ── 手写快照 rig（形态各异；域布局见 meshbuilder.h——pad=2 方域 20×20×H + 列顶 21×21）──
+    // ── 手写快照 rig（形态各异；域布局见 meshbuilder.h——pad=2 方域 20×20×H + 列顶 22×22
+    //    [t1056 #9 域宽 21→22：PCF 半格触达前向 +19；rig 全部经 kTopDim 符号引用，零字面]）──
     const auto newSnap = [](int height, bool shadows) -> ChunkMeshSnapshot {
         ChunkMeshSnapshot s;
         s.height = height;

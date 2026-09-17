@@ -3,6 +3,10 @@
 #include "gamesession.h"  // t1055 被测：GameSession（lastDirtyChunks 值快照面——r2029b）
 #include "generationjob.h" // t1055 被测：GenerationScheduler / GenerationWorker（detachWorker
                            //   守卫缝 + submitAsync fail-fast 默认——r2029a/r2029c）
+#include "meshbuilder.h"  // t1056 被测：ChunkMeshSnapshot 列顶域常量 + captureChunkMeshSnapshot（r2030a）
+#include "voxellight.h"   // t1056 被测：kMaxShadow（PCF 半格触达推导另一端——r2030a）
+#include "worldfacade.h"  // t1056：captureChunkMeshSnapshot 的收窄查询入参（r2030a）
+#include "terraingen.h"   // t1056：TerrainGen 纯函数对照（r2030b 结果零变化面）
 
 // t1055 agent-review 残余清偿合集一 探针段（4 腿 r2029a-d；filter 词 "r2029"；矩阵 651→655）。
 // 置尾先例沿用（接 section31，runAll 末执行）；r2029a/c 零世界（裸 scheduler + 脚本化替身
@@ -30,6 +34,24 @@
 //    {r2029c}（滞留面复现：零 outcome + inFlight 卡 1）。
 // 确定性口径：r2029a/c 全纯值替身零 RNG 零时间源；r2029b/d 的 setWeatherState 随机重抽窗
 //   只断「>0 且不被 0 值写破坏」，不断窗内具体值（运行期 RNG 与 parity 无交——section11 同门）。
+//
+// ── t1056 残余清偿合集二追加（2 腿 r2030a-b；filter 词 "r2030"；矩阵 655→657）──────────────
+//   r2030a（agent-review-2026-09-16 #9）= 软影列顶域扩到 PCF 半格触达：kTopDim 21→22
+//     （域 [-2,+19]）——前向探测 floor(origin+kChunk+kMaxShadow)+1 = origin+19 旧域差 1 列
+//     （域外 -1 不遮挡 = 边缘影偏亮）；常量面 + 紧覆盖推导（运行时承载——编译期紧式会把
+//     NEG-1 的 kTopDim 回退变编译错误，选型见 meshbuilder.cpp 静态断言处留痕）+ 真实快照
+//     逐探测列对 World 真值（世界边 (0,0) 与内陆 (1,1)，域外 -1 防御分支保留柱）。
+//   r2030b（#6）= generate 首循环以 TerrainColumnSummary.biome 回填 m_biomeCache（消群系
+//     fBm 双算；结果零变化）：全列已填计数 + 判别探针 biomeMemoMissCount==0（biomeAt 懒算
+//     计数——回填在位 → 后续 pass 全命中恒 0；NEG-2 摘回填 → 后续 pass 逐列首查各付一次
+//     fBm 计数飙升。恰红面实证注记：「全列已填」对摘回填不敏感——NEG-2 首跑实测后续 pass
+//     懒填同会把 memo 填满，判别力全在懒算计数）+ biome/height 采样 vs TerrainGen 纯函数
+//     直连（零变化面）+ 命中稳定柱 + beginLoad 懒填兜底柱（清表后 0 → 随查 3 列恰 3 且
+//     懒算恰 +3）。
+//   阴性两轮：NEG-1 回退 kTopDim 22→21 → 恰红 {r2030a, r2013d}（a 的紧覆盖推导 18<19 红
+//     + d 的同变更修订钉 "kTopDim = 22" miss——受影响源钉腿）；NEG-2 摘 memo 回填
+//     （assign 回 clear + 摘循环内回填行）→ 恰红 {r2030b}（懒算计数飙升 = #6 双算本体）。
+//   rig 零接触（两腿各自 fresh 世界）。
 
 // r2029d 专用：qInfo 捕获槽（QtMessageHandler 是裸函数指针不可捕获——文件级 static 落账，
 // 用后还原 handler；窗口内只过滤本诊断词，其余消息照旧走默认通道不落账）。
@@ -521,6 +543,197 @@ void MatrixRun::section32_residual_sweep()
                              " and a freshly re-rolled window survives a zero write the"
                              " same way (capture window installed and restored around the"
                              " probe only)"
+                          << (ok ? QString() : diag);
+    });
+
+    // ── r2030a：软影列顶域扩到 PCF 半格触达（agent-review-2026-09-16 #9）────────────────────
+    runLeg(QStringLiteral("r2030a shadow column-top domain widened to cover the PCF half-cell"
+        " probe (agent-review-2026-09-16 #9): the snapshot constants pin kTopDim == 22 with"
+        " kTopLo == -2 and the tight coverage derivation rides on them at runtime - the"
+        " backward probe lands exactly on -kMaxShadow (floor never dips below the exact"
+        " landing) while the forward probe lands on floor(origin + kChunk + kMaxShadow) + 1"
+        " = origin + kChunk + kMaxShadow + 1 (the PCF half-cell column), which the domain's"
+        " last index kTopLo + kTopDim - 1 now covers exactly at 19 == 19 - the old 21-wide"
+        " domain [-2,+18] missed that one column and answered -1 there (falsely unoccluded"
+        " edge shadows, the reviewed lesion); on real captured snapshots every extreme PCF"
+        " probe column answers the World truth (columnTopAt == columnTopSurfaceY, and never"
+        " the defensive -1 on in-world columns) across a world-edge chunk (0,0) and an"
+        " interior chunk (1,1), and columns far beyond the domain still return the defensive"
+        " -1 (the OOB branch survives as pure defense)"), [&]() {
+        bool ok = true;
+        QString diag;
+
+        // ① 常量面 + 紧覆盖推导（NEG-1 恰红面本体：kTopDim 回退 21 → last 18 < 前向探测 19 红；
+        //    推导以运行时常量承载——编译期紧式会让 NEG-1 直接变编译错误，见 meshbuilder.cpp
+        //    静态断言处的选型留痕）：
+        const bool domOk = ChunkMeshSnapshot::kTopDim == 22 && ChunkMeshSnapshot::kTopLo == -2;
+        constexpr int kFwdProbe = ChunkMeshSnapshot::kChunk + VoxelLight::kMaxShadow + 1; // = 19
+        constexpr int kLastIdx = ChunkMeshSnapshot::kTopLo + ChunkMeshSnapshot::kTopDim - 1;
+        const bool tightOk = kLastIdx == kFwdProbe
+            && ChunkMeshSnapshot::kTopLo <= -VoxelLight::kMaxShadow;
+        ok = ok && domOk && tightOk;
+        if (!(domOk && tightOk))
+            diag += QStringLiteral("[dom dim=%1 lo=%2 last=%3 fwd=%4] ")
+                        .arg(ChunkMeshSnapshot::kTopDim).arg(ChunkMeshSnapshot::kTopLo)
+                        .arg(kLastIdx).arg(kFwdProbe);
+
+        // ② 真实快照行为面：fresh 48×48×96 s82（天气双钉——section11 同门）→ 世界边 chunk
+        //    (0,0) 与内陆 chunk (1,1) 各采一快照，对 PCF 极端探测列（域两端 ±19/-2 与中带）
+        //    断言 snapshot 应答 == World 真值；世界内列恒 ≥ 0（+19 列即被测病灶本体：
+        //    origin+16 右缘顶点 + kMaxShadow 步进 + floor 后 +1 半格 = origin+19）。
+        World wA;
+        wA.setWidth(48);
+        wA.setDepth(48);
+        wA.setHeight(96);
+        wA.setSeed(82);
+        wA.setWeatherState(0);
+        wA.setWeatherRemainingSec(3600.0f);
+        WorldFacade fA(wA);
+        const ChunkMeshBakeParams bake; // 默认阴影开（列顶域唯此消费路径）
+        const int chunksA[2][2] = { { 0, 0 }, { 1, 1 } };
+        const int probesA[6][2] = { { -2, -2 }, { -2, 19 }, { 19, -2 },
+                                    { 19, 19 }, { 0, 8 },  { 16, 16 } };
+        bool behOk = true;
+        QString behDiag;
+        for (const auto &cc : chunksA) {
+            const ChunkMeshSnapshot snap = captureChunkMeshSnapshot(fA, cc[0], cc[1], bake);
+            if (!snap.valid()) {
+                behOk = false;
+                behDiag += QStringLiteral("[invalid c=%1,%2] ").arg(cc[0]).arg(cc[1]);
+                continue;
+            }
+            for (const auto &p : probesA) {
+                const int wx = snap.originX + p[0], wz = snap.originZ + p[1];
+                const float got = snap.columnTopAt(wx, wz);
+                const float want = wA.columnTopSurfaceY(wx, wz);
+                const bool inWorld = wx >= 0 && wz >= 0 && wx < wA.width() && wz < wA.depth();
+                if (got != want || (inWorld && got < 0.0f)) {
+                    behOk = false;
+                    behDiag += QStringLiteral("[c=%1,%2 d=%3,%4 got=%5 want=%6] ")
+                                   .arg(cc[0]).arg(cc[1]).arg(p[0]).arg(p[1]).arg(got).arg(want);
+                }
+            }
+        }
+        ok = ok && behOk;
+        diag += behDiag;
+
+        // ③ 防御分支保留柱：域外远点恒 -1（columnTopAt 域外语义在位——修一是扩域不是删防御）。
+        const ChunkMeshSnapshot snap00 = captureChunkMeshSnapshot(fA, 0, 0, bake);
+        const bool defOk = snap00.valid()
+            && snap00.columnTopAt(snap00.originX - 100, snap00.originZ - 100) == -1.0f;
+        ok = ok && defOk;
+        if (!defOk)
+            diag += QStringLiteral("[def] ");
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| r2030a shadow column-top domain widened to cover the PCF"
+                             " half-cell probe: constants pin kTopDim 22 / kTopLo -2 with the"
+                             " tight derivation at runtime (backward probe = -kMaxShadow"
+                             " exact, forward probe = kChunk + kMaxShadow + 1 after floor's"
+                             " +1 half-cell, covered exactly by the domain's last index - the"
+                             " old 21-wide domain missed that column), captured snapshots"
+                             " answer the World truth on every extreme probe column for both"
+                             " the world-edge and an interior chunk (never the defensive -1"
+                             " in-world), and far-out-of-domain columns still answer the"
+                             " defensive -1"
+                          << (ok ? QString() : diag);
+    });
+
+    // ── r2030b：generate 首循环回填群系 memo（agent-review-2026-09-16 #6，结果零变化）────────
+    runLeg(QStringLiteral("r2030b biome memo refilled on the generate first pass (agent-"
+        "review-2026-09-16 #6, zero-result-change): after a fresh fixed world's generate the"
+        " column memo is fully populated (filled-sentinel count == width*depth) AND the"
+        " discriminating lazy-compute counter reads ZERO - the first-loop backfill makes"
+        " every later-pass biomeAt a cache hit, whereas removing the backfill (the exact-red"
+        " face) makes the later passes pay one fBm per column and the counter spikes (the"
+        " filled count alone is NOT discriminating: the later passes' lazy fills would"
+        " populate the memo anyway - proven in the NEG-2 dry run); biome and height sampling"
+        " still match the TerrainGen pure authority column-for-column on a probe grid (the"
+        " backfilled values ARE the first-pass computations - results bit-unchanged), further"
+        " sampling keeps both counters stable (full memo, zero misses - cache hits never"
+        " churn), and the lazy-fill fallback still works on a beginLoad world (memo 0 after"
+        " the reset, then exactly the three distinct columns queried show up as filled with"
+        " exactly three lazy computes)"), [&]() {
+        bool ok = true;
+        QString diag;
+
+        // fresh fixed 世界（构造即 generate——首循环回填被测面本体；天气双钉防 RNG 进窗）：
+        World wF;
+        wF.setWidth(48);
+        wF.setDepth(48);
+        wF.setHeight(96);
+        wF.setSeed(82);
+        wF.setWeatherState(0);
+        wF.setWeatherRemainingSec(3600.0f);
+
+        // ① 全列已填 + 判别计数归零（NEG-2 恰红面本体：摘回填 → 后续 pass 懒填仍会把 memo
+        //    填满（filled 不断红）但逐列首查的懒算计数飙升 → miss 断言红）：
+        const int filled = wF.biomeMemoFilledCount();
+        const int misses = wF.biomeMemoMissCount();
+        const bool fillOk = filled == 48 * 48 && misses == 0;
+        ok = ok && fillOk;
+        if (!fillOk)
+            diag += QStringLiteral("[fill n=%1/%2 miss=%3] ").arg(filled).arg(48 * 48).arg(misses);
+
+        // ② 结果零变化面：biome/height 采样栅格 == TerrainGen 纯函数直连（同 seed 同 dims；
+        //    逐位一致 = 回填是缓存不是改写）：
+        const TerrainGen::Dims dimsF{ 48, 48, 96 };
+        TerrainGen genF(82, dimsF);
+        bool pureOk = true;
+        QString pureDiag;
+        const int pxF[6] = { 0, 7, 16, 24, 33, 47 };
+        const int pzF[6] = { 0, 5, 21, 40, 44, 47 };
+        for (int ix = 0; ix < 6; ++ix) {
+            for (int iz = 0; iz < 6; ++iz) {
+                const int x = pxF[ix], z = pzF[iz];
+                const bool eq = wF.biomeIdAt(x, z) == int(genF.biomeComputeAt(x, z))
+                    && wF.heightAt(x, z) == genF.heightAt(x, z);
+                if (!eq) {
+                    pureOk = false;
+                    pureDiag += QStringLiteral("[%1,%2] ").arg(x).arg(z);
+                }
+            }
+        }
+        ok = ok && pureOk;
+        diag += pureDiag;
+
+        // ③ 稳定柱：②的采样全走命中后再数一遍——memo 仍满员、懒算计数仍 0（命中不重填）：
+        const bool stableOk = wF.biomeMemoFilledCount() == 48 * 48
+            && wF.biomeMemoMissCount() == 0;
+        ok = ok && stableOk;
+        if (!stableOk)
+            diag += QStringLiteral("[stable n=%1 miss=%2] ")
+                        .arg(wF.biomeMemoFilledCount()).arg(wF.biomeMemoMissCount());
+
+        // ④ 懒填兜底柱（beginLoad 世界——memo 清表语义原样、懒填路径未被本修破坏）：
+        //    清表后计数 0；随查 3 个不同列 → 计数恰 3 且懒算恰 +3。
+        wF.beginLoad(82);
+        const int afterLoad = wF.biomeMemoFilledCount();
+        const int missAtLoad = wF.biomeMemoMissCount();
+        wF.biomeIdAt(3, 4);
+        wF.biomeIdAt(20, 30);
+        wF.biomeIdAt(47, 47);
+        const int afterLazy = wF.biomeMemoFilledCount();
+        const int missAfter = wF.biomeMemoMissCount();
+        const bool lazyOk = afterLoad == 0 && afterLazy == 3
+            && (missAfter - missAtLoad) == 3;
+        ok = ok && lazyOk;
+        if (!lazyOk)
+            diag += QStringLiteral("[lazy load=%1 lazy=%2 miss %3->%4] ")
+                        .arg(afterLoad).arg(afterLazy).arg(missAtLoad).arg(missAfter);
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+                          << "| r2030b biome memo refilled on the generate first pass: the"
+                             " memo is fully populated after generate AND the lazy-compute"
+                             " counter reads zero (the discriminating face - later passes all"
+                             " hit the first-loop backfill), biome and height sampling still"
+                             " match the TerrainGen pure authority on a probe grid (results"
+                             " bit-unchanged), both counters stay stable across cache-hit"
+                             " sampling, and the lazy-fill fallback still works on a"
+                             " beginLoad world (0 after reset, three filled with exactly"
+                             " three lazy computes)"
                           << (ok ? QString() : diag);
     });
 }

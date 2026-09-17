@@ -446,7 +446,9 @@ void MatrixRun::section17_meshbuilder()
                 SrcPin("r2013 capture entry", "ChunkMeshSnapshot captureChunkMeshSnapshot(const WorldFacade &world, int cx, int cz,", 1),
                 SrcPin("r2013 snapshot QObjectFree pin", "static_assert(QObjectFree<ChunkMeshSnapshot>", 1),
                 SrcPin("r2013 output QObjectFree pin", "static_assert(QObjectFree<ChunkMeshData>", 1),
-                SrcPin("r2013 column-top domain width", "kTopDim = 21", 1),
+                SrcPin("r2013 column-top domain width (revised t1056 #9: 21->22 to cover the"
+                       " PCF half-cell probe, same-change pin relocation per the t1023c"
+                       " precedent - correction, not relaxation)", "kTopDim = 22", 1),
                 SrcPin("r2013 pad domain width", "kDim = kChunk + 2 * kPad", 1),
             });
         const QStringList missCpp = pinSet(
