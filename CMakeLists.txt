@@ -1220,6 +1220,9 @@ add_executable(redstone_matrix_test
     # t1064 退出存档失败重试退避探针附加：Game 层 SaveBridge（t1057 桥源直编——t1064 探锁退避
     #   Q_INVOKABLE 面 + 独立连接探锁 + msleep 退避；worldstore/savecoordinator 系已列）。
     tools/matrix/section39_exit_save_backoff.cpp
+    # t1065 流式→固定世界切换池残留收口探针附加：Game 层 StreamingBridge 直编（真链进入握手 /
+    #   流式标志落库 / 会话 detach——r2039 切换链发生器；world/gamestore 系已列）。
+    tools/matrix/section40_slot_pool_fixed_switch.cpp
     # t1022 键位映射表探针附加：Core 层 KeybindManager（默认表完整性 / 冲突拒收 / settings.json
     #   round-trip——显式 storePath 密闭不触真实档）。PlayerController setKey 规范化消费同链直编。
     src/Core/keybindmanager.cpp

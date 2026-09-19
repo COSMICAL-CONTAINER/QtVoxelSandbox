@@ -425,4 +425,5 @@ private:
                                   //   （r2021c 真链 harness 同门），r2037d 纯源码钉，rig
                                   //   世界 w 零接触，接 section37）
     void section39_exit_save_backoff(); // t1064 退出存档失败重试退避 探针（置尾先例沿用：r2038a 无锁常态墙[首试即真零重试 + 零退避双证 + +3 口径 + 完成门/toast 语义面] / r2038b 退避承重[真锁 BEGIN EXCLUSIVE：桥直调窗 [100,300]ms + 锁窗内释放→重试收敛恰一次] / r2038c 上限与不谎报[锁全程持有：恰一次重试即止 + 计数零动 + 台账历史原样 + 释放后收敛] / r2038d 结构钉[共用实现单点 + 两调用点 + 旧 0ms 重放禁入 + 完成门/归还序零触碰复钉 + 退避常量 ≤300ms 源钉]——真 QQmlEngine × 真桥单例 × 生产 wrapper 原文抽取（brace 配平），rig 世界 w 零接触，接 section38）
+    void section40_slot_pool_fixed_switch(); // t1065 流式→固定世界切换池残留收口 探针（置尾先例沿用：r2039a fixed-only 零变化墙[真链进入恒 false×2 + 驻留零沿 + 池零 patch 零重派生 + 段指针逐位不动 + 时代标记恒 false] / r2039b 切换承重墙[真链流式走查产负坐标驻留键 → detach → 进 fixed → 时代门重派生恰一次 → 池与固定网格逐位一致 + 负坐标组清零 + churn 账本闭合] / r2039c 往返腿[fixed→流式→fixed→流式全链池一致性 + fixed 两轮键集逐位一致 + 流式再进入重派生不回退 + 差分路径仍活] / r2039d 结构钉[时代标记单点落账 + fixed 收口恰一处 + 函数域抽体钉 + 两消费端体零触碰反探 + 生命周期/C++ 模式读面禁入 QML 反探 + reinitializeAsFixed 体零沿语义钉]——r2039a-c 真 QQmlEngine × 真 World 池镜像 wrapper（section38 同门镜像家族），r2039d 纯源码钉，rig 世界 w 零接触，接 section39）
 };
