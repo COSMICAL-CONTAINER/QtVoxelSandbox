@@ -310,14 +310,19 @@ Item {
     });
 
     // ── r2035b：入口收敛承重墙（真链进入 + 静止玩家 → 突发批口 + 沿观测合流 + 收敛 + 沿停）──
+    //    t1063 同变更修订（留痕非削钉）：钉的「QML 消费面在场」原样存活（needle
+    //    function onResidentChunkRevisionChanged() x1 不变）；腿名中消费形态描述「per-edge
+    //    whole-pool rebuild」随差分池 patch 如实化为「revision-edge pool consumer（已降档为
+    //    差分增量，整池路径退役至世界换代收口）」——filter r2035 计数同基线，单行文本修订。
     runLeg(QStringLiteral("r2035b entry convergence load-bearing wall (real-chain enter with a"
         " production-size core and a static player: the whole enterWorld burst lands the"
         " resident set through exactly one revision edge, every edge-time observation of the"
         " resident set only ever loses members outside the generation radius and the edge-time"
         " resident count is monotone non-decreasing across the whole session, the resident set"
         " converges to exactly the request-set size with zero inside-radius evictions, and"
-        " after convergence the revision edge goes silent), with the QML amplification path"
-        " (per-edge whole-pool rebuild) pinned as the documented livelock-grade consumer"), [&]() {
+        " after convergence the revision edge goes silent), with the revision-edge QML pool"
+        " consumer pinned as the documented livelock-grade face (consumption since downgraded"
+        " to a differential patch)"), [&]() {
         bool ok = true;
         QString diag;
 
@@ -461,10 +466,11 @@ Item {
                         .arg(edges - edgesBefore)
                         .arg(w.residentChunkRevision() - revBefore);
 
-        // 放大路径钉（机理存照）：沿 → 整池重建的 QML 消费面在场——逐翻转发射因此属
-        // livelock 级；批口把沿收敛到稳态观察点即掐断放大环路（结构文档钉）。
+        // 消费面钉（机理存照）：沿 → 池消费面在场——逐翻转发射因此属 livelock 级；批口把沿
+        // 收敛到稳态观察点即掐断放大环路（结构文档钉）。t1063 起消费形态 = 差分增量增删
+        // （钉的是消费面在场，非其历史整池形态；增量性归 section38 r2037b/c 承钉）。
         const QStringList missQml = pinSet(srcRoot + QStringLiteral("/ui/Main.qml"),
-            { SrcPin("pool rebuild consumer", "function onResidentChunkRevisionChanged()", 1) });
+            { SrcPin("pool consumer", "function onResidentChunkRevisionChanged()", 1) });
         ok = ok && missQml.isEmpty();
         if (!missQml.isEmpty())
             diag += QStringLiteral("[qmlpin %1] ").arg(missQml.join(QLatin1Char(',')));
@@ -488,7 +494,7 @@ Item {
                              " non-decreasing edge-time resident count, the resident set"
                              " converges to exactly the request-set size with zero"
                              " inside-radius evictions, and after convergence the revision"
-                             " edge goes silent; per-edge whole-pool rebuild consumer pinned)"
+                             " edge goes silent; revision-edge QML pool consumer pinned)"
                           << (ok ? QString() : diag);
     });
 
