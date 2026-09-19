@@ -1177,6 +1177,20 @@ add_executable(redstone_matrix_test
     #   SQLite 库（fresh + 用后即删，saves/ 零触碰）+ 真线程收敛（阈值锚 deadline 轮询防
     #   flake）。）
     tools/matrix/section35_fixed_async_bake.cpp
+    # t1061 无限世界生产入口 livelock 探针段（置尾先例沿用：runAll 末执行，rig 世界零接触；
+    #   4 腿 r2035a-d = fixed 零变化墙[真链进入分流恒 false + 会话零构造 + 驻留沿零发射 +
+    #   通电门/泵墙/进入分流三钉] / 入口收敛承重墙[真 QQmlEngine×真桥×真 PlayerController
+    #   生产尺寸核心域真链进入：物化突发恰一条驻留沿 + 沿时刻驻留集合流（成员减少全在 gen
+    #   半径外 + 驻留数单调不降）+ 收敛到请求集尺寸零半径内驱逐 + 收敛后沿停 + 呈现层整池
+    #   重建消费面钉（逐翻转发射属 livelock 级的机理存照）] / 预生成中心×出生 chunk 分歧
+    #   [首沿合规驱逐半径外预生成 + 错位域收敛 + 走回重物化逐位恒等 + 收敛后驻留稳] /
+    #   走离走回+结构钉[首沿门前惰性 + 走离擦槽驱逐半径内零丢失 + Edits-on-evict 编辑存活 +
+    #   单一权威源钉族（决策单/toEvict 生产消费/执行体/位置喂入/沿收口各恰一 + 物化批口
+    #   五落点）]。filter 词 r2035。随段直编 src/Game/streamingbridge.{h,cpp}（已列）+ 复用
+    #   gamesession/world 系源文件；sparse fresh 小世界族（fixed 宿主 48×48×96 s82 + 核心
+    #   域 160×160×96/80×80×96）+ 真临时 SQLite 库（fresh + 用后即删，saves/ 零触碰）+
+    #   真线程收敛（deadline 轮询防 flake）。）
+    tools/matrix/section36_streaming_entry.cpp
     # t1022 键位映射表探针附加：Core 层 KeybindManager（默认表完整性 / 冲突拒收 / settings.json
     #   round-trip——显式 storePath 密闭不触真实档）。PlayerController setKey 规范化消费同链直编。
     src/Core/keybindmanager.cpp
