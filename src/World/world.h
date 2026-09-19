@@ -1255,6 +1255,40 @@ public:
     //   旧 t276 固定网格循环序（r2021a 逐位恒等墙）。recreate/regenerate/beginLoad 不 bump
     //   （成员集重建后仍全网格 Loaded；运行期换尺寸旧 QML 亦不处理——chunksBuilt 守卫一次
     //   成型，登记非目标）。
+    //
+    //   ── t1061 物化批口（resident 沿收敛到稳态观察点）────────────────────────────────
+    //   批内翻转仍逐次 ++revision（计数语义零变化——既有沿对账面不动），但 NOTIFY **延后到
+    //   最外层批口收口恰发一次**（ResidentSetBatch）。选型立证：本沿的唯一消费契约 = 呈现层
+    //   按驻留集**重建渲染池**（Main.qml onResidentChunkRevisionChanged → 整池重派生，每沿
+    //   O(驻留数 × 段数) 同步 buildMesh）——重建只在「稳态观察点」有意义；sparse 物化链的
+    //   过渡内部态（population 脚手架邻块 ③加入/⑥移出、快照-回填-恢复窗）不是世界稳态，
+    //   逐翻转发沿 = (a) 池消费到非稳态集（脚手架弹进弹出 = t1061 实机 resident 永久振荡 +
+    //   中间态内容烘进网格的顶点数递减指纹），(b) 每物化 chunk ~17 次 O(池) 重建 → enterWorld
+    //   主线程 livelock（用户实测：无限世界进入即 resident 反复缩水、世界永远加载不出来）。
+    //   批口把「一次同步物化突发」收敛为至多一条沿，观察点 = 稳态。非批路径（裸
+    //   setChunkLifecycle——矩阵沿对账腿、驱逐器 rig 缝）行为逐位不变：翻转即 ++ 即发。
+    //   纯主线程 RAII 零线程原语（t1023c 纪律）；嵌套安全 = 深度计数（population 脚手架链
+    //   在预生成/adopt 批内自嵌套），仅最外层收口发射。
+    class ResidentSetBatch
+    {
+    public:
+        explicit ResidentSetBatch(World &w) : m_w(w) { ++m_w.m_residentBatchDepth; }
+        ResidentSetBatch(const ResidentSetBatch &) = delete;
+        ResidentSetBatch &operator=(const ResidentSetBatch &) = delete;
+        ~ResidentSetBatch()
+        {
+            if (--m_w.m_residentBatchDepth != 0)
+                return; // 嵌套批：仅最外层收口
+            if (m_w.m_residentBatchPending) {
+                m_w.m_residentBatchPending = false;
+                emit m_w.residentChunkRevisionChanged(); // 稳态观察点：一次突发恰一条沿
+            }
+        }
+
+    private:
+        World &m_w;
+    };
+
     bool setChunkLifecycle(int cx, int cz, ChunkLifecycle to)
     {
         const ChunkLifecycle from = m_chunks.lifecycleAt(cx, cz);
@@ -1262,7 +1296,11 @@ public:
             return false;
         if (chunkLifecycleQueryable(from) != chunkLifecycleQueryable(to)) {
             ++m_residentChunkRevision;
-            emit residentChunkRevisionChanged();
+            // t1061 物化批口：批内沿收敛到批口一次发（见 ResidentSetBatch 头注）。
+            if (m_residentBatchDepth > 0)
+                m_residentBatchPending = true;
+            else
+                emit residentChunkRevisionChanged();
         }
         return true;
     }
@@ -2231,6 +2269,12 @@ private:
     QVector<QPair<int, int>> residentChunkKeysOrdered() const;
     // 驻留集 revision（成员集变化沿 +1；唯一写点 = setChunkLifecycle forwarder，选型注释在该处）。
     int m_residentChunkRevision = 0;
+    // ── t1061 物化批口私有面（ResidentSetBatch 深度 + 待发沿旗；主线程单写者零锁）────────
+    //   depth > 0 期间翻转只置 pending、沿延后；最外层析构收口恰发一次（收口点 = ResidentSetBatch
+    //   析构，见其头注）。计数器（m_residentChunkRevision）在批内照常逐翻转 ++——批口只收敛
+    //   「发射时机」，不动「计数语义」。
+    int m_residentBatchDepth = 0;
+    bool m_residentBatchPending = false;
 
     // ── §29.5-W4 异步网格作业桥私有面（纯主线程；零锁——提交/取消/交付全在 GUI 线程）────
     //   会话注入的构建 sink（null = 未通电世界 → 调用方同步回退；fixed 使能世界经

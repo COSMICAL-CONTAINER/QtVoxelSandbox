@@ -806,6 +806,10 @@ inline bool GameSession::loadStreamingWorld(WorldStore &store)
     StreamWorldMeta meta;
     if (!m_chunkStore->readStreamWorldMeta(meta) || !meta.streaming)
         return false; // 非流式世界：caller 走既有 fixed 读档链
+    // ── t1061 物化批口（读档突发整批收口）────────────────────────────────────────────
+    // 行回灌 + D3 blob 物化整批 = 一次同步物化突发 → 批口收口恰一条驻留沿（enterWorld 主
+    // 线程内逐行发沿只放大呈现层 O(池) 重建，无稳态观察价值——world.h ResidentSetBatch 契约）。
+    const World::ResidentSetBatch residentBatch(m_world);
     QVector<ChunkStoreBlob> rows;
     if (m_chunkStore->loadAllRows(rows) < 0)
         qWarning() << "GameSession::loadStreamingWorld: chunk_edits scan failed"
@@ -889,6 +893,12 @@ inline void GameSession::pumpStreamingTick()
 {
     if (!m_streamDriver)
         return; // fixed 世界零驱动器（连构造都不发生）——D2 零活动墙
+    // ── t1061 物化批口（拍级收口）────────────────────────────────────────────────────
+    // 本拍内的 k 个 adopt 交付 + 位置沿驱逐翻转（①onPlayerChunk → evictor ⑥⑦）的驻留集
+    // 沿收敛到拍尾恰一条——呈现层池重建节流上限 = 每 tick 一次（单交付自嵌套批口在各物化
+    // 入口，world.h ResidentSetBatch 契约）。无此拍级批口，worker 高吞吐时一拍 k 交付 =
+    // k 条沿 = 呈现层 k 次 O(池) 重建/拍（t1061 实机 livelock 的驱动相位放大面）。
+    const World::ResidentSetBatch residentBatch(m_world);
     // ① 位置沿喂驱动器（变更沿幂等在驱动器：同 chunk 重复喂零动作、首喂即沿）。
     if (m_hasPlayerChunk)
         m_streamDriver->onPlayerChunk(m_playerChunkCx, m_playerChunkCz);
