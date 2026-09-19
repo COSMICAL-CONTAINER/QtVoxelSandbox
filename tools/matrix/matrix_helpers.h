@@ -413,4 +413,15 @@ private:
                                   //   未动邻块零扰动] / r2036d 结构钉[统一物化路径单一权威 +
                                   //   钳制/快照面不回退 + fixed 反探]——80×80×96 fresh sparse
                                   //   小世界族，rig 世界 w 零接触，接 section36）
+    void section38_slot_pool_patch(); // t1063 Main.qml 差分池 patch 探针（置尾先例沿用：
+                                  //   r2037a fixed 世界零变化墙[真桥进入握手恒 false + 驻留
+                                  //   零沿 + 池零 patch 零重建 + 段指针逐位不动] / r2037b
+                                  //   增量等价承重墙[每沿后池 ≡ 整池重建参照逐项恒等 + 幸存
+                                  //   组指针复用 + 重加组 canonical 归位新对象] / r2037c 增量
+                                  //   性计量腿[每沿 churn = 恰变化键组规模 + 批口单沿双键 +
+                                  //   走查模拟账本闭合] / r2037d 结构钉[消费面恰一处 + 增量
+                                  //   入口 + 组对齐源钉 + 消费端零触碰 + 玩法路径]——
+                                  //   r2037a-c 真 QQmlEngine × 真 World 池镜像 wrapper
+                                  //   （r2021c 真链 harness 同门），r2037d 纯源码钉，rig
+                                  //   世界 w 零接触，接 section37）
 };

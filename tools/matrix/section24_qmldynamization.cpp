@@ -563,13 +563,16 @@ Item {
     });
 
     // ── r2021d：钉面（新 QML 面逐一正面钉 + 旧网格退役反探 + 玩法路径零触碰 + 集中）──────
+    //    t1063 同变更修订：Main.qml 消费面计数三针随差分池 patch 修订（count/keyAt x1→x2、
+    //    rebuild entry x3→x4，腿名括注同步）——其余钉面（world.h 三成员 / 枚举权威 / 反探 /
+    //    玩法路径）零变化。
     runLegMulti({ "r2021d surface pins (P4 QML dynamization): comment-stripped source pins"
         " hold the new minimal resident-set face on World (one Q_PROPERTY revision, two"
         " Q_INVOKABLE enumerators, the single notify emit, the membership-edge bump"
         " predicate, and the single cz-major enumeration authority in world.cpp), the"
         " legacy fixed-grid loop text is retired from Main.qml while the model-driven"
-        " consumption is present with exact occurrence counts (count/keyAt x1,"
-        " revision-changed handler x1, pool rebuild entry x3), Main.qml stays silent on"
+        " consumption is present with exact occurrence counts (count/keyAt x2,"
+        " revision-changed handler x1, pool rebuild entry x4), Main.qml stays silent on"
         " the lifecycle decision face (no setChunkLifecycle - the standing zero-decision"
         " surface extends to the render model) and keeps its gameplay-path markers"
         " (onTicked bridge, enterWorld, startGame) with zero GameSession mentions"
@@ -609,14 +612,19 @@ Item {
         }
 
         // ③ Main.qml 消费面精确计数（正面）+ 旧网格退役反探（miss 非空 = 合规缺席）。
+        //    t1063 同变更修订（留痕非削钉）：差分池 patch 落场后 count/keyAt 消费点 x1→x2
+        //    （初建 + patchChunkSlotPool 各一）、rebuildChunkSlotPool 入口 x3→x4（定义 +
+        //    onCompleted + patch 未成型兜底 + resetChunkSlotPool 尾调）；第 3 处历史语义
+        //    「revision handler 调整池重建」随 t1063 改为「handler 路由差分入口」——计数钉
+        //    只锁「入口在位且恰一处不增不减」，路由目标面归 r2037d（section38）承钉。
         const QStringList missQmlPos = pinSet(
             srcRoot + QStringLiteral("/ui/Main.qml"), {
-                SrcPin("r2021 qml consumes residentChunkCount", "residentChunkCount", 1),
-                SrcPin("r2021 qml consumes residentChunkKeyAt", "residentChunkKeyAt", 1),
+                SrcPin("r2021 qml consumes residentChunkCount", "residentChunkCount", 2),
+                SrcPin("r2021 qml consumes residentChunkKeyAt", "residentChunkKeyAt", 2),
                 SrcPin("r2021 qml revision handler", "onResidentChunkRevisionChanged", 1),
                 SrcPin("r2021 qml pool rebuild entry (definition + onCompleted +"
-                       " revision handler)",
-                    "rebuildChunkSlotPool", 3),
+                       " patch fallback + reset tail)",
+                    "rebuildChunkSlotPool", 4),
                 SrcPin("r2021 qml initial build routed through the pool",
                     "Component.onCompleted: { window.rebuildChunkSlotPool() }", 1),
             });
@@ -667,8 +675,8 @@ Item {
                              " the single cz-major enumeration authority in world.cpp), the"
                              " legacy fixed-grid loop text is retired from Main.qml while"
                              " the model-driven consumption is present with exact"
-                             " occurrence counts (count/keyAt x1, revision-changed handler"
-                             " x1, pool rebuild entry x3), Main.qml stays silent on the"
+                             " occurrence counts (count/keyAt x2, revision-changed handler"
+                             " x1, pool rebuild entry x4), Main.qml stays silent on the"
                              " lifecycle decision face (no setChunkLifecycle - the standing"
                              " zero-decision surface extends to the render model) and keeps"
                              " its gameplay-path markers (onTicked bridge, enterWorld,"

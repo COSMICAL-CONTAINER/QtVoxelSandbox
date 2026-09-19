@@ -1203,6 +1203,20 @@ add_executable(redstone_matrix_test
     #   radius 0 空域按需），rig 世界 w 零接触；r2036d 纯源码钉；无新增 .cpp——world/chunk 系
     #   源文件已列）。
     tools/matrix/section37_walkback_identity.cpp
+    # t1063 Main.qml 差分池 patch 探针段（置尾先例沿用：runAll 末执行，filter 词 r2037；
+    #   4 腿 r2037a-d = fixed 世界零变化墙[真桥进入握手恒 false + 驻留零沿 + 池零 patch 零重建
+    #   + 段指针逐位不动]/增量等价承重墙[真 QQmlEngine×真 World 池镜像：每沿后池 ≡ 整池重建
+    #   参照逐项恒等[keys 账本≡驻留枚举/每键 5 段/组首全局对齐] + 幸存组指针复用 + 重加组
+    #   canonical 归位新对象 + 被挤开组规范序重排复用]/增量性计量腿[每沿 churn = 恰变化键组
+    #   规模（单键 5 « 整池 45）+ 批口双键突发单沿恰 10 + 12 沿走查模拟逐沿精确 + 账本闭合
+    #   + patches==发射数]/结构钉[revision Connections 恰一处 + 增量入口路由 + 组创建单点化
+    #   + 组身份账本属性 + 步长单源表达式三面同源 + 两消费端契约句零触碰反探 + 世界换代全量
+    #   重派生收口面[定义 + enterWorld 流式分支路由函数域钉] + 玩法路径标记 + 生命周期决策
+    #   禁入 QML]。r2037a-c 真 QQmlEngine × 真 World × 池镜像 wrapper（r2021c 真链 harness
+    #   家族同门——Main.qml 池消费逻辑最小复刻 + builds/destroys/patches 计数断言视图），
+    #   r2037d 纯源码钉；无新增 .cpp——world/streamingbridge 系源文件已列，rig 世界 w 零
+    #   接触）。
+    tools/matrix/section38_slot_pool_patch.cpp
     # t1022 键位映射表探针附加：Core 层 KeybindManager（默认表完整性 / 冲突拒收 / settings.json
     #   round-trip——显式 storePath 密闭不触真实档）。PlayerController setKey 规范化消费同链直编。
     src/Core/keybindmanager.cpp
