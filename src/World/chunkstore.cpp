@@ -13,6 +13,10 @@
 //     开-用-关，无长活连接状态；同连接名复用前先 removeDatabase 防残留句柄。
 //   - chunk_edits 表 IF NOT EXISTS 幂等建表（纯加表；零 bump——头注④）。
 //   - 读路径失败一律降级 miss/false（不抛不堵；写路径失败 Result fail 上抛给驱逐缝）。
+//   - t1066 保存链连接面 busy 等待归零：openStoreConnection 唯一连接设置点显式归零 busy 等待
+//     （Qt QSQLITE 默认秒级 busy 等待——外部锁下驱逐缝 persistChunk / 保存时冲洗会阻塞秒级才
+//     失败；失败语义零变只是不再先等。连接盘点表与自锁竞态面论证 = worldstore.cpp 同门头注：
+//     本连接开-用-关于 GUI 线程串行，W3 驱逐缝与 W5 冲洗缝都在主线程拍内，与保存事务零重叠）。
 
 // 附加表连接名（独立于 worldstore 的 "voxelsandbox_worldstore" 与 savecoordinator 的
 // "voxelsandbox_savecoordinator"——三域三连接互不占用）。
@@ -38,6 +42,7 @@ QSqlDatabase openStoreConnection(const QString &dbPath)
         QSqlDatabase::removeDatabase(kChunkStoreConn);
     QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), kChunkStoreConn);
     db.setDatabaseName(dbPath);
+    db.setConnectOptions(QStringLiteral("QSQLITE_BUSY_TIMEOUT=0")); // t1066：锁下即败即返（附加表读写唯一设置点）
     db.open();
     return db;
 }

@@ -32,6 +32,31 @@ Q_LOGGING_CATEGORY(lcSave, "vo.save")
 // 命名 QSqlDatabase 连接（避免占用默认连接，便于多库切换 / 临时扫描连接隔离）。
 static const char *const kConn = "voxelsandbox_worldstore";
 
+// ── t1066 保存链连接面 busy 等待归零（全部 QSQLITE 连接设置点盘点 + 选型立证）──────────────
+// 病灶：Qt QSQLITE 驱动默认 busy timeout 为秒级——外部锁（杀软/索引器/同步盘）全程持有时，
+//   保存链**首试**在第一条撞锁语句上阻塞秒级才失败（t1064 真锁腿 wall≈29s 实测；首试第一撞锁
+//   点 = 协调层台账 SELECT，随后事务写面在本文件 kConn 上同型阻塞）；t1064 的 150ms 探锁退避
+//   只约束重试间隔、不约束首试阻塞 = 锁下退出仍卡秒级。
+// 修法：各连接设置点显式归零 busy 等待（锁下即败即返），锁下失败语义交由 t1064 探锁退避收敛
+//   （首试瞬时败 → 探锁 → 150ms 一档 → 恰一次重试）；无锁路径逐位不变（busy 等待只在撞锁时
+//   生效——零竞争面上本选项零观感，r2040a 常态墙承重）。
+// 连接盘点表（src/ 全部 QSQLITE 连接设置点，禁漏一处；r2040d 逐连接放置钉 = 逐行扫本 API 面）：
+//   ① kConn/createWorld ② kConn/openWorld（保存链事务写面）
+//   ③ kScanConn/worldList ④ kRenameConn/renameWorld（列表/重命名非保存链：归零后锁下从
+//     「秒级等待后失败」变「瞬时失败」——列表跳该文件仍带 qWarning、重命名仍诚实 false，语义
+//     原样只是更快）
+//   ⑤⑥ savecoordinator.cpp 台账连接 recover/coordUpsert（台账读面 = 保存链首试第一撞锁点 +
+//     台账写面 marker-first 闸）
+//   ⑦ chunkstore.cpp openStoreConnection（附加表读写唯一设置点）
+//   ⑧ savebridge.cpp 探锁连接 = t1064 已显式归零（不动；r2038d 源钉在案）。
+// 自锁竞态面论证（0 值的代价 = 瞬时锁竞争也即败，须证进程内零并发窗口）：src/ 全部 SQLite
+//   访问都在 GUI 线程串行——本文件连接同线程开-用-关，saveAll 单事务自持自放；保存时冲洗
+//   （附加表写；Main.qml runExitSave 先冲洗后三写，两段零时间重叠）与本文件事务不交错；台账
+//   连接在协调层五段流程内开-用-关；worldgen/mesh worker 线程不触任何 Sql 面 → 内部锁竞争
+//   零窗口，0 值不引入自败面。
+// worldstore 零 diff 审计面登记例外：本单改的只有**连接设置**（每设置点一行 setConnectOptions
+//   + 本注释块），协议/数据/schema/返回语义/t974 计数口径零触碰——审计例外由主控关单时登记。
+
 WorldStore::WorldStore(QObject *parent) : QObject(parent) {}
 
 // t974 写完成计数统一收口（契约见 worldstore.h saveOkCount Q_PROPERTY 注释）：只在「持久化调用
@@ -197,6 +222,7 @@ QVariantList WorldStore::worldList() const
         {
             QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), kScanConn);
             db.setDatabaseName(dir.absoluteFilePath(file));
+            db.setConnectOptions(QStringLiteral("QSQLITE_BUSY_TIMEOUT=0")); // t1066：锁下即败即返（盘点表见文件头）
             if (!db.open()) {
                 qCWarning(lcSave) << "worldList: cannot open" << file << ":" << db.lastError().text();
                 continue;
@@ -237,6 +263,7 @@ QString WorldStore::createWorld(const QString &name, int seed)
     {
         QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), kConn);
         db.setDatabaseName(dbPath(file));
+        db.setConnectOptions(QStringLiteral("QSQLITE_BUSY_TIMEOUT=0")); // t1066：锁下即败即返（盘点表①②）
         if (!db.open()) {
             qCCritical(lcSave) << "createWorld: cannot open" << file << ":" << db.lastError().text();
             return QString();
@@ -316,6 +343,7 @@ bool WorldStore::renameWorld(const QString &file, const QString &newName)
     {
         QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), kRenameConn);
         db.setDatabaseName(path);
+        db.setConnectOptions(QStringLiteral("QSQLITE_BUSY_TIMEOUT=0")); // t1066：锁下即败即返（盘点表③④）
         if (!db.open()) {
             qCWarning(lcSave) << "renameWorld: cannot open" << file << ":" << db.lastError().text();
         } else {
@@ -382,6 +410,7 @@ bool WorldStore::openWorld(const QString &file)
     {
         QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), kConn);
         db.setDatabaseName(dbPath(file));
+        db.setConnectOptions(QStringLiteral("QSQLITE_BUSY_TIMEOUT=0")); // t1066：锁下即败即返（盘点表①②）
         if (!db.open()) {
             qCCritical(lcSave) << "openWorld: cannot open" << file << ":" << db.lastError().text();
             return false;

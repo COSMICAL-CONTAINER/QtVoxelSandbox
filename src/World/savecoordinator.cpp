@@ -24,6 +24,14 @@
 //     常在读面才炸，故「open 失败」与「SELECT busy」两面目同归 OpenError，与「表真缺席=旧档
 //     Fresh」用 sqlite_master 只读探针辨析（实现见 recover() 内注）；saveAll 对 prior==OpenError
 //     拒存（禁不可知台账上的代次重编）。
+//   - t1066 保存链连接面 busy 等待归零：台账连接两设置点（recover 读面 + coordUpsert 写面）显式
+//     归零 busy 等待（连接盘点表/自锁竞态面论证 = worldstore.cpp 同门头注）。Qt QSQLITE 默认
+//     busy timeout 秒级——外部锁全程持有时保存链**首试**在本类 recover() 的台账 SELECT 上阻塞
+//     秒级才失败（t1064 真锁腿 wall≈29s 实测），t1064 退避只约束重试间隔不约束首试阻塞。归零后
+//     首试在第一条撞锁语句即败，锁占三面目判读（#5②）语义零变——Unreadable/OpenError 派生原样
+//     只是不再先等秒级；失败收敛交 t1064 探锁退避（首试瞬时败 → 探锁 → 150ms 一档 → 恰一次
+//     重试）。自锁竞态面：台账连接开-用-关于协调层五段流程内、全程 GUI 线程串行（本文件头注
+//     登记原样），内部并发零窗口。
 
 // 协调层台账连接名（独立于 worldstore 的 "voxelsandbox_worldstore"）。
 static const char *const kCoordConn = "voxelsandbox_savecoordinator";
@@ -64,6 +72,7 @@ SaveGenerationInfo SaveCoordinator::recover() const
     {
         QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), kCoordConn);
         db.setDatabaseName(m_dbPath);
+        db.setConnectOptions(QStringLiteral("QSQLITE_BUSY_TIMEOUT=0")); // t1066：锁下即败即返（台账读面）
         if (db.open()) {
             // 只读，不建表（recover 对无台账旧档不写任何东西）。
             QSqlQuery q(db);
@@ -114,6 +123,7 @@ bool SaveCoordinator::coordUpsert(const char *key, qint64 value) const
     {
         QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), kCoordConn);
         db.setDatabaseName(m_dbPath);
+        db.setConnectOptions(QStringLiteral("QSQLITE_BUSY_TIMEOUT=0")); // t1066：锁下即败即返（台账写面）
         if (db.open()) {
             QSqlQuery q(db);
             // IF NOT EXISTS 幂等建表（纯加表；对外部 EXCLUSIVE 锁这本身就是一次写 → 失败即挡，
