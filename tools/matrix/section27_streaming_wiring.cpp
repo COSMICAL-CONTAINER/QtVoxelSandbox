@@ -498,7 +498,7 @@ void MatrixRun::section27_streaming_wiring()
         " both the outcome face and the data face inside the same function body with the data"
         " adoption as the single adopt call site, the world-side adopt materializes through the"
         " r2012 guarded application plus the Loaded promotion and the main-thread population"
-        " replay with the in-flight neighbor guard, QML stays free of every W2 token, and"
+        " replay with the in-flight neighbor read-domain promotion (t1062 revised pin), QML stays free of every W2 token, and"
         " worldstore stays blind to the streaming seams)"), [&]() {
         bool ok = true;
         QString diag;
@@ -550,7 +550,11 @@ void MatrixRun::section27_streaming_wiring()
             diag += QStringLiteral("[same-beat body=%1] ").arg(beatBody.size());
 
         // ③ world.cpp 正面钉：adopt 落位链（r2012 守卫入口 + ③晋升 + population 主线程 + 列
-        //    种子光）与在途邻居守卫（W2 流式在途槽不复用脚手架拆卸）。
+        //    种子光）与在途邻居读域就位（t1062 同变更修订留痕：原「在途专分支守卫」钉面随
+        //    根因修复退役——旧分支只回填数组不动生命周期，population 查询门对 {Loading,
+        //    Generated} 恒拒 → 读域全空气（r2036c 恰红实证）；新形态 = 在途邻与 Absent 邻
+        //    同走脚手架一路，经 ②③ 合法边提升到 Loaded（可查询）后回填、population 后统一
+        //    ⑥⑦+擦槽。钉面改钉该单一提升路径的两条转移语句，非削钉）。
         const QStringList missWc = pinSet(
             srcRoot + QStringLiteral("/World/world.cpp"), {
                 SrcPin("adopt entry", "bool World::adoptGeneratedChunk(int cx, int cz, const GeneratedChunkData &data)", 1),
@@ -561,8 +565,10 @@ void MatrixRun::section27_streaming_wiring()
                 SrcPin("adopt main-thread population", "sparsePopulateChunk(cx, cz);", 2),
                 SrcPin("adopt column light reflood", "refloodBox(cx * TerrainGen::kChunkSize", 2),
                 SrcPin("slot ensure entry", "bool World::ensureStreamingChunkSlot(int cx, int cz)", 1),
-                SrcPin("in-flight neighbor guard",
-                    "inflightLife == ChunkLifecycle::Loading || inflightLife == ChunkLifecycle::Generated", 1),
+                SrcPin("in-flight neighbor read-domain promotion entry",
+                    "setChunkLifecycle(nx, nz, ChunkLifecycle::Loading);", 1),
+                SrcPin("in-flight neighbor read-domain promotion queryable edge",
+                    "setChunkLifecycle(nx, nz, ChunkLifecycle::Loaded);", 1),
             });
         for (const QString &m : missWc) {
             ok = false;
@@ -629,7 +635,7 @@ void MatrixRun::section27_streaming_wiring()
                              " seams (sparse-only session gate, tick-tail beat with both faces"
                              " drained in one function body and a single adopt call site,"
                              " world-side adopt on the guarded application + Loaded promotion +"
-                             " main-thread population chain with the in-flight neighbor guard,"
+                             " main-thread population chain with the in-flight neighbor read-domain promotion,"
                              " QML and worldstore free of every streaming token)"
                           << (ok ? QString() : diag);
     });

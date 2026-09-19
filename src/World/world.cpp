@@ -283,6 +283,14 @@ void World::sparseGenerateChunk(int cx, int cz)
 //   入「本 population 时恰已物化的真邻块」，即把 pass-k 数学 applied 到终态上 = 按加载次序污染
 //   邻块。写域钳制（锚 ±1 chunk）令窗外溢写两序同拒；窗内溢写落 snapshot-terrain/脚手架 =
 //   pass-k 读域状态（恢复时丢弃，邻块自身 population 已同值落位）= 确定性。
+//   **读域的「可查询性」前提（t1062 修正三——读域时刻一致性隐含的前置）**：读域内的列不仅要
+//   呈现 pass-k 状态，还必须**可被 pass 读到**——population 读经 ChunkManager::blockAt 查询门
+//   （chunkMaterialized = {Loaded, Active}），{Loading, Generated} 态的列读恒 OOB 等价（全空）。
+//   旧 W2 在途邻专分支只在数组上回填地形、不动生命周期 → 回填地形对全部 pass 读不可见（读域
+//   退化为全空气）→ 异步走回 chunk 重物化 ≠ 初见（r2036c 三方恒等腿恰红实证：carve 35 vs
+//   2613 / ore 288 vs 1182 / tree 1 vs 38）。修复 = 在途邻与 Absent 邻同走脚手架一路（②③ 合法
+//   边提升到 Loaded 后回填，population 后 ⑥⑦+擦槽；在途槽被拆由 adopt 防御路径恢复——见
+//   sparsePopulateChunk ① 内注释）。
 void World::sparsePopulateChunk(int cx, int cz)
 {
     if (!isSparse())
@@ -338,44 +346,29 @@ void World::sparsePopulateChunk(int cx, int cz)
                         m_terrain.fillTerrainColumn(nx * kCS + lx, nz * kCS + lz, sink);
                 continue;
             }
-            // §29.5-W2：在途流式邻居（槽位在、非可查询、非 Absent = {Loading, Generated}——
-            // 异步会话中边①已交接 / 边②已收割但自身 adopt 未跑的 chunk）：按上方快照-回填-
-            // 恢复同门处理，**不走脚手架创建/拆卸**——其生命周期由异步链（边①②③，唯一权威
-            // generationjob.h + adopt）驱动，脚手架的 ⑥⑦+擦槽会拆掉在途槽位。其体素数组此刻
-            // 恒为空（W2 流式下内容只经自身 adopt 落位）：快照=全零 → 纯地形回填呈 pass-k 读
-            // 域真值 → population 窗口写入落快照域 → 恢复 memcpy 原样归零 → 该邻自身 adopt
-            // 随后落缓冲逐位重 derive（r2023b 恒等面同门；恢复无损论证同上——其对自身的溢写
-            // 已由自身 population 同值落位）。W1 同步链无在途槽位 = 本分支死代码（r2023 腿族
-            // 不触，恰红面零扰动）。
-            const ChunkLifecycle inflightLife = m_chunks.lifecycleAt(nx, nz);
-            if (inflightLife == ChunkLifecycle::Loading || inflightLife == ChunkLifecycle::Generated) {
-                Chunk *inflight = m_chunks.chunk(nx, nz);
-                if (!inflight)
-                    continue; // 防御（不可达：有态必有槽）
-                ReadNeighbor &n = nb[nbN++];
-                n.cx = nx;
-                n.cz = nz;
-                n.snapshotted = true; // 复用快照恢复面（created=false → 不拆卸、不动生命周期）
-                n.snapVoxels.assign(inflight->voxelData(), inflight->voxelData() + inflight->voxelCount());
-                n.snapStates.assign(inflight->stateData(), inflight->stateData() + inflight->voxelCount());
-                std::memset(inflight->voxelDataMut(), 0, inflight->voxelCount());
-                std::memset(inflight->stateDataMut(), 0, inflight->voxelCount());
-                inflight->recomputeAllHeightmaps(); // 全空列基准（terrain 回填经 setBlock 增量维护）
-                ScaffoldColumnSink sink{ &m_chunks };
-                for (int lz = 0; lz < kCS; ++lz)
-                    for (int lx = 0; lx < kCS; ++lx)
-                        m_terrain.fillTerrainColumn(nx * kCS + lx, nz * kCS + lz, sink);
-                continue;
-            }
+            // t1062 根因修复：在途流式邻（{Loading, Generated}——异步会话边①已交接 / 边②已
+            // 收割但自身 adopt 未跑的槽位）与 Absent 邻**同走脚手架一路**。旧专分支只在数组上
+            // 回填地形、不动生命周期——但 population 各 pass 经 ChunkManager::blockAt 读栅格，
+            // 而该查询门（chunkMaterialized = {Loaded, Active}）对 {Loading, Generated} 恒拒
+            // → 回填的地形对全部 pass 读**不可见**（读域退化为全空气）：实测 r2036c（t1062
+            // 复现腿）异步走回 chunk 的 carve/ore/tree/entrance 计数全崩（35 vs 2613 / 288 vs
+            // 1182 / 1 vs 38 / 11 vs 9）→ 重物化内容 ≠ 初见（走回矿/树变样的直接病灶）。本路
+            // 经 ②③ 合法边把在途邻提升到 Loaded（Loading→Generated=② / Generated→Loaded=③；
+            // 自转移被守卫拒 = 预期 no-op），读域与脚手架/快照两形态同真值；population 后统一
+            // ⑥⑦+擦槽（见 ④）。在途槽被拆的恢复面 = adoptGeneratedChunk 防御路径（ensureChunk
+            // 重建槽位 + 边①②补齐——「交付时仍停 Loading / 槽位曾被拆卸重建」语义既有）+
+            // 调度器边②被拒 best-effort 忽略（generationjob 唯一权威语义），该邻自身 adopt 随
+            // 后落缓冲并跑自身 population 逐位重 derive。W1 同步链无在途槽位 = 本路径对既有
+            // 腿族逐位等价（ensureChunk 幂等 + Absent→Loading=① 原样）。
             if (!m_chunks.ensureChunk(nx, nz))
                 continue; // 防御（物化失败 → 该邻域读走 OOB 等价；C 内容不受影响）
-            setChunkLifecycle(nx, nz, ChunkLifecycle::Loading);
+            setChunkLifecycle(nx, nz, ChunkLifecycle::Loading);   // ①（在途邻自转移拒 = no-op）
             ScaffoldColumnSink sink{ &m_chunks };
             for (int lz = 0; lz < kCS; ++lz)
                 for (int lx = 0; lx < kCS; ++lx)
                     m_terrain.fillTerrainColumn(nx * kCS + lx, nz * kCS + lz, sink);
-            setChunkLifecycle(nx, nz, ChunkLifecycle::Generated);
-            setChunkLifecycle(nx, nz, ChunkLifecycle::Loaded);
+            setChunkLifecycle(nx, nz, ChunkLifecycle::Generated); // ②（Generated 邻自转移拒 = no-op）
+            setChunkLifecycle(nx, nz, ChunkLifecycle::Loaded);    // ③ → 可查询（读域可见性承重）
             nb[nbN].cx = nx;
             nb[nbN].cz = nz;
             nb[nbN].created = true;
@@ -547,7 +540,10 @@ bool World::adoptGeneratedChunk(int cx, int cz, const GeneratedChunkData &data)
         return false; // 防御（物化失败）
     // 槽位在途态对齐（防御面）：正常链 = 边①②已由调度器驱动到 Generated；极端面（在途槽
     // 位曾被拆卸重建 / 交付时仍停 Loading）补齐 ①②——经唯一守卫入口，非法转移被拒即忽略
-    //（best-effort 记账，与 r2011 同门；六态域外态不预）。
+    //（best-effort 记账，与 r2011 同门；六态域外态不预）。t1062 起本路径转正为「population
+    // 在途邻拆卸恢复面」：他块 population 把在途邻按脚手架同路提升→回填→⑥⑦+擦槽后，本
+    // adopt 负责重建槽位（ensureChunk）+ 补齐 ①② + 落缓冲 + 自身 population（见
+    // sparsePopulateChunk ① 注释的恢复面论证）。
     if (m_chunks.lifecycleAt(cx, cz) == ChunkLifecycle::Absent)
         setChunkLifecycle(cx, cz, ChunkLifecycle::Loading);
     if (m_chunks.lifecycleAt(cx, cz) == ChunkLifecycle::Loading)
