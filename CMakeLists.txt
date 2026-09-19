@@ -1223,6 +1223,9 @@ add_executable(redstone_matrix_test
     # t1065 流式→固定世界切换池残留收口探针附加：Game 层 StreamingBridge 直编（真链进入握手 /
     #   流式标志落库 / 会话 detach——r2039 切换链发生器；world/gamestore 系已列）。
     tools/matrix/section40_slot_pool_fixed_switch.cpp
+    # t1066 保存链 BUSY_TIMEOUT=0 探针附加：Game/World 层 SaveBridge/SaveCoordinator/WorldStore
+    #   直编（真链零注入真锁腿 + 逐连接放置钉；worldstore/savecoordinator/chunkstore 系已列）。
+    tools/matrix/section41_save_busy_zero.cpp
     # t1022 键位映射表探针附加：Core 层 KeybindManager（默认表完整性 / 冲突拒收 / settings.json
     #   round-trip——显式 storePath 密闭不触真实档）。PlayerController setKey 规范化消费同链直编。
     src/Core/keybindmanager.cpp
