@@ -1227,10 +1227,10 @@ private:
     //   岩浆吞墙等系统拆墙路径与玩家挖掘同口径掉画）。World::removePaintingAt 连通域清整张画（种子格
     //   ±u/±Y 同 face 域 + 锚格反解矩形只清本画，同面邻画不误伤）；drop 时经 blockDroppedAsItem 掉
     //   1× PaintingId。声明与契约见 world.h。
-    // t725→t806 余烬门三件套已整体下沉 World 层单一权威（t806 泛化 + t848 内腔 2×3..21×21 + 四角可选；同末地门
-    //   三件套模式，World 层可被矩阵测试直编）：World::tryIgniteNetherPortal（点燃检测，placeBlock 打火石
-    //   分支调）/ World::removeNetherPortalAt（连通域熄灭，finishMiningAt 直挖门格分支调）/
-    //   World::breakNetherPortalsAround（门框失撑熄灭，finishMiningAt 末尾调）。声明与契约见 world.h。
+    // t725→t806 余烬门三件套已整体下沉 World 层单一权威（t806 泛化 + t848 内腔 2×3..21×21 + 四角可选；同暗渊门
+    //   三件套模式，World 层可被矩阵测试直编）：World::tryIgniteEmberGate（点燃检测，placeBlock 打火石
+    //   分支调）/ World::removeEmberGateAt（连通域熄灭，finishMiningAt 直挖门格分支调）/
+    //   World::breakEmberGatesAround（门框失撑熄灭，finishMiningAt 末尾调）。声明与契约见 world.h。
     // t242 攻击 mob（spec「玩家左键攻击生物」）：damageEntity(entityIndex, dmg) + swingArm +
     //   emit mobAttacked。t265 伤害改走 ToolRegistry::attackDamage(手持物)（剑木4/石5/铁6、空手/工具=1 HP）。
     //   由 beginMining 在 mob 优先于方块时调。mob 由 caller 选定（findMobHit 已返最近活体索引）。
@@ -1590,7 +1590,7 @@ private:
     float m_fireTimer = 0.0f;
     float m_fireDmgTimer = 0.0f;
     // t725 余烬门站入灼烧累积（独立于 m_fireDmgTimer——那是 t344 随机熄灭路径；门伤须稳定 1HP/s 不掺
-    //   随机熄灭，同 t351「稳定扣血」教训）：脚位 / 眼位格任一 == NetherPortal 时累 dt，每满 1s 扣 1HP；
+    //   随机熄灭，同 t351「稳定扣血」教训）：脚位 / 眼位格任一 == EmberGate 时累 dt，每满 1s 扣 1HP；
     //   离开门格归零。仅 Survival（非 Survival 清零，同火段 else 分支）。
     float m_portalBurnTimer = 0.0f;
     // t669 毒马铃薯食物中毒态：m_poisonTimer 中毒剩余秒（>0 中毒；tickImpl 递减，归零解毒），

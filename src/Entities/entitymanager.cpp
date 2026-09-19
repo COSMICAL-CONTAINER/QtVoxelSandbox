@@ -938,7 +938,7 @@ int EntityManager::spawnEnderEye(const QVector3D &origin, const QVector3D &vel)
     e.vx = vel.x(); // 复用 vx/vy/vz 作 3D 速度（EnderEye 不走 Mob 击退衰减分支，无冲突）
     e.vy = vel.y();
     e.vz = vel.z();
-    // 判定飞行距离随机带（机制等价 MC 末影之眼飞行一段后落地/碎裂；玩家据此逐步逼近要塞）。
+    // 判定飞行距离随机带（机制等价 MC 暗渊之眼飞行一段后落地/碎裂；玩家据此逐步逼近要塞）。
     e.enderEyeDistLeft = kEnderEyeDistMin
         + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kEnderEyeDistMax - kEnderEyeDistMin);
     e.enderEyeShatter = 0.0f; // 飞行态（非碎裂）
@@ -6849,9 +6849,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                                 && world->blockAt(px, py, pz) == BlockRegistry::Air) {
                                 // 来向格是空气 → 落火（撞面外的空气侧；t724 火系统承接蔓延）。
                                 // review27 #14③：先试下界门框（与打火石 playercontroller 路径同源口径——
-                                //   tryIgniteNetherPortal 成门 → 开口整面 NetherPortal 不落火；烈焰弹撞
+                                //   tryIgniteEmberGate 成门 → 开口整面 EmberGate 不落火；烈焰弹撞
                                 //   黑曜石门框内腔点火与打火石等效，替代此前只在打火石链生效的门检测）。
-                                if (world->tryIgniteNetherPortal(px, py, pz)) {
+                                if (world->tryIgniteEmberGate(px, py, pz)) {
                                     qCInfo(lcEnt) << "fireball lit nether portal at" << px << py << pz;
                                 } else {
                                     world->setBlock(px, py, pz, BlockRegistry::Fire, 0);
@@ -6882,16 +6882,16 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         }
 
         // --- EnderEye（t729 暗渊之眼投射物；t757 两段式定位）：寻路要塞 + 飞距结算（变掉落物 / 碎裂无掉落）---
-        //   机制等价 MC 1.0 末影之眼 ender eye：右键掷出 → 寻路要塞（t757 远段升空平飞指示 / 近段下探逼近，
+        //   机制等价 MC 1.0 暗渊之眼 ender eye：右键掷出 → 寻路要塞（t757 远段升空平飞指示 / 近段下探逼近，
         //   速度 ~kEnderEyeSpeed=4，玩家可侧身看它飞）→ 飞行一段后判定：80% 变**掉落物实体**（emit
         //   enderEyeBecameItem，可捡回）、20% 碎裂（缩小淡出 + 玻璃碎裂粒子，无掉落）。本分支两态：飞行态
         //   （enderEyeShatter==0，两段转向 + 位移 + distLeft 递减）/ 碎裂态（enderEyeShatter>0，仅倒计，QML
-        //   delegate 播动画；归零释放槽无掉落）。无重力（非抛物）、无方块碰撞（机制等价 MC 末影之眼透过地形
+        //   delegate 播动画；归零释放槽无掉落）。无重力（非抛物）、无方块碰撞（机制等价 MC 暗渊之眼透过地形
         //   感应要塞；豆腐脑如穿墙亦可接受，距离短）。
         if (e.kind == EnderEye) {
             if (e.enderEyeShatter > 0.0f) {
                 // 碎裂态：倒计时（QML delegate 据 shatteringAt 播缩小淡出 + 玻璃碎裂粒子动画），归零 → 释放槽
-                //   （无掉落物，机制等价 MC 末影之眼破裂无回收）。
+                //   （无掉落物，机制等价 MC 暗渊之眼破裂无回收）。
                 e.enderEyeShatter -= float(dt);
                 dirty = true;
                 if (e.enderEyeShatter <= 0.0f) {
@@ -6952,7 +6952,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             // 判定结算：剩余飞行距离归零 → 掷判定（80% 掉落物 / 20% 碎裂）。
             if (e.enderEyeDistLeft <= 0.0f) {
                 if (QRandomGenerator::global()->bounded(100) < kEnderEyeDropChance) {
-                    // 80% → 变**掉落物实体**（机制等价 MC 末影之眼落地变掉落物可回收；emit 语义事件，呈现层转发
+                    // 80% → 变**掉落物实体**（机制等价 MC 暗渊之眼落地变掉落物可回收；emit 语义事件，呈现层转发
                     //   ItemEntityManager.spawnItem 生成 item 实体，玩家走近可捡回 —— 反复使用逐步逼近要塞）。
                     // 审查修 B11（t724-t729 复盘）：眼睛无方块碰撞（设计上穿墙），结算点可能在实体格内（掉落物
                     //   卡方块永不可拾）或岩浆 / 火格（被 t724 焚毁逻辑吞掉，玩家白耗一只眼）→ 从当前位置向下
@@ -7034,7 +7034,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   「本格有碰撞盒才命中」经核不成立——本工程 Rail / Torch 都是 ShapeNone 无碰撞盒（t835 探针
             //   钉死「落轨格 / 落火把格必传送」，格级接触是 t835 对「点在薄盒内一 tick 跨过即漏」的有意
             //   判据），改盒存在性判据会砸 t835 基线。取①：t835「本格任意方块实存」判据保留，豁免表在
-            //   原 5 id（Air / Water·Lava ② / NetherPortal / Fire）基础上补**无碰撞植物族**——着生植物
+            //   原 5 id（Air / Water·Lava ② / EmberGate / Fire）基础上补**无碰撞植物族**——着生植物
             //   （isGroundPlant：草丛 / 花×4 / 蘑菇×2）+ 枯灌木 + 树苗 + 作物（isCropBlock：小麦 / 胡萝卜 /
             //   马铃薯）+ 浆果丛 + 甘蔗，全族 ShapeNone 无碰撞、MC 1.0 投掷物 raytrace 穿过、本工程箭亦按
             //   空碰撞盒穿过 → 珍珠平抛弧线下降段不再被草丛截断在数格内（review25 #5 反噬 t835「更远
@@ -7049,7 +7049,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                                        || hitId == BlockRegistry::SweetBerryBush
                                        || hitId == BlockRegistry::Sugarcane;
                 if (hitId != BlockRegistry::Air && hitId != BlockRegistry::Water
-                    && hitId != BlockRegistry::Lava && hitId != BlockRegistry::NetherPortal
+                    && hitId != BlockRegistry::Lava && hitId != BlockRegistry::EmberGate
                     && hitId != BlockRegistry::Fire && !plantPass) {
                     remove = true;
                     landed = true;
@@ -7211,7 +7211,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   其后各自分支（水中生物照旧飞行段可钩——t836 语义不变，仅实体格命中让位）。贴靠格快照进
             //   bobberGround*（Ground 态节流复查用，review25 #12）。
             if (nid != BlockRegistry::Air && nid != BlockRegistry::Water && nid != BlockRegistry::Lava
-                && nid != BlockRegistry::NetherPortal && nid != BlockRegistry::Fire) {
+                && nid != BlockRegistry::EmberGate && nid != BlockRegistry::Fire) {
                 e.bobberState = kBobberStGround;
                 e.bobberGroundCellX = qint16(bx);
                 e.bobberGroundCellY = qint16(by);

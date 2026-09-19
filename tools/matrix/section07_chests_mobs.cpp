@@ -955,7 +955,7 @@ void MatrixRun::section07_chests_mobs()
     // ── P-t1002 要塞 piece 链逐方块重建探针（R19.19 批最大项；placeStronghold piece 化重写验收面）──
     //    rig：t995/t1001 同款 5 seed（20260821/777/424242/1337/90210，缺要塞的种子跳过、备胎续扫，
     //    ≥4 世界才判）× 128×128×64 世界池。断言五层：
-    //    (a) 传送门房逐方块：全图 EndPortal 恰 12 格且全在足迹内（12 框架环 + 至多一座要塞）+ 预嵌眼
+    //    (a) 传送门房逐方块：全图 AbyssGate 恰 12 格且全在足迹内（12 框架环 + 至多一座要塞）+ 预嵌眼
     //        池化窗（~10%/框）+ 岩浆 [80,200]（盆 9 + 河沟 ~108）+ 银鱼笼 ≥1 + 铁栏杆恰 59（传送门房
     //        39 格栅 + 监狱厅 20）+ 铁门恰 4 格（监狱厅 2 门）+ 圆石楼梯恰 3（直梯段 C3）；
     //    (b) piece 家具面（足迹域计数）：书架 [200,400]（大馆 231 固定 + 小馆可选 86）/ 梯 ≥7（大馆 7 +
@@ -967,7 +967,7 @@ void MatrixRun::section07_chests_mobs()
     //    (e) 源码钉：piece 上限 50 / 传送门保证旗（**阴性轮钉**：摘除即红）/ 权重表行字面（**阴性轮
     //        钉**：打乱即红）/ 变体 45/75/95 比例字面 / 格架 spine 行（传送门链深 5 / 大图书馆 5 /
     //        角房 7 ≥ 链深契约）/ 重试子 seed。
-    runLegMulti({ "t1002 stronghold piece-chain rebuild: 12-frame portal room (world-total EndPortal == 12, eyes/po"
+    runLegMulti({ "t1002 stronghold piece-chain rebuild: 12-frame portal room (world-total AbyssGate == 12, eyes/po"
         "oled, lava, silverfish cage, 39 grate bars + 20 prison bars = 59, 2 iron doors), furniture count"
         "s (bookshelf [200,400], ladders >=7, webs >=8 at wiki 7%, chests >=3, slabs [40,80]), per-block "
         "variant pool 45/30/20/5 in windows, deterministic re-gen, piece-table/guarantee source pins, see"
@@ -1033,12 +1033,12 @@ void MatrixRun::section07_chests_mobs()
                             else if (id == BR::MonsterEgg)        { ++family; ++famEgg; }
                         }
                     }
-            // (a) 全图 EndPortal 扫描：恰 12 格（至多一座要塞 + 环完整）且全在足迹内。
+            // (a) 全图 AbyssGate 扫描：恰 12 格（至多一座要塞 + 环完整）且全在足迹内。
             int worldFrames = 0, framesInBounds = 0;
             for (int x = 0; x < wT1002.width(); ++x)
                 for (int z = 0; z < wT1002.depth(); ++z)
                     for (int y = 0; y < wT1002.height(); ++y)
-                        if (wT1002.blockAt(x, y, z) == BR::EndPortal) {
+                        if (wT1002.blockAt(x, y, z) == BR::AbyssGate) {
                             ++worldFrames;
                             if (x >= cx - World::kStrongholdHalf && x <= cx + World::kStrongholdHalf
                                 && z >= cz - World::kStrongholdHalf && z <= cz + World::kStrongholdHalf
@@ -1051,7 +1051,7 @@ void MatrixRun::section07_chests_mobs()
                 for (int rdz = -2; rdz <= 2; ++rdz) {
                     const bool onRing = (rdx == -2 || rdx == 2) ? (rdz >= -1 && rdz <= 1)
                                         : (rdz == -2 || rdz == 2) && (rdx >= -1 && rdx <= 1);
-                    if (onRing && (wT1002.stateAt(px + rdx, py, pz + rdz) & BR::EndPortalStateActiveFlag)) ++eyes;
+                    if (onRing && (wT1002.stateAt(px + rdx, py, pz + rdz) & BR::AbyssGateStateActiveFlag)) ++eyes;
                 }
             pooledFrames += 12;
             pooledEyes += eyes;
@@ -1124,7 +1124,7 @@ void MatrixRun::section07_chests_mobs()
         }
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                          << "| t1002 stronghold piece-chain rebuild: 12-frame portal room (world-total EndPortal"
+                          << "| t1002 stronghold piece-chain rebuild: 12-frame portal room (world-total AbyssGate"
                              " == 12, eyes" << pooledEyes << "/" << pooledFrames << "pooled, lava, silverfish cage,"
                              " 39 grate bars + 20 prison bars = 59, 2 iron doors), furniture counts (bookshelf"
                              " [200,400], ladders >=7, webs >=8 at wiki 7%, chests >=3, slabs [40,80]), per-block"

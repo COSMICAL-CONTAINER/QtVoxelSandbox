@@ -851,11 +851,11 @@ void World::finishLoad()
     rebuildStructureRegions();
 }
 
-// 审查修 B5（t724-t729 复盘）：读档后从体素反推要塞末地传送门中心格回写 m_strongholdPortal*。旧版三坐标
+// 审查修 B5（t724-t729 复盘）：读档后从体素反推要塞暗渊门中心格回写 m_strongholdPortal*。旧版三坐标
 //   只在世界生成（placeStronghold）记录 → 读档（beginLoad+finishLoad）后丢失或残留旧世界坐标，暗渊之眼
-//   （t729）飞错方向 / 误走「无要塞」直飞兜底。扫描对象 = 末地传送门框架（EndPortal=111）而非激活门面
-//   （EndPortalSurface=131）：门面只在 12 框架全激活后存在（t664），未激活要塞扫门面必漏 → 扫框架则任何
-//   存档都能反推（框架 worldgen 必放、生存不可挖，见 blockregistry.h EndPortal 注释）。框架环足迹 5×5：
+//   （t729）飞错方向 / 误走「无要塞」直飞兜底。扫描对象 = 暗渊门框架（AbyssGate=111）而非激活门面
+//   （AbyssGateSurface=131）：门面只在 12 框架全激活后存在（t664），未激活要塞扫门面必漏 → 扫框架则任何
+//   存档都能反推（框架 worldgen 必放、生存不可挖，见 blockregistry.h AbyssGate 注释）。框架环足迹 5×5：
 //   就近并入同簇（XZ 落簇 bbox 外扩 3 内且同层 ±1），取「格数最多、平局取距世界中心（=出生点）最近」的簇
 //   （同 placeStronghold 的 best 选择语义；创造玩家自建框架环属边缘情形，多格优先 + 近出生点优先大体还原
 //   worldgen 选择）。簇 bbox 中心 = 环中心：标准环相对坐标 x∈[-2,2] / z∈[-20,-16] → 中心 (0,-18)，y=框架
@@ -879,7 +879,7 @@ void World::rebindStrongholdPortalFromVoxels()
     for (int y = 0; y < H; ++y) {
         for (int z = 0; z < D; ++z) {
             for (int x = 0; x < W; ++x) {
-                if (m_chunks.blockAt(x, y, z) != BlockRegistry::EndPortal) continue;
+                if (m_chunks.blockAt(x, y, z) != BlockRegistry::AbyssGate) continue;
                 // 就近并入既有簇（环 5×5 足迹：bbox 外扩 3 覆盖环内任意两框架间距；y 区间外扩 1 相交
                 //   容层间 ≤1 的阶梯衔接 / 多层环 —— 审查修 L14）。
                 bool merged = false;
@@ -1600,12 +1600,12 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     checkSnowLayerOnEdit(x, y, z, oldId, id); // t527：积雪层失撑（破下方支撑 → 正上方积雪层整柱坍落为携带层数的下落实体）复检
     checkGravityBlockOnEdit(x, y, z, oldId, id); // t799：沙/沙砾失撑坍落复检（放置自检①+支撑变化②；4 参数放置/挖掘主入口）
     checkRailOnEdit(x, y, z, oldId, id);      // t565：铁轨连接重算（放 / 破 Rail 或其邻 → 本轨 + 邻轨连接位更新）
-    checkEndPortalIntegrity(x, y, z, oldId, id); // t664：末地传送门完整性复检（框架破 → 门面消失）
+    checkAbyssGateIntegrity(x, y, z, oldId, id); // t664：暗渊门完整性复检（框架破 → 门面消失）
     checkFireOnEdit(x, y, z); // t843：6 邻立地火失撑即时熄灭（破支撑 → 火当场灭；钩子族收口）
     // review #27：余烬门门框失撑熄灭并入写入钩子族（本入口无变化早退 → 此处 oldId != id 恒真）；破 / 置换
     //   本格非空内容 → 扫 6 邻门面熄灭（纯放置入 Air 格不触发，同玩家挖掘路径语义）。
     if (oldId != BlockRegistry::Air)
-        breakNetherPortalsAround(x, y, z);
+        breakEmberGatesAround(x, y, z);
     checkPaintingSupportOnEdit(x, y, z, oldId, id); // t837①：画作支撑墙失撑 → 整画掉落（钩子族同口径）
     notePowerWrite(x, y, z, oldId, id);       // t656：红石电力脏标记（红石族编辑 / 邻粉 → 局部重算入队）
     return true;
@@ -1753,12 +1753,12 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     checkSnowLayerOnEdit(x, y, z, oldId, id); // t527：积雪层失撑（破下方支撑 → 正上方积雪层整柱坍落为携带层数的下落实体）复检
     checkGravityBlockOnEdit(x, y, z, oldId, id); // t799：沙/沙砾失撑坍落复检（放置自检①+支撑变化②；5 参数放置/开合主入口）
     checkRailOnEdit(x, y, z, oldId, id);      // t565：铁轨连接重算（放 / 破 Rail 或其邻 → 本轨 + 邻轨连接位更新）
-    checkEndPortalIntegrity(x, y, z, oldId, id); // t664：末地传送门完整性复检（框架破 → 门面消失）
+    checkAbyssGateIntegrity(x, y, z, oldId, id); // t664：暗渊门完整性复检（框架破 → 门面消失）
     checkTrapdoorDoorSupportOnEdit(x, y, z, oldId, id); // t851：活板门 / 门失撑掉落复检（支撑被破 / 被换非实体 → 掉落成物品）
     checkFireOnEdit(x, y, z); // t843：6 邻立地火失撑即时熄灭（同 4 参数版钩子族收口）
     // review #27：余烬门门框失撑熄灭并入写入钩子族（同 4 参数版；state-only 写 oldId==id 不触发）。
     if (oldId != BlockRegistry::Air && oldId != id)
-        breakNetherPortalsAround(x, y, z);
+        breakEmberGatesAround(x, y, z);
     checkPaintingSupportOnEdit(x, y, z, oldId, id); // t837①：画作支撑墙失撑 → 整画掉落（钩子族同口径；
     //   画格自清重入由 m_inRemovePainting 守卫，放置入 Air 格的画锚写天然 no-op——墙格恒非 Air）
     notePowerWrite(x, y, z, oldId, id);       // t656：红石电力脏标记（红石族编辑 / 邻粉 → 局部重算入队；state-only 写亦触发——拉杆 / 按钮翻位即此路径）
@@ -1794,7 +1794,7 @@ bool World::setBlockFromEntity(int x, int y, int z, quint8 id, quint8 state)
     // review #27：余烬门门框失撑熄灭并入写入钩子族。本入口 occ 守卫限 Air/水 → 仅「沙落填水格」（水被
     //   置换出本格）触发；落进空气格不触发（纯放置语义）。
     if (occ != BlockRegistry::Air && occ != id)
-        breakNetherPortalsAround(x, y, z);
+        breakEmberGatesAround(x, y, z);
     return true;
 }
 
@@ -1843,7 +1843,7 @@ bool World::clearBlockSilent(int x, int y, int z)
     //   （recheck 刻意不含 checkGravityBlockOnEdit，防柱内重入，见其头注释）。
     recheckAttachmentsAfterClear(x, y, z, occ); // t494/t565/t527 + t445/t504/t507/t524 + 火把族（全量复检）
     checkGravityBlockOnEdit(x, y, z, occ, id); // t799：正上方沙/沙砾失撑坍落（TNT 点火清格 → 上方沙柱塌落砸在引燃 TNT 上）
-    breakNetherPortalsAround(x, y, z); // review #27：余烬门熄灭并入钩子族（TNT 点火清格邻接门面 → 熄门；occ==Air 时 6 邻无门亦快速 no-op）
+    breakEmberGatesAround(x, y, z); // review #27：余烬门熄灭并入钩子族（TNT 点火清格邻接门面 → 熄门；occ==Air 时 6 邻无门亦快速 no-op）
     // t837① 画作失撑由 recheckAttachmentsAfterClear 内 checkPaintingSupportOnEdit 覆盖（TNT 引燃时画挂
     //   TNT 墙 → 随清格整画掉落）。
     notePowerWrite(x, y, z, occ, id);       // t656：红石电力脏标记（TNT 被点火清 Air → 邻粉 / 邻接收器重算）
@@ -1937,13 +1937,13 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     //   checkGravityBlockOnEdit 批量先例，流体批量热路径可承受；真掉落才走中间 worldChanged）。
     checkFlowerMushroomOnEdit(x, y, z, lightOldId, id);
     // review #27：余烬门门框失撑熄灭并入写入钩子族（焚毁 / 蒸发等「非空内容被置换」写触发；门面自清
-    //   经 m_inRemoveNetherPortal 守卫早退无重入）。快速路径 = 6 邻 blockAt 读（无门格即返），流体批量
+    //   经 m_inRemoveEmberGate 守卫早退无重入）。快速路径 = 6 邻 blockAt 读（无门格即返），流体批量
     //   热路径可承受（同 checkRailOnEdit / checkGravityBlockOnEdit 批量先例口径）。
     // review #27 + t837①：门 / 画作失撑复检（门框 / 画墙被置换为非实体 → 各自整域消失 / 掉落）。纯放置
     //   （Air 格写入）不触发——门框 / 画墙恒原非 Air。快速路径 = 数次 blockAt 邻读（无门格 / 画格即返），
     //   流体批量热路径可承受（同 notePowerWrite 快路径量级）。
     if (lightOldId != BlockRegistry::Air && lightOldId != id) {
-        breakNetherPortalsAround(x, y, z);
+        breakEmberGatesAround(x, y, z);
         checkPaintingSupportOnEdit(x, y, z, lightOldId, id);
     }
     if (m_batchFluid) return true; // t350 流体 tick 批量写：累积栅格写 + 重光照，末尾由 caller 统一 emit + clearDirty
@@ -1984,12 +1984,12 @@ bool World::setBlockSilent(int x, int y, int z, quint8 id, quint8 state)
     checkSnowLayerOnEdit(x, y, z, oldId, id);    // t527：积雪层失撑复检
     checkGravityBlockOnEdit(x, y, z, oldId, id); // t799：沙/沙砾失撑坍落复检（系统静默写路径收口，同族）
     checkRailOnEdit(x, y, z, oldId, id);         // t565：铁轨连接重算
-    checkEndPortalIntegrity(x, y, z, oldId, id); // t664：末地传送门完整性复检
+    checkAbyssGateIntegrity(x, y, z, oldId, id); // t664：暗渊门完整性复检
     checkTrapdoorDoorSupportOnEdit(x, y, z, oldId, id); // t851：活板门 / 门失撑掉落复检（系统静默写路径同族收口）
     // review #27：余烬门门框失撑熄灭并入写入钩子族（系统静默写路径——火吞可燃物 / 系统清格，同 5 参数
     //   setBlock 谓词：本格非空内容被置换才触发）。
     if (oldId != BlockRegistry::Air && oldId != id)
-        breakNetherPortalsAround(x, y, z);
+        breakEmberGatesAround(x, y, z);
     checkPaintingSupportOnEdit(x, y, z, oldId, id); // t837①：画作支撑墙失撑 → 整画掉落（系统静默写同族收口）
     notePowerWrite(x, y, z, oldId, id);          // t656：红石电力脏标记
     return true;
@@ -2750,7 +2750,7 @@ void World::tickLavaFlow()
             //   中间重建（同 setWaterSilent 挂 checkRailOnEdit 的既有先例），批量终态不受破坏。
             recheckAttachmentsAfterClear(b.x, b.y, b.z, oldId);
             checkGravityBlockOnEdit(b.x, b.y, b.z, oldId, BlockRegistry::Air); // t799：沙/沙砾失撑复检（焚毁木支撑 → 正上方沙柱坍落，同 setBlock 路径）
-            breakNetherPortalsAround(b.x, b.y, b.z); // review24 #3：岩浆焚毁门面邻格可燃木 → 熄门（与火吞噬同块木同语义；#27 钩此前漏挂本路径——oldId 必非 Air 木类）
+            breakEmberGatesAround(b.x, b.y, b.z); // review24 #3：岩浆焚毁门面邻格可燃木 → 熄门（与火吞噬同块木同语义；#27 钩此前漏挂本路径——oldId 必非 Air 木类）
             pokeFluidDirty(b.x, b.y, b.z); // 焚毁邻接流体 → 标脏 + 活动盒扩展（级联焚毁 / 水流入新坑，同旧 setBlock 语义）
         }
         m_batchFluid = false;
@@ -3602,7 +3602,7 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
     for (const DestroyedVoxel &d : destroyed) {
         recheckAttachmentsAfterClear(d.x, d.y, d.z, d.oldId);
         checkGravityBlockOnEdit(d.x, d.y, d.z, d.oldId, BlockRegistry::Air); // t799：爆炸破坏支撑 → 弹坑上缘沙/沙砾柱坍落（旧 QML 链不发信号 → 悬空残留）
-        breakNetherPortalsAround(d.x, d.y, d.z); // review #27：爆炸拆掉门面 6 邻非抗爆格（黑曜石框免疫）→ 邻接门面熄灭；d.oldId 必非 Air（破坏列表构造）
+        breakEmberGatesAround(d.x, d.y, d.z); // review #27：爆炸拆掉门面 6 邻非抗爆格（黑曜石框免疫）→ 邻接门面熄灭；d.oldId 必非 Air（破坏列表构造）
     }
     emit worldChanged();
     m_chunks.clearAllDirty();
@@ -4015,7 +4015,7 @@ void World::dropGravityColumn(int x, int y, int z)
         //   甘蔗整柱 / 雪层整柱由各 check 内部的 drop*Column 继续向上收）。不含重力复检（防柱内指数重入，
         //   见 recheckAttachmentsAfterClear 头注释）。caller 末尾 1 次 worldChanged 覆盖本扫的静默写。
         recheckAttachmentsAfterClear(x, cy, z, b);
-        breakNetherPortalsAround(x, cy, z); // review #27：坍落清格邻接门面 → 熄门（同钩子族口径；b 非空构造）
+        breakEmberGatesAround(x, cy, z); // review #27：坍落清格邻接门面 → 熄门（同钩子族口径；b 非空构造）
         if (!any) firstY = cy;
         any = true;
         ++cy;
@@ -4329,10 +4329,10 @@ void World::checkRailOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
     }
 }
 
-// t664 末地传送门框架环完整性检查（纯读；见 world.h 头注释）。环 = 12 框架格围绕 3×3 内圈中心 (cx,cy,cz)：
-//   ±2 环上不含四角 —— {(cx±2, y, cz-1..cz+1)} ∪ {(cx-1..cx+1, y, cz±2)}。全部为 EndPortal 框架且
-//   state bit0 激活（EndPortalStateActiveFlag）→ 环完整。任一缺失 / 未激活 / 越界 → false。
-bool World::endPortalRingComplete(int cx, int cy, int cz) const
+// t664 暗渊门框架环完整性检查（纯读；见 world.h 头注释）。环 = 12 框架格围绕 3×3 内圈中心 (cx,cy,cz)：
+//   ±2 环上不含四角 —— {(cx±2, y, cz-1..cz+1)} ∪ {(cx-1..cx+1, y, cz±2)}。全部为 AbyssGate 框架且
+//   state bit0 激活（AbyssGateStateActiveFlag）→ 环完整。任一缺失 / 未激活 / 越界 → false。
+bool World::abyssGateRingComplete(int cx, int cy, int cz) const
 {
     // 环 12 格：每条边 3 个（x = cx±2 时 z ∈ {cz-1,cz,cz+1}；z = cz±2 时 x ∈ {cx-1,cx,cx+1}）。
     for (int i = -1; i <= 1; ++i) {
@@ -4344,28 +4344,28 @@ bool World::endPortalRingComplete(int cx, int cy, int cz) const
             if (p[0] < 0 || p[0] >= m_width || p[1] < 0 || p[1] >= m_depth) return false;
             if (cy < 0 || cy >= m_height) return false;
             const quint8 b = m_chunks.blockAt(p[0], cy, p[1]);
-            if (b != BlockRegistry::EndPortal) return false; // 非框架格 → 环断裂
-            if ((m_chunks.stateAt(p[0], cy, p[1]) & BlockRegistry::EndPortalStateActiveFlag) == 0)
+            if (b != BlockRegistry::AbyssGate) return false; // 非框架格 → 环断裂
+            if ((m_chunks.stateAt(p[0], cy, p[1]) & BlockRegistry::AbyssGateStateActiveFlag) == 0)
                 return false; // 框架未放眼激活 → 环未就绪
         }
     }
     return true;
 }
 
-// t664 尝试打开末地传送门（见 world.h 头注释）：环完整 → 3×3 内圈 (cx±1, cy, cz±1) 各格写门面
-//   （EndPortalSurface=131 薄星平面）。门面格若已存在同 id → 跳过（防重复写）。静默直写 m_chunks
+// t664 尝试打开暗渊门（见 world.h 头注释）：环完整 → 3×3 内圈 (cx±1, cy, cz±1) 各格写门面
+//   （AbyssGateSurface=131 薄星平面）。门面格若已存在同 id → 跳过（防重复写）。静默直写 m_chunks
 //   （不经 World::setBlock → 不重入完整性复检 / 不逐格发 broken/placed）+ 末尾 1 次 worldChanged
 //   （N 写 1 emit，同 dropCactusColumn 批量收口模式）+ clearAllDirty。门面是普通方块 → 存档持久化。
-bool World::tryOpenEndPortal(int cx, int cy, int cz)
+bool World::tryOpenAbyssGate(int cx, int cy, int cz)
 {
-    if (!endPortalRingComplete(cx, cy, cz)) return false; // 环未就绪 → 不开
+    if (!abyssGateRingComplete(cx, cy, cz)) return false; // 环未就绪 → 不开
     bool changed = false;
     for (int dx = -1; dx <= 1; ++dx) {
         for (int dz = -1; dz <= 1; ++dz) {
             const int px = cx + dx, pz = cz + dz;
             if (px < 0 || px >= m_width || pz < 0 || pz >= m_depth || cy < 0 || cy >= m_height) continue;
-            if (m_chunks.blockAt(px, cy, pz) == BlockRegistry::EndPortalSurface) continue; // 已开 → 跳过
-            m_chunks.setBlock(px, cy, pz, BlockRegistry::EndPortalSurface); // 静默直写 + 标脏
+            if (m_chunks.blockAt(px, cy, pz) == BlockRegistry::AbyssGateSurface) continue; // 已开 → 跳过
+            m_chunks.setBlock(px, cy, pz, BlockRegistry::AbyssGateSurface); // 静默直写 + 标脏
             changed = true;
         }
     }
@@ -4376,11 +4376,11 @@ bool World::tryOpenEndPortal(int cx, int cy, int cz)
     return true;
 }
 
-// t664 编辑后末地传送门完整性复检（见 world.h 头注释；同 checkRailOnEdit 模式）。任何编辑都可能让环失效
-//   （框架被破 → 门面应全消失）。复检范围 = 本格周围 ±3 立方体内的 EndPortalSurface 门面格；对每块门面
+// t664 编辑后暗渊门完整性复检（见 world.h 头注释；同 checkRailOnEdit 模式）。任何编辑都可能让环失效
+//   （框架被破 → 门面应全消失）。复检范围 = 本格周围 ±3 立方体内的 AbyssGateSurface 门面格；对每块门面
 //   反查其环中心（门面在内圈 3×3，中心 ∈ {px-1..px+1} × {pz-1..pz+1} 九候选），环不完整 → 静默清门面。
 //   静默直写不经 setBlock → 不重入本检查；末尾 1 次 worldChanged 批量收口。
-void World::checkEndPortalIntegrity(int x, int y, int z, quint8 oldId, quint8 id)
+void World::checkAbyssGateIntegrity(int x, int y, int z, quint8 oldId, quint8 id)
 {
     Q_UNUSED(oldId); Q_UNUSED(id); // 任何编辑都可能影响门面（框架被破 / 门面自身被瞬破）→ 不筛编辑类型
     // 快速筛：本编辑若与环完全无关（非框架 / 非门面 / 非环邻）→ 周围扫不到门面则 no-op（扫描代价可接受：
@@ -4392,12 +4392,12 @@ void World::checkEndPortalIntegrity(int x, int y, int z, quint8 oldId, quint8 id
     for (int sy = y0; sy <= y1; ++sy) {
         for (int sz = z0; sz <= z1; ++sz) {
             for (int sx = x0; sx <= x1; ++sx) {
-                if (m_chunks.blockAt(sx, sy, sz) != BlockRegistry::EndPortalSurface) continue;
+                if (m_chunks.blockAt(sx, sy, sz) != BlockRegistry::AbyssGateSurface) continue;
                 // 门面格 (sx,sy,sz)：反查环中心候选（门面在内圈 3×3 → 中心 ∈ sx±1 / sz±1 九候选）。
                 bool keep = false;
                 for (int cx = sx - 1; cx <= sx + 1 && !keep; ++cx) {
                     for (int cz = sz - 1; cz <= sz + 1; ++cz) {
-                        if (endPortalRingComplete(cx, sy, cz)) { keep = true; break; }
+                        if (abyssGateRingComplete(cx, sy, cz)) { keep = true; break; }
                     }
                 }
                 if (!keep) {
@@ -4415,7 +4415,7 @@ void World::checkEndPortalIntegrity(int x, int y, int z, quint8 oldId, quint8 id
 }
 
 // t806 余烬门点燃检测（见 world.h 头注释；t725 v1 写死 2×3 内腔的 PlayerController 版本泛化下沉 World
-//   层单一权威 —— 同末地门三件套（endPortalRingComplete / tryOpenEndPortal）模式）。MC 规则参数表
+//   层单一权威 —— 同暗渊门三件套（abyssGateRingComplete / tryOpenAbyssGate）模式）。MC 规则参数表
 //   （dev-spec t806 + t848 上限对齐 MC 1.0；单一权威常量，改门尺寸只动这 2 行）：
 //     内腔开口宽 w ∈ [2, 21]（框外沿 4..23）、高 h ∈ [3, 21]（框外沿 5..23）——t806 时代上限 4×5，
 //     t848 放宽至 21×21 内腔 = 23×23 框外沿（MC 1.0 传送门最大尺寸）；22+ 超限拒点；
@@ -4431,13 +4431,13 @@ void World::checkEndPortalIntegrity(int x, int y, int z, quint8 oldId, quint8 id
 //      拒点。t806 时代此处以旧上限 kMaxW-1=3 截断 → 5 宽内腔恒测 4 → ④ 右柱校验打第 5 内腔列判败，
 //      即用户实测「4×4 以上点不着」的根因位）。
 //   ④ 矩形 + 框架校验：开口 w×h 全空气（防 L 形 / 腔内异物）+ 梁柱全黑曜石。
-// 全命中 → 开口整面填 NetherPortal（state=axis；逐格 setBlock 发 blockPlaced → 呈现层 portalHost 逐格
+// 全命中 → 开口整面填 EmberGate（state=axis；逐格 setBlock 发 blockPlaced → 呈现层 portalHost 逐格
 //   建 delegate + 放置音，机制对标 MC 点燃瞬间整门成形的多点事件）。t848 性能注：检测 O(w×h) ≤ 441 格
 //   读；点燃写 ≤ 441 格 setBlock（一次 21×21 满门 ~441 次写入钩子族扇出，一次性代价同一次小规模爆炸可
-//   接受；Air→门格纯放置不触发 breakNetherPortalsAround → 填门不自扰；每次写后 clearAllDirty 即时收口
+//   接受；Air→门格纯放置不触发 breakEmberGatesAround → 填门不自扰；每次写后 clearAllDirty 即时收口
 //   → 无脏 chunk 累积风暴）。
 // 越界 blockAt 返 Air ≠ Obsidian → 梁 / 柱校验自然判败（无 OOB 风险）。
-bool World::tryIgniteNetherPortal(int ix, int iy, int iz)
+bool World::tryIgniteEmberGate(int ix, int iy, int iz)
 {
     // t848 尺寸单一权威常量：内腔宽 2..21 / 高 3..21（框外沿 4×5 最小 .. 23×23 最大 = MC 1.0 上限）。
     //   t806 旧上限 4×5 时用户实测「4×4 以上点不着」：5 宽内腔在 ③ 量宽被旧 kMaxW-1=3 截断 → w 恒测 4 →
@@ -4490,7 +4490,7 @@ bool World::tryIgniteNetherPortal(int ix, int iy, int iz)
         // 全命中 → 开口整面 w×h 填门面（state=axis：0=X 平面 / 1=Z 平面）。
         for (int c = 0; c < w; ++c)
             for (int r = 0; r < h; ++r)
-                setBlock(cx + c * ux, innerY0 + r, cz + c * uz, BlockRegistry::NetherPortal, axisState);
+                setBlock(cx + c * ux, innerY0 + r, cz + c * uz, BlockRegistry::EmberGate, axisState);
         return true;
     };
     // 先试 X 平面（门沿 X 展开 / 面朝 ±Z），再试 Z 平面（门正交两向各试一次，机制等价 MC 检测顺序）。
@@ -4499,10 +4499,10 @@ bool World::tryIgniteNetherPortal(int ix, int iy, int iz)
 }
 
 // t806 余烬门连通域熄灭（见 world.h 头注释；t725 自 PlayerController 下沉 World 层，逻辑逐行同源）。
-//   BFS 收集 ±u（门展开轴水平）/ ±Y 同 axis 的 NetherPortal 格 → 全部 setWaterSilent 清 Air（静默：
+//   BFS 收集 ±u（门展开轴水平）/ ±Y 同 axis 的 EmberGate 格 → 全部 setWaterSilent 清 Air（静默：
 //   多格逐格 blockBroken 会刷粒子/音风暴；worldChanged 仍逐格发 → 呈现层 portalHost cleanupVis 清孤儿）。
 //   尺寸无关：连通域天然覆盖任意大小门（2×3 最小 .. 21×21 最大，t848）。门无物品形态（dropId=0）→ 无掉落。
-void World::removeNetherPortalAt(int px, int py, int pz, int axis)
+void World::removeEmberGateAt(int px, int py, int pz, int axis)
 {
     // 门展开轴 u（axis=0 → 门沿 X 展开 / 面朝 ±Z；axis=1 → 沿 Z 展开 / 面朝 ±X）。
     const int ux = (axis == 0) ? 1 : 0;
@@ -4520,8 +4520,8 @@ void World::removeNetherPortalAt(int px, int py, int pz, int axis)
         if (seen) continue;
         const quint8 bid = m_chunks.blockAt(c.x, c.y, c.z);
         const bool isSeed = (c.x == px && c.y == py && c.z == pz);
-        if (bid != BlockRegistry::NetherPortal && !isSeed) continue;      // 非门格 → 不入域
-        if (bid == BlockRegistry::NetherPortal && int(m_chunks.stateAt(c.x, c.y, c.z) & 1) != axis)
+        if (bid != BlockRegistry::EmberGate && !isSeed) continue;      // 非门格 → 不入域
+        if (bid == BlockRegistry::EmberGate && int(m_chunks.stateAt(c.x, c.y, c.z) & 1) != axis)
             continue;                                                     // 异轴门（X/Z 面贴邻）→ 不连
         cells.push_back(c);
         // 4 向扩展（门平面内：±u 水平 + ±Y 垂直）。
@@ -4531,32 +4531,32 @@ void World::removeNetherPortalAt(int px, int py, int pz, int axis)
         frontier.push_back({c.x, c.y - 1, c.z});
     }
     // 清域：setWaterSilent 静默清（主破坏格已由 caller 走 setBlock 清 + 发过一次事件；域内守卫防双清）。
-    //   review #27：置 m_inRemoveNetherPortal 守卫——setWaterSilent 已并入 breakNetherPortalsAround 钩子
+    //   review #27：置 m_inRemoveEmberGate 守卫——setWaterSilent 已并入 breakEmberGatesAround 钩子
     //   族，置位期间钩子早退（本 BFS 一次收完整扇门，清域写不再嵌套触发二次连通域清除）。
-    m_inRemoveNetherPortal = true;
+    m_inRemoveEmberGate = true;
     for (const Cell &c : cells) {
-        if (m_chunks.blockAt(c.x, c.y, c.z) != BlockRegistry::NetherPortal)
+        if (m_chunks.blockAt(c.x, c.y, c.z) != BlockRegistry::EmberGate)
             continue; // 种子已被 caller 清 / 异轴守卫已滤（防御双清）
         setWaterSilent(c.x, c.y, c.z, BlockRegistry::Air, 0);
     }
-    m_inRemoveNetherPortal = false;
+    m_inRemoveEmberGate = false;
 }
 
 // t806 余烬门门框失撑熄灭（见 world.h 头注释；t725 自 PlayerController 下沉 World 层，逻辑同源）。
-//   破块后扫 6 邻的 NetherPortal，各自经连通域熄灭整扇门。恒熄（含创造）：门失效是结构后果非掉落。
-//   review #27：并入 World 写入钩子族（对照 checkEndPortalIntegrity 模式）—— 爆炸 / 焚毁 / 坍落 / 静默
+//   破块后扫 6 邻的 EmberGate，各自经连通域熄灭整扇门。恒熄（含创造）：门失效是结构后果非掉落。
+//   review #27：并入 World 写入钩子族（对照 checkAbyssGateIntegrity 模式）—— 爆炸 / 焚毁 / 坍落 / 静默
 //   清格等一切「拆格」路径与玩家挖掘同口径熄门（此前钩子仅挂 playercontroller 一处，系统路径拆门框后
 //   门面残留）。快速路径 = 6 次 blockAt 邻读（无门格即返，流体批量热路径可承受，同 notePowerWrite 快
-//   路径量级）。removeNetherPortalAt 清域期间（m_inRemoveNetherPortal）早退防嵌套 BFS。
-void World::breakNetherPortalsAround(int x, int y, int z)
+//   路径量级）。removeEmberGateAt 清域期间（m_inRemoveEmberGate）早退防嵌套 BFS。
+void World::breakEmberGatesAround(int x, int y, int z)
 {
-    if (m_inRemoveNetherPortal) return; // 连通域清除自管整扇门；其清域写不再重入本钩子
+    if (m_inRemoveEmberGate) return; // 连通域清除自管整扇门；其清域写不再重入本钩子
     constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
     for (const auto &n : kNb) {
         const int px = x + n[0], py = y + n[1], pz = z + n[2];
-        if (m_chunks.blockAt(px, py, pz) != BlockRegistry::NetherPortal) continue;
+        if (m_chunks.blockAt(px, py, pz) != BlockRegistry::EmberGate) continue;
         const int axis = int(m_chunks.stateAt(px, py, pz) & 1);
-        removeNetherPortalAt(px, py, pz, axis);
+        removeEmberGateAt(px, py, pz, axis);
     }
 }
 
@@ -7082,7 +7082,7 @@ void World::tickIceMelt()
         if (m_chunks.blockAt(x, y, z) != BlockRegistry::Ice) continue; // 过期索引项（非冰，如已融化 / 被破）→ 跳过
         // 「高亮邻」判定（机制等价 MC ice light ≥12 融化；本工程简化为二者其一即触发候选）：
         //   (a) 6 正交邻格任一为发光方块（BlockRegistry::lightEmission(id,state)>0：火把 14 / 燃烧熔炉 13 / 岩浆 15 /
-        //       末地传送门 10）—— 即「邻接热源 / 强光源」；
+        //       暗渊门 10）—— 即「邻接热源 / 强光源」；
         //   (b) OR 本格方块光（blockLightAt）≥ kIceMeltBlockLight(12) —— 火把近场照射（火把 14 衰减 1 → 距 1 格 = 13，
         //       距 2 格 = 12，均 ≥12 触发；机制等价 MC 冰需 light level ≥12 从 ≥2 邻面照射）。
         //   二者其一 → 本格为融化候选。注意不查天光（skyLight）：MC 冰只在「方块光 / 高亮」下融，阳光下不融
@@ -9301,7 +9301,7 @@ void World::placeJungleTemple()
 }
 
 // t487/t665/t713 要塞（见 world.h 头注释）。机制等价 MC 1.0 要塞 stronghold：地下深处（Y<30）的石砖**走廊 +
-//   房间 piece 拼接**结构 + 末地传送门房（悬空熔岩台 + 12 框架环）+ 图书馆（书架墙 + 蛛网 + 怪物蛋）+ 银鱼
+//   房间 piece 拼接**结构 + 暗渊门房（悬空熔岩台 + 12 框架环）+ 图书馆（书架墙 + 蛛网 + 怪物蛋）+ 银鱼
 //   刷怪笼。确定性散布（hashColumn + seed 偏移，PLAN §2-K），结构与 placeDungeons / placeJungleTemple 同源
 //   （网格采样 + 概率筛选 + 抖动 + y 范围派生）。
 //
@@ -9316,8 +9316,8 @@ void World::placeJungleTemple()
 //     - **北走廊**（5 宽，x -2..2, z -11..-7）→ **传送门房**（25×10，x -12..12, z -21..-12）：北侧环沟岩浆河
 //       （dy=0，72 格，被高台 / 石砖栏 / 周界墙三面封闭 → 静态不流）+ **石砖高台**（13×6，x -6..6, z -21..-16，
 //       dy 1..3 实心，顶面 y=4 可站立）+ 中轴 **3 级石砖楼梯**（dz -15..-13，dy 3..1，每步 Δ0.5 ≤ auto-step
-//       0.55 → 玩家从房内地面 y=1 走上高台顶 y=4；台下实心填充不悬浮）+ **12 框架环**（EndPortal=111 框架，
-//       中心 (0, 4, -18) 标准 ±2 方形环；~10% 预置末影之眼 state 激活，机制等价 MC 1.0 框架预置眼睛；t664
+//       0.55 → 玩家从房内地面 y=1 走上高台顶 y=4；台下实心填充不悬浮）+ **12 框架环**（AbyssGate=111 框架，
+//       中心 (0, 4, -18) 标准 ±2 方形环；~10% 预置暗渊之眼 state 激活，机制等价 MC 1.0 框架预置眼睛；t664
 //       激活/完整性机制接线）+ **3×3 岩浆盆**（环内圈正下方一格 dy=3 —— 门面（dy=4）正下方，机制等价 MC 1.0
 //       传送门房熔岩池位置）+ **银鱼刷怪笼**（环中心正上方 (0, 5, -18)，机制等价 MC 1.0 要塞传送门房上方
 //       silverfish spawner）。
@@ -9325,7 +9325,7 @@ void World::placeJungleTemple()
 //       加成来源 t474）+ 中央书架岛 + 蛛网 + 石砖台阶装饰。
 //     - **南门洞**（x -1..1, z=7）→ **战利品/银鱼房**（17×11，x -8..8, z 8..18）：银鱼刷怪笼（Spawner +
 //       SpawnerStateSilverfish → tickSpawners 刷 Silverfish）+ 战利品箱（Chest + ChestStateStrongholdFlag
-//       → 首开填要塞战利品含末影之眼）。
+//       → 首开填要塞战利品含暗渊之眼）。
 //     - **走廊装饰**：内部空间确定性散布 Cobweb 蛛网（~8%，仅 dy=1 贴地，不悬空；跳过全部设施房 → 不再
 //       误盖框架 / 平台 / 楼梯 —— t682 楼梯悬浮挡路根因是散布楼梯装饰，t713 移除楼梯装饰只留蛛网）。
 //   placeJungleTemple 之后、fillWater 之前（独立于海平面；fillWater 仅填地表低洼 → 地下要塞不被灌水）。
@@ -9356,7 +9356,7 @@ void World::placeStronghold()
     const int strongSeed = m_seed + 26513; // 要塞哈希偏移（与其它 worldgen hashColumn 解耦；纯整数加，确定性）
 
     // t564：候选要塞坐标集（cx, cy, cz）—— 循环内只收集、不放置；循环后选距出生点最近的一座放置
-    //   （全图至多一个末地传送门）。
+    //   （全图至多一个暗渊门）。
     std::vector<std::array<int, 3>> candidates;
 
     // 单座要塞放置器（placeAt）：put 捕获 placeAt 的 (cx,cy,cz)（与旧内联版 put 捕获循环变量的语义一致）。
@@ -9606,7 +9606,7 @@ void World::placeStronghold()
 
         // PortalRoom（传送门房；**固定局部坐标**，与 t713 旧房体同位 → B5 读档反推 / t1000 bounds 零
         //   回归）：石砖高台（13×6，dy1..3，台面 dy=4 可站立）+ 3×3 岩浆盆（dy=3，激活门面正下方
-        //   一格）+ 12 框架环（标准 ±2 方形环 = endPortalRingComplete 同几何，~10% 预嵌眼）+ 3 级
+        //   一格）+ 12 框架环（标准 ±2 方形环 = abyssGateRingComplete 同几何，~10% 预嵌眼）+ 3 级
         //   石砖楼梯（台下实心）+ 环沟岩浆河 + 南栏 + 银鱼刷怪笼（wiki SHPR 704 砖 + 15 岩浆 + 8 楼梯
         //   + 12 框架 + 1 笼的块数级复刻；岩浆盆 9 + 河沟 72（12 列×6 行；review0904 勘误旧注释 ~108）≥ 15 ✓）+ **39 铁栏杆格栅**（wiki 39
         //   精确总数，三段分配：入口格栅 7 + 岩浆河护栏 24 + 高台护栏 8——MC 分配口径不同总和同，登记）。
@@ -9648,8 +9648,8 @@ void World::placeStronghold()
                                                 : (pdz == -20 || pdz == -16) && (pdx >= -1 && pdx <= 1);
                     if (!onRingExact) continue;
                     const quint32 eh = hashVoxel(strongSeed ^ 0x664u, cx + pdx, cy + 4, cz + pdz);
-                    const quint8 st = (eh % 100u) < 10u ? BlockRegistry::EndPortalStateActiveFlag : 0u;
-                    put(pdx, 4, pdz, BlockRegistry::EndPortal, st);
+                    const quint8 st = (eh % 100u) < 10u ? BlockRegistry::AbyssGateStateActiveFlag : 0u;
+                    put(pdx, 4, pdz, BlockRegistry::AbyssGate, st);
                 }
             // f) 银鱼刷怪笼（环中心正上方；t786 显式银鱼 type → tickSpawners 刷 Silverfish）。
             put(0, 5, -18, BlockRegistry::Spawner, BlockRegistry::SpawnerStateSilverfish);
@@ -9922,16 +9922,16 @@ void World::placeStronghold()
             const int yRange = yHi - yLo + 1;
             const int cy = yLo + int((r >> 9) & 0x1Fu) % yRange; // 地板（底面）y
 
-            // t564：只收集候选（不立即放置）—— 全图至多一座要塞 / 一个末地传送门（用户「同一区块/出生点
-            //   附近生成好几个末地传送门，应至多一个」）。放置延迟到循环后选「距出生点（世界中心）最近」的
+            // t564：只收集候选（不立即放置）—— 全图至多一座要塞 / 一个暗渊门（用户「同一区块/出生点
+            //   附近生成好几个暗渊门，应至多一个」）。放置延迟到循环后选「距出生点（世界中心）最近」的
             //   一座执行（见下方 placeAt + bestIdx 段）。
             candidates.push_back({cx, cy, cz});
         }
     }
 
-    // t564：从候选里选距世界中心（=出生点，t276 大世界居中）最近的一座放置 → **至多一个末地传送门**。
+    // t564：从候选里选距世界中心（=出生点，t276 大世界居中）最近的一座放置 → **至多一个暗渊门**。
     //   旧版每 40 格网格 55% 命中 → 160×160 世界 ~9 座要塞（每座含 3×3 传送门），出生点附近多座 → 用户
-    //   「生成好几个末地传送门」。改为全图至多一座、且落在出生点附近（玩家探索即可寻，机制等价 MC 1.0
+    //   「生成好几个暗渊门」。改为全图至多一座、且落在出生点附近（玩家探索即可寻，机制等价 MC 1.0
     //   要塞「环出生点分布」的单座近点，本工程小世界取一座）。
     int bestIdx = -1;
     double bestDistSq = 1e18;
@@ -9944,7 +9944,7 @@ void World::placeStronghold()
     }
     if (bestIdx >= 0) {
         placeAt(candidates[size_t(bestIdx)][0], candidates[size_t(bestIdx)][1], candidates[size_t(bestIdx)][2]);
-        // t729 记录要塞末地传送门中心格（供暗渊之眼右击寻路目标；见 world.h m_strongholdPortal* 头注释）。
+        // t729 记录要塞暗渊门中心格（供暗渊之眼右击寻路目标；见 world.h m_strongholdPortal* 头注释）。
         //   传送门房中心 = 环中心 (x), 门面 dy=4 (y), 房内 dz 中心 -18 (z)；全图唯一。重置先于判定（无候选 → 清）。
         //   t1000：偏移引用类常量 kStrongholdPortalDy/Dz（与 insideStronghold 反解同源，防两处字面量漂移）。
         m_hasStronghold = true;

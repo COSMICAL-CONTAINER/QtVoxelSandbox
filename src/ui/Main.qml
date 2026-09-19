@@ -965,7 +965,7 @@ Window {
                 portalHost.portalObjs[key].destroy()
                 delete portalHost.portalObjs[key]
             }
-            const pcells = theWorld.collectBlocksOfId(138) // 138 = BlockRegistry::NetherPortal（字面量+注释）
+            const pcells = theWorld.collectBlocksOfId(138) // 138 = BlockRegistry::EmberGate（字面量+注释）
             for (let pi = 0; pi + 2 < pcells.length; pi += 3)
                 portalHost.addPortalVis(pcells[pi], pcells[pi + 1], pcells[pi + 2])
             console.info("[t725] portal rebuild on load: " + (pcells.length / 3) + " cells")
@@ -1741,8 +1741,8 @@ Window {
         //   （一份首开一次性 roll）。
         if (theWorld.isJungleTempleChest(x, y, z)) chestStore.populateJungleTempleLoot(x, y, z)
         // t487 要塞箱首开填充战利品：worldgen placeStronghold 给要塞箱 state 置 ChestStateStrongholdFlag(bit6) →
-        //   isStrongholdChest 返 true。首开时由 LootTable::strongholdChestPool 抽 6 件（末影之眼 / 骨头 / 腐肉 /
-        //   铁锭 / 青金石 / 红石 / 钻石 / 附魔书等）分散入随机空槽（坐标确定性 seed → 同箱同战利品；末影之眼是
+        //   isStrongholdChest 返 true。首开时由 LootTable::strongholdChestPool 抽 6 件（暗渊之眼 / 骨头 / 腐肉 /
+        //   铁锭 / 青金石 / 红石 / 钻石 / 附魔书等）分散入随机空槽（坐标确定性 seed → 同箱同战利品；暗渊之眼是
         //   激活传送门的关键物品，机制等价 MC 1.0 要塞战利品）。同地牢 / 矿井 / 神殿 / 丛林神殿箱机制（一份首开一次性 roll）。
         if (theWorld.isStrongholdChest(x, y, z)) chestStore.populateStrongholdLoot(x, y, z)
         chestOpen = true
@@ -3138,7 +3138,7 @@ Window {
         function onChickenLaidEgg(x, y, z) { itemEntities.spawnItem(x, y, z, 0x22B, 1) }
         // t729 暗渊之眼飞行判定「变掉落物」（EntityManager EnderEye tick 飞距结算 80% 分支发）：转发到
         //   ItemEntityManager.spawnItem 生成**掉落物实体**（EndEyeId 0x23A 暗渊之眼 ×1）—— 玩家走近可捡回，反复
-        //   使用逐步逼近要塞（机制等价 MC 末影之眼落地变掉落物可回收）。0x23A = RecipeRegistry::EndEyeId（⚠️ QML
+        //   使用逐步逼近要塞（机制等价 MC 暗渊之眼落地变掉落物可回收）。0x23A = RecipeRegistry::EndEyeId（⚠️ QML
         //   不 import C++ 静态类故用字面量，同 onMobDied 既有约定）。坐标 = 眼睛落点货架 floor(pos)（与 spawnItem
         //   整数格约定一致）。单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费路由到 Game 层 item 管理）。
         function onEnderEyeBecameItem(x, y, z) { itemEntities.spawnItem(x, y, z, 0x23A, 1) }
@@ -4644,7 +4644,7 @@ Window {
         // t725 余烬门条带纹理（portalHost delegate 材质级 flipbook）：同 fireStripTex 模式（source 走
         //   resourcePack.portalStripSource，active → file:/// 落盘合成条带、否则 qrc 程序生成条带；门 quad
         //   几何 UV 全 [0,1] → scaleV=1/N 压采样窗到单帧 + positionV=k/N 平移）。帧数 N=32 与
-        //   BlockRegistry::kNetherPortalStripFrames 同源单一权威（portalStripFrames CONSTANT）。
+        //   BlockRegistry::kEmberGateStripFrames 同源单一权威（portalStripFrames CONSTANT）。
         Texture {
             id: portalStripTex
             source: resourcePack.portalStripSource
@@ -10363,7 +10363,7 @@ Window {
                     //   snowball）。delegate Node 已摆 position（雪球世界坐标）+ 不转（雪球对称无需定向）。NoLighting
                     //   （红线：可见 Model 必须 NoLighting）。
                     //   t807 同族排查结论（t803 教训顺手核对）：雪球/鸡蛋/火球（含箭）均为纯色自绘组合体（无贴图），
-                    //   不存在「同一张 item 图标铺满立方六面」的贴图错渲染病（那是旧版末影之眼/珍珠专属：六面都是
+                    //   不存在「同一张 item 图标铺满立方六面」的贴图错渲染病（那是旧版暗渊之眼/珍珠专属：六面都是
                     //   眼睛/珠）；纯色小体各角度读作「球/弹」非「贴图方块」，维持原创体积模型不改。
                     Node {
                         visible: { const _r = mon.revision; return _r >= 0 ? (entKind === EntityManager.Snowball) : false }
@@ -10430,7 +10430,7 @@ Window {
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#fff4c4" }
                         }
                     }
-                    // t729 暗渊之眼（EnderEye；机制等价 MC 1.0 末影之眼 ender eye —— 玩家右键 EndEyeId 掷出寻路要塞，
+                    // t729 暗渊之眼（EnderEye；机制等价 MC 1.0 暗渊之眼 ender eye —— 玩家右键 EndEyeId 掷出寻路要塞，
                     //   §9 改名 + 原创模型/贴图）。t807 改**掉落物式贴图**：BillboardQuad 单面 billboard 恒正对相机铺
                     //   item 图标（MaterialIcon 0x23A，内部两级：pack 命中 ender_eye.png / pack 关 drawEndEye 自绘），
                     //   与掉落物 Repeater 材料段同源同图 —— 修掉旧版「六面立方铺同一张贴图 → 六面都是眼睛」的贴图
@@ -10510,7 +10510,7 @@ Window {
                     //   抛物飞行，落点把玩家传送过去；§9 区隔 + 原创视觉）。t807 改**掉落物式贴图**（同 EnderEye
                     //   分支）：BillboardQuad 单面 billboard 恒正对相机铺 item 图标（MaterialIcon 0x243，内部两级：
                     //   pack 命中 ender_pearl.png / pack 关 drawEnderPearl 自绘透明底）—— 修掉旧版 pack 命中时
-                    //   「六面立方铺同一张珍珠图标」同病（t807 主诉末影之眼的同族：立方六面都是珠），并顺带以
+                    //   「六面立方铺同一张珍珠图标」同病（t807 主诉暗渊之眼的同族：立方六面都是珠），并顺带以
                     //   item 图标替代程序双色深绿小方珠回退（与掉落物 Repeater 材料段同源同图，渲染语义统一）。
                     //   飞行自旋改面内 roll（绕 billboard 自身 Z；珠形近圆对称 → 自旋仅高光微动，保留无害）。
                     //   命中（方块 / 寿命兜底）→ C++ emit enderPearlLanded → 呈现层路由 applyEnderPearlTeleport
@@ -11322,7 +11322,7 @@ Window {
             }
         }
 
-        // t725 余烬门渲染 host（同 fireHost / paintingHost 的 createObject delegate 模式）：NetherPortal
+        // t725 余烬门渲染 host（同 fireHost / paintingHost 的 createObject delegate 模式）：EmberGate
         //   方块（138）的贴图是 32 帧条带 flipbook + 软半透明紫面（非图集瓦片）→ 渲染不走 chunk mesh
         //   （chunkgeometry 三处 PASS 已 skip），每格门面一个 delegate = **单片竖直平面 quad**（BillboardQuad
         //   XY ±0.5，按门朝向绕 Y 旋转：X 平面门（state=0，门沿 X 展开 / 面朝 ±Z）不旋转；Z 平面门（state=1，
@@ -11347,8 +11347,8 @@ Window {
                 const o = portalObjs[key]
                 if (o) { o.destroy(); delete portalObjs[key] }
             }
-            // 兜底清孤儿（连通域静默清 / 系统改写）：blockAt != NetherPortal(138) 的条目销毁（blockBroken
-            //   之外的清除路径收口——removeNetherPortalAt 的 setWaterSilent 不发 blockBroken，靠 onWorldChanged）。
+            // 兜底清孤儿（连通域静默清 / 系统改写）：blockAt != EmberGate(138) 的条目销毁（blockBroken
+            //   之外的清除路径收口——removeEmberGateAt 的 setWaterSilent 不发 blockBroken，靠 onWorldChanged）。
             function cleanupVis() {
                 for (const key in portalObjs) {
                     const p = key.split(",")
@@ -12164,7 +12164,7 @@ Window {
             // t843：燃烧方块被破坏（计时烧毁 setBlock 替换 / 玩家挖 / 爆炸）→ 摘面火 overlay（火随块走；
             //   烧毁位燃起的余烬火经 blockPlaced(137) 挂立地火 delegate，视觉无缝衔接）。
             burningHost.removeBurningVis(x, y, z)
-            // t725：余烬门熄灭 → 销毁视觉 delegate（id=138=BlockRegistry::NetherPortal；直挖门格走 setBlock
+            // t725：余烬门熄灭 → 销毁视觉 delegate（id=138=BlockRegistry::EmberGate；直挖门格走 setBlock
             //   发本信号，连通域其余格走 setWaterSilent 静默不发——由 onWorldChanged portalHost.cleanupVis
             //   兜底清）。挖门无掉落（dropId=0，C++ 侧）。
             if (id === 138) portalHost.removePortalVis(x, y, z)
@@ -12267,8 +12267,8 @@ Window {
             // t724：火焰点燃（玩家打火石右击 / tickFire 蔓延上窜 setBlock Fire）→ 挂视觉 delegate（id=137=
             //   BlockRegistry::Fire）。addFireVis 内 blockAt 真值校验（防陈旧信号挂假 delegate）。
             if (id === 137) fireHost.addFireVis(x, y, z)
-            // t725：余烬门生成（打火石点燃门框 → tryIgniteNetherPortal 逐格 setBlock NetherPortal）→ 挂视觉
-            //   delegate（id=138=BlockRegistry::NetherPortal）。addPortalVis 内 blockAt 真值校验（同火模式）。
+            // t725：余烬门生成（打火石点燃门框 → tryIgniteEmberGate 逐格 setBlock EmberGate）→ 挂视觉
+            //   delegate（id=138=BlockRegistry::EmberGate）。addPortalVis 内 blockAt 真值校验（同火模式）。
             if (id === 138) portalHost.addPortalVis(x, y, z)
             // t760：刷怪笼放置（创造背包取笼放置 setBlock Spawner）→ 挂视觉 delegate（id=40=
             //   BlockRegistry::Spawner）。addSpawnerVis 内 blockAt 真值校验（同火/门模式，防陈旧信号）。
@@ -12377,7 +12377,7 @@ Window {
             //   本兜底不再承担那条路径，只兜「无信号的栅格改写」族）。
             burningHost.cleanupVis()
             // t725：同步清余烬门视觉 delegate 孤儿（门框破坏连锁 / 连通域静默清不经 blockBroken 的路径
-            //   收口；removeNetherPortalAt 的 setWaterSilent 只发 worldChanged → 此处兜底）。
+            //   收口；removeEmberGateAt 的 setWaterSilent 只发 worldChanged → 此处兜底）。
             portalHost.cleanupVis()
             // t760：同步清刷怪笼视觉 delegate 孤儿（爆炸 / 系统改写栅格不经 blockBroken 的路径收口；同
             //   portalHost 模式）。

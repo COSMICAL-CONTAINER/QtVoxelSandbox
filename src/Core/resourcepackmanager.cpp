@@ -577,7 +577,7 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         // t620 书架侧面：tile 111 → pack block/bookshelf.png（木板边框 + 中央书脊书列）。顶/底=planks(8)
         //   经既存 {8→oak_planks.png} 自动覆盖（per-face 见 BlockDef）。非 pack 回落 default_bookshelf.png。
         {111, QStringLiteral("bookshelf.png")},                 // bookshelf（书架侧/前面；t620 per-face）
-        // t620 末影祭坛三 tile（EndPortal 方块的 endframe 化）：side(140)/top(141) 走专用合成（endframe_side.png
+        // t620 暗渊祭坛三 tile（AbyssGate 方块的 endframe 化）：side(140)/top(141) 走专用合成（endframe_side.png
         //   裁顶部 3/16 空白；eye(142) = endframe_top.png + endframe_eye.png overlay 叠加——MC eye 贴图是中央局部
         //   图非整面），见 ensureBuiltLocked 特判。此处的直映射仅作「文件名存在性声明」，实际覆盖由特判完成。
         {140, QStringLiteral("endframe_side.png")},             // endframe_side（祭坛侧/底=灰白细孔框身；t620 裁剪合成）
@@ -846,12 +846,12 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         {0x237, QStringLiteral("paper.png")},          // 纸（t473：3 甘蔗横排合成）
         {0x238, QStringLiteral("book.png")},           // 书（t473：3 纸 + 1 皮革合成；附魔台/书架材料；非 enchanted_book）
         {0x239, QStringLiteral("gunpowder.png")},      // 火药（t485：杀潜行者掉落；TNT 合成原料）
-        // t497 末影之眼（EndEyeId=0x23A）：机制等价 MC 1.0 ender eye（要塞宝藏箱战利品；右键末地传送门激活）。
+        // t497 暗渊之眼（EndEyeId=0x23A）：机制等价 MC 1.0 ender eye（要塞宝藏箱战利品；右键暗渊门激活）。
         //   t487 引入物品但 itemFilenameMap 漏映射 → pack 启用时仍走自绘 Canvas（drawEndEye）。补映射 → pack 有
         //   ender_eye.png 时改用包内贴图（alpha-test 透明底，机制等价 MC item icon）；包缺 → 安全跳过保自绘。
-        //   注：MC「末影珍珠 ender_pearl」是另一物品（合成末影之眼的原料），本工程无独立物品 id 故不映射；
-        //   本工程的「末影之眼」即机制等价物，故 ender_eye.png 是其正确 pack 图标。
-        {0x23A, QStringLiteral("ender_eye.png")},        // 末影之眼（t497：pack 启用用包内贴图，回落 drawEndEye 自绘）
+        //   注：MC「末影珍珠 ender_pearl」（§9 记载：MC 物品名引用）是另一物品（合成暗渊之眼的原料），本工程无独立物品 id 故不映射；
+        //   本工程的「暗渊之眼」即机制等价物，故 ender_eye.png 是其正确 pack 图标。
+        {0x23A, QStringLiteral("ender_eye.png")},        // 暗渊之眼（t497：pack 启用用包内贴图，回落 drawEndEye 自绘）
         // t507 木碗 / 蘑菇汤（bowl / mushroom_stew）：pack item 目录通常有 bowl.png / mushroom_stew.png。包内缺则
         //   安全跳过（保留自绘 MaterialIcon）。
         {0x23B, QStringLiteral("bowl.png")},              // 木碗（t507）
@@ -1500,7 +1500,7 @@ QImage composeGrassSide(const QDir &blockDir)
     return side;
 }
 
-// t620 裁掉贴图顶部空白带（MC 矮模型元素的侧贴图自带顶部空白——附魔台 0.25、末影祭坛 0.1875）。
+// t620 裁掉贴图顶部空白带（MC 矮模型元素的侧贴图自带顶部空白——附魔台 0.25、暗渊祭坛 0.1875）。
 //   本引擎 pushBox 整张 UV 无子区采样 → 裁掉顶部 blankFrac 比例的行、余下有效部分整张返回（调用方再缩
 //   kTile×kTile）。仅当顶部确实存在「全透明行带」时才裁（防误裁无空白的自定义包：从顶向下找首个不透明
 //   行，若其行号 < blankFrac*height 则从该行起裁到底；否则原样返回不裁）。源空 / 解码失败 → 空 QImage。
@@ -1530,7 +1530,7 @@ QImage cropTopBlank(const QImage &src, float blankFrac)
     return img.copy(0, cropY, img.width(), img.height() - cropY);
 }
 
-// t620 末影祭坛之眼 overlay 合成：endframe_top.png（框面基底）+ endframe_eye.png 叠加（SourceOver：眼图
+// t620 暗渊祭坛之眼 overlay 合成：endframe_top.png（框面基底）+ endframe_eye.png 叠加（SourceOver：眼图
 //   alpha>0 处覆眼、透明处保框面）。MC eye 贴图是中央局部图（非整面）故必须叠基底。返回已缩放 kTile 的
 //   ARGB32_Premultiplied；任一源缺 / 解码失败 → 空 QImage（调用方跳过，保程序生成眼瓦片）。
 QImage overlayEyeOnTop(const QDir &blockDir)
@@ -1890,7 +1890,7 @@ void ensureBuiltLocked()
             if (tile.isNull())
                 continue;
         } else if (m.first == 110 || m.first == 140) {
-            // t620 附魔台侧（110）/ 末影祭坛侧（140）走裁剪合成：MC 侧贴图顶部自带空白（附魔台 4/16、
+            // t620 附魔台侧（110）/ 暗渊祭坛侧（140）走裁剪合成：MC 侧贴图顶部自带空白（附魔台 4/16、
             //   祭坛 3/16 —— 模型元素矮于整格、贴图按 16px 满格 UV 绘制故顶部留空）。本引擎 pushBox 是
             //   整张 UV 无子区采样 → 合成时裁掉顶部空白行、余下有效部分整张缩放 → 贴到矮盒侧面（附魔台
             //   0.75 / 祭坛满格拉伸）无缝且无黑边（opaque 段透明像素会显黑，裁剪是唯一正解）。源缺 / 全
@@ -1900,7 +1900,7 @@ void ensureBuiltLocked()
             if (tile.isNull())
                 continue;
         } else if (m.first == 142) {
-            // t620 末影祭坛之眼态（142）走 overlay 合成：MC endframe_eye.png 是**中央局部图**（demo 包实测
+            // t620 暗渊祭坛之眼态（142）走 overlay 合成：MC endframe_eye.png 是**中央局部图**（demo 包实测
             //   仅中央 64×96/128 不透明，非整面贴图）→ 不能直接当顶面。合成 = endframe_top.png（框面基底）
             //   + endframe_eye.png SourceOver 叠加（眼图 alpha>0 处覆眼、透明处保框面）。任一缺 → 跳过。
             tile = overlayEyeOnTop(blockDir);
@@ -2067,12 +2067,13 @@ void ensureBuiltLocked()
             1, BlockRegistry::kFireStripFrames,
             { {0, QStringLiteral("fire_0.png")} },
             QStringLiteral("voxelsandbox_fire_strip.png"));
-    // t725 余烬门条带：包内 nether_portal.png（MC 动画贴图单列竖排 strip；demo 包实测 16×512 = 32 帧现成）→
+    // t725 余烬门条带：包内 nether_portal.png（§9 豁免：资源包读取面——用户包内 MC 布局文件名，机制等价
+    //   记载合法；MC 动画贴图单列竖排 strip；demo 包实测 16×512 = 32 帧现成）→
     //   以 qrc 程序生成余烬门条带为底、包内帧覆盖 → 落盘 voxelsandbox_portal_strip.png。
     s.portalStripFile = buildFluidStrip(
             blockDir, QStringLiteral(":/textures/portal_strip.png"),
-            1, BlockRegistry::kNetherPortalStripFrames,
-            { {0, QStringLiteral("nether_portal.png")} },
+            1, BlockRegistry::kEmberGateStripFrames,
+            { {0, QStringLiteral("nether_portal.png")} }, // §9 豁免：资源包读取面（用户包内文件名）
             QStringLiteral("voxelsandbox_portal_strip.png"));
 
     // review D3-b 图鉴生物头像预生成（t633 修 GUI 卡顿）：mobHeadIconSource 此前把「PNG 解码 + 裁剪 +
@@ -2706,7 +2707,7 @@ AtlasIconSpec atlasIconSpecForBlock(int blockId)
         addBox(0.0, 0.0, 0.0, 1.0, 0.75, 1.0, topT, sideT, sideT);
         spec.bookOverlay = true; // t764 ① 盒顶叠画悬浮敞开书（见 drawEnchantBookOverlay）
         break;
-    case BlockRegistry::EndPortal: // 祭坛框 13/16 高（endframe 化；顶瓦片含未放眼态合成）
+    case BlockRegistry::AbyssGate: // 祭坛框 13/16 高（endframe 化；顶瓦片含未放眼态合成）
         addBox(0.0, 0.0, 0.0, 1.0, 0.8125, 1.0, topT, sideT, sideT);
         break;
     case BlockRegistry::Anvil: // 铁砧三段：底座 + 束腰 + 砧面台（顶瓦片 = 各阶段砧面 anvil_top*）

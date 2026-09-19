@@ -336,16 +336,16 @@ public:
     }
     // t487 该格箱子是否「要塞生成箱」（worldgen placeStronghold 写入的箱子，state 带
     //   ChestStateStrongholdFlag bit6；玩家放置的箱子 / 地牢箱 / 矿井箱 / 神殿箱 / 丛林神殿箱无此位）。
-    //   Main.qml.openChest 据此判「是否首开填充要塞战利品」（LootTable::strongholdChestPool：末影之眼 / 骨头 /
+    //   Main.qml.openChest 据此判「是否首开填充要塞战利品」（LootTable::strongholdChestPool：暗渊之眼 / 骨头 /
     //   腐肉 / 铁锭 / 青金石 / 红石 / 钻石 / 附魔书等）。分层（PLAN §2）：纯只读谓词（blockAt + stateAt +
     //   BlockRegistry），不写栅格。非箱子格 → false。
     Q_INVOKABLE bool isStrongholdChest(int x, int y, int z) const {
         return blockAt(x, y, z) == BlockRegistry::Chest
             && (stateAt(x, y, z) & BlockRegistry::ChestStateStrongholdFlag) != 0;
     }
-    // t729 最近要塞（末地传送门）坐标 getter（placeStronghold 记录；详见 m_strongholdPortal* 字段头注释）。
+    // t729 最近要塞（暗渊门）坐标 getter（placeStronghold 记录；详见 m_strongholdPortal* 字段头注释）。
     //   暗渊之眼（EnderEye）右键掷出的**飞行目标**：Game/Physics 层（PlayerController）据玩家眼位 → 本传送门
-    //   中心方向计算飞行初速，把眼睛导向要塞（机制等价 MC 1.0 末影之眼寻路要塞）。玩家朝要塞方向走多次使用
+    //   中心方向计算飞行初速，把眼睛导向要塞（机制等价 MC 1.0 暗渊之眼寻路要塞）。玩家朝要塞方向走多次使用
     //   可逐步逼近（本工程单要塞，方向恒指向它）。分层（PLAN §2）：纯只读查询（无世界创建则恒 false），
     //   Q_INVOKABLE 兼 F3 调试 / 未来 HUD 展示；Game 层 C++ 亦直调。坐标 = 传送门房 12 框架环中心格
     //   （(cx, cy+4, cz-18)，全图唯一）。
@@ -843,7 +843,7 @@ public:
     //   经 WorldClock.ticked 桥接调用（每 100ms 一 tick；本方法内部节流到 ~每 kIceMeltTickInterval×0.1s 一窗）。
     //   每窗遍历冰格索引（m_iceCells，O(冰格数) 替代全图扫描，同 tickIceFreeze / tickCropGrowth 的位置索引模式）：
     //   对每个 Ice 格查其「高亮邻居」—— 任一 6 正交邻格是发光方块（BlockRegistry::lightEmission(state)>0：火把/
-    //   燃烧熔炉/岩浆/火/末地传送门）或本格格方块光 ≥ kIceMeltBlockLight（~12，机制等价 MC 冰需 light level ≥12
+    //   燃烧熔炉/岩浆/火/暗渊门）或本格格方块光 ≥ kIceMeltBlockLight（~12，机制等价 MC 冰需 light level ≥12
     //   从 ≥2 邻面照射才融；本工程简化为「单邻发光源或自身高方块光」即触发候选）→ 命中按散布概率 kIceMeltPct
     //   （hashVoxel(seed, x,y,z) + 窗口序号，PLAN §2-K 确定性散布，同 tickCropGrowth / tickIceFreeze 错峰）融为水
     //   （setWaterSilent 静默写 Water state=0：系统模拟非玩家破/放 → 无 broken/placed 噪音，机制等价 MC 冰融化无
@@ -1071,29 +1071,34 @@ public:
     //   （邻轨连接位按「轨已消失」重算）。三族（普通 / 动力 / 探测）统一（isRail 单一权威）。
     void checkRailOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
 
-    // t664 末地传送门完整性复检（机制等价 MC「传送门开启后拆任一框架 → 门面全消失」；同 checkRailOnEdit
-    //   模式）。（x,y,z,oldId,id）= 本格刚发生的编辑。任何方块变化都可能影响末地传送门环：本格是框架
-    //   （EndPortal）被破坏 / 本格是门面（EndPortalSurface）被瞬破 / 本格邻接环任意位置 → 扫本格周围
-    //   ±3 立方体内的 EndPortalSurface 门面格，对每块门面反查其环中心（3×3 内圈中心），环 12 框架任一
+    // ── t1067 §9 区隔改名映射表（World 写入钩子族 / 暗渊门三件套；映射总表见 blockregistry.h 头注——
+    //   数值 id 138/111/131 零变化 = 存档安全铁律）。标识符：原 checkEndPortalIntegrity→checkAbyssGateIntegrity、（§9）
+    //   原 endPortalRingComplete→abyssGateRingComplete、原 tryOpenEndPortal→tryOpenAbyssGate、（§9）
+    //   原 tryIgniteNetherPortal→tryIgniteEmberGate、原 removeNetherPortalAt→removeEmberGateAt、（§9）
+    //   原 breakNetherPortalsAround→breakEmberGatesAround、原 m_inRemoveNetherPortal→m_inRemoveEmberGate（§9）
+    //   （§9 记载：机制等价 MC 1.0 下界/末地传送门三件套）。
+    // t664 暗渊门完整性复检（机制等价 MC「传送门开启后拆任一框架 → 门面全消失」；同 checkRailOnEdit
+    //   模式）。（x,y,z,oldId,id）= 本格刚发生的编辑。任何方块变化都可能影响暗渊门环：本格是框架
+    //   （AbyssGate）被破坏 / 本格是门面（AbyssGateSurface）被瞬破 / 本格邻接环 12 框架环
     //   缺失 / 未激活 → 该门面格静默清 Air（m_chunks.setBlock 直写，不经 World::setBlock → 不重入本检查）+
     //   1 次 worldChanged 批量收口。供 4/5 参数 setBlock 末尾各调一次（编辑路径收口，同 checkRailOnEdit）。
-    void checkEndPortalIntegrity(int x, int y, int z, quint8 oldId, quint8 id);
+    void checkAbyssGateIntegrity(int x, int y, int z, quint8 oldId, quint8 id);
 
-    // t664 末地传送门框架环完整性检查（纯读）：给定候选环中心（3×3 内圈中心 cx,cz,cy），环 = 12 框架格
-    //   {(cx±2,cy,cz-1..cz+1)} ∪ {(cx-1..cx+1,cy,cz±2)}（不含四角）。全部为 EndPortal **且** state bit0
-    //   激活 → 返 true（环可开）。中心格非 3×3 内圈实际门面位（不检查中心格自身）→ 供 tryOpenEndPortal
-    //   （激活最后一框后开环）+ checkEndPortalIntegrity（拆框架后验环失效）共用。纯读 m_chunks。
-    bool endPortalRingComplete(int cx, int cy, int cz) const;
+    // t664 暗渊门框架环完整性检查（纯读）：给定候选环中心（3×3 内圈中心 cx,cz,cy），环 = 12 框架格
+    //   {(cx±2,cy,cz-1..cz+1)} ∪ {(cx-1..cx+1,cy,cz±2)}（不含四角）。全部为 AbyssGate **且** state bit0
+    //   激活 → 返 true（环可开）。中心格非 3×3 内圈实际门面位（不检查中心格自身）→ 供 tryOpenAbyssGate
+    //   （激活最后一框后开环）+ checkAbyssGateIntegrity（拆框架后验环失效）共用。纯读 m_chunks。
+    bool abyssGateRingComplete(int cx, int cy, int cz) const;
 
-    // t664 尝试打开末地传送门（12 框架全部激活 → 3×3 内圈填 EndPortalSurface 薄星平面）。调用方 = 玩家
+    // t664 尝试打开暗渊门（12 框架全部激活 → 3×3 内圈填 AbyssGateSurface 薄星平面）。调用方 = 玩家
     //   激活最后一框后的 PlayerController useBlock 分支。环不完整 → no-op（return false）。打开成功：
-    //   3×3 内圈各格写 EndPortalSurface（m_chunks 直写 + 标脏，静默不经 setBlock → 不重入完整性复检）+
+    //   3×3 内圈各格写 AbyssGateSurface（m_chunks 直写 + 标脏，静默不经 setBlock → 不重入完整性复检）+
     //   1 次 worldChanged + clearAllDirty（N 写 1 emit，同 dropCactusColumn 批量收口）。返是否打开。
     //   门面方块是普通方块 → 随存档正常持久化（spec「portal fills 应保存」）。
-    bool tryOpenEndPortal(int cx, int cy, int cz);
+    bool tryOpenAbyssGate(int cx, int cy, int cz);
 
     // t806 余烬门点燃检测（机制等价 MC 1.0 nether portal frame 检测的泛化版；t725 v1 写死最小 2×3 门且
-    //   住在 PlayerController，本方法泛化后下沉 World 层单一权威 —— 同末地门三件套模式，PlayerController
+    //   住在 PlayerController，本方法泛化后下沉 World 层单一权威 —— 同暗渊门三件套模式，PlayerController
     //   打火石分支只做转发，矩阵测试可直编）。给定点燃格 (ix,iy,iz)（门框内腔空气格 = 打火石火苗位），
     //   X 平面（门沿 X 展开 / 面朝 ±Z）与 Z 平面各试一次：下探底梁 → 左探开口左沿 → 量宽量高 → 矩形 +
     //   框架校验。MC 规则参数表（dev-spec t806 + t848 上限对齐 MC 1.0）：内腔开口宽 2..21 / 高 3..21
@@ -1101,31 +1106,31 @@ public:
     //   相邻两门共用中间竖柱各自成门，t848 共享柱语义）；**四角不检查**（MC 1.0 门框角块可选 —— 角块不
     //   承结构，缺角可点燃、破角不碎门）。任一不符（超 21×21 / 低于 2×3 / 缺梁缺柱 / 非矩形腔）→ 返
     //   false（caller 回退
-    //   普通 Fire 点燃）。全命中 → 开口整面 w×h 各格 setBlock(NetherPortal, axis)（axis=0 X 平面 /
+    //   普通 Fire 点燃）。全命中 → 开口整面 w×h 各格 setBlock(EmberGate, axis)（axis=0 X 平面 /
     //   1=Z 平面；逐格发 blockPlaced → 呈现层 portalHost 逐格建 delegate + 放置音）。
-    bool tryIgniteNetherPortal(int ix, int iy, int iz);
+    bool tryIgniteEmberGate(int ix, int iy, int iz);
 
     // t806 余烬门连通域熄灭（t725 自 PlayerController 下沉 World 层单一权威，逻辑同源）：从 (px,py,pz)
     //   （门格之一，可能已被清 Air）按 axis flood-fill 收集整扇门（±u 门展开轴水平 / ±Y 垂直同 axis 的
-    //   NetherPortal 格）→ 全部 setWaterSilent 清 Air（静默：多格逐格 blockBroken 会刷粒子/音风暴；
+    //   EmberGate 格）→ 全部 setWaterSilent 清 Air（静默：多格逐格 blockBroken 会刷粒子/音风暴；
     //   worldChanged 仍逐格发 → 呈现层 portalHost cleanupVis 清孤儿）。尺寸无关（连通域天然覆盖任意
-    //   大小的门）。门无物品形态（dropId=0）→ 无掉落。供 breakNetherPortalsAround（World 写入钩子族）
-    //   与 PlayerController finishMiningAt 直挖门格分支调。置 m_inRemoveNetherPortal 守卫（见成员注释）。
-    void removeNetherPortalAt(int px, int py, int pz, int axis);
+    //   大小的门）。门无物品形态（dropId=0）→ 无掉落。供 breakEmberGatesAround（World 写入钩子族）
+    //   与 PlayerController finishMiningAt 直挖门格分支调。置 m_inRemoveEmberGate 守卫（见成员注释）。
+    void removeEmberGateAt(int px, int py, int pz, int axis);
 
-    // t806 余烬门门框失撑熄灭（t725 下沉，逻辑同源）：破块后扫 6 邻的 NetherPortal，各自经连通域熄灭
+    // t806 余烬门门框失撑熄灭（t725 下沉，逻辑同源）：破块后扫 6 邻的 EmberGate，各自经连通域熄灭
     //   整扇门。机制等价 MC「黑曜石门框任一**承重**格被破坏 → 传送门失效消失」：底梁 / 顶梁 / 边柱格均
     //   与门格 6 邻接 → 破任一即断结构；角块不与门格相邻（对角位）→ 破角不碎门（角块可选语义的自然
     //   推论，检测不查角 / 失撑不邻角两侧自洽）。恒熄（含创造，结构后果非掉落，同叶衰语义）。
-    //   review #27：并入 World 写入钩子族（同 checkEndPortalIntegrity 模式）—— 全部静默 / 直写清格路径
+    //   review #27：并入 World 写入钩子族（同 checkAbyssGateIntegrity 模式）—— 全部静默 / 直写清格路径
     //   （setBlock×2 / setBlockSilent / clearBlockSilent / setWaterSilent / setBlockFromEntity /
     //   destroySphereSilent 逐破坏格 / dropGravityColumn 逐清格）对「本格原有非空内容被置换」的写都调
     //   本钩子 → 爆炸 / 焚毁 / 坍落 / 流体置换等拆格路径与玩家挖掘同口径熄门（此前仅玩家路径调，
-    //   系统路径拆门框后门面残留）。纯放置（Air 格写入）不触发。m_inRemoveNetherPortal 置位期间早退
+    //   系统路径拆门框后门面残留）。纯放置（Air 格写入）不触发。m_inRemoveEmberGate 置位期间早退
     //   （连通域清除自管，防嵌套 BFS）。
-    void breakNetherPortalsAround(int x, int y, int z);
+    void breakEmberGatesAround(int x, int y, int z);
 
-    // t837① 画作连通域移除（t721 自 PlayerController 下沉 World 层单一权威，t806 removeNetherPortalAt 同
+    // t837① 画作连通域移除（t721 自 PlayerController 下沉 World 层单一权威，t806 removeEmberGateAt 同
     //   模式；逻辑逐行同源）：从 (px,py,pz)（画格之一，可能已被清 Air）按 face flood-fill 收集候选域
     //   （±u 观察者右向水平 / ±Y 垂直同 face 的 Painting 格），域内锚格（bit7）用 index 反解矩形
     //   （paintingSize → w×h，锚格=左上）界定画身份——只清「种子坐标所在矩形」那一张（同面相邻两画平面
@@ -1772,8 +1777,9 @@ private:
     //   仅扫候选丛林格）。
 
     void placeJungleTemple();
-    // t487 要塞（spec「地下深（Y<30）生成：石砖迷宫 + 末地传送门房（末地传送门方块 + 12 末影之眼激活 → 末地
-    //   预热，末地本身可推迟）+ 图书馆（书架，附魔加成）+ 银鱼刷怪笼」；机制等价 MC 1.0 要塞 stronghold）。
+    // t487 要塞（spec 原文「地下深（Y<30）生成：石砖迷宫 + 末地传送门房（末地传送门方块 + 12 末影之眼激活 → 末地（§9 记载：历史原文引用）
+    //   预热，末地本身可推迟）+ 图书馆（书架，附魔加成）+ 银鱼刷怪笼」——§9 记载：历史 spec 原文引用；今名
+    //   暗渊门房/暗渊门框架/暗渊之眼/暗渊预热。机制等价 MC 1.0 要塞 stronghold）。
     //   t713 扩建 ~4.5×（45×45×10：中央大厅 + 四向走廊 + 图书馆 + 传送门房 + 战利品房 + 两储藏龛；墙高 8 ——
 //   t759 传送门房净空修复 5→8，框架上方通行空间 +3，仅新世界生效）。
     //   placeJungleTemple 之后、fillWater 之前，地下深处（y ∈ [kBedrockTop+4, kStrongholdMaxY=30]，spec「Y<30」）
@@ -1784,17 +1790,17 @@ private:
     //     - 内部走廊 / 房间（Air，石砖墙隔出；大厅四角承重柱 + 东入口走廊 + 东北 / 东南储藏龛）；
     //     - **图书馆**（10×17×8 大房）：四壁 Bookshelf 书架墙（t474 书架，附魔台加成来源）+ 中央书架岛 +
     //       蛛网装饰（机制等价 MC 1.0 要塞图书馆书架墙）；
-    //     - **末地传送门房**（25×10×8 房间，t759 净高 8）：北侧环沟岩浆河（dy=0，静态封闭不流）+ 石砖高台
+    //     - **暗渊门房**（25×10×8 房间，t759 净高 8）：北侧环沟岩浆河（dy=0，静态封闭不流）+ 石砖高台
     //       （13×6，顶面可站立）+ 中轴 3 级石砖楼梯（每步 Δ0.5 ≤ auto-step，通向门框；台下实心不悬浮）+
-    //       3×3 岩浆盆（门面正下方一格）+ 12 EndPortal 框架环（中心 (0,4,-18) 标准 ±2 方形环；框架层不随
-    //       t759 加高变动 → B5 反推 y=cy+4 假设与记录值零回归；~10% 预置末影之眼；
+    //       3×3 岩浆盆（门面正下方一格）+ 12 AbyssGate 框架环（中心 (0,4,-18) 标准 ±2 方形环；框架层不随
+    //       t759 加高变动 → B5 反推 y=cy+4 假设与记录值零回归；~10% 预置暗渊之眼；
     //       t664 激活/完整性机制接线）+ 环中心上方银鱼刷怪笼（机制等价 MC 1.0 要塞传送门房上方 spawner）；
     //     - **战利品/银鱼房**（17×11×8 房间）：双银鱼刷怪笼（Spawner + SpawnerStateSilverfish 显式 type →
     //       tickSpawners 刷 Silverfish）+ 双战利品箱（Chest + ChestStateStrongholdFlag → 首开填要塞战利品
-    //       含末影之眼）；
+    //       含暗渊之眼）；
     //     - 走廊散布 Cobweb 蛛网（仅 dy=1 贴地不悬空；设施房整房跳过 —— t682 装饰覆盖框架的教训）。
     //   纯函数于 seed（hashColumn / hashVoxel）→ 同 seed 同要塞分布（PLAN §2-K）。**宝藏箱内容**：Chest 物品存
-    //   ChestStore，首开填充由 isStrongholdChest 判定 → strongholdChestPool（含末影之眼，激活传送门关键物品）。
+    //   ChestStore，首开填充由 isStrongholdChest 判定 → strongholdChestPool（含暗渊之眼，激活传送门关键物品）。
     void placeStronghold();
     // t309 地表小湖泊（部分露出；spec「地表小湖泊（部分露出）」）：fillWater 之后，plains/forest 平坦地表
     //   确定性散布小型浅水湖——在局部低洼（disc heightAt 轻微起伏、湖岸外圈 ≥ surfaceY）的草地 carve 一个浅水盘
@@ -1861,10 +1867,10 @@ private:
     // t1056（#6）判别探针计数（biomeMemoMissCount 读面）：biomeAt 懒算一次 +1；generate 随
     //   memo 重置归零。运行期瞬态不进存档（powerRecomputePasses 同族口径）。
     mutable int m_biomeMemoMisses = 0;
-    // t729 最近要塞末地传送门中心格坐标（worldgen placeStronghold 放置处记录；全图至多一座要塞 / 一个传送门，
-    //   t564「全图至多一个末地传送门」）。m_hasStronghold=false → 无要塞（世界未生成 / 空）→ 暗渊之眼掷出兜底
+    // t729 最近要塞暗渊门中心格坐标（worldgen placeStronghold 放置处记录；全图至多一座要塞 / 一个传送门，
+    //   t564「全图至多一个暗渊门」）。m_hasStronghold=false → 无要塞（世界未生成 / 空）→ 暗渊之眼掷出兜底
     //   不寻路。坐标语义 = 传送门房 12 框架环中心格：x=placeAt 的 cx（环 x 中心）、y=cy+4（地板 cy 之上门面 dy=4）、
-    //   z=cz-18（传送门房内部 dz∈[-21,-12] 中心 -18）。玩家眼位 → 该点方向 = 末影之眼飞行目标（EntityManager 掷出
+    //   z=cz-18（传送门房内部 dz∈[-21,-12] 中心 -18）。玩家眼位 → 该点方向 = 暗渊之眼飞行目标（EntityManager 掷出
     //   + Game 层算方向，分层只向下的只读源）。generate 时由 placeStronghold 记录；beginLoad 显式清（防旧
     //   世界残留误导），finishLoad 末由 rebindStrongholdPortalFromVoxels 从体素反推回写（审查修 B5：读档不丢）。
     bool m_hasStronghold = false;
@@ -1896,13 +1902,13 @@ private:
     //   不 emit worldChanged / 不 clearAllDirty；caller 末尾一次性 emit + clearDirty。把「每 tick 写 N 格
     //   → N 次 worldChanged 扇出重建」合并为「1 次重建」，消除活跃扩散期卡顿。通用机制（t351 岩浆可同用）。
     bool m_batchFluid = false;
-    // review #27（Review 2026-08-23 低危）：余烬门连通域熄灭重入守卫。breakNetherPortalsAround 并入 World
+    // review #27（Review 2026-08-23 低危）：余烬门连通域熄灭重入守卫。breakEmberGatesAround 并入 World
     //   写入钩子族（setBlock×2 / setBlockSilent / clearBlockSilent / setWaterSilent / setBlockFromEntity /
-    //   destroySphereSilent / dropGravityColumn）后，removeNetherPortalAt 自身清门格走 setWaterSilent →
-    //   该写的钩子又会扫 6 邻发现「尚未清到的门格」再进 removeNetherPortalAt —— 嵌套 BFS 虽有界（门 ≤21×21，t848）
+    //   destroySphereSilent / dropGravityColumn）后，removeEmberGateAt 自身清门格走 setWaterSilent →
+    //   该写的钩子又会扫 6 邻发现「尚未清到的门格」再进 removeEmberGateAt —— 嵌套 BFS 虽有界（门 ≤21×21，t848）
     //   但同一扇门被反复半清。置位期间钩子早退：连通域清除自管整扇门，一次平坦 BFS 收完。
-    bool m_inRemoveNetherPortal = false;
-    // t837① 画作连通域移除重入守卫（m_inRemoveNetherPortal 同模式）：checkPaintingSupportOnEdit 并入
+    bool m_inRemoveEmberGate = false;
+    // t837① 画作连通域移除重入守卫（m_inRemoveEmberGate 同模式）：checkPaintingSupportOnEdit 并入
     //   World 写入钩子族后，removePaintingAt 自身清画格走 setWaterSilent → 该写的钩子又会扫 4 水平邻发现
     //   「尚未清到的画格」再进 removePaintingAt —— 嵌套半清。置位期间钩子早退：连通域清除自管整张画。
     bool m_inRemovePainting = false;

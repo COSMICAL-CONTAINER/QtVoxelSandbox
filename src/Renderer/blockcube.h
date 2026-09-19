@@ -46,7 +46,7 @@ class BlockCube : public QQuick3DGeometry
     QML_NAMED_ELEMENT(BlockCube)
     Q_PROPERTY(int blockId READ blockId WRITE setBlockId NOTIFY blockIdChanged)
     // t965 形态按钮组：方块 state（缺省 0 = 放置缺省形态）。rebuild 每面瓦片经
-    //   BlockRegistry::stateTileOverride 态变（耕地干/湿顶面、末地框无眼/有眼顶面——Core 单一权威），
+    //   BlockRegistry::stateTileOverride 态变（耕地干/湿顶面、暗渊框无眼/有眼顶面——Core 单一权威），
     //   非态变方块/面退 tileIndex 旧路径（既有消费端零漂移）。
     Q_PROPERTY(int blockState READ blockState WRITE setBlockState NOTIFY blockStateChanged)
     // t257 掉落沙光影（可选）：设 world + worldPos 后，rebuild 据世界位采样光场 + PCF 软影烘顶点色。

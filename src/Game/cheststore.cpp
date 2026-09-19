@@ -464,7 +464,7 @@ bool ChestStore::populateJungleTempleLoot(int x, int y, int z)
 
 // t487 首开填充要塞战利品（见 cheststore.h 头注释）。与 populateDungeonLoot / populateMineshaftLoot /
 //   populatePyramidLoot / populateJungleTempleLoot 同源逻辑，仅换战利品池（LootTable::strongholdChestPool：
-//   末影之眼 / 骨头 / 腐肉 / 铁锭 / 青金石 / 红石 / 钻石 / 附魔书等）+ 抽取次数（kStrongholdRolls=6）+
+//   暗渊之眼 / 骨头 / 腐肉 / 铁锭 / 青金石 / 红石 / 钻石 / 附魔书等）+ 抽取次数（kStrongholdRolls=6）+
 //   坐标确定性 seed 盐（0x5A17D1C7 专用盐，与其它四表解耦 → 同坐标要塞箱与其它箱战利品各自独立）。
 bool ChestStore::populateStrongholdLoot(int x, int y, int z)
 {

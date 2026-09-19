@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """t725 生成余烬门「条带」贴图（portalHost delegate 的材质级 flipbook 动画）。
 
-机制等价 MC 1.0 下界传送门 flipbook（nether_portal.png 单列 32 帧），但贴图为本项目程序生成的原创
+机制等价 MC 1.0 下界传送门 flipbook（nether_portal.png 单列 32 帧——§9 记载：机制等价引用 MC 文件名），但贴图为本项目程序生成的原创
 像素图，**不**拷贝任何 MC 资产（§9 override (a)）。
 
-条带结构（与 Main.qml portalStripTex 三方共用 BlockRegistry::kNetherPortalStripFrames 常量；改帧数必须同步）：
+条带结构（与 Main.qml portalStripTex 三方共用 BlockRegistry::kEmberGateStripFrames 常量；改帧数必须同步）：
   - portal_strip.png：16 宽 × 512 高 = 1 列 × 32 行（每帧 16×16）。
     门面 = 满格紫色漩涡：多层正弦扰动纹（横向波纹沿纵向流动）+ 中心亮核（门心偏亮的紫白渐变）。
     与火焰的 cutout 透明底不同，门是**满格半透明面**（边缘 alpha 高、纹谷 alpha 略低 → 微透感，
@@ -16,7 +16,7 @@ UV 全 [0,1] + Texture scaleV=1/N + positionV=k/N（与水 / 岩浆的 chunk-mes
 UV v∈[0,1/N]）。
 
 包覆盖：resourcepackmanager 启用包时，以本程序生成条带为底、包内 block/nether_portal.png 帧覆盖
-（demo 包实测 16×512 = 32 帧现成 strip，帧数天然与本常量对齐）→ 落盘合成条带。无包时 QML 直接加载
+（demo 包实测 16×512 = 32 帧现成 strip，帧数天然与本常量对齐；§9 豁免：资源包读取面——用户包内 MC 布局文件名）→ 落盘合成条带。无包时 QML 直接加载
 本 qrc 条带。
 
 输出（覆盖写入 textures/）：
@@ -32,7 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")
 TS = 16  # 帧像素边长（与图集瓦片 kTile=16 同源）
 
-PORTAL_FRAMES = 32  # 与 BlockRegistry::kNetherPortalStripFrames 一致
+PORTAL_FRAMES = 32  # 与 BlockRegistry::kEmberGateStripFrames 一致
 
 
 def build_portal_strip():

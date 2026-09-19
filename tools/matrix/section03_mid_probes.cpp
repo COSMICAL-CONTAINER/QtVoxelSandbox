@@ -329,7 +329,7 @@ void MatrixRun::section03_mid_probes()
     //      破共享柱中格 → 双门同熄（共享柱对两门都是承重格，批 F 熄灭钩子按连通域各自收域）；
     //   ⑦ 缺角 21×21 最大门 → 成门 441（四角可选语义在超大门保持）；
     //   ⑧ 破框碎门（批 F 钩子超大门回归）：⑦ 门破底梁中格（镜像 finishMiningAt setBlock(Air)+
-    //      breakNetherPortalsAround 序列）→ 整门 441 格全熄（连通域熄灭尺寸无关）。
+    //      breakEmberGatesAround 序列）→ 整门 441 格全熄（连通域熄灭尺寸无关）。
     runLegMulti({ "t848 portal size cap 23x23: interior 2x3..21x21 (frame outer 4x5..23x23 MC 1.0 cap; t806-era wid"
         "th-cap truncated measurement -> pillar probe hit interior air = user 'only 4x4 ignites'), user-r"
         "epro 5x4 lights 20 cells, 21x21 max lights on both planes 441 cells each (= interior area, top-r"
@@ -375,7 +375,7 @@ void MatrixRun::section03_mid_probes()
                 for (int r = -3; r <= h + 3; ++r)
                     for (int d = -2; d <= 2; ++d)
                         if (w848.blockAt(x0 + c * ux + d * uz, pY848 + r, z0 + c * uz + d * ux)
-                            == BR::NetherPortal)
+                            == BR::EmberGate)
                             ++n;
             return n;
         };
@@ -383,7 +383,7 @@ void MatrixRun::section03_mid_probes()
         // ① 用户复现位：5×4 内腔（X 平面带角）开口中格点燃 → 成门恰 20 格。
         {
             buildFrame848(6, 6, 1, 0, 5, 4, true);
-            const bool lit = w848.tryIgniteNetherPortal(8, pY848 + 1, 6);
+            const bool lit = w848.tryIgniteEmberGate(8, pY848 + 1, 6);
             const int n = cellsInBox848(6, 6, 1, 0, 5, 4);
             if (!lit || n != 20) {
                 qInfo().noquote() << "  [t848 diag] user-repro 5x4 interior:" << lit << "cells" << n;
@@ -393,7 +393,7 @@ void MatrixRun::section03_mid_probes()
         // ② 21×21 最大内腔（X 平面带角），点燃位 = 开口右上角（压满两扫描上界）→ 441 格 + state=0。
         {
             buildFrame848(6, 16, 1, 0, 21, 21, true);
-            const bool lit = w848.tryIgniteNetherPortal(26, pY848 + 20, 16);
+            const bool lit = w848.tryIgniteEmberGate(26, pY848 + 20, 16);
             const int n = cellsInBox848(6, 16, 1, 0, 21, 21);
             const int st = int(w848.stateAt(6, pY848, 16) & 1);
             if (!lit || n != 441 || st != 0) {
@@ -405,7 +405,7 @@ void MatrixRun::section03_mid_probes()
         // ③ 21×21 最大内腔（Z 平面带角），点燃位 = 开口中格 → 441 格 + state=1。
         {
             buildFrame848(34, 6, 0, 1, 21, 21, true);
-            const bool lit = w848.tryIgniteNetherPortal(34, pY848 + 10, 16);
+            const bool lit = w848.tryIgniteEmberGate(34, pY848 + 10, 16);
             const int n = cellsInBox848(34, 6, 0, 1, 21, 21);
             const int st = int(w848.stateAt(34, pY848, 6) & 1);
             if (!lit || n != 441 || st != 1) {
@@ -417,10 +417,10 @@ void MatrixRun::section03_mid_probes()
         // ④ 超限拒：内腔 22 宽 / 22 高（超 21×21 上限，框外沿 23×23 封顶）均拒且零门格。
         {
             buildFrame848(6, 40, 1, 0, 22, 3, true); // 22 宽（X 平面）
-            bool bad = w848.tryIgniteNetherPortal(17, pY848 + 1, 40)
+            bool bad = w848.tryIgniteEmberGate(17, pY848 + 1, 40)
                        || cellsInBox848(6, 40, 1, 0, 22, 3) != 0;
             buildFrame848(40, 40, 0, 1, 2, 22, true); // 22 高（Z 平面）
-            bad = bad || w848.tryIgniteNetherPortal(40, pY848 + 1, 41)
+            bad = bad || w848.tryIgniteEmberGate(40, pY848 + 1, 41)
                         || cellsInBox848(40, 40, 0, 1, 2, 22) != 0;
             if (bad) {
                 qInfo().noquote() << "  [t848 diag] oversize 22w/22h not rejected";
@@ -430,7 +430,7 @@ void MatrixRun::section03_mid_probes()
         // ⑤ 2×3 最小门（X 平面带角）→ 成门恰 6 格（放宽上限不动下限）。
         {
             buildFrame848(6, 48, 1, 0, 2, 3, true);
-            const bool lit = w848.tryIgniteNetherPortal(7, pY848 + 1, 48);
+            const bool lit = w848.tryIgniteEmberGate(7, pY848 + 1, 48);
             const int n = cellsInBox848(6, 48, 1, 0, 2, 3);
             if (!lit || n != 6) {
                 qInfo().noquote() << "  [t848 diag] 2x3 min gate:" << lit << "cells" << n;
@@ -460,15 +460,15 @@ void MatrixRun::section03_mid_probes()
                 int n = 0;
                 for (int c = 0; c < w; ++c)
                     for (int r = 0; r < h; ++r)
-                        if (w848.blockAt(x0 + c, pY848 + r, sZ) == BR::NetherPortal) ++n;
+                        if (w848.blockAt(x0 + c, pY848 + r, sZ) == BR::EmberGate) ++n;
                 return n;
             };
-            const bool litA = w848.tryIgniteNetherPortal(sX + 1, pY848 + 1, sZ);
+            const bool litA = w848.tryIgniteEmberGate(sX + 1, pY848 + 1, sZ);
             const int onlyA = countRect848(sX, 3, 4) + countRect848(sX + 4, 3, 4); // 点 A 后：A=12 / B=0
-            const bool litB = w848.tryIgniteNetherPortal(sX + 5, pY848 + 1, sZ);
+            const bool litB = w848.tryIgniteEmberGate(sX + 5, pY848 + 1, sZ);
             const int bothA = countRect848(sX, 3, 4), bothB = countRect848(sX + 4, 3, 4); // 双门共存各 12
             w848.setBlock(sX + 3, pY848 + 1, sZ, BR::Air, 0); // 破共享柱中格（finishMiningAt 同款先清格）
-            w848.breakNetherPortalsAround(sX + 3, pY848 + 1, sZ);
+            w848.breakEmberGatesAround(sX + 3, pY848 + 1, sZ);
             const int after = countRect848(sX, 3, 4) + countRect848(sX + 4, 3, 4); // 双门同熄归零
             if (!litA || !litB || onlyA != 12 || bothA != 12 || bothB != 12 || after != 0) {
                 qInfo().noquote() << "  [t848 diag] shared-pillar double door: litA" << litA
@@ -480,14 +480,14 @@ void MatrixRun::section03_mid_probes()
         // ⑦ 缺角 21×21 最大门（X 平面无角）→ 成门恰 441 格；⑧ 破底梁中格 → 整门全熄（批 F 钩子超大门回归）。
         {
             buildFrame848(24, 34, 1, 0, 21, 21, false);
-            const bool lit = w848.tryIgniteNetherPortal(34, pY848 + 10, 34);
+            const bool lit = w848.tryIgniteEmberGate(34, pY848 + 10, 34);
             const int n = cellsInBox848(24, 34, 1, 0, 21, 21);
             if (!lit || n != 441) {
                 qInfo().noquote() << "  [t848 diag] cornerless 21x21 max gate:" << lit << "cells" << n;
                 ok848 = false;
             }
             w848.setBlock(34, pY848 - 1, 34, BR::Air, 0); // 底梁中格（finishMiningAt 同款先清格）
-            w848.breakNetherPortalsAround(34, pY848 - 1, 34);
+            w848.breakEmberGatesAround(34, pY848 - 1, 34);
             if (cellsInBox848(24, 34, 1, 0, 21, 21) != 0) {
                 qInfo().noquote() << "  [t848 diag] max-gate beam break left"
                                   << cellsInBox848(24, 34, 1, 0, 21, 21) << "cells";

@@ -164,7 +164,7 @@ const char *iconFileForBlock(quint8 id)
     // t482/t483 防御造物方块立方体图标（build_cube_icons.py 程序生成原创像素图）。
     case BlockRegistry::Pumpkin:       return "icon_pumpkin.png";     // t482/t675 南瓜（t644 --from-pack 拼方块：顶=瓜顶+短茎 / 右=瓜棱 / 左=刻脸；放置态恒面向玩家，同款经典读感）
     case BlockRegistry::Snow:          return "icon_snow.png";        // 雪块（各面=冷白冰晶噪点，同积雪层；雪傀儡身体方块）
-    case BlockRegistry::EndPortal:     return "icon_end_portal.png";  // t634/t644 末地传送门（--from-pack：endframe 顶/侧贴图，与放置态一致）
+    case BlockRegistry::AbyssGate:     return "icon_abyss_gate.png";  // t634/t644 暗渊门（--from-pack：endframe 顶/侧贴图，与放置态一致）
     // t484 废弃矿井结构方块图标（build_cube_icons.py flat 2D 透明底；程序生成原创像素图）。
     case BlockRegistry::Cobweb:        return "icon_cobweb.png";      // 蜘蛛网（cross 透明底；灰白蛛丝放射网纹；矿井散布）
     case BlockRegistry::Rail:          return "icon_rail.png";        // t644 铁轨（--from-pack flat 透明底：pack 直轨贴图，与放置态一致）
@@ -210,7 +210,7 @@ bool isPackDerivedIconFamily(quint8 id)
     case BlockRegistry::Dropper:         // t676 cube_front
     case BlockRegistry::Pumpkin:         // t675 cube_front
     case BlockRegistry::EnchantingTable: // t644 table（0.75 矮盒）
-    case BlockRegistry::EndPortal:       // t644 frame
+    case BlockRegistry::AbyssGate:       // t644 frame
     case BlockRegistry::Bookshelf:       // t644 cube
     case BlockRegistry::Rail:            // t644 flat
     case BlockRegistry::GoldenRail:      // t644 flat
@@ -613,10 +613,10 @@ QVariantList Hotbar::creativeMaterials() const
         // t485 火药（机制等价 MC 1.0 gunpowder）：杀潜行者（Stalker）掉落；TNT 合成原料（5 火药 + 4 沙 → 1 TNT）。
         //   创造调色板补全便于测试 TNT 合成 / 引爆。可堆叠 64；非方块 → 右键不放置。MaterialIcon 自绘火药图标。
         int(RecipeRegistry::GunpowderId),       // 火药：杀潜行者掉落；TNT 合成原料
-        // t487 末影之眼（机制等价 MC 1.0 ender eye）：要塞宝藏箱战利品 + 创造调色板补全（便于测试激活传送门）。
-        //   可堆叠 64；非方块（材料段）→ 右键不走方块放置，走 useBlock 末地传送门激活分支（placeBlock 检测命中
-        //   EndPortal + 持末影之眼 → 翻传送门 state bit0 激活）。MaterialIcon 自绘末影之眼图标（绿蓝球体 + 瞳孔）。
-        int(RecipeRegistry::EndEyeId),          // 末影之眼：要塞宝藏箱战利品；右键末地传送门激活（t487）
+        // t487 暗渊之眼（机制等价 MC 1.0 ender eye）：要塞宝藏箱战利品 + 创造调色板补全（便于测试激活传送门）。
+        //   可堆叠 64；非方块（材料段）→ 右键不走方块放置，走 useBlock 暗渊门激活分支（placeBlock 检测命中
+        //   AbyssGate + 持暗渊之眼 → 翻传送门 state bit0 激活）。MaterialIcon 自绘暗渊之眼图标（绿蓝球体 + 瞳孔）。
+        int(RecipeRegistry::EndEyeId),          // 暗渊之眼：要塞宝藏箱战利品；右键暗渊门激活（t487）
         // t507 木碗 + 蘑菇汤（机制等价 MC 1.0 bowl / mushroom stew）：生存由合成获得（碗=3 木板 V 形 / 蘑菇汤=碗+红+白
         //   蘑菇），创造调色板补全便于测试食用。木碗可堆叠 64；蘑菇汤 maxStack=1（碗装液体食物不可叠，同铁桶族）。
         //   非方块（材料段）→ 右键不放置（蘑菇汤走「食用」分支：长按右键累积进食 +10 饥饿，食完返空碗）。
@@ -640,7 +640,7 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::PaintingId),         // 画作：8 木棒+1 羊毛合成；右键墙贴画（t720/t721）
         // t726 暗渊链路（机制等价 MC 1.0 ender pearl / blaze powder / blaze rod / ender eye passive）：
         //   夜行者死亡掉暗渊珠（t727）→ 燃烬棒（怒焰人掉落，未来实体）冶炼成燃烬粉 → 暗渊珠 + 燃烬粉
-        //   合成暗渊之眼（复用 EndEyeId 0x23A：见 t487 末影之眼——同一机制的被动/暗渊眼即其同源产物）。
+        //   合成暗渊之眼（复用 EndEyeId 0x23A：见 t487 暗渊之眼——同一机制的被动/暗渊眼即其同源产物）。
         //   创造调色板补全便于测试整条合成链（destructive-test 直接取原料合眼）。可堆叠 64（走材料段默认）；
         //   非方块 → 右键不放置。MaterialIcon 自绘图标（珠=深青绿圆珠 粉=橙黄火粉堆 棒=橙黄火棒）。
         int(RecipeRegistry::EnderPearlId),       // 暗渊珠：杀夜行者掉落；与燃烬粉合成暗渊之眼（t726/t727）
@@ -918,12 +918,12 @@ QVariantList Hotbar::creativeBlocks() const
              //   silverfish stone / monster egg）。要塞书房散布；创造取用可自建「看似石砖实为虫巢」陷阱。
              //   紧随石砖系列（外表同族，破坏行为异）。
              int(BlockRegistry::MonsterEgg),                                 // 怪物蛋（石砖形；瞬破出蠹虫）
-             // t634 末地传送门（EndPortal，endframe 化 t620）：进创造调色板（用户「末地传送门的框架在创造背包没找到」
+             // t634 暗渊门（AbyssGate，endframe 化 t620）：进创造调色板（用户「末地传送门的框架在创造背包没找到」——§9 记载：历史用户原话，今名暗渊门框架）
              //   ——要塞传送门房祭坛可直接取用 / 自建末地祭坛测试）。放置正常（ShapeFull 整格 / setBlock 空气格路径）；
              //   破坏：创造瞬破（t141 基岩同款，drop=false 无掉落——原方块 dropId=0 本就不掉）；生存不可破
-             //   （hardness=-1，同基岩）。右键交互不变（持末影之眼 → 激活 state bit0；不持 → 无效应）。
+             //   （hardness=-1，同基岩）。右键交互不变（持暗渊之眼 → 激活 state bit0；不持 → 无效应）。
              //   紧随要塞石砖系列（同为要塞结构族）。
-             int(BlockRegistry::EndPortal),                                  // 末地传送门（末影祭坛；末影之眼右键激活；创造可放/瞬破）
+             int(BlockRegistry::AbyssGate),                                  // 暗渊门（暗渊祭坛；暗渊之眼右键激活；创造可放/瞬破）
              // t760 刷怪笼（Spawner）进创造调色板（此前缺失：worldgen 专属方块，玩家只能挖到却拿不到——中键
              //   复制出的 item 也因无图标显透明）。机制等价 MC 1.0 刷怪笼：玩家在附近时周期性在笼周刷一只
              //   敌对 mob（地牢=僵尸/骷髅系，要塞=蠹虫，见 EntityManager::tickSpawners），破坏后停止刷怪
@@ -941,7 +941,7 @@ QVariantList Hotbar::creativeBlocks() const
 
 // ── t965 形态按钮组支持表（hotbar.h 声明处注释为完整契约）──
 //   state 值直读 BlockRegistry 具名位/常量（门 bit2 / 活板门 bit0 / 红石火把熄灭位 / 动力轨通电位 /
-//   末地框激活位 / 耕地湿润上界 / 作物阶段上界）——本表是「按钮 index → state」的唯一权威，
+//   暗渊框激活位 / 耕地湿润上界 / 作物阶段上界）——本表是「按钮 index → state」的唯一权威，
 //   QML 零复制（ResourceBrowser 经本查询建按钮组 + 驱动预览 state）。
 QVariantList Hotbar::blockFormStates(int blockId) const
 {
@@ -969,8 +969,8 @@ QVariantList Hotbar::blockFormStates(int blockId) const
     case BlockRegistry::GoldenRail: // 动力铁轨：未激活(0)/激活(GoldenRailStateOnFlag 通电亮金贴图)
         s = { 0, int(BlockRegistry::GoldenRailStateOnFlag) };
         break;
-    case BlockRegistry::EndPortal: // 末地传送门框架：无眼(0=放置缺省)/有眼(EndPortalStateActiveFlag)
-        s = { 0, int(BlockRegistry::EndPortalStateActiveFlag) };
+    case BlockRegistry::AbyssGate: // 暗渊门框架：无眼(0=放置缺省)/有眼(AbyssGateStateActiveFlag)
+        s = { 0, int(BlockRegistry::AbyssGateStateActiveFlag) };
         break;
     case BlockRegistry::WheatCrop: // 作物三族：生长阶段 0..7（共享 WheatCropStageMax 上界，t407 同机制）
     case BlockRegistry::CarrotCrop:
@@ -1113,9 +1113,9 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::BookId)          return QStringLiteral("书");     // 3 纸 + 1 皮革合成；附魔台 / 附魔书 / 书架材料
         // t485 火药（机制等价 MC 1.0 gunpowder）：杀潜行者（Stalker，机制等价 MC 苦力怕）掉落；TNT 合成原料（5 火药 + 4 沙 → 1 TNT）。
         if (blockId == RecipeRegistry::GunpowderId)   return QStringLiteral("火药"); // 杀潜行者掉落；TNT 合成原料
-        // t487 末影之眼（机制等价 MC 1.0 ender eye）：要塞宝藏箱战利品；右键末地传送门激活（末地预热占位）。
-        //   名称用通用词「末影之眼」、零 MC 专名（§9 区隔）。
-        if (blockId == RecipeRegistry::EndEyeId)      return QStringLiteral("末影之眼"); // 要塞宝藏箱战利品；激活末地传送门
+        // t487 暗渊之眼（机制等价 MC 1.0 ender eye）：要塞宝藏箱战利品；右键暗渊门激活（末地预热占位）。
+        //   名称用通用词「暗渊之眼」、零 MC 专名（§9 区隔）。
+        if (blockId == RecipeRegistry::EndEyeId)      return QStringLiteral("暗渊之眼"); // 要塞宝藏箱战利品；激活暗渊门
         // t567 指南针（材料段 0x23F；4 铁锭 + 1 红石合成；HUD 指针指向出生点）。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::CompassId)     return QStringLiteral("指南针"); // 4 铁锭+1 红石合成；HUD 指针指向出生点
         // t663 雪球名（用户「雪球无名字」——nameForBlock 漏返 → 图鉴 / tooltip 空串）：铲挖雪层 / 雪块 /

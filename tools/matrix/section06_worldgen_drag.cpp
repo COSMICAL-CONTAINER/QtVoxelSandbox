@@ -1306,9 +1306,9 @@ Item {
 
     // ── P-t965 形态切换按钮组系统探针（R19.17 🅴；用户第五轮口径「变体面板扩展成编号按钮组（1 2 3…
     //    默认最普通形态）——耕地干/湿两态、门+活板门未激活/激活、草丛低/中/高三态、红石火把亮/灭、
-    //    动力铁轨未激活/激活、末地传送门框架有眼/无眼、作物（小麦/胡萝卜/马铃薯）生长阶段」）──
+    //    动力铁轨未激活/激活、暗渊门框架有眼/无眼、作物（小麦/胡萝卜/马铃薯）生长阶段」）──
     //    支持清单核实结论（state 表达方式逐项核自数据层实现，无臆造 API；无末地主题方块缺席项——
-    //    末地传送门框架即 EndPortal=111，state bit0 = 末影之眼放眼位）：
+    //    暗渊门框架即 AbyssGate=111，state bit0 = 暗渊之眼放眼位）：
     //      耕地 23 = state 低 2 位湿润等级（干 0 / 湿 3 最深；顶瓦 26/27）
     //      门三族 19/89/135 = state bit2 开合（合 0 / 开 4；薄板几何换边）——135 系 t965 订正（旧
     //        家族表字面量 71 是错 id=青色羊毛）
@@ -1359,7 +1359,7 @@ Item {
             { int(BR::TallGrass),     3, int(BR::TallGrassShort), int(BR::TallGrassMedium), int(BR::TallGrassTall) },
             { int(BR::RedstoneTorch), 2, 0, int(BR::RedstoneTorchStateOffFlag), int(BR::RedstoneTorchStateOffFlag) },
             { int(BR::GoldenRail),    2, 0, int(BR::GoldenRailStateOnFlag),   int(BR::GoldenRailStateOnFlag) },
-            { int(BR::EndPortal),     2, 0, int(BR::EndPortalStateActiveFlag), int(BR::EndPortalStateActiveFlag) },
+            { int(BR::AbyssGate),     2, 0, int(BR::AbyssGateStateActiveFlag), int(BR::AbyssGateStateActiveFlag) },
             { int(BR::WheatCrop),     int(BR::WheatCropStageMax) + 1, 0, 1, int(BR::WheatCropStageMax) },
             { int(BR::CarrotCrop),    int(BR::WheatCropStageMax) + 1, 0, 1, int(BR::WheatCropStageMax) },
             { int(BR::PotatoCrop),    int(BR::WheatCropStageMax) + 1, 0, 1, int(BR::WheatCropStageMax) },
@@ -1482,10 +1482,10 @@ Item {
         {
             // BlockCube 顶面态变（顶面 = 面 2 → 顶点 8..11；顶点第 4 float = u）。
             BlockCube bc;
-            bc.setBlockId(int(BR::EndPortal));
+            bc.setBlockId(int(BR::AbyssGate));
             bc.setBlockState(0);
             const int epNoEye = tileOfU965(cubeVtxU(bc.vertexData(), 8));
-            bc.setBlockState(int(BR::EndPortalStateActiveFlag));
+            bc.setBlockState(int(BR::AbyssGateStateActiveFlag));
             const int epEye = tileOfU965(cubeVtxU(bc.vertexData(), 8));
             okB965 = okB965 && epNoEye == 141 && epEye == 142;
             // 耕地干(0) 26 ↔ 湿(3 最深) 27。

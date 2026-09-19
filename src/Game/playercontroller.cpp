@@ -1696,7 +1696,7 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
                                 || brokenId == BlockRegistry::PotatoCrop
                                 || brokenId == BlockRegistry::SnowLayer // t505 雪层按 state 掉 (state+1) 雪球
                                 || brokenId == BlockRegistry::Painting // t721 画：state 带 face/index（连通域移除用）
-                                || brokenId == BlockRegistry::NetherPortal) // t725 门：state 带 axis（连通域熄灭用）
+                                || brokenId == BlockRegistry::EmberGate) // t725 门：state 带 axis（连通域熄灭用）
         ? m_world->stateAt(x, y, z) : quint8(0);
     // t506 冰（Ice）生存挖掘 → 生成水方块（机制等价 MC 1.0 冰破成水）：精准采集（SilkTouch）→ 走通用 silk 分支
     //   掉 Ice 自身（line ~1007），不在此处理；非精准采集 → 破冰格置水源（Water state=0）而非 Air。PackIce /
@@ -1725,7 +1725,7 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     if (brokenId == BlockRegistry::Painting) {
         const int face = (brokenState & BlockRegistry::PaintingStateFaceMask)
                          >> BlockRegistry::PaintingStateFaceShift;
-        // t837①：removePaintingAt 已自本类下沉 World 层单一权威（t806 removeNetherPortalAt 同模式；Game 层
+        // t837①：removePaintingAt 已自本类下沉 World 层单一权威（t806 removeEmberGateAt 同模式；Game 层
         //   调 World 向下合法）。掉落改由 World 侧 blockDroppedAsItem 信号驱动（Main.qml spawnItem 同链）。
         m_world->removePaintingAt(x, y, z, face, /*drop=*/drop);
         // 画作无支撑依赖其它画（画格连通域已随 removePaintingAt 全清）→ 无需再扫邻；但破的画格本身
@@ -1737,12 +1737,12 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
         return; // 画特判收口：不走通用掉落 / 级联链
     }
     // t725 余烬门直挖熄灭（机制等价 MC 1.0 破坏传送门任一格 → 整扇门消失）：本格已被上方 setBlock 清 Air，
-    //   余格经 World::removeNetherPortalAt 按 brokenState 的 axis flood-fill 静默清（t806 自本类下沉 World 层
+    //   余格经 World::removeEmberGateAt 按 brokenState 的 axis flood-fill 静默清（t806 自本类下沉 World 层
     //   单一权威；同画 t721 模式——多格逐格 blockBroken 会刷粒子/音风暴）。门无物品形态（dropId=0）→ 无
     //   掉落。之后**不再进通用掉落链**（通用 dropId=0 路径 spawnItem 对 id<=0 已守卫不产出，但提前收口免
     //   无谓扫描；本格 setBlock 已发一次 blockBroken 粒子/音）。门格不依赖门框（直挖是玩家拆门本身）→ 不再扫邻。
-    if (brokenId == BlockRegistry::NetherPortal) {
-        m_world->removeNetherPortalAt(x, y, z, int(brokenState & 1));
+    if (brokenId == BlockRegistry::EmberGate) {
+        m_world->removeEmberGateAt(x, y, z, int(brokenState & 1));
         emit playerMined(x, y, z, int(brokenId), drop);
         if (m_mode == Survival && m_hotbar) m_hotbar->damageSelectedItem(); // 同通用路径：生存破块工具 -1 耐久
         emit swingArm();
@@ -1803,15 +1803,15 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     // t851 活板门 / 门失撑掉落：正上方活板门（四邻+下方全失实体面）/ 门下扇（失去齐平地面）→ 级联
     //   掉落为物品。支撑判定与放置预检同谓词；门直破本体走上方配对联动不经此（防双掉）。
     dropUnsupportedDoorsAround(x, y, z);
-    // t725 余烬门门框失撑熄灭：破块后扫 6 邻的 NetherPortal，各自经连通域熄灭整扇门（t806 自本类下沉
-    //   World::breakNetherPortalsAround 单一权威；尺寸无关——连通域天然覆盖 2×3..21×21 任意门，t848）。破**黑曜石
+    // t725 余烬门门框失撑熄灭：破块后扫 6 邻的 EmberGate，各自经连通域熄灭整扇门（t806 自本类下沉
+    //   World::breakEmberGatesAround 单一权威；尺寸无关——连通域天然覆盖 2×3..21×21 任意门，t848）。破**黑曜石
     //   门框**任一承重格即断结构（门格只与门框格 / 门格相邻；角块与门格对角不邻 → 破角不碎门，与检测
     //   不查角两侧自洽）；破其它方块邻接门格（如门内放火把旁的门格）同样熄——门格邻格恒是结构格
     //   （黑曜石 / 门格 / 内腔空气），被破即失效，机制等价 MC 门框完整性。恒熄（含创造，结构后果非掉落，
     //   同叶衰语义）。
     //   review #27（Review 2026-08-23 低危）：钩子已并入 World 写入钩子族（setBlock×2 / setBlockSilent /
     //   clearBlockSilent / setWaterSilent / setBlockFromEntity / destroySphereSilent / dropGravityColumn
-    //   —— 对照 checkEndPortalIntegrity 模式），本处 finishMiningAt 开头的 setBlock(Air) 已触发同一钩子，
+    //   —— 对照 checkAbyssGateIntegrity 模式），本处 finishMiningAt 开头的 setBlock(Air) 已触发同一钩子，
     //   显式调用删除（单一权威防双份语义漂移）。
     // t247 草丛 / 小麦作物失撑掉落：破块后其正上方的草丛 / 小麦作物（唯一支撑 = 本格，刚被破为 Air）
     //   直接掉落（同火把失撑语义）。brokenState 已在 setBlock(Air) 前读（WheatCrop 在上 / 普通块 = 0），
@@ -2295,11 +2295,11 @@ bool PlayerController::tryPlacePainting(int face)
 //   checkPaintingSupportOnEdit）已整体下沉 World 层单一权威（t806 余烬门三件套同模式——失撑钩子并入
 //   World 写入钩子族后，爆炸 / 焚毁 / 岩浆吞墙等系统拆墙路径与玩家挖掘同口径掉画，此前仅玩家路径覆盖）。
 //   实现见 world.cpp；调用点：finishMiningAt 直挖画格分支（World::removePaintingAt）。
-// t725→t806 余烬门三件套（tryIgniteNetherPortal 点燃检测 / removeNetherPortalAt 连通域熄灭 /
-//   breakNetherPortalsAround 门框失撑熄灭）已整体下沉 World 层单一权威（t806 泛化 + t848 内腔 2×3..21×21 +
-//   四角可选；同末地门三件套模式）—— 实现见 world.cpp；调用点：placeBlock 打火石分支
-//   （World::tryIgniteNetherPortal）/ finishMiningAt 直挖门格分支（World::removeNetherPortalAt）。
-//   review #27：breakNetherPortalsAround 已并入 World 写入钩子族（setBlock×2 / setBlockSilent /
+// t725→t806 余烬门三件套（tryIgniteEmberGate 点燃检测 / removeEmberGateAt 连通域熄灭 /
+//   breakEmberGatesAround 门框失撑熄灭）已整体下沉 World 层单一权威（t806 泛化 + t848 内腔 2×3..21×21 +
+//   四角可选；同暗渊门三件套模式）—— 实现见 world.cpp；调用点：placeBlock 打火石分支
+//   （World::tryIgniteEmberGate）/ finishMiningAt 直挖门格分支（World::removeEmberGateAt）。
+//   review #27：breakEmberGatesAround 已并入 World 写入钩子族（setBlock×2 / setBlockSilent /
 //   clearBlockSilent / setWaterSilent / setBlockFromEntity / destroySphereSilent / dropGravityColumn
 //   —— 玩家挖掘经 setBlock 自动触发，系统路径同口径），finishMiningAt 不再显式调。
 
@@ -3582,7 +3582,7 @@ void PlayerController::placeBlock()
     //   只绕过「开界面」类 useBlock（工作台 / 熔炉 / 箱子 / 附魔台 / 铁砧；review0909 #2 补音符盒；
     //   t1034 存量清偿再补门 / 活板门 / 床——潜行持方块 = 放置语义优先于开合 / 翻板 / 入睡，MC「潜行右键 =
     //   对方块面放置」旁路口径统一）。机关（拉杆 / 按钮）t1046 补旁路（parity 台账低-3，t1034 同式）：
-    //   潜行持方块右键机关 = 对面放置而非扳动；浆果丛 / 末地门 / 传送门等其它 useBlock 仍**不绕过**
+    //   潜行持方块右键机关 = 对面放置而非扳动；浆果丛 / 暗渊门 / 传送门等其它 useBlock 仍**不绕过**
     //   （非「容器 UI / 开合 / 入睡 / 调音 / 机关」语义，shift 不改变其交互）。
     //   t1050（Review_2026-09-15 #2，用户「一切按 MC 原版」裁决）纠偏：旁路收窄为**手持可放置方块
     //   才旁路**——sneakPlaceBlock = sneakPlace && m_selectedBlock != Air（selectedBlock 经 hotbar
@@ -3770,27 +3770,27 @@ void PlayerController::placeBlock()
             return; // 采摘成功 → 不再走放置路径
         }
     }
-    // t487/t664 末影之眼激活末地传送门（t664 正确形态：12 格**末地传送门框架**（EndPortal=111）环 +
-    //   t664 门面（EndPortalSurface=131）薄星平面；机制等价 MC 1.0 持末影之眼右键各框架放眼激活）。
-    //   右键命中格为末地传送门框架 + 手持末影之眼物品（EndEyeId）→ 翻 state bit0（EndPortalStateActiveFlag，
+    // t487/t664 暗渊之眼激活暗渊门（t664 正确形态：12 格**暗渊门框架**（AbyssGate=111）环 +
+    //   t664 门面（AbyssGateSurface=131）薄星平面；机制等价 MC 1.0 持暗渊之眼右键各框架放眼激活）。
+    //   右键命中格为暗渊门框架 + 手持暗渊之眼物品（EndEyeId）→ 翻 state bit0（AbyssGateStateActiveFlag，
     //   mesher 切激活贴图 endframe_eye）+ qInfo 日志。激活后检查该框架所属环：12 框架**全部激活** →
-    //   World::tryOpenEndPortal 在 3×3 内圈生成门面（薄黑色星平面，光 15，通往另一宇宙观感；末地维度仍
-    //   留占位）。生存消耗 1 末影之眼（创造不耗，同桶 / 食物 / 种子模式）。优先于放置（右键框架即激活，
+    //   World::tryOpenAbyssGate 在 3×3 内圈生成门面（薄黑色星平面，光 15，通往另一宇宙观感；暗渊维度仍
+    //   留占位）。生存消耗 1 暗渊之眼（创造不耗，同桶 / 食物 / 种子模式）。优先于放置（右键框架即激活，
     //   不另放块）。
     //   分层（PLAN §2）：激活属 Game/Physics（读射线命中 + 写 World state + 调 World 打开门面 + 写 Hotbar VM）。
-    if (BlockRegistry::isEndPortal(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))
+    if (BlockRegistry::isAbyssGate(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))
         && m_hotbar && m_hotbar->selectedItemId() == RecipeRegistry::EndEyeId) {
         const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
-        if ((st & BlockRegistry::EndPortalStateActiveFlag) == 0) { // 仅未激活时激活（防重复激活刷消耗）
-            m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::EndPortal,
-                              quint8(st | BlockRegistry::EndPortalStateActiveFlag));
+        if ((st & BlockRegistry::AbyssGateStateActiveFlag) == 0) { // 仅未激活时激活（防重复激活刷消耗）
+            m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::AbyssGate,
+                              quint8(st | BlockRegistry::AbyssGateStateActiveFlag));
             if (m_mode == Survival)
-                m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 末影之眼（创造不耗 → 无限激活）
+                m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 暗渊之眼（创造不耗 → 无限激活）
             // t664 开环：激活的框架属于哪个环（环中心 ∈ 本格 ±2 水平，3×3 内圈中心与框架相距 ≤2）。
-            //   对每个候选中心尝试打开 —— tryOpenEndPortal 内部验 12 框架全激活才开，未满则 no-op。
+            //   对每个候选中心尝试打开 —— tryOpenAbyssGate 内部验 12 框架全激活才开，未满则 no-op。
             for (int cx = m_hitBx - 2; cx <= m_hitBx + 2; ++cx) {
                 for (int cz = m_hitBz - 2; cz <= m_hitBz + 2; ++cz) {
-                    if (m_world->tryOpenEndPortal(cx, m_hitBy, cz)) {
+                    if (m_world->tryOpenAbyssGate(cx, m_hitBy, cz)) {
                         qInfo() << "end portal opened at" << cx << m_hitBy << cz
                                 << "(end dimension deferred - placeholder)"; // 末地预热占位（门面已开，维度留后续）
                     }
@@ -3799,7 +3799,7 @@ void PlayerController::placeBlock()
             m_lastPlaceMs = now;
             emit swingArm();
             qInfo() << "end portal frame activated at" << m_hitBx << m_hitBy << m_hitBz
-                    << "(end dimension deferred - placeholder)"; // 末地预热占位（日志，不实现末地维度）
+                    << "(end dimension deferred - placeholder)"; // 末地预热占位（日志，不实现暗渊维度）
         }
         return; // 已是激活态 → 右键无效应（不重复消耗 / 不放置），机制等价 MC 已激活框架无法再插眼
     }
@@ -4068,10 +4068,10 @@ void PlayerController::placeBlock()
     }
     // t729 暗渊之眼掷出（用户「直接右键的话是可以放出来生成他的实体，一样的贴图，并且会飞向最近的地下要塞结构的
     //   地方，就是那个3×3的传送门的地方移动一定的距离之后...重新变化为掉落物，或者直接碎掉」；机制等价 MC 1.0
-    //   末影之眼 ender eye）：手持 EndEyeId（0x23A，t726 合成产物）右键 → 从眼位朝**最近要塞末地传送门**掷出（t757 两段式：远段升空指示 / 近段下探，初速方向随段取）
+    //   暗渊之眼 ender eye）：手持 EndEyeId（0x23A，t726 合成产物）右键 → 从眼位朝**最近要塞暗渊门**掷出（t757 两段式：远段升空指示 / 近段下探，初速方向随段取）
     //   暗渊之眼（EntityManager::spawnEnderEye），速度 ~kEnderEyeUseSpeed=4（EntityManager::kEnderEyeSpeed 是 private
     //   不能跨层读，故本层自定同值常量，同箭/雪球本地常量模式）。朝向 = player眼位 → world.strongholdPortal* 中心格
-    //   的水平方向 + 略向上偏置（机制等价 MC 末影之眼飞行略升）→ 归一化 × 速度。World::hasStronghold() 无要塞（世界
+    //   的水平方向 + 略向上偏置（机制等价 MC 暗渊之眼飞行略升）→ 归一化 × 速度。World::hasStronghold() 无要塞（世界
     //   未建 / 空）→ 任意方向坠落（兜底不崩）。眼睛飞行 kEnderEyeDist 后 80% 变掉落物（可捡回）/ 20% 碎裂无掉落；
     //   玩家朝要塞方向走多次使用可逐步逼近（本工程单要塞）。**不要求 m_hasHit**（瞄准的是传送门方向非方块命中格）；
     //   眼睛非方块（材料段）→ selectedBlock 归 Air，须在 `m_selectedBlock == Air` 守卫之前分流（同雪球/蛋/生物蛋
@@ -4099,7 +4099,7 @@ void PlayerController::placeBlock()
                     //   tick 压平 → 白窜一段。初速即远段巡航方向，起爬弧度全交实体端，两层单一口径。）
                     dir = QVector3D(pdx / horizDist, 0.0f, pdz / horizDist);
                 } else {
-                    // 近段：直线朝传送门中心 + 略升（机制等价 MC 末影之眼飞距略升；tick 已不叠加，仅此初速含）
+                    // 近段：直线朝传送门中心 + 略升（机制等价 MC 暗渊之眼飞距略升；tick 已不叠加，仅此初速含）
                     dir = QVector3D(pdx, float(m_world->strongholdPortalY()) - eye.y(), pdz).normalized();
                     dir.setY(dir.y() + 0.25f);
                     dir = dir.normalized();
@@ -4513,9 +4513,9 @@ void PlayerController::placeBlock()
     //   打火石非方块（工具段 id>=0x100）→ selectedBlock 归 Air，须在 `m_selectedBlock == Air` 守卫之前分流
     //   （同桶 / 剪刀 / 玻璃模式）。spectator 已被入口 canPlace() 守卫拦截；Creative / Survival 均可点火。
     //   分层（PLAN §2）：点火属 Game/Physics（读射线命中 + 写 World + 写 Hotbar VM），不改 setBlock 语义。
-    //   t725 余烬门优先：先 World::tryIgniteNetherPortal 检测黑曜石门框（t806 泛化 + t848 上限：内腔
+    //   t725 余烬门优先：先 World::tryIgniteEmberGate 检测黑曜石门框（t806 泛化 + t848 上限：内腔
     //   2×3 最小 .. 21×21 最大 = 框外沿 23×23（MC 1.0 上限）、四角可选、边柱可共享，X/Z 平面各试）——
-    //   命中 → 开口整面填 NetherPortal 门面（机制等价 MC 1.0
+    //   命中 → 开口整面填 EmberGate 门面（机制等价 MC 1.0
     //   黑曜石框内点燃传送门，v1 仅 2×3 的检测已下沉 World 层单一权威）；未命中 → 回退普通 Fire 点燃
     //   （原 t724 语义不变）。两路均消耗耐久 / 挥手（机制等价 MC 点燃失败生火同样耗打火石）。
     //   t841/t846 前置守卫：命中已是立地火 / 燃烧态方块 → 幂等拒绝（不消耗不挥手，火上不可叠火）；命中
@@ -4594,7 +4594,7 @@ void PlayerController::placeBlock()
             const int fx = m_hitBx + m_hitNx, fy = m_hitBy + m_hitNy, fz = m_hitBz + m_hitNz;
             if (fy >= 0 && fy < m_world->height()
                 && m_world->blockAt(fx, fy, fz) == BlockRegistry::Air) { // ==Air 门：含水落火格天然被拒
-                const bool portalLit = m_world->tryIgniteNetherPortal(fx, fy, fz); // t806 先试门框（成门 → 开口整面 NetherPortal）
+                const bool portalLit = m_world->tryIgniteEmberGate(fx, fy, fz); // t806 先试门框（成门 → 开口整面 EmberGate）
                 if (!portalLit)
                     m_world->setBlock(fx, fy, fz, BlockRegistry::Fire, 0); // state=0（火无 state 语义）
                 if (m_mode == Survival) m_hotbar->damageSelectedItem(); // 生存 -1 耐久（创造不耗）
@@ -8282,13 +8282,13 @@ void PlayerController::step(qreal dt)
         // m_burning 翻转才 emit（避免每帧抖 QML 绑定，同 eyeInWater 模式）。
         if ((m_fireTimer > 0.0f) != m_burning) { m_burning = !m_burning; emit burningChanged(); }
         // t725 余烬门站入灼烧（dev-plan v1 降级：**无下界维度**——本工程单维度，站门格内持续灼烧替代传送；
-        //   机制对标 MC 1.0 下界传送门站立伤害的降级语义）。独立 ~1s 累积器（不复用 m_fireTimer——那是
+        //   机制对标 MC 1.0 下界传送门站立伤害的降级语义——§9 记载）。独立 ~1s 累积器（不复用 m_fireTimer——那是
         //   t344 随机熄灭路径，掺入会让门伤时有时无，同 t351「伤害时有时无」教训）：脚位 / 眼位格任一 ==
-        //   NetherPortal → 累积 ≥1s 扣 1HP（fallDamageTaken(1, Fire) 复用红闪 / 视角晃链，死因=燃烧）；
+        //   EmberGate → 累积 ≥1s 扣 1HP（fallDamageTaken(1, Fire) 复用红闪 / 视角晃链，死因=燃烧）；
         //   离开门格累积器归零（不跨门段累积）。
         bool inPortal = false;
-        if (footY >= 0 && m_world->blockAt(fx, footY, fz) == BlockRegistry::NetherPortal) inPortal = true;
-        if (!inPortal && eyeY >= 0 && m_world->blockAt(fx, eyeY, fz) == BlockRegistry::NetherPortal)
+        if (footY >= 0 && m_world->blockAt(fx, footY, fz) == BlockRegistry::EmberGate) inPortal = true;
+        if (!inPortal && eyeY >= 0 && m_world->blockAt(fx, eyeY, fz) == BlockRegistry::EmberGate)
             inPortal = true;
         if (inPortal) {
             m_portalBurnTimer += float(dt);

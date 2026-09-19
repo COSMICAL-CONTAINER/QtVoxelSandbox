@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""生成末地传送门方块的贴图（16×16 像素，原创自绘，§9 override (a)）。
+"""生成暗渊门方块的贴图（16×16 像素，原创自绘，§9 override (a)）。
 
-t487 要塞传送门房中央方块（机制等价 MC 1.0 end portal——末地传送门平面；§9 区隔：末地为通用描述词，
+t487 要塞传送门房中央方块（机制等价 MC 1.0 end portal——暗渊门平面；§9 区隔：末地为通用描述词，
 机制对齐非 MC 专名照搬）。名称 / 贴图纯原创自绘（零 MC 资产）。
 
 视觉意图：读作「星空中的绿色传送门旋涡」——
   - 主体：深紫黑星空底（黑紫底 + 散布星点）。
   - 中心：亮绿色旋涡（同心方框环纹，从中心亮绿渐到外圈深绿）。
-  - 末激活版（end_portal）旋涡暗；激活版（end_portal_active）旋涡亮 + 中心高光（mesher 据 state bit0 切换）。
+  - 末激活版（abyss_gate）旋涡暗；激活版（abyss_gate_active）旋涡亮 + 中心高光（mesher 据 state bit0 切换）。
 
 输出（覆盖写入 textures/）：
-  default_end_portal.png          （tile 129，末地传送门未激活态各面同贴图）
-  default_end_portal_active.png   （tile 130，末地传送门激活态各面同贴图 —— 旋涡更亮 + 中心高光）
+  default_abyss_gate.png          （tile 129，暗渊门未激活态各面同贴图）
+  default_abyss_gate_active.png   （tile 130，暗渊门激活态各面同贴图 —— 旋涡更亮 + 中心高光）
 
 依赖：仅 PIL/numpy，无外部贴图。与 build_obsidian.py / build_enchanting_table.py 同风格（程序生成原创像素图）。
 """
@@ -51,7 +51,7 @@ def starfield_base():
 
 
 def draw_face(active):
-    """末地传送门面：深紫黑星空底 + 中心亮绿旋涡（active 控制旋涡亮度 + 中心高光）。
+    """暗渊门面：深紫黑星空底 + 中心亮绿旋涡（active 控制旋涡亮度 + 中心高光）。
 
     active=False（tile 129 未激活）：旋涡暗绿，中心无高光。
     active=True（tile 130 激活）：旋涡亮绿 + 中心白绿高光。
@@ -104,9 +104,9 @@ def save(arr, name):
 
 
 def main():
-    # 末地传送门各面同贴图（mesher 整立方路径 6 面统一用 tile 129/130 据 state bit0 选）。
-    save(draw_face(active=False), "default_end_portal")
-    save(draw_face(active=True), "default_end_portal_active")
+    # 暗渊门各面同贴图（mesher 整立方路径 6 面统一用 tile 129/130 据 state bit0 选）。
+    save(draw_face(active=False), "default_abyss_gate")
+    save(draw_face(active=True), "default_abyss_gate_active")
 
 
 if __name__ == "__main__":

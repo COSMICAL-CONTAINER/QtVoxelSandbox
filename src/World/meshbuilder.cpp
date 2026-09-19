@@ -151,14 +151,14 @@ static int tileFor(quint8 block, int face, quint8 state)
             return BlockRegistry::def(block).topTile;     // farmland_dry(26) —— 湿润由顶点色暗化体现
         return BlockRegistry::def(block).sideTile;        // 侧/底 = dirt(2)
     }
-    // t487/t620 末地传送门「末影祭坛化」per-face + 激活态：本工程无独立祭坛框方块，传送门方块本体兼作
-    //   末影祭坛（endframe 化）。侧·底 = endframe_side(140)（灰白细孔框身）恒定；顶面按 state bit0
-    //   （EndPortalStateActiveFlag，玩家持末影之眼右键翻）切换 endframe_top(141)（未放之眼：框面 +
+    // t487/t620 暗渊门「暗渊祭坛化」per-face + 激活态：本工程无独立祭坛框方块，传送门方块本体兼作
+    //   暗渊祭坛（endframe 化）。侧·底 = endframe_side(140)（灰白细孔框身）恒定；顶面按 state bit0
+    //   （AbyssGateStateActiveFlag，玩家持暗渊之眼右键翻）切换 endframe_top(141)（未放之眼：框面 +
     //   中央暗绿凹槽）→ endframe_eye(142)（已放之眼：框面 + 中央之眼亮纹，放之眼后的可见反馈）。
-    //   旧 t487 程序星空贴图（end_portal 129 / end_portal_active 130）仍在图集，但已无 BlockDef/tileFor
+    //   旧 t487 程序星空贴图（abyss_gate 129 / abyss_gate_active 130）仍在图集，但已无 BlockDef/tileFor
     //   引用（非 pack 程序回退改走 140..142 的 build_endframe.py 程序贴图）。
     //   t965：顶面态变选择收敛 BlockRegistry::stateTileOverride（查看器形态预览同源单一权威）。
-    if (block == BlockRegistry::EndPortal) {
+    if (block == BlockRegistry::AbyssGate) {
         const int overrideTile = BlockRegistry::stateTileOverride(block, face, state);
         return overrideTile >= 0 ? overrideTile : 140; // 顶 = 141/142（Core 态变权威）；侧/底 = endframe_side
     }
@@ -362,7 +362,7 @@ ChunkMeshData MeshBuilder::build(const ChunkMeshSnapshot &snap, Reason reason)
                     if (b == BlockRegistry::Torch) continue;       // 火把走 torchHost（QML Model）
                     if (b == BlockRegistry::Painting) continue;    // t720 画作走 paintingHost（QML delegate，贴图不进图集）——非 partial 非 cross，双 PASS 均跳过
                     if (b == BlockRegistry::Fire) continue;        // t724 火焰走 fireHost（QML delegate 两片对角交叉双面 quad + fire_strip 翻书）——非 partial 非 cross，双 PASS 均跳过
-                    if (b == BlockRegistry::NetherPortal) continue; // t725 余烬门走 portalHost（QML delegate 竖直平面 quad + portal_strip 翻书）——非 partial 非 cross，双 PASS 均跳过
+                    if (b == BlockRegistry::EmberGate) continue; // t725 余烬门走 portalHost（QML delegate 竖直平面 quad + portal_strip 翻书）——非 partial 非 cross，双 PASS 均跳过
                     if (b == BlockRegistry::Spawner) continue;    // t760 刷怪笼走 spawnerHost（QML delegate：BlockCube cutout 铁笼壳 + 笼内旋转迷你蠹虫）——整笼 delegate 渲染，双 PASS 均跳过
                     // t194：必须闭区间 [FirstPartial, LastPartial]。段后整立方（Chest=22）虽 id 更大但非异形
                     //   （ShapeFull，走 PASS 2 立方面）。旧单边 `b >= FirstPartial` 把 Chest 误路由进 PartialBlockGeometry
@@ -812,7 +812,7 @@ ChunkMeshData MeshBuilder::build(const ChunkMeshSnapshot &snap, Reason reason)
                             if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isAnvil(blk)) continue; // t766 铁砧三盒异形已在 PASS 1；不进整立方面（否则满格立方覆盖三盒造型，退回「上下各一半」观感）
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::Painting) continue; // t720 画作渲染走 paintingHost QML delegate（贴图不进图集）；立方面路径会把画格画成 tile 0 草顶立方
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::Fire) continue; // t724 火焰渲染走 fireHost QML delegate（fire_strip 翻书条带不进图集）；立方面路径会把火格画成 tile 0 草顶立方
-                            if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::NetherPortal) continue; // t725 余烬门渲染走 portalHost QML delegate（portal_strip 翻书不进图集）；立方面路径会把门格画成 tile 0 草顶立方
+                            if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::EmberGate) continue; // t725 余烬门渲染走 portalHost QML delegate（portal_strip 翻书不进图集）；立方面路径会把门格画成 tile 0 草顶立方
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::Spawner) continue; // t760 刷怪笼渲染走 spawnerHost QML delegate（BlockCube cutout 笼壳 + 旋转迷你蠹虫）；terrain 立方是 opaque 整壳会完全遮住笼内迷你蠹虫
                             const quint8 nb = snap.blockAtWorld(wx + F.dir[0], ly + F.dir[1], wz + F.dir[2]);
                             if (occludesNeighborFace(nb)) continue;        // t746 邻居实体 → 剔除（跨 chunk 路由正确）；叶邻不剔（防叶孔透视 void）
@@ -929,7 +929,7 @@ ChunkMeshData MeshBuilder::build(const ChunkMeshSnapshot &snap, Reason reason)
                         if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isAnvil(b)) continue; // t766 铁砧三盒异形已在 PASS 1；不进整立方面（greedy 同 culled 路径双保险）
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::Painting) continue; // t720 画作渲染走 paintingHost QML delegate（贴图不进图集）；不进整立方面
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::Fire) continue; // t724 火焰渲染走 fireHost QML delegate（fire_strip 翻书不进图集）；不进整立方面
-                        if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::NetherPortal) continue; // t725 余烬门渲染走 portalHost QML delegate（portal_strip 翻书不进图集）；不进整立方面
+                        if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::EmberGate) continue; // t725 余烬门渲染走 portalHost QML delegate（portal_strip 翻书不进图集）；不进整立方面
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::Spawner) continue; // t760 刷怪笼渲染走 spawnerHost QML delegate（BlockCube cutout 笼壳 + 旋转迷你蠹虫）；不进整立方面
                         for (int f = 0; f < 6; ++f) {
                             const FaceDef &F = kFaces[f];

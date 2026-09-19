@@ -84,7 +84,7 @@ Node {
     function burstEgg(px, py, pz) {
         burstFloat(px, py, pz, 6, "#f5efdd", 0.06, 1.5, 1.0, 1.2, 0.5, 6.0)
     }
-    // t729 暗渊之眼碎裂（机制等价 MC 末影之眼破裂无回收）：浅珠绿玻璃碎屑 + 小幅四散 + 弱重力（同雪沫碎裂
+    // t729 暗渊之眼碎裂（机制等价 MC 暗渊之眼破裂无回收）：浅珠绿玻璃碎屑 + 小幅四散 + 弱重力（同雪沫碎裂
     //   手感）。原点 = float 世界坐标（眼睛碎裂点，非方块格中心 → 不加 +0.5，同 burstSnowball 模式）。色为珠绿
     //   玻璃（对齐 entity_endereye 珠身绿；用户「直接碎掉的动画」→ 玻璃碎裂粒子 + delegate 缩小淡出双呈现）。
     //   数量少（8，小珠）。t729 delegate 检测 shatteringAt(index) 翻 true 时调。
@@ -417,7 +417,7 @@ Node {
             case 108: return "#7a7a7a" // stone_brick（石砖，石灰）
             case 109: return "#7a7a7a" // stone_brick_slab
             case 110: return "#7a7a7a" // stone_brick_stairs
-            case 111: return "#1a0a2a" // end_portal（末地传送门，深紫黑星空）
+            case 111: return "#1a0a2a" // abyss_gate（暗渊门，深紫黑星空）
             // ── 手动点火机关（id 112..114）──
             case 112: return "#6b4f2a" // lever（杠杆，木质底座棕）
             case 113: return "#6b4f2a" // wood_button（木按钮，棕）
@@ -441,7 +441,7 @@ Node {
             case 128: return "#8a8a8a" // detector_rail（探测铁轨，铁灰）
             case 129: return "#a83838" // redstone_torch（红石火把，红焰头）
             case 130: return "#a83838" // redstone_dust（红石粉导线，红粉）
-            case 131: return "#1a0a2a" // end_portal_surface（末地门面，深紫黑星空）
+            case 131: return "#1a0a2a" // abyss_gate_surface（暗渊门面，深紫黑星空）
             case 132: return "#7a7a7a" // monster_egg（怪物蛋，石砖灰；外表即石砖）
             // ── 云杉树叶（id 133）── t714 雪原云杉树冠针叶（深蓝绿）
             case 133: return "#3a6e55" // spruce_leaves（云杉树叶，深蓝绿针叶）
@@ -453,7 +453,7 @@ Node {
             // ── t806 余烬门（id 138）── 门色紫：创建（burstPlace 逐门格）/ 破坏（burstBreak 直挖门格）粒子
             //   原走 default 白（t513 表缺行）→ 改门主体紫（tools/build_portal.py mid=(122,32,178)=#7a20b2
             //   条带主体色，对齐门方块紫漩涡贴图；余格连通域静默清不发粒子同画 t721 模式不变）。
-            case 138: return "#7a20b2" // nether_portal（余烬门面片，门主体紫）
+            case 138: return "#7a20b2" // ember_gate（余烬门面片，门主体紫）
             default: return "#ffffff" // 未来新方块兜底（显白便于察觉缺色并补表）
         }
     }

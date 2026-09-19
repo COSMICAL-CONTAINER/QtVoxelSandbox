@@ -264,18 +264,18 @@ TILES = [
     "default_dispenser_front",    # 127 dispenser_front（发射器前面（排出口所朝面）贴图；石质灰底 + 中央暗腔排出口；
                                   #    Dispenser 前面=本 tile（mesher 据 state 选，同熔炉 tileFor 分支）；
                                   #    tools/build_dispenser.py 程序生成原创像素图）
-    # t487 要塞结构方块（机制等价 MC 1.0 要塞 stronghold 的石砖 / 末地传送门；名称 / 贴图全原创自绘 §9a）。
-    #   各由独立 build_*.py 程序生成原创像素图（石砖走 culled 立方面路径；末地传送门 solid=false 整立方）。
+    # t487 要塞结构方块（机制等价 MC 1.0 要塞 stronghold 的石砖 / 暗渊门；名称 / 贴图全原创自绘 §9a）。
+    #   各由独立 build_*.py 程序生成原创像素图（石砖走 culled 立方面路径；暗渊门 solid=false 整立方）。
     "default_stone_brick",        # 128 stone_brick（石砖各面同贴图；石质灰底 + 砖块缝纹网格；StoneBrick 各面=本 tile；
                                   #    StoneBrickSlab/StoneBrickStairs 经 tileIndex 取 sideTile 共享本 tile；
                                   #    机制等价 MC 1.0 stone brick——要塞墙体主体；tools/build_stone_brick.py 程序生成）
-    "default_end_portal",         # 129 end_portal（末地传送门未激活态各面贴图；深紫黑星空底 + 中心暗绿旋涡；EndPortal
+    "default_abyss_gate",         # 129 abyss_gate（暗渊门未激活态各面贴图；深紫黑星空底 + 中心暗绿旋涡；AbyssGate
                                   #    各面=本 tile，mesher 据 state bit0 选 129(未激活)/130(激活)；机制等价 MC 1.0 end portal
-                                  #    ——要塞传送门房中央；§9 区隔末地为通用描述词；tools/build_end_portal.py 程序生成）
-    "default_end_portal_active",  # 130 end_portal_active（末地传送门激活态各面贴图；深紫黑星空底 + 中心亮绿旋涡 + 白绿
-                                  #    高光；玩家持末影之眼右键传送门翻 state bit0 → mesher 切本 tile 显激活视觉；
-                                  #    不绑定方块 id（EndPortal def 各面=129），属 mesher 据 state 的呈现选择，非方块属性；
-                                  #    tools/build_end_portal.py 程序生成）
+                                  #    ——要塞传送门房中央；§9 区隔末地为通用描述词；tools/build_abyss_gate.py 程序生成）
+    "default_abyss_gate_active",  # 130 abyss_gate_active（暗渊门激活态各面贴图；深紫黑星空底 + 中心亮绿旋涡 + 白绿
+                                  #    高光；玩家持暗渊之眼右键传送门翻 state bit0 → mesher 切本 tile 显激活视觉；
+                                  #    不绑定方块 id（AbyssGate def 各面=129），属 mesher 据 state 的呈现选择，非方块属性；
+                                  #    tools/build_abyss_gate.py 程序生成）
     # t490 手动 TNT 点火机关方块（机制等价 MC 1.0 lever / wooden button / stone button；无红石故右键激活即点燃邻接
     #   TNT）。各由独立 build_lever_button.py 程序生成原创像素图（不透明贴地薄板，同 WoodPressurePlate 几何）。
     "default_lever",              # 131 lever（杠杆各面同贴图；木质底座 + 中央竖直扳柄 + 顶部圆柄头；右键扳动点燃邻接 TNT）
@@ -301,13 +301,13 @@ TILES = [
     #   tools/build_dropper.py 程序生成原创像素图（石质灰底 + 中央小方形暗孔，区别发射器的大暗腔）。
     "default_dropper_front",      # 139 dropper_front（投掷器前面（排出口）贴图；石质灰底 + 中央小方形暗孔；
                                   #    Dropper 前面=本 tile；tools/build_dropper.py 程序生成原创像素图）
-    # t620 末影祭坛（末地传送门框）三张（EndPortal 方块的 endframe 化视觉；机制等价 MC 1.0 end portal frame——
-    #   本工程无独立祭坛框方块，传送门方块本体兼作祭坛：侧=框身石纹 / 顶=框面（放末影之眼前）/ 顶(eye)=
-    #   框面 + 中央暗绿之眼合成图（放末影之眼激活态，mesher tileFor 据 state bit0 选）。tools/build_endframe.py
+    # t620 暗渊祭坛（暗渊门框）三张（AbyssGate 方块的 endframe 化视觉；机制等价 MC 1.0 end portal frame——
+    #   本工程无独立祭坛框方块，传送门方块本体兼作祭坛：侧=框身石纹 / 顶=框面（放暗渊之眼前）/ 顶(eye)=
+    #   框面 + 中央暗绿之眼合成图（放暗渊之眼激活态，mesher tileFor 据 state bit0 选）。tools/build_endframe.py
     #   程序生成原创像素图（非 pack 回退）。
     "default_endframe_side",      # 140 endframe_side（祭坛侧/底面贴图；灰白细孔框身石纹）
-    "default_endframe_top",       # 141 endframe_top（祭坛顶面贴图（未放末影之眼）；灰白框面 + 中央暗绿凹槽）
-    "default_endframe_eye",       # 142 endframe_eye（祭坛顶面贴图（已放末影之眼）；框面 + 中央之眼亮纹）
+    "default_endframe_top",       # 141 endframe_top（祭坛顶面贴图（未放暗渊之眼）；灰白框面 + 中央暗绿凹槽）
+    "default_endframe_eye",       # 142 endframe_eye（祭坛顶面贴图（已放暗渊之眼）；框面 + 中央之眼亮纹）
     # t620 门上下半 per-face 贴图（机制等价 MC 1.0 门两格高：下格门板 / 上格带窗。PartialBlockGeometry door
     #   case 据 state bit3（上/下格）选 tile；kDefs topTile=upper / bottomTile=lower。tools/build_door.py
     #   程序生成原创像素图（非 pack 回退）。
