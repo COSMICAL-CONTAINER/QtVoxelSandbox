@@ -153,13 +153,19 @@ void MatrixRun::section08_recent()
     //     mesh 段的 worker 列[chunkgeometry 交付回调计数 meshNworker]。白名单扫描零变化：仍
     //     仅 std::thread、仍仅双文件白名单——W4 零新增线程原语落点[复用 meshworker.h]；任何
     //     新增线程原语文件/记号仍必须同变更更新本探针，防「F3 谎报 / 野线程潜入」。
+    //     t1064 四修（同变更修订，非放宽——按上行登记程序转正第三落点）：Game/savebridge.cpp
+    //     携 QThread 记号 = 退出存档退避的**有界同步 sleep**（QThread::msleep 单点，≤300ms 一
+    //     档；零线程孵化、F3 线程计数事实零变化），白名单扩为三落点且第三落点记号钉死 QThread
+    //     （其余记号仍禁入该文件）；savebridge.cpp 其余面（探锁/台账读）不含任何扫描记号。
     runLegMulti({ "t1023c sync-meshing fact pin (t906 recheck; R20.12 amended, dual-site; W4"
-        " amended): src tree threading-primitive hits (QThreadPool/QThread/QtConcurrent/QF"
-        "uture/moveToThread/std::thread/std::async) are sanctioned only in the dual-file wh"
+        " amended; t1064 amended three-site): src tree threading-primitive hits (QThreadPool/QThread/QtConcurrent/QF"
+        "uture/moveToThread/std::thread/std::async) are sanctioned only in the three-site wh"
         "itelist World/backgroundgeneration.h (background generation worker) + World/meshw"
         "orker.h (worker meshing executor, now production-wired by the W4 sparse-session ho"
         "st gamesession.h -- zero new primitive sites) with std::thread (both workers ban Q"
-        "Object, see their headers), and the F3 line 'threads: 0/0 (sync meshing)' stays p"
+        "Object, see their headers) + Game/savebridge.cpp with QThread for the exit-save"
+        " backoff's bounded single-step sleep (msleep only, zero thread spawn, the F3"
+        " thread-count fact untouched), and the F3 line 'threads: 0/0 (sync meshing)' stays p"
         "inned as the FIXED-world fact (the app's only world mode until W5: meshing is sti"
         "ll synchronous on the GUI thread via ChunkGeometry direct-connected slots; sparse"
         " streaming worlds report their async meshing via the win-line worker column counte"
@@ -185,7 +191,12 @@ void MatrixRun::section08_recent()
             const QString kSanctionedBg = QStringLiteral("World/backgroundgeneration.h"); // R20.12 后台 GenerationJob worker
             const QString kSanctionedMw = QStringLiteral("World/meshworker.h"); // D6 MeshWorker（MeshBuilder 线程化执行器，生产零接线）
             const QString kSanctionedTok = QStringLiteral("std::thread");
-            int files = 0, hits = 0, sanctionedBgHits = 0, sanctionedMwHits = 0;
+            // t1064 第三落点（同变更转正，非放宽）：savebridge.cpp 携 QThread = 退出存档退避的
+            //   有界同步 sleep（msleep 单点，零线程孵化、F3 线程计数事实零变化）；其余记号仍禁入。
+            const QString kSanctionedSb = QStringLiteral("Game/savebridge.cpp");
+            const QString kSanctionedSbTok = QStringLiteral("QThread");
+            int files = 0, hits = 0, sanctionedBgHits = 0, sanctionedMwHits = 0,
+                sanctionedSbHits = 0;
             QString hitDetail;
             QDirIterator it(srcRoot, { QStringLiteral("*.cpp"), QStringLiteral("*.h") },
                             QDir::Files, QDirIterator::Subdirectories);
@@ -202,6 +213,8 @@ void MatrixRun::section08_recent()
                         if (tok == kSanctionedTok) {
                             if (rel == kSanctionedBg) ++sanctionedBgHits; // 受认可落点①
                             else if (rel == kSanctionedMw) ++sanctionedMwHits; // 受认可落点②
+                        } else if (tok == kSanctionedSbTok) {
+                            if (rel == kSanctionedSb) ++sanctionedSbHits; // 受认可落点③（t1064 msleep-only）
                         }
                     }
                 }
@@ -213,20 +226,24 @@ void MatrixRun::section08_recent()
                                 .contains(QStringLiteral("threads: 0/0 (sync meshing)"));
             // 命中面 = 全部命中都在受认可落点（且**每个**白名单落点在场 ≥1 命中——防「worker
             // 文件被挪走后事实钉空转」）；F3 行照常钉（mesher 生产路径仍同步）。
-            const int sanctionedHits = sanctionedBgHits + sanctionedMwHits;
-            const bool everySanctionedSitePresent = sanctionedBgHits >= 1 && sanctionedMwHits >= 1;
+            const int sanctionedHits = sanctionedBgHits + sanctionedMwHits + sanctionedSbHits;
+            const bool everySanctionedSitePresent = sanctionedBgHits >= 1 && sanctionedMwHits >= 1
+                && sanctionedSbHits >= 1;
             const bool okThreadPin = files > 0 && hits > 0 && hits == sanctionedHits
                 && everySanctionedSitePresent && f3Present;
             if (!okThreadPin) ++totalFail;
             qInfo().noquote() << (okThreadPin ? "PASS" : "FAIL")
                               << "| t1023c sync-meshing fact pin (t906 recheck; R20.12 amended,"
-                                 " dual-site; W4 amended): src tree threading-primitive hits"
-                                 " are sanctioned only in the dual-file whitelist"
-                                 " World/backgroundgeneration.h (background generation"
-                                 " worker) + World/meshworker.h (worker meshing executor,"
-                                 " production-wired by the W4 sparse-session host"
-                                 " gamesession.h - zero new primitive sites) with std::thread"
-                                 " (both workers ban QObject), across"
+                                 " dual-site; W4 amended; t1064 amended three-site): src tree"
+                                 " threading-primitive hits are sanctioned only in the"
+                                 " three-site whitelist World/backgroundgeneration.h"
+                                 " (background generation worker) + World/meshworker.h"
+                                 " (worker meshing executor, production-wired by the W4"
+                                 " sparse-session host gamesession.h - zero new primitive"
+                                 " sites) with std::thread (both workers ban QObject) +"
+                                 " Game/savebridge.cpp with QThread for the exit-save"
+                                 " backoff's bounded single-step sleep (msleep only, zero"
+                                 " thread spawn), across"
                               << files
                               << "files, and the F3 line 'threads: 0/0 (sync meshing)' stays"
                                  " pinned as the FIXED-world fact (meshing still synchronous"

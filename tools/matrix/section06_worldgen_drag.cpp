@@ -3796,9 +3796,10 @@ Item {
                 qInfo().noquote() << "  [t974 diag] c keptPx=" << pdKept.value(QStringLiteral("px")).toDouble()
                                   << "retry" << rP << rW << rR;
         }
-        // (d) 源码钉：QML 写完成门链序（runExitSave 定义 < 完成门 < 重试 < toast < coverGrabPending 置位）
-        //     + onClosing 兜底同链 + WorldStore 计数器契约（Q_PROPERTY + 三处成功尾 bump，saveAll 的
-        //     bump 在 commit 成功门之后）。
+        // (d) 源码钉：QML 写完成门链序（runExitSave 定义 < 退避重试收口 < 完成门 < toast <
+        //     coverGrabPending 置位；t1064 清偿后重试位 = runExitSaveWithBackoff 调用 + 桥探锁
+        //     退避——本钉意图「完成门先于退出流程置位」原样）+ onClosing 兜底同链 + WorldStore
+        //     计数器契约（Q_PROPERTY + 三处成功尾 bump，saveAll 的 bump 在 commit 成功门之后）。
         {
             const QString exeDirP974 = QCoreApplication::applicationDirPath();
             const QString rootP974 = QDir(exeDirP974 + QStringLiteral("/..")).absolutePath();
@@ -3810,8 +3811,8 @@ Item {
             const QString wsHdr = readSrcP974(QStringLiteral("src/World/worldstore.h"));
             const QString wsCpp = readSrcP974(QStringLiteral("src/World/worldstore.cpp"));
             const int iRunExit = mainSrc.indexOf(QStringLiteral("function runExitSave()"));
-            const int iGate = mainSrc.indexOf(QStringLiteral("let exitSaveOk = runExitSave()"));
-            const int iRetry = mainSrc.indexOf(QStringLiteral("if (!exitSaveOk) exitSaveOk = runExitSave()"));
+            const int iGate = mainSrc.indexOf(QStringLiteral("let exitSaveOk = runExitSaveWithBackoff()"));
+            const int iRetry = mainSrc.indexOf(QStringLiteral("SaveBridge.exitSaveRetryBackoff("));
             const int iToast = mainSrc.indexOf(QStringLiteral("存档写入失败，本次进度未保存"));
             const int iCover = mainSrc.indexOf(QStringLiteral("coverGrabPending = true"));
             const int iOnClose = mainSrc.indexOf(QStringLiteral("onClosing: (close) => {"));
@@ -3823,10 +3824,11 @@ Item {
             okD = iRunExit >= 0
                   && iRunExit < mainSrc.indexOf(QStringLiteral("function saveAndExitToWorldList()"))
                   && iGate >= 0 && iRetry >= 0 && iToast >= 0 && iCover >= 0
+                  && iRunExit < iRetry      // t1064：退避收口在 runExitSave 之后（共用 wrapper 单点）
                   && iGate < iCover          // 写完成门先于退出流程置位 = 「写盘在退出前同步完成」链序
                   && mainSrc.contains(QStringLiteral("window.lastExitSaveOk = exitSaveOk"))
                   && iOnClose >= 0
-                  && onCloseSlice.contains(QStringLiteral("runExitSave()"))
+                  && onCloseSlice.contains(QStringLiteral("runExitSaveWithBackoff()"))
                   && onCloseSlice.contains(QStringLiteral("worldStore.closeWorld()"))
                   && wsHdr.contains(QStringLiteral("Q_PROPERTY(int saveOkCount READ saveOkCount NOTIFY saveOkCountChanged)"))
                   && iBump1 >= 0 && iCommitGate >= 0 && iCommitGate < iBump1
@@ -4110,13 +4112,13 @@ Item {
             const QString fnSlice974 = (iFnDef974 >= 0 && iRunExitDef > iFnDef974)
                                            ? main974m.mid(iFnDef974, iRunExitDef - iFnDef974) : QString();
             const int nRefs974 = main974m.count(QStringLiteral("returnTransientItemsBeforeSave()"));   // 定义 + 两路径调用 = 3
-            const int iGate974f = main974m.indexOf(QStringLiteral("let exitSaveOk = runExitSave()"));
+            const int iGate974f = main974m.indexOf(QStringLiteral("let exitSaveOk = runExitSaveWithBackoff()"));
             const int iCallSave974 = iFnDef974 >= 0
                                          ? main974m.indexOf(QStringLiteral("returnTransientItemsBeforeSave()"), iFnDef974 + 1) : -1;
             const int iOnClose974f = main974m.indexOf(QStringLiteral("onClosing: (close) => {"));
             const QString closeSlice974 = iOnClose974f >= 0 ? main974m.mid(iOnClose974f, 1400) : QString();
             const int iCallClose974 = closeSlice974.indexOf(QStringLiteral("returnTransientItemsBeforeSave()"));
-            const int iSaveClose974 = closeSlice974.indexOf(QStringLiteral("runExitSave()"));
+            const int iSaveClose974 = closeSlice974.indexOf(QStringLiteral("runExitSaveWithBackoff()"));
             const int iBadgeBind974 = main974m.indexOf(QStringLiteral(
                     "unsavedExitFile: window.lastExitSaveOk === false ? window.currentWorldFile : \"\""));
             okF974 = iFnDef974 >= 0 && nRefs974 == 3
@@ -4136,7 +4138,8 @@ Item {
                      && wl974s.contains(QStringLiteral("property string unsavedExitFile"))
                      && wl974s.contains(QStringLiteral("root.unsavedExitFile === model.file"))
                      && wl974s.contains(QStringLiteral("上次退出未保存"))
-                     // #36：重试无退避登记注释（按钮路径全登记 + 关窗路径指针 = 恰两处）。
+                     // #36 → t1064 清偿登记：按钮路径全登记 + 关窗路径指针 = 恰两处；
+                     //   「退避 ≤300ms」方向词在位（清偿后即实现本体，非纸面方向）。
                      && main974m.count(QStringLiteral("review0901 #36")) == 2
                      && main974m.contains(QStringLiteral("退避 ≤300ms"));
             if (!okF974)

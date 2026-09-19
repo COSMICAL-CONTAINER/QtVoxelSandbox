@@ -30,9 +30,10 @@
 //     再构造再用（可重建性：全新实例全周期 accept→build→harvest 恰一对账）；
 //   r2020d 结构钉 + 白名单修订自证 + 零接线反探 + 线程身份：meshworker.h 正面钉（submit/
 //     takeBuilt/容量 64/单一权威执行体/线程原语/cv 唤醒/QObjectFree 钉/析构丢弃计数）+ 反探
-//     （零 QObject 面/零 Qt 线程设施/零网格逻辑回流记号/零 World 读面）+ 修订后 t1023c 双文件
-//     白名单的段内自证 sweep（thread 记号恰在 backgroundgeneration.h + meshworker.h 两落点，各
-//     ≥1）+ 零生产接线（「MeshWorker」记号全 src 树只许出现在 meshworker.h；chunkgeometry.{h,cpp}
+//     （零 QObject 面/零 Qt 线程设施/零网格逻辑回流记号/零 World 读面）+ 修订后 t1023c 白名单
+//     的段内自证 sweep（thread 记号恰在 backgroundgeneration.h + meshworker.h 两落点各 ≥1 +
+//     t1064 第三落点 savebridge.cpp 携 QThread[msleep-only 有界同步 sleep]，此外零落点）
+//     + 零生产接线（「MeshWorker」记号全 src 树只许出现在 meshworker.h；chunkgeometry.{h,cpp}
 //     显式反探；Main.qml 零记号）+ 线程身份对账（执行线程 == 工作线程 != 调用者线程，r2012 同款）。
 // 恰红面设计（先于腿文定稿；R20.11 纪律）：
 //   NEG-1 摘「接受项恰一产出」（worker 侧 built 遗漏一条——threadLoop 产出 push 加 requestId
@@ -540,9 +541,11 @@ void MatrixRun::section23_meshworker()
         " zero Qt threading facilities (QThread/QThreadPool/QtConcurrent/QMutex), zero copied"
         " mesh logic (face table/occlusion predicate/greedy mask/tile lookups) and zero World"
         " read face (no WorldFacade, no snapshot capture - capture stays on the caller thread);"
-        " an in-section sweep re-certifies the amended dual-file threading whitelist (thread"
-        " tokens live in exactly two sanctioned sites, backgroundgeneration.h plus"
-        " meshworker.h, one or more each, nowhere else) and"
+        " an in-section sweep re-certifies the amended three-site threading whitelist (thread"
+        " tokens live in exactly three sanctioned sites, backgroundgeneration.h plus"
+        " meshworker.h with std::thread and, since the t1064 exit-save backoff, savebridge.cpp"
+        " with QThread for its bounded single-step msleep (zero thread spawn), one or more"
+        " each, nowhere else) and"
         " re-certifies the sanctioned wiring hosts (the MeshWorker token lives in meshworker.h"
         " + the W4 session host gamesession.h + the fixed ownership host world.h/world.cpp per"
         " §29.7 t1060 -"
@@ -602,14 +605,16 @@ void MatrixRun::section23_meshworker()
         ok = ok && negOk;
         if (!negOk) diag += QStringLiteral("[neg-probe] ");
 
-        // ③ 修订后双文件白名单段内自证（独立于 t1023c 修订腿的同语义 sweep——thread 记号恰在
-        //    backgroundgeneration.h + meshworker.h 两落点，各 ≥1，此外零落点）。
+        // ③ 修订后白名单段内自证（独立于 t1023c 修订腿的同语义 sweep——thread 记号恰在
+        //    backgroundgeneration.h + meshworker.h 两落点各 ≥1 + t1064 第三落点 savebridge.cpp
+        //    携 QThread[退出存档退避的有界同步 sleep——msleep 单点、零线程孵化、F3 线程计数
+        //    事实零变化]，其余记号仍禁入；此外零落点）。
         const QStringList tokens = {
             QStringLiteral("QThreadPool"), QStringLiteral("QThread"), QStringLiteral("QtConcurrent"),
             QStringLiteral("QFuture"), QStringLiteral("moveToThread"), QStringLiteral("std::thread"),
             QStringLiteral("std::async"),
         };
-        int files = 0, unsanctioned = 0, bgHits = 0, mwHits = 0;
+        int files = 0, unsanctioned = 0, bgHits = 0, mwHits = 0, sbHits = 0;
         QString sweepDetail;
         QDirIterator it(srcRoot, { QStringLiteral("*.cpp"), QStringLiteral("*.h") },
                         QDir::Files, QDirIterator::Subdirectories);
@@ -626,17 +631,20 @@ void MatrixRun::section23_meshworker()
                     ++bgHits;
                 else if (rel == QStringLiteral("World/meshworker.h") && tok == QStringLiteral("std::thread"))
                     ++mwHits;
+                else if (rel == QStringLiteral("Game/savebridge.cpp") && tok == QStringLiteral("QThread"))
+                    ++sbHits; // t1064 第三落点（msleep-only 有界同步 sleep，零线程孵化）
                 else {
                     ++unsanctioned;
                     sweepDetail += rel + QStringLiteral(":") + tok + QStringLiteral(" ");
                 }
             }
         }
-        const bool whitelistOk = files > 0 && unsanctioned == 0 && bgHits >= 1 && mwHits >= 1;
+        const bool whitelistOk = files > 0 && unsanctioned == 0 && bgHits >= 1 && mwHits >= 1
+            && sbHits >= 1;
         ok = ok && whitelistOk;
         if (!whitelistOk)
-            diag += QStringLiteral("[whitelist unsanctioned=%1 bg=%2 mw=%3 %4] ")
-                        .arg(unsanctioned).arg(bgHits).arg(mwHits).arg(sweepDetail);
+            diag += QStringLiteral("[whitelist unsanctioned=%1 bg=%2 mw=%3 sb=%4 %5] ")
+                        .arg(unsanctioned).arg(bgHits).arg(mwHits).arg(sbHits).arg(sweepDetail);
 
         // ④ 接线宿主白名单（W4 转正 + §29.7 t1060 同变更修订——纠偏留痕非放宽，t1023c/r2018d/
         //    r2019d/r2026d 先例）：r2020 交付态 = 全树「执行器」记号只许出现在本头（组件先行零
@@ -713,8 +721,10 @@ void MatrixRun::section23_meshworker()
                              " surface holds under comment-stripped pins, reverse probes prove"
                              " zero QObject face, zero Qt threading facilities, zero copied"
                              " mesh logic and zero World read face; the in-section sweep"
-                             " re-certifies the dual-file threading whitelist (std::thread"
-                             " only in backgroundgeneration.h + meshworker.h) and the"
+                             " re-certifies the three-site threading whitelist (std::thread"
+                             " in backgroundgeneration.h + meshworker.h, and since t1064"
+                             " QThread in savebridge.cpp for the bounded exit-save sleep,"
+                             " zero thread spawn) and the"
                              " token whitelist amended in the same change for the W4 wiring"
                              " host and the fixed ownership host (token lives in meshworker.h"
                              " + gamesession.h + world.h/world.cpp - the session host owns the"

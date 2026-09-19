@@ -1205,6 +1205,20 @@ Window {
                                                  : { valid: false },
                                              gatherPlayerState(), progress.toVariant())
     }
+    // t1064 退出存档失败退避重试（review0901 登记清偿，出处见 saveAndExitToWorldList 重试段注释）：
+    //   「保存并退出」按钮与 onClosing 关窗两路径**共用唯一实现**（禁第二份退避逻辑散写；两处
+    //   调用点各只此一调）。链序：首试 → 失败才走 SaveBridge.exitSaveRetryBackoff 探锁退避
+    //   （独立连接小事务，锁在持才睡一档 ≤300ms 上限）→ 整链重试恰一次。选型立证：①锁窗
+    //   （杀软/索引器/同步盘）常为百毫秒级，0ms 立即重试几乎必再败（登记原文）——探锁失败才
+    //   退避，非锁失败（flush 失败/磁盘满）零退避立即重试 = 旧 0ms 行为对无锁失败保真；②重试
+    //   整链重跑 runExitSave（快照重取，写链全量重写幂等重放同 t974 门），恰一次不多不少
+    //   （上限防把关窗/退出阻塞成秒级「未响应」）。
+    function runExitSaveWithBackoff() {
+        if (runExitSave())
+            return true
+        SaveBridge.exitSaveRetryBackoff(worldStore, currentWorldFile)
+        return runExitSave()
+    }
     // t974 窗口关闭兜底存档：playing 态直接关窗（标题栏 X / Alt+F4）此前无任何落盘点 —— 进程即退，
     //   自上次保存退出后的全部进度静默丢失（用户侧「偶发未保存」的另一半：退出走按钮=存、走关窗=丢，
     //   从界面分不清）。此处同步跑同一条 runExitSave 链（写完再放行关闭 = 「退出前阻塞等写完成」）；
@@ -1216,10 +1230,10 @@ Window {
             //   必须先调它再存档）。t974 初版漏接此序 → 开着背包/面板关窗 = 面板槽/合成格/光标物品
             //   不进 gatherPlayerState 快照而静默丢失。
             returnTransientItemsBeforeSave()
-            // review0901 #36：失败 0ms 立即重试一次（无退避）——取舍登记见 saveAndExitToWorldList
-            //   重试段注释（两路径同型；锁窗场景两连败概率高，toast 已兜用户面）。
-            let okClose = runExitSave()
-            if (!okClose) okClose = runExitSave()
+            // review0901 #36 → t1064 清偿：失败重试自 0ms 立即重放升级为退避重试——两路径共用
+            //   runExitSaveWithBackoff 唯一实现（SaveBridge 独立连接探锁 + ≤300ms 一档 + 整链
+            //   恰一次重试；t974 完成门「写完并核验才放行关闭」语义逐位不动，失败仍不谎报）。
+            let okClose = runExitSaveWithBackoff()
             if (!okClose) console.warn("[t974] close save FAILED after retry - progress NOT saved:", currentWorldFile)
             // review0901 #35：与按钮路径对称写入（失败置 false）——世界列表「上次退出未保存」角标
             //   消费本属性；关窗路径进程即退、角标当下不可见，写它保「两路径同写」的属性契约完整。
@@ -1247,13 +1261,11 @@ Window {
             //   之间无 tick 可插入 —— 同步 JS 串行，快照不漂移）→ 仍失败则 toast 显式告知「本次进度未保存」
             //   + console.warn 留痕，绝不静默丢档。完成门之后才置 coverGrabPending / 进抓帧退出流程 =
             //   「写盘在退出前同步完成」的调用链序（矩阵 P-t974 源序钉）。
-            //   review0901 #36 登记取舍：重试为 0ms 间隔立即重放（无退避）——外部进程持 .sqlite 锁
-            //   （杀软/索引器/同步盘）常为百毫秒到秒级，两连败概率高，重试只覆盖「瞬态已释放」窄窗；
-            //   用户面由 toast 兜住（+ 世界列表「上次退出未保存」角标，#35），不静默。未来提质方向 =
-            //   先以小事务（saveProgress 单行 upsert）探锁、失败退避 ≤300ms 后再整链重试——上限卡死
-            //   防把关窗/退出阻塞成秒级「未响应」。
-            let exitSaveOk = runExitSave()
-            if (!exitSaveOk) exitSaveOk = runExitSave()
+            //   review0901 #36 登记清偿（t1064）：重试自 0ms 间隔立即重放升级为退避重试——SaveBridge
+            //   独立连接探锁、锁在持才退避一档（退避 ≤300ms 上限卡死，防把关窗/退出阻塞成秒级
+            //   「未响应」）后整链重试恰一次；实现唯一收口 = runExitSaveWithBackoff（两路径共用，
+            //   无第二份退避逻辑），完成门 / toast / lastExitSaveOk / 瞬态归还前置序逐位原样。
+            let exitSaveOk = runExitSaveWithBackoff()
             if (!exitSaveOk) {
                 console.warn("[t974] exit save FAILED after retry - progress NOT saved:", currentWorldFile)
                 showInfoToast("存档写入失败，本次进度未保存")

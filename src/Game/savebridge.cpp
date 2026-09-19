@@ -3,7 +3,12 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
+#include <QElapsedTimer>
+#include <QFileInfo>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QStandardPaths>
+#include <QThread>
 
 // ── t1057 SaveCoordinator 生产接线桥实现（语义与选型立证见 savebridge.h 类头注）──────────────
 
@@ -95,4 +100,52 @@ SaveGenerationInfo SaveBridge::recoveryInfo(const QString &worldFile) const
     SaveCoordinator coord;
     coord.bind(nullptr, resolveSavePath(worldFile));
     return coord.recover();
+}
+
+// ── t1064 探锁退避（语义契约见 savebridge.h；探针选型立证录此处）──────────────────────────
+// 探针三选型对比（为何是「独立连接 BEGIN EXCLUSIVE」而非登记原文示例的 saveProgress）：
+//   ✗ saveProgress 单行 upsert（review0901 #36 原文示例面）：走 store 计数面 → 探锁成功也
+//     ++m_saveOkCount，把 t974「成功 = +3」观测口径破坏成 +4；要避免就得动 worldstore 加
+//     不计数探针（worldstore 冻结域，r2031d 禁触反探钉死）——两头堵。
+//   ✗ 只读 SELECT 探针：不取写锁，测不出外部 EXCLUSIVE 持锁（savecoordinator #5② 注原话：
+//     「SQLite open 是惰性的，锁占常在读面才炸」——只读恰是测不出的那一面）。
+//   ✓ 独立连接 BEGIN EXCLUSIVE + ROLLBACK：BEGIN EXCLUSIVE 正是外部锁下整条保存链的第一失败
+//     面（marker-first 台账写同型失败；r2015c/r2027d/r2031c 真锁注入先例全是这一手）——探它
+//     的失败 = 重试同败的充分预测；ROLLBACK 立即放手 = 探针零数据写（无行无表）零计数面；
+//     BUSY_TIMEOUT 显式归零 = 探针即败即返（不向退出路径引入隐藏等待）。
+int SaveBridge::exitSaveRetryBackoff(WorldStore *store, const QString &worldFile)
+{
+    // 无库可探 = 无锁面 → 零退避（caller 立即重试，与旧 0ms 行为同门——绝不给无锁失败白添延迟）。
+    if (!store || worldFile.isEmpty())
+        return 0;
+    const QString dbPath = resolveSavePath(worldFile);
+    if (!QFileInfo::exists(dbPath))
+        return 0;
+    // 独立命名连接（开-用-关；savecoordinator 台账连接同款形态，与 worldstore / 台账连接互不占用）。
+    static const char *const kProbeConn = "voxelsandbox_savebridge_probe";
+    if (QSqlDatabase::contains(kProbeConn))
+        QSqlDatabase::removeDatabase(kProbeConn);
+    bool locked = true; // 保守缺省：探不了（open 拒/病）= 当作锁在持 → 退避一档（误判方向安全）
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), kProbeConn);
+        db.setDatabaseName(dbPath);
+        db.setConnectOptions(QStringLiteral("QSQLITE_BUSY_TIMEOUT=0")); // 探针即败即返（无隐藏等待）
+        if (db.open()) {
+            QSqlQuery q(db);
+            if (q.exec(QStringLiteral("BEGIN EXCLUSIVE"))) {
+                locked = false; // 拿到写锁 = 锁已释放 → 零退避
+                QSqlQuery release(db);
+                release.exec(QStringLiteral("ROLLBACK")); // 立即放手（探针零痕迹：无行无表无计数）
+            }
+        }
+    }
+    QSqlDatabase::removeDatabase(kProbeConn);
+    if (!locked)
+        return 0;
+    qWarning() << "SaveBridge::exitSaveRetryBackoff: save db locked by an external process -"
+               << "backing off" << kExitSaveBackoffMs << "ms before the single retry";
+    QElapsedTimer t;
+    t.start();
+    QThread::msleep(kExitSaveBackoffMs); // 同步一档（关窗/退出路径本就同步阻塞等写完，t974 门同序）
+    return int(t.elapsed());
 }
