@@ -335,6 +335,12 @@ Window {
     property var terrainGeos: []
     property var chunkObjects: []
     property var chunkKeys: []       // t1063：驻留键集账本（[[cx,cz],...]；仅命令式赋值，零绑定消费）
+    // t1065：池时代标记（呈现层池账本面，非生命周期决策——真值只由 enterWorld 两分支命令式写）。
+    //   true = 池由流式（sparse）驻留集成型，键集可含核心域外/负坐标 chunk。进入 fixed 世界时
+    //   reinitializeAsFixed 把驻留集整表直设回固定网格（模式迁移静默：不发驻留沿，见 world.cpp
+    //   头注）→ 差分路径无从感知换代 → 本标记承担「换代过」记忆，fixed 进入链据此全量重派生
+    //   一次清账。fixed-only 会话恒 false = fixed 进入链零重派生（池逐位旧行为，r2039a 墙语义）。
+    property bool poolStreamingEra: false
     property bool chunksBuilt: false
     // review28 #4：t860 cutout 折叠降级**总开关**（false = 默认折叠态 5 段）。恢复独立 cutout 段 = 本开关
     //   置 true（一处翻转，三面经绑定自动联动，**不可能只恢复一半**——旧注释「恢复 createObject 一行即回
@@ -875,16 +881,33 @@ Window {
             // t1063：流式进入 = reinitializeAsSparse 世界内容整体换代（world.cpp 静默约定，不
             //   emit worldChanged——差分路径的幸存组复用前提不成立，mesh 属上一世界）→ 全量
             //   重派生一次（r2021 时代由进入沿触发的整池重建语义在此收口；进入恰一次非走查
-            //   热路径，进入沿本身已被差分路径按增量消费）。
+            //   热路径，进入沿本身已被差分路径按增量消费）。t1065：换代后池属流式时代 → 落账
+            //   （fixed 进入链对偶收口的凭据，见下方 else 分支）。
             window.resetChunkSlotPool()
-        } else if (worldStore.hasChunks()) {
-            // 已保存地形 → 加载存档（玩家编辑过的地形恢复，而非 worldgen 重生）
-            theWorld.beginLoad(seed)
-            worldStore.loadChunks()
-            theWorld.finishLoad()
+            window.poolStreamingEra = true
         } else {
-            // 新世界（仅 meta 无 chunk blob）→ 按 seed 全量 worldgen（recreate 网格 + 地形 + 光场）
-            theWorld.regenerate(seed)
+            // t1065 fixed 进入链换代收口（流式 → fixed 的对偶面）：上一局流式会话残留时，桥内
+            //   reinitializeAsFixed 已把驻留集整表直设回固定网格（模式迁移静默——不发驻留沿；
+            //   世界内容由下方 beginLoad/finishLoad / regenerate 的 worldChanged 驱动刷新），差分
+            //   路径无从感知键集换代 → 池仍持流式时代键集（核心域外/负坐标组在固定网格外显空、
+            //   固定网格中不在池内的键无 Model 不显）。流式时代落账在 → 内容就位后全量重派生
+            //   一次清账；否则（fixed-only 会话）零调用 = 池逐位不动（固定链零变化墙语义延续）。
+            if (worldStore.hasChunks()) {
+                // 已保存地形 → 加载存档（玩家编辑过的地形恢复，而非 worldgen 重生）
+                theWorld.beginLoad(seed)
+                worldStore.loadChunks()
+                theWorld.finishLoad()
+            } else {
+                // 新世界（仅 meta 无 chunk blob）→ 按 seed 全量 worldgen（recreate 网格 + 地形 + 光场）
+                theWorld.regenerate(seed)
+            }
+            // 内容就位后收口（重建窗口 / 渐进同步 kick 等下游池消费面看到的是 fixed 键集池；
+            //   重派生即建 mesh 一次到位，免「空网格首建 + worldChanged 二次重建」）。清标记 =
+            //   「每换代恰一次」下界（连进多个 fixed 世界只首个重派生，零 Model churn）。
+            if (window.poolStreamingEra) {
+                window.poolStreamingEra = false
+                window.resetChunkSlotPool()
+            }
         }
         // t691：读档 / worldgen 直写栅格不经 blockPlaced 信号 → 事件驱动的位置表（附魔台悬浮书）读档后
         //   恒空（onWorldChanged 只**清孤儿**不重建 → 存档里的附魔台读档后无书，直到玩家再编辑）。进世界
