@@ -121,6 +121,10 @@ void World::reinitializeAsFixed(int width, int depth, int height)
 // 本单生成语义 = terraingen 单列权威（fillTerrainColumn）。
 void World::sparseGenerate()
 {
+    // t1061 物化批口：整个出生半径预生成 = 一次同步物化突发 → 批口收口恰一条驻留沿
+    //（进入期 GUI 线程本就阻塞在 enterWorld 内，逐 chunk 沿对呈现层零观察价值、只放大
+    // O(池) 重建——契约见 world.h ResidentSetBatch 头注）。
+    ResidentSetBatch residentBatch(*this);
     m_chunks.reinitializeSparse(m_width, m_depth, m_height); // 零 chunk 分配（全 Absent 态）
     m_terrain = TerrainGen(m_seed, { m_width, m_depth, m_height }); // 核心 dims = 生成语义参数（generate 首行同式——海域半径/列钳高）
     m_biomeCache.clear();    // 群系 memo 作废（懒重建；generate 同门）
@@ -157,6 +161,9 @@ void World::sparseGenerate()
 // 自身 chunk 可查询（Loaded）后运行；同步调用内无外部观察者（单写者纪律），返回即全量稳态。
 void World::sparseGenerateChunk(int cx, int cz)
 {
+    // t1061 物化批口：单 chunk 物化全链（含 population 脚手架加/拆与快照-回填窗的过渡
+    // 内部态）= 一次物化突发 → 批口收口恰一条驻留沿（契约见 world.h ResidentSetBatch 头注）。
+    ResidentSetBatch residentBatch(*this);
     // §29.5-W3：生成写抑制窗（列体填充 + population 窗口重放全程——内容初生非「编辑」，
     // persist 域不记；嵌套安全 = 深度计数，population 自身写同被抑制）。
     ChunkManager::UnsavedEditWriteWindow unsavedEditSuppression(m_chunks);
@@ -527,6 +534,9 @@ bool World::loadChunkAt(int cx, int cz)
 // 收割拍（主线程）调用——ChunkManager/侧表族非线程安全，worker 侧零触碰世界。
 bool World::adoptGeneratedChunk(int cx, int cz, const GeneratedChunkData &data)
 {
+    // t1061 物化批口：一次收割交付的物化全链 = 一次物化突发（契约见 world.h ResidentSetBatch
+    // 头注；k 个交付的拍级收敛在 GameSession 泵拍批口——本函数批口负责单交付自嵌套）。
+    ResidentSetBatch residentBatch(*this);
     // §29.5-W3：生成写抑制窗（守卫应用 + population 窗口重放全程——内容初生非「编辑」）。
     ChunkManager::UnsavedEditWriteWindow unsavedEditSuppression(m_chunks);
     if (m_chunks.mode() != WorldMode::Sparse)
@@ -576,6 +586,10 @@ bool World::ensureStreamingChunkSlot(int cx, int cz)
 bool World::restoreChunkFromBlob(int cx, int cz, const QByteArray &voxels, const QByteArray &states,
                                  const QByteArray &light)
 {
+    // t1061 物化批口：一次 blob 物化链 = 一次物化突发（契约见 world.h ResidentSetBatch 头注；
+    // 读档 overlay 批的整批收敛在 GameSession::loadStreamingWorld 批口——本函数批口负责
+    // 单行/单驱逐回灌自嵌套）。
+    ResidentSetBatch residentBatch(*this);
     if (m_chunks.mode() != WorldMode::Sparse)
         return false; // fixed 无物化概念（零变化墙）
     if (m_chunks.chunkMaterialized(cx, cz))
