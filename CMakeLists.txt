@@ -1191,6 +1191,18 @@ add_executable(redstone_matrix_test
     #   域 160×160×96/80×80×96）+ 真临时 SQLite 库（fresh + 用后即删，saves/ 零触碰）+
     #   真线程收敛（deadline 轮询防 flake）。）
     tools/matrix/section36_streaming_entry.cpp
+    # t1062 走回重生成内容漂移收口 探针段（置尾先例沿用：runAll 末执行，filter 词 r2036；
+    #   4 腿 r2036a-d = fixed 世界零变化墙[同 seed 双 generate 逐位恒等 + generate() 体全 pass
+    #   字面钉 + 物化链反探禁出]/物化时序无关承重墙[全驱逐→逆序重物化 ≡ 预生成初见逐位 +
+    #   同 chunk 驱逐→重物化 ×3 轮恒等 + 零掩蔽口径留痕（自时序恒等面，两时序同链同窗——
+    #   结构族缺席与 (c) 替代两侧同形，与 vs-fixed 恒等面互斥不混）]/预生成 vs 按需三方恒等
+    #   [A 初见 == A 走回重物化 == B 空域按需（内部+域缘 chunk）+ 未动邻块零扰动 + 红面逐体素
+    #   diff 统计 diag]/结构钉[统一物化路径单一权威[sparseGenerate 循环委托 + loadChunkAt 委托
+    #   + 函数域禁绕行] + 写域钳制/快照-回填-恢复不回退 + fixed 反探]。
+    #   r2036a-c 自建 fresh 小世界族（80×80×96 s2036——5×5 chunk，radius 2 预生成恰覆全核心域/
+    #   radius 0 空域按需），rig 世界 w 零接触；r2036d 纯源码钉；无新增 .cpp——world/chunk 系
+    #   源文件已列）。
+    tools/matrix/section37_walkback_identity.cpp
     # t1022 键位映射表探针附加：Core 层 KeybindManager（默认表完整性 / 冲突拒收 / settings.json
     #   round-trip——显式 storePath 密闭不触真实档）。PlayerController setKey 规范化消费同链直编。
     src/Core/keybindmanager.cpp
