@@ -1259,12 +1259,15 @@ public:
     //   ── t1061 物化批口（resident 沿收敛到稳态观察点）────────────────────────────────
     //   批内翻转仍逐次 ++revision（计数语义零变化——既有沿对账面不动），但 NOTIFY **延后到
     //   最外层批口收口恰发一次**（ResidentSetBatch）。选型立证：本沿的唯一消费契约 = 呈现层
-    //   按驻留集**重建渲染池**（Main.qml onResidentChunkRevisionChanged → 整池重派生，每沿
-    //   O(驻留数 × 段数) 同步 buildMesh）——重建只在「稳态观察点」有意义；sparse 物化链的
+    //   按驻留集**维护渲染池**（Main.qml onResidentChunkRevisionChanged → t1063 起差分增量
+    //   增删[只建删变化键组、幸存组复用；整池重派生退役至 enterWorld 流式分支的世界换代
+    //   收口]，每沿 Model churn O(变化键 × 段数)）——池消费只在「稳态观察点」有意义；
+    //   sparse 物化链的
     //   过渡内部态（population 脚手架邻块 ③加入/⑥移出、快照-回填-恢复窗）不是世界稳态，
     //   逐翻转发沿 = (a) 池消费到非稳态集（脚手架弹进弹出 = t1061 实机 resident 永久振荡 +
-    //   中间态内容烘进网格的顶点数递减指纹），(b) 每物化 chunk ~17 次 O(池) 重建 → enterWorld
-    //   主线程 livelock（用户实测：无限世界进入即 resident 反复缩水、世界永远加载不出来）。
+    //   中间态内容烘进网格的顶点数递减指纹），(b) t1063 前整池重派生时代每物化 chunk ~17 次
+    //   O(池) 重建 → enterWorld 主线程 livelock（用户实测：无限世界进入即 resident 反复缩水、
+    //   世界永远加载不出来）。
     //   批口把「一次同步物化突发」收敛为至多一条沿，观察点 = 稳态。非批路径（裸
     //   setChunkLifecycle——矩阵沿对账腿、驱逐器 rig 缝）行为逐位不变：翻转即 ++ 即发。
     //   纯主线程 RAII 零线程原语（t1023c 纪律）；嵌套安全 = 深度计数（population 脚手架链
@@ -1345,7 +1348,8 @@ signals:
                         // 兼任 Q_PROPERTY seed 的 NOTIFY，值未变的额外通知只致绑定重求值同值，无害）
     void worldChanged(); // 生成/编辑后发出 → 网格重建
     // §29.4-P4 r2021：驻留 chunk 集合成员变化沿（③⑧加入 / ⑥移出，见 setChunkLifecycle 选型
-    //   注释）。固定世界恒不发（streaming 关零转移）；QML slot 池据本沿重建（Main.qml 实例化段）。
+    //   注释）。固定世界恒不发（streaming 关零转移）；QML slot 池据本沿差分增删（t1063：
+    //   Main.qml 实例化段 patchChunkSlotPool——整池重派生退役为 enterWorld 流式分支收口面）。
     void residentChunkRevisionChanged();
     void weatherChanged(); // t385 天气态翻转（晴↔雨/雪/雷；驱动 QML 天空变暗 + 粒子切换）
     // t386 一次闪电击中（雷雨天随机触发）：携击中世界坐标 (x,y,z)。呈现层据此显屏幕白闪 + 雷声（playThunder）；

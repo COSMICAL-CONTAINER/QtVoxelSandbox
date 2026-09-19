@@ -328,8 +328,13 @@ Window {
     //   关 → 仅一次（chunksBuilt 守卫）。terrainGeos 持地形段 ChunkGeometry 引用；每个地形段经 Connections(onMeshRebuilt)
     //   调 recomputeMeshStats 把全幅顶点 / 三角面汇总写入 meshVertices/meshTriangles 标量属性 —— F3 叠层**只读
     //   标量**（不把 var 数组进 text 绑定，否则 QML 把 var 属性读判为 binding loop）。chunkObjects 持 Model 引用防 GC。
+    //   t1063 增 chunkKeys（组身份账本 = 驻留键集规范序快照）：patchChunkSlotPool 的 diff 基线，
+    //   与 chunkObjects/terrainGeos 同步整体赋值（不变量：组 g ⇔ chunkKeys[g] ↔
+    //   chunkObjects[g*step .. g*step+step-1]，terrainGeos[g] = 组首地形段 geometry——组对齐
+    //   契约与 _refreshChunkVisibility / kickWorldMeshSync 消费形态同源）。
     property var terrainGeos: []
     property var chunkObjects: []
+    property var chunkKeys: []       // t1063：驻留键集账本（[[cx,cz],...]；仅命令式赋值，零绑定消费）
     property bool chunksBuilt: false
     // review28 #4：t860 cutout 折叠降级**总开关**（false = 默认折叠态 5 段）。恢复独立 cutout 段 = 本开关
     //   置 true（一处翻转，三面经绑定自动联动，**不可能只恢复一半**——旧注释「恢复 createObject 一行即回
@@ -402,36 +407,122 @@ Window {
     //   模型 = theWorld 驻留 chunk 集合（residentChunkCount × residentChunkKeyAt；枚举序 cz 外
     //   cx 内 = 旧 t276 固定网格双循环序，C++ world.cpp 单一权威）。streaming 关（现状）→ 驻留
     //   集恒全网格、residentChunkRevision 恒 0 → 池一次性成型（chunksBuilt 守卫同旧），实例化集
-    //   与旧固定网格**逐位等价**（零变化承重墙，矩阵 r2021a）；revision 沿（未来 streaming 激活
-    //   后的 chunk 增删）→ 下方 Connections 拆池重建，slot 池随模型增删（r2021b 真链实证）。
-    //   重建形态选型（立此存照）：**整池重派生**（销毁全部段 Model → 按枚举重建）——保
-    //   _refreshChunkVisibility / kickWorldMeshSync 的「每 segmentsPerChunk 段一组、组首全局
-    //   对齐」扁平数组不变量（两消费端零触碰 = QML 变更面集中在本池 + 实例化段）；差异增量
-    //   patch（只建删变动 slot）登记生产接线单优化面，本单不做（经济学归接线单评估）。
+    //   与旧固定网格**逐位等价**（零变化承重墙，矩阵 r2021a）；revision 沿（streaming 激活后的
+    //   chunk 增删）→ 下方 Connections 走 patchChunkSlotPool 差分增量增删，slot 池随模型增删
+    //   （r2021b 真链实证）。
+    //   重建形态选型（t1063 修订；r2021「整池重派生」立此存照退役）：驻留集沿 = **差分增量
+    //   增删**——沿时刻 diff 新旧驻留键集，只创建/销毁变化键的 chunk 组，幸存组原 Model 复用
+    //   （每沿 Model churn = O(变化键组规模)，替代旧 O(池) 全量销毁重建——r2035b 登记的
+    //   livelock 级放大器面即此降档）。「每 segmentsPerChunk 段一组、组首全局对齐」扁平数组
+    //   不变量由组级增删 + 新枚举规范序重排保持（_refreshChunkVisibility / kickWorldMeshSync
+    //   两消费端零触碰）。世界内容换代（enterWorld 流式分支的 reinitializeAsSparse 静默换
+    //   世界——不 emit worldChanged，幸存组 mesh 属上一世界无法经脏标记自愈）不走差分：显式
+    //   resetChunkSlotPool 全量重派生（= r2021 时代进入沿触发的整池重建语义的唯一收口点，
+    //   每次进入恰一次；fixed 进入链零调用——beginLoad/regenerate 的 worldChanged 已驱动
+    //   幸存组 mesh 刷新，池原样 = 逐位旧行为）。
     //   生命周期决策零 QML（r2010d 同门延伸）：本面只读驻留集枚举，转移/决策全在 C++。
+    // 单 chunk 段组实例化（t1063 单点化）：初建 / 差分补建共用的唯一权威。段序 terrain, water,
+    //   lava, [cross], glass, ice 与 r2021 初建逐位一致；组内段数 = segmentsPerChunk（5 或 6，
+    //   cutoutSegmentRestored 构建期单开关——review28 #4）。
+    function _createChunkGroup(cx, cz, geos, objs) {
+        const t = terrainChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })
+        objs.push(t); geos.push(t.geometry)
+        objs.push(waterChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz }))
+        objs.push(lavaChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t343 岩浆段
+        // t326 cutout 段开关联动照旧（review28 #4；t860 折叠默认 5 段）。
+        if (window.cutoutSegmentRestored)
+            objs.push(crossChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz }))
+        objs.push(glassChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t405 玻璃段（透明）
+        objs.push(iceChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t468 冰段（半透）
+    }
     function rebuildChunkSlotPool() {
-        if (window.chunksBuilt) return       // 一次性成型守卫（同旧 t276；revision 沿走 Connections 拆池路径）
+        if (window.chunksBuilt) return       // 一次性成型守卫（同旧 t276；驻留集沿走 patchChunkSlotPool）
         window.chunksBuilt = true
         const n = theWorld.residentChunkCount()
-        const geos = [], objs = []
+        const geos = [], objs = [], keys = []
         for (let i = 0; i < n; ++i) {
             const k = theWorld.residentChunkKeyAt(i)
-            const cx = k[0], cz = k[1]
-            const t = terrainChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })
-            objs.push(t); geos.push(t.geometry)
-            objs.push(waterChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz }))
-            objs.push(lavaChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t343 岩浆段
-            // t326 cutout 段开关联动照旧（review28 #4；t860 折叠默认 5 段）。
-            if (window.cutoutSegmentRestored)
-                objs.push(crossChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz }))
-            objs.push(glassChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t405 玻璃段（透明）
-            objs.push(iceChunkComp.createObject(chunkAnchor, { chunkCX: cx, chunkCZ: cz })) // t468 冰段（半透）
+            keys.push(k)
+            window._createChunkGroup(k[0], k[1], geos, objs)
         }
         window.terrainGeos = geos
         window.chunkObjects = objs
+        window.chunkKeys = keys              // t1063：组身份账本随池成型落账
         window.recomputeMeshStats()   // 取初值（createObject 时各段已 buildMesh；后续 meshRebuilt 增量刷新）
         console.info("[t276/r2021] built", objs.length, "chunk Models from", n, "resident chunks")
         window._updatePlayerChunk()   // t470：段就绪 → 初始化玩家 chunk 缓存 + 应用重建窗口（同旧初建）
+    }
+    // t1063 差分池 patch（驻留集沿的唯一消费形态）：枚举新驻留键集与 chunkKeys 账本 diff——
+    //   旧有新无的组整组 destroy、新有旧无的组 _createChunkGroup 整组补建（createObject 即建
+    //   mesh）、其余组**原段 Model 原样复用**（同世界会话内驻留键内容稳定：编辑/流体走自身
+    //   脏重建、驱逐→重物化逐位复原，mesh 无需重建），并按新枚举规范序（cz 外 cx 内）重排
+    //   扁平数组 → 「每 step 段一组、组首全局对齐」不变量逐位保持，两消费端契约零感知。
+    function patchChunkSlotPool() {
+        if (!window.chunksBuilt) { window.rebuildChunkSlotPool(); return } // 池未成型（防御）→ 初建兜底
+        const step = window.cutoutSegmentRestored ? 6 : 5   // 组内段数（与两消费端同一单开关派生）
+        const oldObjs = window.chunkObjects
+        if (window.chunkKeys.length * step !== oldObjs.length) { // 账本失配（不该发生）→ 全量重建自愈
+            console.warn("[t1063] pool ledger mismatch", window.chunkKeys.length, "*", step,
+                         "!=", oldObjs.length, "- full rebuild fallback")
+            window.resetChunkSlotPool()
+            return
+        }
+        const newKeys = []
+        const n = theWorld.residentChunkCount()
+        for (let i = 0; i < n; ++i) newKeys.push(theWorld.residentChunkKeyAt(i))
+        const groups = {}                    // "cx,cz" → { segs: 组内段 Model 数组, geo: 地形段 geometry }
+        for (let g = 0; g < window.chunkKeys.length; ++g) {
+            const okKey = window.chunkKeys[g]
+            const segs = []
+            for (let s = 0; s < step; ++s) segs.push(oldObjs[g * step + s])
+            groups[okKey[0] + "," + okKey[1]] = { segs: segs, geo: segs[0].geometry }
+        }
+        const objs = [], geos = []
+        let created = 0, destroyed = 0
+        for (let i = 0; i < newKeys.length; ++i) {
+            const kk = newKeys[i][0] + "," + newKeys[i][1]
+            const grp = groups[kk]
+            if (grp) {                       // 幸存组：原段 Model 原样复用（零 Model churn）
+                delete groups[kk]
+                for (let s = 0; s < step; ++s) objs.push(grp.segs[s])
+                geos.push(grp.geo)
+            } else {                         // 新驻留键：整组补建
+                window._createChunkGroup(newKeys[i][0], newKeys[i][1], geos, objs)
+                ++created
+            }
+        }
+        for (const kk in groups) {           // 旧有新无：整组销毁（destroy 延迟到事件循环，安全）
+            const grp = groups[kk]
+            for (let s = 0; s < grp.segs.length; ++s)
+                if (grp.segs[s]) grp.segs[s].destroy()
+            ++destroyed
+        }
+        window.terrainGeos = geos
+        window.chunkObjects = objs
+        window.chunkKeys = newKeys
+        window._meshSyncQueue = []           // 被销组可能仍在渐进同步队列（悬空 geometry 引用）→ 清；
+                                             //   欠账由稳态扫描 ≤16 tick 重填（正确性无损，t972 泵自愈面）。
+        if (created > 0 || destroyed > 0) {
+            window.recomputeMeshStats()      // 地形段集变了 → 全幅顶点/三角面汇总刷新
+            window._refreshChunkVisibility() // 新组补算重建窗口标志（幸存组一致保持；F3 窗口账同步）
+        }
+        console.info("[t1063] patched chunk slot pool: +" + created + "/-" + destroyed
+                     + " chunk groups ->", newKeys.length, "resident /", objs.length, "Models")
+    }
+    // t1063 全量重派生（世界换代收口面）：r2021 时代 revision handler 的「整池销毁重派生」
+    //   原体，调用点收敛为 enterWorld 流式分支唯一一处（reinitializeAsSparse 静默换世界内容，
+    //   差分路径的幸存组复用前提不成立）。fixed 世界零调用（固定链 mesh 刷新走 worldChanged
+    //   脏机制，池自 t276 起跨固定世界复用 = 逐位旧行为）。
+    function resetChunkSlotPool() {
+        const objs = window.chunkObjects
+        for (let i = 0; i < objs.length; ++i)
+            if (objs[i]) objs[i].destroy()
+        window.terrainGeos = []
+        window.chunkObjects = []
+        window.chunkKeys = []
+        window._meshSyncQueue = []
+        window.chunksBuilt = false
+        window.rebuildChunkSlotPool()
     }
     // perf-t520 F3 文本节流：把原 F3 text 绑定的全部读取 / 字符串拼接抽成普通函数 —— 由 10Hz Timer
     //   调用（f3RefreshTimer），结果写 window.f3Text 单一 string 属性，F3 Text 元素只读它。这样所有
@@ -781,6 +872,11 @@ Window {
         //   sparse 世界七入口守卫对二者本就早退，跳过分流是冗余保险）。
         if (StreamingBridge.enterWorld(theWorld, worldStore, worldClock, player, file, seed)) {
             console.info("[r2028] infinite world entered:", file)
+            // t1063：流式进入 = reinitializeAsSparse 世界内容整体换代（world.cpp 静默约定，不
+            //   emit worldChanged——差分路径的幸存组复用前提不成立，mesh 属上一世界）→ 全量
+            //   重派生一次（r2021 时代由进入沿触发的整池重建语义在此收口；进入恰一次非走查
+            //   热路径，进入沿本身已被差分路径按增量消费）。
+            window.resetChunkSlotPool()
         } else if (worldStore.hasChunks()) {
             // 已保存地形 → 加载存档（玩家编辑过的地形恢复，而非 worldgen 重生）
             theWorld.beginLoad(seed)
@@ -4725,19 +4821,14 @@ Window {
             //   双循环（theWorld.chunksX×chunksZ）退役——streaming 关下枚举恒等 → 逐位等价。
             Component.onCompleted: { window.rebuildChunkSlotPool() }
         }
-        // r2021：驻留集 revision 沿 → slot 池随模型增删（streaming 关恒不发 = 现状零触发；
-        //   未来 streaming 激活后 chunk 增删在此响应：拆旧池 → 按新枚举重派生，见
-        //   rebuildChunkSlotPool 选型注释「整池重派生」）。
+        // r2021：驻留集 revision 沿 → slot 池随模型增删。t1063 起消费形态 = 差分增量增删
+        //   （patchChunkSlotPool：只创建/销毁变化键的 chunk 组——沿时刻 Model churn O(变化键)
+        //   而非 O(池)）；「整池重派生」退役为 resetChunkSlotPool，收口进 enterWorld 流式分支
+        //   （世界换代面，见 patchChunkSlotPool 选型注释）。
         Connections {
             target: theWorld
             function onResidentChunkRevisionChanged() {
-                const objs = window.chunkObjects
-                for (let i = 0; i < objs.length; ++i)
-                    if (objs[i]) objs[i].destroy()
-                window.terrainGeos = []
-                window.chunkObjects = []
-                window.chunksBuilt = false
-                window.rebuildChunkSlotPool()
+                window.patchChunkSlotPool()
             }
         }
 
