@@ -425,16 +425,16 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_dispenser_side.png      # t486 发射器侧面贴图（build_dispenser.py；石质灰底+边框暗带+四角铆钉）
         textures/default_dispenser_front.png     # t486 发射器前面（排出口所朝面）贴图（build_dispenser.py；石质灰底+中央暗腔排出口）
         textures/default_dropper_front.png       # t609 投掷器前面（排出口所朝面）贴图（build_dropper.py；石质灰底+中央小方形暗孔；顶/底/侧复用熔炉 12/13）
-        textures/default_endframe_side.png       # t620 末影祭坛侧/底面贴图（build_endframe.py；灰白细孔框身石纹；EndPortal endframe 化侧/底）
-        textures/default_endframe_top.png        # t620 末影祭坛顶面贴图（build_endframe.py；灰白框面+中央暗绿凹槽（未放末影之眼））
-        textures/default_endframe_eye.png        # t620 末影祭坛顶面贴图（build_endframe.py；框面+中央之眼亮纹（已放末影之眼激活态））
+        textures/default_endframe_side.png       # t620 暗渊祭坛侧/底面贴图（build_endframe.py；灰白细孔框身石纹；AbyssGate endframe 化侧/底）
+        textures/default_endframe_top.png        # t620 暗渊祭坛顶面贴图（build_endframe.py；灰白框面+中央暗绿凹槽（未放暗渊之眼））
+        textures/default_endframe_eye.png        # t620 暗渊祭坛顶面贴图（build_endframe.py；框面+中央之眼亮纹（已放暗渊之眼激活态））
         textures/default_door_wood_upper.png     # t620 橡木门上半贴图（build_door.py；门板+上部格栅窗；door case 据 state bit3 选）
         textures/default_door_wood_lower.png     # t620 橡木门下半贴图（build_door.py；门板+锁孔板+底部横带）
         textures/default_door_spruce_upper.png   # t620 云杉门上半贴图（build_door.py；深色门板+格栅窗）
         textures/default_door_spruce_lower.png   # t620 云杉门下半贴图（build_door.py；深色门板+锁孔板+底部横带）
         textures/default_stone_brick.png         # t487 石砖各面贴图（build_stone_brick.py；石质灰底+砖块缝纹网格；要塞墙体主体）
-        textures/default_end_portal.png          # t487 末地传送门未激活态贴图（build_end_portal.py；深紫黑星空底+中心暗绿旋涡）
-        textures/default_end_portal_active.png   # t487 末地传送门激活态贴图（build_end_portal.py；深紫黑星空底+中心亮绿旋涡+白绿高光）
+        textures/default_abyss_gate.png          # t487 暗渊门未激活态贴图（build_abyss_gate.py；深紫黑星空底+中心暗绿旋涡）
+        textures/default_abyss_gate_active.png   # t487 暗渊门激活态贴图（build_abyss_gate.py；深紫黑星空底+中心亮绿旋涡+白绿高光）
         textures/default_lever.png               # t490 杠杆贴图（build_lever_button.py；木质底座+竖直扳柄+圆柄头；手动点火机关）
         textures/default_wood_button.png         # t490 木按钮贴图（build_lever_button.py；木质底座+凸起圆钮）
         textures/default_stone_button.png        # t490 石按钮贴图（build_lever_button.py；石质底座+凸起圆钮）
@@ -659,7 +659,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_effect_slowness.png        # t715 缓慢效果图标（build_effect_icons.py 程序自绘原创；深灰蓝厚重靴剪影）
         textures/icon_effect_fire.png            # t715 着火效果图标（build_effect_icons.py 程序自绘原创；黄芯火苗剪影）
         textures/icon_snow.png                   # t482 雪块立方体图标（build_cube_icons.py；各面=冷白冰晶噪点，同积雪层）
-        textures/icon_end_portal.png             # t634/t644 末地传送门立方体图标（--from-pack：endframe_top+side 裁顶空白，与放置态一致）
+        textures/icon_abyss_gate.png             # t634/t644 暗渊门立方体图标（--from-pack：endframe_top+side 裁顶空白，与放置态一致）
         textures/icon_cobweb.png                 # t484 蜘蛛网 flat 2D 图标（build_cube_icons.py；透明底+灰白蛛丝放射网纹）
         textures/icon_rail.png                   # t484/t644 铁轨 flat 2D 图标（--from-pack：pack 直轨贴图，与放置态一致）
         textures/icon_golden_rail.png            # t638/t644 动力铁轨 flat 2D 图标（--from-pack：pack powered_rail 贴图）

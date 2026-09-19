@@ -58,7 +58,8 @@ class ResourcePackManager : public QObject
     //   （qrc 程序生成底 + 包内 fire_0.png 帧覆盖）；否则 qrc:/textures/fire_strip.png。
     Q_PROPERTY(QString fireStripSource READ fireStripSource NOTIFY activeChanged)
     // t725 余烬门条带贴图源（portalHost delegate 翻书；同 fire 模式）：active → file:/// 落盘合成条带
-    //   （qrc 程序生成底 + 包内 nether_portal.png 帧覆盖）；否则 qrc:/textures/portal_strip.png。
+    //   （qrc 程序生成底 + 包内 nether_portal.png 帧覆盖——§9 豁免：资源包读取面，用户包内 MC 布局
+    //   文件名，机制等价记载合法）；否则 qrc:/textures/portal_strip.png。
     Q_PROPERTY(QString portalStripSource READ portalStripSource NOTIFY activeChanged)
     // t489 条带帧数（与 BlockRegistry::kWaterStripFrames / kLavaStripFrames 同源单一权威；QML positionV 动画
     //   步长 = k/N 用此值，mesher UV 子区高 1/N 用 blockregistry 常量）。CONSTANT：值不随运行期变。
@@ -66,7 +67,7 @@ class ResourcePackManager : public QObject
     Q_PROPERTY(int lavaStripFrames READ lavaStripFrames CONSTANT)
     // t724 火焰条带帧数（同源 BlockRegistry::kFireStripFrames；CONSTANT）。
     Q_PROPERTY(int fireStripFrames READ fireStripFrames CONSTANT)
-    // t725 余烬门条带帧数（同源 BlockRegistry::kNetherPortalStripFrames；CONSTANT）。
+    // t725 余烬门条带帧数（同源 BlockRegistry::kEmberGateStripFrames；CONSTANT）。
     Q_PROPERTY(int portalStripFrames READ portalStripFrames CONSTANT)
     // t415 资源包总开关（镜像 settings.json resourcePackEnabled，缺省 false：避免无感知切换贴图）。
     //   setter 立即持久化；配合 apply() 即时重建图集（也可仅持久化等下次重启生效）。
@@ -115,7 +116,7 @@ public:
     int fireStripFrames() const { return BlockRegistry::kFireStripFrames; }
     // t725 余烬门条带贴图源 + 帧数（同 fire 模式）。
     QString portalStripSource() const;
-    int portalStripFrames() const { return BlockRegistry::kNetherPortalStripFrames; }
+    int portalStripFrames() const { return BlockRegistry::kEmberGateStripFrames; }
 
     bool enabled() const;
     void setEnabled(bool e);

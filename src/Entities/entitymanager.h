@@ -425,12 +425,12 @@ public:
     //   点燃——MC fire charge 弹命中生物伤害 + 着火）。撞击点燃改打火石同源口径：命中格可燃 → 直燃进
     //   燃烧态（igniteFlammableAt）；非可燃 → 火球来向空气格置立地火（==Air 门）。
     Q_INVOKABLE int spawnFireball(const QVector3D &origin, const QVector3D &vel, int igniteChancePct = 20);
-    // t729 暗渊之眼投射物（玩家右键 EndEyeId 掷出；机制等价 MC 1.0 末影之眼 ender eye —— 右键掷出寻路要塞）：
-    //   在 origin 处生成携带 3D 速度 vel（blocks/s，初速朝最近要塞末地传送门方向，速度 ~kEnderEyeSpeed=4）的
+    // t729 暗渊之眼投射物（玩家右键 EndEyeId 掷出；机制等价 MC 1.0 暗渊之眼 ender eye —— 右键掷出寻路要塞）：
+    //   在 origin 处生成携带 3D 速度 vel（blocks/s，初速朝最近要塞暗渊门方向，速度 ~kEnderEyeSpeed=4）的
     //   小绿瞳珠实体。kind=EnderEye、pushable=false（玩家走碰不推）、halfW/halfH=0.16（小珠视觉 + 碰撞最小）。
     //   entity.enderEyeDistLeft = 随机 [kEnderEyeDistMin(10), Max(16)] 剩余飞行距离（blocks）→ tick 递减，<=0 即
     //   「判定结算」：80%（kEnderEyeDropChance）→ emit enderEyeBecameItem（呈现层转发 ItemEntityManager.spawnItem
-    //   生成**掉落物实体**，可捡回 —— 机制等价 MC 末影之眼落地变掉落物）+ 移除；20% → 进入碎裂态（enderEyeShatter
+    //   生成**掉落物实体**，可捡回 —— 机制等价 MC 暗渊之眼落地变掉落物）+ 移除；20% → 进入碎裂态（enderEyeShatter
     //   倒计 kEnderEyeShatterTime，QML 播缩小淡出 + 玻璃碎裂粒子）→ 归零移除**无掉落**。vx/vy/vz 复用 3D 速度
     //   （不走 Mob 击退衰减分支，无冲突）。t757：飞行目标改两段式（远=升空指示 / 近=下探逼近，见 tick 分支），
     //   vel 只作初速（tick 内转向平滑接管），spawn 另记 enderEyeCruiseY = origin.y()+kEnderEyeClimbHeight。
@@ -1227,7 +1227,7 @@ signals:
     //   （PLAN §2 分层：Entities 层发语义事件、呈现层只消费）。孵化小鸡是 Entities 层内部行为（spawnMobCore
     //   → entitiesChanged），不经本信号。
     void eggBreak(float x, float y, float z);
-    // t729 暗渊之眼飞行判定结算「变掉落物」（机制等价 MC 1.0 末影之眼飞距后落地变掉落物可捡回）：EnderEye tick
+    // t729 暗渊之眼飞行判定结算「变掉落物」（机制等价 MC 1.0 暗渊之眼飞距后落地变掉落物可捡回）：EnderEye tick
     //   飞行距（enderEyeDistLeft）归零且掷中 80% 掉落分支时发 —— 坐标 = floor(pos)（与 spawnItem 整数格约定一致，
     //   便于 ItemEntityManager 落在眼睛落点）。呈现层（Main.qml）Connections 据它转发 ItemEntityManager.spawnItem
     //   (0x23A=EndEyeId ×1)（同 mobDied→spawnItem 模式；单向事件流，PLAN §2 分层：Entities 层发语义事件、呈现层只
@@ -2596,12 +2596,12 @@ private:
     //   镜像（两者声明点在本常量之前 / 结构体内不可见）—— 改值须三处同步。
     static_assert(kFireballIgniteChance == 20,
                   "kFireballIgniteChance 改值须同步 spawnFireball 默认参与 Entity::fireballIgnitePct DMI（三处镜像）");
-    // t729 暗渊之眼投射物常量（机制等价 MC 1.0 末影之眼 ender eye：右键掷出、直线寻路要塞、飞距后落地变掉落物 /
+    // t729 暗渊之眼投射物常量（机制等价 MC 1.0 暗渊之眼 ender eye：右键掷出、直线寻路要塞、飞距后落地变掉落物 /
     //   小概率碎裂无掉落）。数值为本工程小世界量身调，非 MC 精确复刻（PLAN §4 机制对标非数值 1:1）：
     //   - kEnderEyeSpeed：飞行速度（blocks/s；恒定模长，两段共用，玩家可侧身看它飞）。
-    //   - kEnderEyeDistMin / Max：飞行判定距离随机带（blocks；飞这么多后判定 —— 机制等价 MC 末影之眼飞行一段后
+    //   - kEnderEyeDistMin / Max：飞行判定距离随机带（blocks；飞这么多后判定 —— 机制等价 MC 暗渊之眼飞行一段后
     //     落地/碎裂，玩家据此逐步逼近要塞）。取 10..16：短跳虽够玩家跟追逐步逼近，又不横穿整张地图。
-    //   - kEnderEyeDropChance：判定后「变掉落物」概率（80%，机制等价 MC 末影之眼大部分落地变掉落物可回收；
+    //   - kEnderEyeDropChance：判定后「变掉落物」概率（80%，机制等价 MC 暗渊之眼大部分落地变掉落物可回收；
     //     20% 碎裂无掉落，防无限回收刷分 + 让「碎掉」这一结果存在）。
     //   - kEnderEyeShatterTime：碎裂动画窗口（秒；C++ 延迟移除，QML 在此窗口播缩小淡出 + 玻璃碎裂粒子）。
     //   - kEnderEyeHalfDim：半宽 / 半高（blocks；小绿瞳珠视觉 + 碰撞最小）。

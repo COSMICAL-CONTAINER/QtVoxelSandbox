@@ -1389,7 +1389,7 @@ void MatrixRun::section01_redstone_core()
                                                                 : (rdz == -2 || rdz == 2) && (rdx >= -1 && rdx <= 1);
                     if (!onRing) continue;
                     ++frames;
-                    if (pw->blockAt(px + rdx, py, pz + rdz) != BR::EndPortal) {
+                    if (pw->blockAt(px + rdx, py, pz + rdz) != BR::AbyssGate) {
                         qInfo().noquote() << "  frame missing at" << (px + rdx) << py << (pz + rdz);
                         ok = false;
                     }

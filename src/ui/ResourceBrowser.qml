@@ -999,7 +999,7 @@ Item {
                                             //   多模型互斥不叠渲染）。
                                             visible: root.selectedIsCube && !root.selectedIsMob && !root.selectedIsBed && !root.selectedIsItem3D // review27 #4：附魔台 94 不在 isPartialBlock → selectedIsCube 对 94 仍 true，与下方 ItemShapeGeometry 预览叠渲 z-fight（同 Main.qml 掉落物侧修法）；家族互斥钉死
                                             // blockId 绑选中物；不设 world → BlockCube 顶点色恒白（全亮，无天光遮蔽，预览纯净）。
-                                            // t965：blockState 绑形态按钮组（耕地干/湿顶面、末地框无眼/有眼顶面——
+                                            // t965：blockState 绑形态按钮组（耕地干/湿顶面、暗渊框无眼/有眼顶面——
                                             //   BlockRegistry::stateTileOverride Core 权威；非态变方块 state 0 零漂移）。
                                             geometry: BlockCube { blockId: root.selectedId; blockState: root.selectedFormState }
                                             // t966 yaw 子：spinAngle 自转（拖拽时由 DragHandler 写入）；-35° 基偏给 3/4 视角。
@@ -1808,7 +1808,7 @@ Item {
                                 // ── t965 形态切换按钮组悬浮面板（预览区下沿内侧；与 variantPanel 同款
                                 //   悬浮语言/同层 z 约定）──
                                 //   支持方块「状态」形态切换：耕地干/湿、门+活板门未激活/激活、草丛矮/中/高、
-                                //   红石火把亮/灭、动力轨未激活/激活、末地框无眼/有眼、作物生长阶段（Hotbar::
+                                //   红石火把亮/灭、动力轨未激活/激活、暗渊框无眼/有眼、作物生长阶段（Hotbar::
                                 //   blockFormStates 单一权威，空表=不支持 → 面板不出现）。编号钮 1 2 3…，
                                 //   钮 1 = 表首 = 最普通/放置缺省形态（默认选中）。选中物切换回钮 1
                                 //   （onSelectedIdChanged 重置）；预览网格经 blockState → Core 态变即时刷新。

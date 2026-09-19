@@ -166,7 +166,7 @@ void MatrixRun::section02_early_probes()
     //    可选）+ 破角不碎门（角块不承结构且与门格对角不邻）；⑤ 缺承重框格拒：底梁 / 顶梁 / 边柱各破一格
     //    均拒；⑥ 非矩形（腔内异物）拒；⑦ 低于最小（1 宽 / 2 高）拒；⑧ 点燃位无关性：4×5 开口四角 + 中部
     //    任一格点燃同成门；⑨ 破框碎门：破任一承重框格（镜像 finishMiningAt 的 setBlock(Air)+
-    //    breakNetherPortalsAround 序列）→ 整门 20 格全熄；直挖门格（setBlock(Air)+removeNetherPortalAt）
+    //    breakEmberGatesAround 序列）→ 整门 20 格全熄；直挖门格（setBlock(Air)+removeEmberGateAt）
     //    同样整门熄（连通域尺寸无关）。
     runLegMulti({ "t806 portal frame generalization: ignite fills whole 2x3..4x5 inner opening (2x3 min X-plane 6 c"
         "ells state=0 / 4x5 Z-plane 20 cells state=1, ignition position-independent at 5 sample cells), o"
@@ -205,14 +205,14 @@ void MatrixRun::section02_early_probes()
                         w806.setBlock(x0 + ci * ux, pY + ry, z0 + ci * uz, BR::Obsidian, 0);
             }
         };
-        // 局部门格计数：只数本 rig 清场盒内的 NetherPortal（各场景共用一世界，隔壁 rig 的残留门不串数）。
+        // 局部门格计数：只数本 rig 清场盒内的 EmberGate（各场景共用一世界，隔壁 rig 的残留门不串数）。
         const auto cellsInBox = [&](int x0, int z0, int ux, int uz, int w, int h) -> int {
             int n = 0;
             for (int c = -3; c <= w + 3; ++c)
                 for (int r = -3; r <= h + 3; ++r)
                     for (int d = -2; d <= 2; ++d)
                         if (w806.blockAt(x0 + c * ux + d * uz, pY + r, z0 + c * uz + d * ux)
-                            == BR::NetherPortal)
+                            == BR::EmberGate)
                             ++n;
             return n;
         };
@@ -220,7 +220,7 @@ void MatrixRun::section02_early_probes()
         // ① 2×3 最小门（X 平面 / 带角）：开口中格点燃 → true + 本 rig 门格恰 6 + state=0（X 平面）。
         {
             buildFrame(8, 8, 1, 0, 2, 3, true);
-            const bool lit = w806.tryIgniteNetherPortal(9, pY + 1, 8);
+            const bool lit = w806.tryIgniteEmberGate(9, pY + 1, 8);
             const int n = cellsInBox(8, 8, 1, 0, 2, 3);
             const int st = int(w806.stateAt(8, pY, 8));
             if (!lit || n != 6 || st != 0) {
@@ -229,14 +229,14 @@ void MatrixRun::section02_early_probes()
             }
         }
         // ⑧ 点燃位无关性（兼 ② 4×5 最大门 Z 平面 + ⑨ 直挖门格熄灭链）：4×5 开口的四角 + 中部共 5 个点燃位
-        //    逐轮（每轮重搭框）点燃 → 均成门恰 20 格 + state=1；随后直挖一门格 + removeNetherPortalAt 连通域
+        //    逐轮（每轮重搭框）点燃 → 均成门恰 20 格 + state=1；随后直挖一门格 + removeEmberGateAt 连通域
         //    熄灭（镜像 finishMiningAt 门格分支序列）→ 归零。
         {
             const int wx = 30, wz = 8;
             const int cells[5][2] = {{0, 0}, {3, 0}, {0, 4}, {3, 4}, {1, 2}}; // (列, 行) 开口内点燃位
             for (int i = 0; i < 5; ++i) {
                 buildFrame(wx, wz, 0, 1, 4, 5, true);
-                const bool lit = w806.tryIgniteNetherPortal(wx, pY + cells[i][1], wz + cells[i][0]);
+                const bool lit = w806.tryIgniteEmberGate(wx, pY + cells[i][1], wz + cells[i][0]);
                 const int n = cellsInBox(wx, wz, 0, 1, 4, 5);
                 const int st = int(w806.stateAt(wx, pY, wz));
                 if (!lit || n != 20 || st != 1) {
@@ -245,7 +245,7 @@ void MatrixRun::section02_early_probes()
                     ok = false;
                 }
                 w806.setBlock(wx, pY, wz, BR::Air, 0);        // 直挖门格（finishMiningAt 同款先清格）
-                w806.removeNetherPortalAt(wx, pY, wz, 1);     // 连通域熄灭余格
+                w806.removeEmberGateAt(wx, pY, wz, 1);     // 连通域熄灭余格
                 if (cellsInBox(wx, wz, 0, 1, 4, 5) != 0) {
                     qInfo().noquote() << "  [t806 diag] direct-mine teardown at pos" << i
                                       << "left" << cellsInBox(wx, wz, 0, 1, 4, 5);
@@ -258,9 +258,9 @@ void MatrixRun::section02_early_probes()
         //    t848 放宽后移交本处只验新上限。
         {
             buildFrame(8, 14, 1, 0, 22, 3, true); // 22 宽（X 平面）
-            bool bad = w806.tryIgniteNetherPortal(19, pY + 1, 14) || cellsInBox(8, 14, 1, 0, 22, 3) != 0;
+            bool bad = w806.tryIgniteEmberGate(19, pY + 1, 14) || cellsInBox(8, 14, 1, 0, 22, 3) != 0;
             buildFrame(8, 22, 1, 0, 2, 22, true); // 22 高
-            bad = bad || w806.tryIgniteNetherPortal(9, pY + 1, 22) || cellsInBox(8, 22, 1, 0, 2, 22) != 0;
+            bad = bad || w806.tryIgniteEmberGate(9, pY + 1, 22) || cellsInBox(8, 22, 1, 0, 2, 22) != 0;
             if (bad) {
                 qInfo().noquote() << "  [t806 diag] oversize 22w/22h not rejected";
                 ok = false;
@@ -269,7 +269,7 @@ void MatrixRun::section02_early_probes()
         // ④ 缺角通过（MC 1.0 角块可选）：3×4 无角门 → 成门恰 12 格。
         {
             buildFrame(20, 8, 1, 0, 3, 4, false);
-            const bool lit = w806.tryIgniteNetherPortal(21, pY + 1, 8);
+            const bool lit = w806.tryIgniteEmberGate(21, pY + 1, 8);
             const int n = cellsInBox(20, 8, 1, 0, 3, 4);
             if (!lit || n != 12) {
                 qInfo().noquote() << "  [t806 diag] cornerless 3x4:" << lit << "cells" << n;
@@ -282,7 +282,7 @@ void MatrixRun::section02_early_probes()
             for (int i = 0; i < 3; ++i) {
                 buildFrame(20, 8, 1, 0, 3, 4, true);
                 w806.setBlock(20 + holes[i][0], pY + holes[i][1], 8, BR::Air, 0);
-                const bool lit = w806.tryIgniteNetherPortal(21, pY + 1, 8);
+                const bool lit = w806.tryIgniteEmberGate(21, pY + 1, 8);
                 if (lit || cellsInBox(20, 8, 1, 0, 3, 4) != 0) {
                     qInfo().noquote() << "  [t806 diag] missing frame member" << i << "still lit";
                     ok = false;
@@ -293,7 +293,7 @@ void MatrixRun::section02_early_probes()
         {
             buildFrame(20, 14, 1, 0, 4, 3, true);
             w806.setBlock(22, pY + 2, 14, BR::Stone, 0);
-            if (w806.tryIgniteNetherPortal(21, pY + 1, 14) || cellsInBox(20, 14, 1, 0, 4, 3) != 0) {
+            if (w806.tryIgniteEmberGate(21, pY + 1, 14) || cellsInBox(20, 14, 1, 0, 4, 3) != 0) {
                 qInfo().noquote() << "  [t806 diag] non-rectangular opening not rejected";
                 ok = false;
             }
@@ -301,15 +301,15 @@ void MatrixRun::section02_early_probes()
         // ⑦ 低于最小拒：1×3（单列开口）/ 2×2（矮开口）→ 均拒且零门格。
         {
             buildFrame(30, 20, 0, 1, 1, 3, true); // 1 宽（Z 平面）
-            bool bad = w806.tryIgniteNetherPortal(30, pY + 1, 21) || cellsInBox(30, 20, 0, 1, 1, 3) != 0;
+            bool bad = w806.tryIgniteEmberGate(30, pY + 1, 21) || cellsInBox(30, 20, 0, 1, 1, 3) != 0;
             buildFrame(30, 28, 0, 1, 2, 2, true); // 2 高
-            bad = bad || w806.tryIgniteNetherPortal(30, pY + 1, 29) || cellsInBox(30, 28, 0, 1, 2, 2) != 0;
+            bad = bad || w806.tryIgniteEmberGate(30, pY + 1, 29) || cellsInBox(30, 28, 0, 1, 2, 2) != 0;
             if (bad) {
                 qInfo().noquote() << "  [t806 diag] below-min 1w/2h not rejected";
                 ok = false;
             }
         }
-        // ⑨ 破框碎门 + 破角不碎门（镜像 finishMiningAt 框格破坏链：setBlock(Air) + breakNetherPortalsAround）：
+        // ⑨ 破框碎门 + 破角不碎门（镜像 finishMiningAt 框格破坏链：setBlock(Air) + breakEmberGatesAround）：
         //    4×5 门破 底梁中 / 顶梁中 / 左边柱中 / 右边柱中 任一承重格 → 整门 20 格全熄；破左下角块
         //    （不承结构且与门格对角不邻）→ 门健在 20 格。
         {
@@ -317,23 +317,23 @@ void MatrixRun::section02_early_probes()
             const int breaks[4][2] = {{0, -1}, {1, 5}, {-1, 2}, {4, 2}}; // (列偏移, 行偏移) 的框格位
             for (int i = 0; i < 4; ++i) {
                 buildFrame(wx, wz, 0, 1, 4, 5, true);
-                if (!w806.tryIgniteNetherPortal(wx, pY + 1, wz + 1) || cellsInBox(wx, wz, 0, 1, 4, 5) != 20) {
+                if (!w806.tryIgniteEmberGate(wx, pY + 1, wz + 1) || cellsInBox(wx, wz, 0, 1, 4, 5) != 20) {
                     qInfo().noquote() << "  [t806 diag] frame-break rig" << i << "ignite failed";
                     ok = false;
                     continue;
                 }
                 const int bx = wx, by = pY + breaks[i][1], bz = wz + breaks[i][0];
                 w806.setBlock(bx, by, bz, BR::Air, 0);
-                w806.breakNetherPortalsAround(bx, by, bz);
+                w806.breakEmberGatesAround(bx, by, bz);
                 if (cellsInBox(wx, wz, 0, 1, 4, 5) != 0) {
                     qInfo().noquote() << "  [t806 diag] frame member" << i << "broken, door survived";
                     ok = false;
                 }
             }
             buildFrame(wx, wz, 0, 1, 4, 5, true);
-            w806.tryIgniteNetherPortal(wx, pY + 1, wz + 1);
+            w806.tryIgniteEmberGate(wx, pY + 1, wz + 1);
             w806.setBlock(wx, pY - 1, wz - 1, BR::Air, 0); // 左下角块
-            w806.breakNetherPortalsAround(wx, pY - 1, wz - 1);
+            w806.breakEmberGatesAround(wx, pY - 1, wz - 1);
             if (cellsInBox(wx, wz, 0, 1, 4, 5) != 20) {
                 qInfo().noquote() << "  [t806 diag] corner break collapsed door:"
                                   << cellsInBox(wx, wz, 0, 1, 4, 5);
@@ -1745,12 +1745,12 @@ void MatrixRun::section02_early_probes()
     });
 
     // ── Review 2026-08-23 #27 余烬门熄灭钩子并入 World 写入族探针 ──
-    // 背景：旧熄门钩子只挂 playercontroller 挖掘路径（finishMiningAt 显式调 breakNetherPortalsAround），
+    // 背景：旧熄门钩子只挂 playercontroller 挖掘路径（finishMiningAt 显式调 breakEmberGatesAround），
     //   爆炸 / TNT 点火 / 火焚 / 流体置换等系统静默写路径拆掉门框或门面后**门面残留**（玩家肉眼：框被炸掉
     //   一角、紫门面悬空不灭）。review #27 修法 = 钩子下沉 World 写入族（setBlock×2 / setBlockSilent /
     //   clearBlockSilent / setWaterSilent / setBlockFromEntity / destroySphereSilent 逐破坏格 /
-    //   dropGravityColumn 逐清格，谓词=本格原有非空内容被置换；removeNetherPortalAt 清域带
-    //   m_inRemoveNetherPortal 守卫防嵌套 BFS）。本探针逐入口驱动：
+    //   dropGravityColumn 逐清格，谓词=本格原有非空内容被置换；removeEmberGateAt 清域带
+    //   m_inRemoveEmberGate 守卫防嵌套 BFS）。本探针逐入口驱动：
     //   (a) 爆炸（destroySphereSilent r=1.5 打掉 4×5 门一角 4 门格；黑曜石框爆炸免疫——残 16 格靠钩子熄）
     //   (b) setBlockSilent 置换门格（火吞系统写代表）；(c) clearBlockSilent 拆底梁（TNT 点火清格代表）；
     //   (d) setWaterSilent 置换门格（流体蒸发 / 改道代表）；(e) 纯放置对照（旧格 Air → 不熄，机制等价
@@ -1760,7 +1760,7 @@ void MatrixRun::section02_early_probes()
         "n sphere per-voxel / setBlockSilent / clearBlockSilent / setWaterSilent / player dig setBlock) c"
         "ollapses whole connected portal domain (4x5 rig: 16 out-of-sphere cells die via hook, obsidian f"
         "rame blast-immune), pure placement into air beside a lit door keeps all 20 cells (predicate guar"
-        "d), removeNetherPortalAt clear guarded against nested BFS" }, [&]() {
+        "d), removeEmberGateAt clear guarded against nested BFS" }, [&]() {
         World wRf27;
         wRf27.setWidth(48);
         wRf27.setDepth(48);
@@ -1790,13 +1790,13 @@ void MatrixRun::section02_early_probes()
             for (int c = -3; c <= 7; ++c)
                 for (int r = -3; r <= 8; ++r)
                     for (int d = -2; d <= 2; ++d)
-                        if (wRf27.blockAt(px27 + d, pY27 + r, pz27 + c) == BR::NetherPortal) ++n;
+                        if (wRf27.blockAt(px27 + d, pY27 + r, pz27 + c) == BR::EmberGate) ++n;
             return n;
         };
         // 每场景起手式：重建 + 点燃 + 核对恰 20 门格。
         const auto ignite20 = [&]() -> bool {
             buildPortal45();
-            const bool lit = wRf27.tryIgniteNetherPortal(px27, pY27 + 1, pz27 + 1);
+            const bool lit = wRf27.tryIgniteEmberGate(px27, pY27 + 1, pz27 + 1);
             return lit && countPortal27() == 20;
         };
         // (a) 爆炸拆角：r=1.5 球心打门面角格 (px27,pY27,pz27) → 球内门格 4（dz²+dy²≤2.25），球外 16 格
@@ -1875,7 +1875,7 @@ void MatrixRun::section02_early_probes()
                              "setWaterSilent / player dig setBlock) collapses whole connected portal domain "
                              "(4x5 rig: 16 out-of-sphere cells die via hook, obsidian frame blast-immune), "
                              "pure placement into air beside a lit door keeps all 20 cells (predicate "
-                             "guard), removeNetherPortalAt clear guarded against nested BFS";
+                             "guard), removeEmberGateAt clear guarded against nested BFS";
     });
 
     // ── Review 2026-08-23 #28 铁砧砸伤按目标结算探针 ──

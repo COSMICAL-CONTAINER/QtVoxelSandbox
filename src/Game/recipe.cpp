@@ -880,8 +880,8 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
     // t726 暗渊之眼（ender_eye）：暗渊珠 + 燃烬粉 → 1 暗渊之眼（无序 2×2，背包栏 / 工作台均可）。
     //   机制等价 MC 1.0 ender eye 配方（ender pearl + blaze powder 任意摆放）。2 原料各 1 件、多重集
     //   {EnderPearl:1, BlazePowder:1} 唯一 → shapeless 不与既有配方冲突。产物 = EndEyeId（材料段 0x23A，
-    //   既有末影之眼 id，t487——机制等价 MC ender eye，暗渊之眼即其同源产物；右键末地传送门激活
-    //   placeBlock EndPortal 分支）。原料暗渊珠（t727 夜行者掉落）/ 燃烬粉（燃烬棒冶炼，t726 同批）。
+    //   既有暗渊之眼 id，t487——机制等价 MC ender eye，暗渊之眼即其同源产物；右键暗渊门激活
+    //   placeBlock AbyssGate 分支）。原料暗渊珠（t727 夜行者掉落）/ 燃烬粉（燃烬棒冶炼，t726 同批）。
     { int(RecipeRegistry::Inventory2x2), true,
       { RecipeRegistry::EnderPearlId, RecipeRegistry::BlazePowderId, 0,
         0,                            0,                             0,

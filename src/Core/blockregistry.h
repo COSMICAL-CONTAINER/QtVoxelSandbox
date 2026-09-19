@@ -32,6 +32,26 @@
 //      机制等价 MC 1.0 玻璃 glass）。
 //   115=brown_mushroom（t507 白蘑菇 / 棕蘑菇：cross 形蘑菇，机制等价 MC 1.0 brown mushroom；蘑菇汤原料）。
 // air 恒 solid=false / hardness=0 / 不掉落。方块名用通用词，零 MC 专有名词（PLAN §9）。
+//
+// ── t1067 §9 区隔改名映射表（改名批收口；数值 block id 零变化 = 存档安全铁律——saves 存数值 id，改名零迁移）──
+//   标识符：原 NetherPortal→EmberGate（余烬门，§9 记载：机制等价 MC 1.0 nether portal id 90）；
+//           原 EndPortal→AbyssGate（暗渊门框架，§9 记载：机制等价 MC 1.0 end portal frame id 120）；
+//           原 EndPortalSurface→AbyssGateSurface（暗渊门面，§9 记载：机制等价 MC 1.0 end portal id 119）。
+//   常量/谓词/World 方法：原 kNetherPortalStripFrames→kEmberGateStripFrames、原 isEndPortal→isAbyssGate、（§9）
+//           原 isEndPortalSurface→isAbyssGateSurface、原 EndPortalStateActiveFlag→AbyssGateStateActiveFlag、（§9）
+//           原 tryIgniteNetherPortal→tryIgniteEmberGate、原 removeNetherPortalAt→removeEmberGateAt、（§9）
+//           原 breakNetherPortalsAround→breakEmberGatesAround、原 m_inRemoveNetherPortal→m_inRemoveEmberGate、（§9）
+//           原 endPortalRingComplete→abyssGateRingComplete、原 checkEndPortalIntegrity→checkAbyssGateIntegrity、（§9）
+//           原 tryOpenEndPortal→tryOpenAbyssGate。内部分类字面（BlockDef::name，仅 blockName() 调试读面、（§9）
+//           零存档/资源包消费方——豁免论证：改名零外部观测面）：原 "nether_portal"→"ember_gate"、（§9）
+//           原 "end_portal"→"abyss_gate"、原 "end_portal_surface"→"abyss_gate_surface"。（§9）
+//   displayName：末地传送门框架→暗渊门框架 / 末地传送门面→暗渊门面 / 末影之眼→暗渊之眼（§9(b) 硬底线：
+//           维度专有名换原创「暗渊」——与既有暗渊珠 t727 / 暗渊之眼 t729 家族同源；物品 id 0x23A 不变）。
+//   资产文件名：icon_end_portal.png→icon_abyss_gate.png、default_end_portal{,_active}.png→（§9）
+//           default_abyss_gate{,_active}.png、tools/build_end_portal.py→build_abyss_gate.py（内容像素零变化）。（§9）
+//   豁免面（旧词根字面合法存留，行携 §9 标记）：resourcepackmanager 资源包读取面（用户包内 MC 布局文件名
+//           nether_portal.png——§9 机制等价记载合法）+ kMcBlockId 迁移文档表 MC 侧行标签 + 本表与
+//           world.h World 写入钩子族映射头注的对照记载。
 class BlockRegistry
 {
 public:
@@ -241,7 +261,7 @@ public:
                                   //   maxStack=64。各面贴图=spawner(51)（t760 改 cutout 铁笼栅格：铁灰栅栏 + 格间透明孔，
                                   //   中心光斑删除，原创自绘 §9a）。
                                   //   **t760 渲染重构**：solid=false / ShapeFull（glass / ice 先例）—— 本方块被 mesher
-                                  //   双 pass 跳过（同 Painting/Fire/NetherPortal），整笼改由 QML spawnerHost delegate
+                                  //   双 pass 跳过（同 Painting/Fire/EmberGate），整笼改由 QML spawnerHost delegate
                                   //   渲染（BlockCube 铁笼壳 alphaMode:Mask cutout + 笼内缓慢旋转迷你蠹虫模型）；
                                   //   碰撞 / 选中 / 射线走 shape=ShapeFull 不变；lightOpacity 随 solid=false 转 0
                                   //   （t742 铁活板门 cutout 同款：孔后邻面采到本格天光）。
@@ -692,8 +712,8 @@ public:
         //   MC 1.0 发射器射箭）。每发射器 per-dispenser 冷却（防每帧刷屏）。worldgen placeJungleTemple 把发射器
         //   嵌入走廊石壁（朝向走廊中央的压力板）。进创造调色板（玩家可取用 / 放置 / 自建机关）。
         Dispenser       = 107, // 发射器：踩压力板触发的射箭机关方块（机制等价 MC 1.0 dispenser）；丛林神殿陷阱
-        // ── t487 要塞结构方块（机制等价 MC 1.0 要塞 stronghold 的石砖 / 石砖台阶/楼梯 / 末地传送门；名称 / 贴图
-        //   全原创自绘 §9a；§9 区隔：末地/末影之眼为通用描述词，机制对齐非专名照搬）：
+        // ── t487 要塞结构方块（机制等价 MC 1.0 要塞 stronghold 的石砖 / 石砖台阶/楼梯 / 暗渊门；名称 / 贴图
+        //   全原创自绘 §9a；§9 区隔：末地/暗渊之眼为通用描述词，机制对齐非专名照搬）：
         //   石砖（StoneBrick）：石质整立方装饰方块（要塞墙体主体；机制等价 MC 1.0 stone brick）。整立方 opaque
         //   （solid=true / ShapeFull —— 走 mesher 整立方面路径，**非**异形，与 stone/cobble/mossy 同族）、
         //   hardness=1.5（同 stone 量级，需镐）、toolType=Pickaxe、requiresTool=true、minTier1（木镐可破且掉落）、
@@ -714,21 +734,22 @@ public:
         //   同编码）。经 isStairs 谓词并入异形路由（段外，同 CobbleStairs 模式）。音色归 GroupStone。
         //   worldgen placeStronghold 楼梯井；进创造调色板。
         StoneBrickStairs= 110, // 石砖楼梯：整步+背墙（机制等价 MC 1.0 stone brick stairs）；复用 ShapeStairs 几何
-        //   末地传送门框架（EndPortal；t664 更名，原「末地祭坛/末地传送门」）：要塞传送门房 12 格框架环方块
-        //   （机制等价 MC 1.0 end portal frame；§9 区隔：末地为通用描述词，机制对齐非 MC 专名照搬）。
-        //   **整立方**（框架盒身；t664 起本方块是**框架**——激活后的薄门面是独立方块 EndPortalSurface=131）。
+        //   暗渊门框架（AbyssGate；t664 更名，t1067 再更名；历史名「末地祭坛/末地传送门框架」——§9 记载）：
+        //   要塞传送门房 12 格框架环方块（机制等价 MC 1.0 end portal frame；§9 区隔：维度名换原创「暗渊」，
+        //   与既有暗渊珠 t727 / 暗渊之眼 t729 家族同源）。
+        //   **整立方**（框架盒身；t664 起本方块是**框架**——激活后的薄门面是独立方块 AbyssGateSurface=131）。
         //   solid=false（非实体 → 不挡邻居面剔除，与地形解耦）/ ShapeFull（碰撞 / 选中仍走整格可踩 / 可瞄准）、
         //   **hardness=-1.0**（生存不可挖掘：canMine=false；**创造可瞬破** drop=0 不掉落，同 bedrock 语义 ——
-        //   t664 完整性：破任一框架 → 3×3 门面全消失，World::checkEndPortalIntegrity 维护）、dropId=0 不掉落、
+        //   t664 完整性：破任一框架 → 3×3 门面全消失，World::checkAbyssGateIntegrity 维护）、dropId=0 不掉落、
         //   dropCount=0、maxStack=64（worldgen 专属 / 不掉落 → maxStack 实不可达，填 64 与方块族一致）。各面贴图
-        //   =t620 末影祭坛三面（侧·底=endframe_side(140) / 顶（未放之眼）=endframe_top(141) / 顶（已放眼）=
-        //   endframe_eye(142)（框面+中央之眼亮纹，tileFor per-face + state 选；程序星空 129 由 EndPortalSurface
+        //   =t620 暗渊祭坛三面（侧·底=endframe_side(140) / 顶（未放之眼）=endframe_top(141) / 顶（已放眼）=
+        //   endframe_eye(142)（框面+中央之眼亮纹，tileFor per-face + state 选；程序星空 129 由 AbyssGateSurface
         //   复用为门面）。
-        //   音色归 GroupStone（石质兜底）。**激活机制**（t664 正确形态）：玩家持末影之眼物品（EndEyeId）右键
-        //   各框架 → placeBlock useBlock 分支翻 state bit0（放眼态）+ 摇 candidate 环中心调 World::tryOpenEndPortal
-        //   —— 12 框架**全部激活** → 3×3 内圈生成 EndPortalSurface 薄星平面（末地维度仍占位不实现）。
-        //   t634 进创造调色板（自建末地传送门测试）。state 经 m_states 落 SQLite round-trip 保真。
-        EndPortal       = 111, // 末地传送门框架：12 格环围 3×3 内圈（机制等价 MC 1.0 end portal frame）；末影之眼右键放眼激活
+        //   音色归 GroupStone（石质兜底）。**激活机制**（t664 正确形态）：玩家持暗渊之眼物品（EndEyeId）右键
+        //   各框架 → placeBlock useBlock 分支翻 state bit0（放眼态）+ 摇 candidate 环中心调 World::tryOpenAbyssGate
+        //   —— 12 框架**全部激活** → 3×3 内圈生成 AbyssGateSurface 薄星平面（暗渊维度仍占位不实现）。
+        //   t634 进创造调色板（自建暗渊门测试）。state 经 m_states 落 SQLite round-trip 保真。
+        AbyssGate       = 111, // 暗渊门框架：12 格环围 3×3 内圈（机制等价 MC 1.0 end portal frame）；暗渊之眼右键放眼激活
         // ── t490 手动 TNT 点火机关方块（机制等价 MC 1.0 lever / 木按钮 / 石按钮；无红石系统，故用「右键激活 →
         //   点燃水平四邻 TNT」简化为单次脉冲触发，spec「若时间紧，拉杆/按钮可简化为放置即点燃邻接 TNT 或右键触发
         //   单一路径」）。名称 / 贴图全原创自绘 §9a（tools/build_lever_button.py 程序生成）。三者本身是可放置 / 可破的
@@ -913,18 +934,18 @@ public:
         //   音色归 GroupStone（石粉质感）。**不进创造方块段调色板**（粉尘经红石粉物品放置获得 —— 红石 tab
         //   t660 取物品 0x224，同玻璃物品模式）。
         RedstoneDust    = 130, // 红石粉导线：红石粉物品放置成（贴地薄层）；15 级衰减导电；破坏掉回红石粉
-        // ── t664 末地传送门「门面」方块（机制等价 MC 1.0 end portal 的薄黑色星平面）：框架环（EndPortal=111，
-        //   t664 更名「末地传送门框架」）12 格全激活后由 PlayerController 在 3×3 内圈生成的**薄水平星平面**。
-        //   贴图 = tile 129（end_portal 程序星空：深紫黑星空底 + 中心暗绿旋涡 —— t620 endframe 化后该瓦片
+        // ── t664 暗渊门「门面」方块（机制等价 MC 1.0 end portal 的薄黑色星平面）：框架环（AbyssGate=111，
+        //   t664 更名「暗渊门框架」）12 格全激活后由 PlayerController 在 3×3 内圈生成的**薄水平星平面**。
+        //   贴图 = tile 129（abyss_gate 程序星空：深紫黑星空底 + 中心暗绿旋涡 —— t620 endframe 化后该瓦片
         //   无消费方，t664 复用为门面，零新增瓦片）；几何 = 与铁轨族同款水平双面 quad 但**贴 cell 顶下方**
         //   （y = 1-1/16，悬空平面非贴地——机制等价 MC 门面悬于框架顶平；经 isCrossBillboard 并入 PASS 1
-        //   cutout 路由，PartialBlockGeometry EndPortalSurface case）。solid=false / ShapeNone（无碰撞、玩家
+        //   cutout 路由，PartialBlockGeometry AbyssGateSurface case）。solid=false / ShapeNone（无碰撞、玩家
         //   穿过、不挡邻居面剔除）、hardness=0（瞬破）、NoTool、dropId=0 不掉落（worldgen 派生方块非采集物）、
         //   dropCount=0、maxStack=64。**光照**：lightEmission 恒 15（机制等价 MC 1.0 门面发光 15；要塞黑暗中
-        //   一片亮星平面即「通往另一宇宙」的观感）。**完整性**（World::checkEndPortalIntegrity，同
+        //   一片亮星平面即「通往另一宇宙」的观感）。**完整性**（World::checkAbyssGateIntegrity，同
         //   checkRailOnEdit 模式）：任一邻格框架被破 → 本格门面自动消失（静默清 Air；玩家拆门反馈）。
-        //   音色归 GroupStone。**不进创造调色板**（框架（EndPortal=111）已进；门面是激活派生方块）。
-        EndPortalSurface= 131, // 末地传送门面：12 框架全激活 → 3×3 内圈生成薄黑色星平面（光 15；框架破则消失）
+        //   音色归 GroupStone。**不进创造调色板**（框架（AbyssGate=111）已进；门面是激活派生方块）。
+        AbyssGateSurface= 131, // 暗渊门面：12 框架全激活 → 3×3 内圈生成薄黑色星平面（光 15；框架破则消失）
         // ── t665 怪物蛋（MonsterEgg；机制等价 MC 1.0 silverfish stone / monster egg）：**外表与石砖完全
         //   相同**（各面贴图=stone_brick(128)）、硬度 0（瞬破）、NoTool（空手可采）、**dropId=0 不掉落
         //   方块** —— 破坏时由 PlayerController::finishMiningAt 特判生成一只 Silverfish 敌对 mob
@@ -1013,12 +1034,12 @@ public:
         //   火上窜）。燃烧伤害：mob / 玩家点火复用 t344 岩浆链（entitymanager / playercontroller 的 Lava 接触
         //   判定并入 Fire）。音色 GroupGrass（软质燃烧物）。不进创造调色板（maxStack=0 不可拾取/放置）。
         Fire           = 137, // 火焰：非实体光源格（光 15）；两片对角交叉双面 quad + 32 帧翻书动画；点燃 / 蔓延 / 自熄
-        // ── t725 余烬门（NetherPortal；机制等价 MC 1.0 nether portal id 90，无对应物品形态）：黑曜石门框
+        // ── t725 余烬门（EmberGate；机制等价 MC 1.0 nether portal id 90，无对应物品形态）：黑曜石门框
         //   （内腔开口 2×3 最小 .. 21×21 最大 = 框外沿 4×5 .. 23×23，t806 泛化 + t848 上限对齐 MC 1.0；
         //   四角块可选——检测不查角 / 破角不碎门；边柱可共享——相邻门共用竖柱各自成门）内以打火石点燃
-        //   生成的**非实体传送门面片**格（World::tryIgniteNetherPortal 单一权威，
+        //   生成的**非实体传送门面片**格（World::tryIgniteEmberGate 单一权威，
         //   点燃填满整个开口）。lightEmission=11（机制
-        //   等价 MC 下界传送门微光），渲染**不进 chunk mesh**（mesher 双 PASS 跳过，同 Fire t724 模式）→
+        //   等价 MC 下界传送门微光——§9 记载），渲染**不进 chunk mesh**（mesher 双 PASS 跳过，同 Fire t724 模式）→
         //   Main.qml portalHost 逐格 delegate 渲染：**竖直平面 quad**（非 fire 的交叉对角——门是平面），
         //   X 平面门（portal 沿 X 轴展开 / 面朝 ±Z）quad 不旋转，Z 平面门 quad 绕 Y 旋 90°；state=朝向
         //   （0=X 平面 / 1=Z 平面，点燃检测时写定）；NoCulling 双面可见 + **Blend 半透明**（贴图 alpha
@@ -1027,14 +1048,14 @@ public:
         //   solid=false / ShapeNone（无碰撞可穿入、不挡邻居面剔除、不可选体）、hardness=0（瞬破）、NoTool、
         //   requiresTool=false、dropId=0（破 = 门熄灭无掉落，spawnItem 对 id<=0 已守卫不产出）、maxStack=0
         //   （不可进背包——只能打火石点燃产生，无物品形态）。**门完整性**：任一门格或其黑曜石门框**承重**格
-        //   （底梁/顶梁/边柱；角块除外）被破坏 → 同朝向连通域整门熄灭（World::removeNetherPortalAt /
-        //   breakNetherPortalsAround，t806 自 PlayerController 下沉 World 层；PlayerController finishMiningAt
+        //   （底梁/顶梁/边柱；角块除外）被破坏 → 同朝向连通域整门熄灭（World::removeEmberGateAt /
+        //   breakEmberGatesAround，t806 自 PlayerController 下沉 World 层；PlayerController finishMiningAt
         //   连锁调用，同 t721 画 flood-fill 先例；连通域尺寸无关天然支持任意大小门）。
         //   **站立伤害 v1**（dev-plan 明确允许降级）：玩家处于门格内持续灼烧 1 伤害/秒（复用 Fire 掉落类别），
         //   **无下界维度**（本工程单维度，不做传送）。音色 GroupGrass（同 fire，软质熄灭）。不进创造调色板
         //   （maxStack=0 不可拾取/放置）。tickFire 生态**零交互**：flammable() 表不含本格（火不蔓延进门 /
         //   门不助燃——门格非 air，flint 分支亦不覆写）。
-        NetherPortal   = 138, // 余烬门：黑曜石门框内点燃的传送门面片（光 11）；竖直平面 quad + 32 帧紫色漩涡；站入灼烧
+        EmberGate   = 138, // 余烬门：黑曜石门框内点燃的传送门面片（光 11）；竖直平面 quad + 32 帧紫色漩涡；站入灼烧
         // ── t761 沙砾（Gravel；机制等价 MC 1.0 gravel id 13，「换皮沙子」重力方块）：松散灰砾石。**与沙
         //   同受重力**（Main.qml maybeTriggerFallingBlock 按 id 8||139 触发塌落，链式 / 落水穿透 / 遇不完整
         //   方块变掉落物全同沙）；solid=true / ShapeFull（整立方，mesher 走贪心合并天然支持）；hardness=0.6 /
@@ -1207,14 +1228,14 @@ public:
     static bool isWoodButton(quint8 blockId);
     static bool isStoneButton(quint8 blockId);
     static bool isManualIgniter(quint8 blockId); // 任一手动点火机关（Lever / WoodButton / StoneButton）
-    // t487 要塞结构方块统一谓词（单一权威）：blockId == EndPortal 即末地传送门。供 PlayerController placeBlock
-    //   useBlock 分支判定「右键命中格是否末地传送门 → 持末影之眼激活」（避免各处硬编码 id 判定漂移，同 isLadder
+    // t487 要塞结构方块统一谓词（单一权威）：blockId == AbyssGate 即暗渊门。供 PlayerController placeBlock
+    //   useBlock 分支判定「右键命中格是否暗渊门 → 持暗渊之眼激活」（避免各处硬编码 id 判定漂移，同 isLadder
     //   单 id 模式）。单 id 故裸相等判定，仍提供谓词作单一权威（未来追加变体时一处同步）。
-    static bool isEndPortal(quint8 blockId);
-    // t664 末地传送门「门面」统一谓词（单一权威）：blockId == EndPortalSurface 即激活后的薄星平面
+    static bool isAbyssGate(quint8 blockId);
+    // t664 暗渊门「门面」统一谓词（单一权威）：blockId == AbyssGateSurface 即激活后的薄星平面
     //   （12 框架全激活 → 3×3 内圈生成；光 15 无碰撞；框架破 → World 完整性复检自动消失）。
     //   供 World 完整性复检 + mesher 路由。单 id 裸相等。
-    static bool isEndPortalSurface(quint8 blockId);
+    static bool isAbyssGateSurface(quint8 blockId);
     // t665 怪物蛋统一谓词（单一权威）：blockId == MonsterEgg 即怪物蛋（石砖形；外表同石砖、瞬破出虫）。
     //   供 PlayerController::finishMiningAt 破坏特判（生成 Silverfish 替代掉落）。单 id 裸相等。
     static bool isMonsterEgg(quint8 blockId);
@@ -1703,7 +1724,7 @@ public:
     //   「预览侧复刻一份 state→瓦片映射」的第二权威漂移（同 AtlasTileCount 收编魔数的历史教训）。
     // stateTileOverride：据 (blockId, face, state) 返回**态变瓦片**序号；返回 -1 = 本方块/面无态变
     //   （caller 落既有 tileIndex / def 默认路径，行为与旧版逐位一致）。覆盖族：
-    //   Farmland 顶 26(干)/27(湿)、EndPortal 顶 141(无眼)/142(有眼)、RedstoneTorch 161(亮)/170(灭)、
+    //   Farmland 顶 26(干)/27(湿)、AbyssGate 顶 141(无眼)/142(有眼)、RedstoneTorch 161(亮)/170(灭)、
     //   GoldenRail 157/159(通电亮金)、DetectorRail 158/160(通电视觉)、WheatCrop 29+age(0..7)、
     //   CarrotCrop/PotatoCrop 基底+age/2（4 视觉阶段，t407 口径）。
     static int stateTileOverride(quint8 blockId, int face, quint8 state);
@@ -1737,9 +1758,9 @@ public:
     //   t609：139=dropper_front（投掷器前面（排出口所朝面）贴图；石质灰底 + 中央小方形暗孔（比发射器的大
     //   暗腔排出口更小更简的轻量出口读感）；Dropper 前面=本 tile（mesher 据 state 选，同发射器 tileFor 分支）；
     //   顶/底/侧复用熔炉 12/13；tools/build_dropper.py 程序生成）。
-    //   t620：140..142=末影祭坛三张（EndPortal 方块的 endframe 化视觉：140=endframe_side 侧/底（灰白细孔
-    //   框身）/ 141=endframe_top 顶（未放末影之眼：框面 + 中央暗绿凹槽）/ 142=endframe_eye 顶（已放之眼：
-    //   框面 + 中央之眼亮纹，mesher tileFor 据 EndPortal state bit0 选 141/142）；tools/build_endframe.py
+    //   t620：140..142=暗渊祭坛三张（AbyssGate 方块的 endframe 化视觉：140=endframe_side 侧/底（灰白细孔
+    //   框身）/ 141=endframe_top 顶（未放暗渊之眼：框面 + 中央暗绿凹槽）/ 142=endframe_eye 顶（已放之眼：
+    //   框面 + 中央之眼亮纹，mesher tileFor 据 AbyssGate state bit0 选 141/142）；tools/build_endframe.py
     //   程序生成原创像素图）。
     //   t620：143..146=门上下半 per-face 四张（机制等价 MC 1.0 门两格高：143=door_wood_upper（橡木上半
     //   格栅窗）/ 144=door_wood_lower（橡木下半锁孔板）/ 145=door_spruce_upper / 146=door_spruce_lower（云杉
@@ -1843,12 +1864,13 @@ public:
     //   不随 pack 切换变）。消费方：Main.qml fireStripTex（delegate quad UV 全 [0,1] → Texture scaleV=1/N
     //   + positionV=k/N 翻书；与 chunk-mesh 流体路（UV 烘焙 1/N）不同源，火不进 chunk mesh）。
     static constexpr int kFireStripFrames = 32;
-    // t725 余烬门条带 32 帧（单列）。MC 1.0 下界传送门 flipbook 为 nether_portal.png 单条 32 帧（demo 包
-    //   实测 16×512 = 32 帧现成 strip）；程序回退条带（tools/build_portal.py）同为 16×512/32 帧紫色漩涡 →
+    // t725 余烬门条带 32 帧（单列）。MC 1.0 下界传送门 flipbook 为 nether_portal.png 单条 32 帧（§9 豁免：
+    //   资源包读取面记载——用户包内 MC 布局文件名；demo 包实测 16×512 = 32 帧现成 strip）；程序回退条带
+    //   （tools/build_portal.py）同为 16×512/32 帧紫色漩涡 →
     //   包内 / 程序两侧帧数天然对齐（portalStripFrames CONSTANT 不随 pack 切换变）。消费方：Main.qml
     //   portalStripTex（delegate quad UV 全 [0,1] → Texture scaleV=1/N + positionV=k/N 翻书；门不进 chunk
     //   mesh，与火同为 delegate 渲染路）。
-    static constexpr int kNetherPortalStripFrames = 32;
+    static constexpr int kEmberGateStripFrames = 32;
     static constexpr int kFluidStripFramePx = 16;
 
     // t892 水面高度（cell-local Y 分数，0..1）**单一权威**：水源(state==0) = 7/8 —— 表面比方块顶
@@ -1987,7 +2009,7 @@ public:
     //   岩浆=15（MC 1.0 岩浆光 level 15，地底发光照亮洞穴；机制对齐非精确复刻）。其余 → 0（不自发光）。
     //   越界 → 0。与 lightOpacity 解耦：岩浆 lightOpacity=0（solid=false 全透）但 lightEmission=15（既透光又自发光）。
     static quint8 lightEmission(quint8 blockId);
-    // t494 状态感知自发光强度：默认按 state=0 委托单参版（保持既有火把/岩浆/末地传送门行为零回归）。仅个别方块
+    // t494 状态感知自发光强度：默认按 state=0 委托单参版（保持既有火把/岩浆/暗渊门行为零回归）。仅个别方块
     //   的自发光与 state 相关 —— 当前唯一特例：燃烧中的熔炉（id==Furnace 且 state 含 FurnaceStateLitFlag bit2）
     //   → 13（MC 1.0 熔炉光 level 13，略低于火把 14）。熄灭态（bit2 清）→ 0（同普通方块不自发光）。
     //   仅 World 光照 flood 种子调用此重载（读 cell 真实 state 区分燃/熄）；非状态相关发光方块两版等价。
@@ -2366,16 +2388,16 @@ public:
     static constexpr quint8 ChestStateJungleFlag = 0x20;
     // t487 箱子 state bit6（值 64）=「要塞生成箱」标记（worldgen placeStronghold 写入；玩家放置的箱子 /
     //   地牢箱 / 矿井箱 / 神殿箱 / 丛林神殿箱无此位）。仅供 World::isStrongholdChest 读 → Main.qml.openChest
-    //   据此判「是否首开填充要塞战利品」（LootTable::strongholdChestPool：末影之眼 / 骨头 / 腐肉 / 铁锭 /
+    //   据此判「是否首开填充要塞战利品」（LootTable::strongholdChestPool：暗渊之眼 / 骨头 / 腐肉 / 铁锭 /
     //   青金石 / 红石 / 钻石 / 附魔书等，区别于其它结构表）。**不影响** chestFrontFace（后者只读低 2 位 state&3，
     //   bit6 被忽略 → 朝向编码零回归）；collisionAABBs / selectionAABBs 亦不读 chest state → 复用 bit6 作 marker
     //   零回归（同 ChestStateDungeonFlag bit2 / Mineshaft bit3 / Pyramid bit4 / Jungle bit5 / torch marker 同族）。
     //   state 经 m_states 落 SQLite round-trip 保真（旧存档箱子 state 无 bit6 → 非要塞箱，不填充，安全）。
     static constexpr quint8 ChestStateStrongholdFlag = 0x40;
-    // t487 末地传送门 state bit0（值 1）=「已激活」标记（玩家持末影之眼右键传送门翻此位）。mesher 据 bit0 切
-    //   end_portal(129) / end_portal_active(130) 贴图（激活后中心旋涡更亮）。state 经 m_states 落 SQLite
-    //   round-trip 保真。旧存档 / worldgen 传送门 state=0 → 未激活（玩家需放末影之眼激活）。
-    static constexpr quint8 EndPortalStateActiveFlag = 0x01;
+    // t487 暗渊门 state bit0（值 1）=「已激活」标记（玩家持暗渊之眼右键传送门翻此位）。mesher 据 bit0 切
+    //   abyss_gate(129) / abyss_gate_active(130) 贴图（激活后中心旋涡更亮）。state 经 m_states 落 SQLite
+    //   round-trip 保真。旧存档 / worldgen 传送门 state=0 → 未激活（玩家需放暗渊之眼激活）。
+    static constexpr quint8 AbyssGateStateActiveFlag = 0x01;
     // t487 刷怪笼 state bit0（值 1）=「银鱼刷怪笼」标记（worldgen placeStronghold 写入；地牢刷怪笼 state=0
     //   无此位）。t786 起 bit0 语义降级为「旧版兼容标记」：type 位（bit1-5，下述 SpawnerStateMobShift/Mask）
     //   非零时以 type 为准（要塞银鱼笼现写 SpawnerStateSilverfish = 29 = 银鱼 type|bit0，读端两态并存）；

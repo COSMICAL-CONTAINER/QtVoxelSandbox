@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""生成末影祭坛（末地传送门框）方块的贴图（16×16 像素，原创自绘，§9 override (a)）。
+"""生成暗渊祭坛（暗渊门框）方块的贴图（16×16 像素，原创自绘，§9 override (a)）。
 
-t620 末影祭坛贴图接入：本工程无独立祭坛框方块（MC 1.0 end portal frame），EndPortal 传送门方块本体
-兼作祭坛——侧/底 = 框身石纹（endframe_side）、顶 = 框面（endframe_top，未放末影之眼）、放末影之眼激活
+t620 暗渊祭坛贴图接入：本工程无独立祭坛框方块（MC 1.0 end portal frame），AbyssGate 传送门方块本体
+兼作祭坛——侧/底 = 框身石纹（endframe_side）、顶 = 框面（endframe_top，未放暗渊之眼）、放暗渊之眼激活
 后顶面换「框面 + 中央之眼」合成图（endframe_eye，mesher tileFor 据 state bit0 选）。机制对齐非 MC 美术
 照搬，名称 / 贴图纯原创自绘（零 MC 资产）。
 
@@ -13,10 +13,10 @@ t620 末影祭坛贴图接入：本工程无独立祭坛框方块（MC 1.0 end p
 
 输出（覆盖写入 textures/）：
   default_endframe_side.png   （tile 140，祭坛侧 / 底面）
-  default_endframe_top.png    （tile 141，祭坛顶面（未放末影之眼））
-  default_endframe_eye.png    （tile 142，祭坛顶面（已放末影之眼））
+  default_endframe_top.png    （tile 141，祭坛顶面（未放暗渊之眼））
+  default_endframe_eye.png    （tile 142，祭坛顶面（已放暗渊之眼））
 
-依赖：仅 PIL/numpy，无外部贴图。与 build_end_portal.py / build_stone_brick.py 同风格（程序生成原创像素图）。
+依赖：仅 PIL/numpy，无外部贴图。与 build_abyss_gate.py / build_stone_brick.py 同风格（程序生成原创像素图）。
 """
 import os
 import numpy as np

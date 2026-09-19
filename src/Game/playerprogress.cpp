@@ -20,8 +20,8 @@
 //   「耕种时间到」(←合成台，t752；与「出击时间」「挖矿时间到」并列的第三分支，首次合成任意材质锄头)
 //   →「农夫」(←耕种时间到，t752 由独立根重挂——「做锄头」作前置、「收获 10 作物」为其后继)。
 //   独立根线（t637；t752 后仅剩两条，t1000 起三条，t1020 起十条）：「起航」（骑船）/「发射!」（发射器触发）/
-//   「隔墙有眼」（t1000 进入要塞结构区域——用户口径「进入到末地要塞的结构里面去了」；标准 MC 同名进度
-//   跟随末影之眼，本工程无该物品 → 按进入结构落地：PlayerController tick 内 insideStronghold 边沿 →
+//   「隔墙有眼」（t1000 进入要塞结构区域——用户口径「进入到末地要塞的结构里面去了」（用户原话历史记载，今称暗渊要塞）；标准 MC 同名进度
+//   跟随暗渊之眼，本工程无该物品 → 按进入结构落地：PlayerController tick 内 insideStronghold 边沿 →
 //   enteredStronghold 信号 → Main.qml 路由）各自独立根；t1020 追加七条独立根：探索四结构（「地牢探秘」
 //   「废矿来客」「沙漠寻踪」「丛林秘境」——World::inside* 区域沿信号，判定权威 = rebuildStructureRegions
 //   重推导足迹）+ 生活三条（「轨道骑士」t1048 勘误口径：乘矿车到达距乘车起点单方向 ≥500 米——MC On A
@@ -75,10 +75,10 @@ const QList<PlayerProgress::AchievementDef> &PlayerProgress::achievementDefs()
         { "dispense",       nullptr,          "发射!",      "让发射器或投掷器弹出物品",
           int(BlockRegistry::Dispenser) },
         // t1000 独立根：「隔墙有眼」——进入要塞结构区域解锁（触发链见文件头独立根线注释；判定权威 =
-        //   World::insideStronghold 足迹口径）。iconId = 末地传送门框架 EndPortal（要塞传送门房标志物，
+        //   World::insideStronghold 足迹口径）。iconId = 暗渊门框架 AbyssGate（要塞传送门房标志物，
         //   111 家族）。
         { "entered_stronghold", nullptr,      "隔墙有眼",   "发现了藏在地底深处的要塞",
-          int(BlockRegistry::EndPortal) },
+          int(BlockRegistry::AbyssGate) },
         // ── t1020 成就树四分支扩展（采矿 / 战斗 / 探索 / 生活；总数 17→31）──
         // 采矿支（首矿链：挂在既有挖矿线下，父先于子 DFS 序）：
         { "get_coal",       "mining_time",    "煤炭!",      "首次获得煤炭",

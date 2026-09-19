@@ -1032,10 +1032,10 @@ int PartialBlockGeometry::append(
         if (dnz && nb.dustClimbNz > 0) pushDustClimbZ(false);
         break;
     }
-    case BlockRegistry::EndPortalSurface: {
-        // t664 末地传送门「门面」（薄黑色星平面）：水平双面 quad **贴 cell 顶下方**（y = 1−1/16 —— 悬空
+    case BlockRegistry::AbyssGateSurface: {
+        // t664 暗渊门「门面」（薄黑色星平面）：水平双面 quad **贴 cell 顶下方**（y = 1−1/16 —— 悬空
         //   平面挂于框架环顶沿下方，机制等价 MC 1.0 门面浮在框架顶平；区别于铁轨 / 红石粉的贴地薄层）。
-        //   tile = 129（end_portal 程序星空：深紫黑星空底 + 中心暗绿旋涡；t620 endframe 化后该瓦片无消费方，
+        //   tile = 129（abyss_gate 程序星空：深紫黑星空底 + 中心暗绿旋涡；t620 endframe 化后该瓦片无消费方，
         //   t664 复用为门面）。无碰撞（ShapeNone → 玩家穿过）；光 15 由 lightEmission 承担。材质 alphaCutoff
         //   cutout（星空贴图不透明 → 视觉为实面平面）。不做邻居剔除（solid=false，同铁轨 / 睡莲）。
         constexpr float yr = 1.0f - 1.0f / 16.0f; // 平面 y = 15/16（贴 cell 顶下方，悬空）
