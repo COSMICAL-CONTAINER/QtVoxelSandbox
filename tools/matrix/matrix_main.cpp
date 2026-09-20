@@ -1,5 +1,10 @@
 // R20.03 测试分层：main 只剩 app 构造 + 套件运行 + 返回码（原 L227 / L47997-47998）。
 // 运行方式不变：build/redstone_matrix_test.exe，全过 exit 0（headless 须 QT_QPA_PLATFORM=offscreen）。
+// ── 已知 flake 名单（t1071 起在主入口登记，r2045d 在场钉；复跑清协议不变：单轮挂红先复跑，
+//    复红才判 FAIL）──
+// 已知 flake = t882/t891/t927/t960（t882 mob 首游荡窗内甩钩 RNG；t891 火充能直燃 pumpFor 实时钟
+//   敏感；t927/t960 时序/量测窗类，游走噪声同量级）。t789（羊色统计 λ 薄尾）已 t1071 信封加固退出
+//   名单（绝对出现断言退役 → 确定性源钉 + 统计带，≥10 连跑全绿实证）。
 #include "matrix_helpers.h"
 
 int main(int argc, char *argv[])
