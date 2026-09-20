@@ -38,9 +38,11 @@
 //     沿时刻集合反复缩水）；
 //   「预生成中心与出生 chunk 分歧」→ r2035c（出生域与预生成域错位 rig：玩家 chunk (1,1) vs
 //     预生成中心 (5,5) → 首沿把半径外预生成 chunk 合规驱逐 + 半径内按需重请求 → 收敛；走回
-//     预生成域 → 被驱逐预生成 chunk 按需重物化回 Loaded 且**地形面逐列恒等**（heightmap 基
-//     准）+ 半径内存活代表全程逐位未动[跨边界矿脉/树冠带属 r2023 已登记 sparse 分化域，不进
-//     本腿逐位域——腿注释留痕]；收敛后驻留集稳（逐拍采样恒定）——中心分歧不振荡语义面）；
+//     预生成域 → 被驱逐预生成 chunk 按需重物化回 Loaded 且**全逐位恒等**（id+state 全 16×16
+//     ×H 逐体素，含块缘 ±8 列带的矿脉/树冠边界带——t1069 口径收窄：t1062 修掉在途邻读域
+//     漂移后既往登记分化域并入逐位域，旧「地形面逐列恒等(heightmap)」宽口径退役留痕见腿内
+//     注释）+ 半径内存活代表全程逐位未动；收敛后驻留集稳（逐拍采样恒定）——中心分歧不振荡
+//     语义面）；
 //   「走离/走回 + 结构钉」→ r2035d（压小半径控时长：走离半径外驱逐语义保持[半径内驻留
 //     零丢失 + 半径外擦槽到 Absent] + Edits-on-evict 生产语义[编辑过的被驱逐 chunk 走回后
 //     编辑逐位存活 = persist→store→restore 链] + 首沿门前行为惰性[任何位置沿之前泵拍零请求
@@ -504,8 +506,9 @@ Item {
         " exactly the out-of-radius pregenerate chunks while the in-radius pregenerate window"
         " survives untouched, the driver converges the request window around the displaced"
         " spawn, walking back to the pregenerate center re-materializes every evicted"
-        " pregenerate chunk with bitwise-identical content to its pre-eviction snapshot, and"
-        " the converged resident count stays stable across extra pump beats)"), [&]() {
+        " pregenerate chunk with bitwise-identical content to its pre-eviction snapshot"
+        " across every voxel band including the boundary-band ore veins and tree canopies,"
+        " and the converged resident count stays stable across extra pump beats)"), [&]() {
         bool ok = true;
         QString diag;
 
@@ -556,7 +559,8 @@ Item {
         pc.setWorld(&w);
         const auto snapFar = snapChunk(w, 6, 6);  // 半径外预生成代表（必被首沿驱逐）
         const auto snapNear = snapChunk(w, 3, 3); // 半径内预生成代表（必存活）
-        int preEvictHeight[256]; // 列表层面基准（heightmap 与矿脉无关——重生成地形恒等面）
+        int preEvictHeight[256]; // 列级诊断基准（旧宽口径承重面退役留痕——收窄后降为全逐位的
+                                 //   冗余子集，红面归因二分用：height 红 = 地形层漂移）
         for (int lz = 0; lz < 16; ++lz)
             for (int lx = 0; lx < 16; ++lx)
                 preEvictHeight[lz * 16 + lx] = w.heightmapAt(96 + lx, 96 + lz);
@@ -606,13 +610,15 @@ Item {
                         .arg(int(w.chunks().lifecycleAt(3, 7)))
                         .arg(dBack);
 
-        // 重生成正确性柱（口径钉在任务域，不重审 r2023 处置表的登记分化）：被驱逐预生成
-        // chunk 走回重物化后 **地形面逐列恒等**（heightmap 与矿脉/树冠无关——terrain/树/洞
-        // 等 (b) 级重放的确定性承载面）+ 生命态回 Loaded；半径内存活代表全程**逐位**未动。
-        // （实测留痕：跨 chunk 边界带存在已登记类 sparse 域分化——矿脉走向[scatterOres (c)
-        // 替代，块缘 ±8 列]与树冠跨界写 [adopt 时代邻域 ≠ 预生成时代邻域] 在「预生成内容 vs
-        // 按需重生成」两序下不逐位；属 sparse worldgen 既登记分化域，非本任务 livelock 面，
-        // 也不属本腿承重面——地形恒等 + 半径内逐位不动即「重生成正确」的可断言口径。）
+        // 重生成正确性柱（t1069 口径收窄——t1062 关单登记后续腿修订）：被驱逐预生成 chunk
+        // 走回重物化后 **全逐位恒等**（id+state 双数组 16×16×H 全体素比对），断言域随 t1062
+        // 在途邻读域收口扩入**块缘 ±8 列带**——矿脉走向（scatterOres 邻域溢写）与树冠跨界写
+        // 两处既往登记分化域自此进逐位域（修复成果 → 更强断言）。旧宽口径退役留痕：修复前
+        // 该带确不逐位（r2036c 修前红面 204+85 体素全落块缘带），故 t1062 关单时本腿承重口径
+        // 钉在「地形面逐列恒等（heightmap 基准）+ 半径内存活逐位」；收窄后 heightmap 柱降为
+        // 冗余诊断面（全逐位的子集恒真）——保留作列级归因二分（regen 红时 height 红 = 地形层
+        // 漂移；height 绿而 far 红 = 矿/树冠带漂移）。
+        const int diffFar = chunkDiffCount(w, 6, 6, snapFar);
         const int diffNear = chunkDiffCount(w, 3, 3, snapNear);
         bool heightOk = true;
         for (int lz = 0; heightOk && lz < 16; ++lz)
@@ -623,10 +629,11 @@ Item {
                     break;
                 }
             }
-        const bool regenOk = diffNear == 0 && heightOk;
+        const bool regenOk = diffFar == 0 && diffNear == 0 && heightOk;
         ok = ok && regenOk;
         if (!regenOk)
-            diag += QStringLiteral("[regen nearDiff=%1 height=%2] ")
+            diag += QStringLiteral("[regen far=%1 near=%2 height=%3] ")
+                        .arg(diffFar)
                         .arg(diffNear)
                         .arg(heightOk);
 
@@ -659,7 +666,8 @@ Item {
                              " chunks while the in-radius window survives, the driver converges"
                              " the request window around the displaced spawn, walking back"
                              " re-materializes every evicted pregenerate chunk bitwise-identical"
-                             " to its pre-eviction snapshot, and the converged resident count"
+                             " to its pre-eviction snapshot including the ore-vein and"
+                             " tree-canopy boundary bands, and the converged resident count"
                              " stays stable across extra pump beats)"
                           << (ok ? QString() : diag);
     });
