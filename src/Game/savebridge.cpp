@@ -52,8 +52,11 @@ bool SaveBridge::saveViaCoordinator(WorldStore *store, const QString &worldFile,
         qWarning() << "SaveBridge::saveViaCoordinator: store not open / no world file - refusing";
         return false; // 诚实失败（caller 重试 + toast 兜底——t974 完成门同门）
     }
-    // 逐保存栈上 coordinator：开-用-关（r2015 连接经济学原样——无长活连接状态）。
-    SaveCoordinator coord;
+    // t1070 件三：**长活 coordinator**（savebridge.h m_coord 注——r2015 复用前提兑现 + 陈旧
+    //   冻结点防面论证；旧逐保存栈上实例 = Review_2026-09-18 #1 指认面，随本单退役）。bind
+    //   每保存重绑（store/路径逐调用传入语义不变）；钩子逐保存转发（r2031d 钉文本原样）。
+    //   只读恢复面（recoveryInfo）仍栈上局部实例——recover 不触冻结缓冲，零复用诉求。
+    SaveCoordinator &coord = m_coord;
     coord.bind(store, resolveSavePath(worldFile));
     coord.setFaultHook(m_faultHook); // 生产 = 恒空钩 = 无注入形态；矩阵腿经 C++ 面挂
     // 载荷逐参透传（SaveRequest 字段序 = 本签名形参序——头注选型立证）；三写本体在

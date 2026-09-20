@@ -53,7 +53,11 @@
 // 故本类不可拷贝）。冻结缓冲的必要性：WorldStore::saveAll 从 m_world 读 chunk blob（现有接口
 // 零改动），缓冲世界 = 把冻结快照「回放」成一个稳定 World 供其读取；缓冲按 dims 惰性重建并跨
 // 保存复用（setWidth 系触 worldgen 属一次性建造成本，beginLoad 零填充无 worldgen——生产接线
-// 若在意该成本属后续单优化面，本单零生产接线）。保存期间下游 WorldStore 被临时改绑 buffer、
+// 若在意该成本属后续单优化面，本单零生产接线）。**t1070 件三转正留痕**：该「后续单优化面」
+// 已兑现——复用前提由接线层（savebridge.h m_coord 长活 coordinator；旧逐保存栈上实例把复用
+// 打断 = 每保存重付 ≈4 次一次性 worldgen，Review_2026-09-18 #1 指认面）接住，语义面见
+// ensureBuffer 注（快照每保存重新冻结 + beginLoad 每保存重置缓冲 = 冻结点永不陈旧）。
+// 保存期间下游 WorldStore 被临时改绑 buffer、
 // 收尾恢复原绑（setWorld 沿可见——本单测试外无观察者；QML 零迁移）。
 //
 // 分层（PLAN §2）：World 层（与 worldstore 同域；只依赖 World/Chunk/ChunkManager/WorldStore +
@@ -203,6 +207,10 @@ public:
     // 故障注入缝（验收⑤）。缺省无钩 = 生产形态，恒不注入。
     void setFaultHook(SaveFaultHook hook) { m_faultHook = std::move(hook); }
 
+    // t1070 件三诊断面（矩阵 r2044c 断言用；C++ only 非 QML）：冻结缓冲 dims 重建累计
+    //   （首建 + dims 变化才 ++；同 dims 连续保存复用不 ++ = 「跨保存复用」的行为级锚）。
+    int bufferRebuildCount() const { return m_bufferRebuilds; }
+
     // 恢复状态读数（只读；库/表不存在 → Fresh；库在而打不开 → OpenError = #5②，见枚举处注）。
     //   唯一权威判据 = save_coord 两键比对。
     SaveGenerationInfo recover() const;
@@ -214,6 +222,12 @@ private:
     // 冻结：对活体 World 的唯一读点（验收①）。逐 chunk 深拷贝三段 blob + seed/dims。
     static WorldSaveSnapshot captureSnapshot(const World &live);
     // 冻结缓冲就绪：dims 惰性重建 + beginLoad(seed) 零填充（无 worldgen；跨保存复用）。
+    //   **t1070 件三**：复用前提在生产接线层兑现（SaveBridge 持长活 coordinator——savebridge.h
+    //   m_coord 注）；陈旧冻结点防面（判据读码定，宁可失效勤）：快照**每保存重新冻结**
+    //   （captureSnapshot 是对活体的唯一读点、每次保存都跑——复用的只是 World 壳非冻结点本
+    //   身）+ beginLoad 每保存把缓冲网格重置全零再全量重放冻结点——复用缓冲的内容面与「每
+    //   保存新建」逐字节等价，r2015b「窗内改动活体→重读 = 冻结点 ≠ 活体」承重墙逐位不弱化
+    //   （r2044c 行为级复验）。重建计数 = 诊断面（bufferRebuildCount）。
     bool ensureBuffer(const WorldSaveSnapshot &snap);
     // 快照回放进冻结缓冲（逐 chunk memcpy 三段；尺寸不符 → false 防半写）。
     bool applySnapshotToBuffer(const WorldSaveSnapshot &snap);
@@ -225,6 +239,7 @@ private:
     WorldStore *m_store = nullptr; // 下游 SQLiteAdapter（不拥有；调用方保证存活期）
     QString m_dbPath;            // 存档库路径（与 WorldStore::openWorld 同一路径）
     SaveFaultHook m_faultHook;   // 故障注入缝（缺省空 = 生产形态）
+    int m_bufferRebuilds = 0;    // t1070 件三：冻结缓冲 dims 重建累计（诊断面；见 ensureBuffer 注）
 };
 
 // 值纪律编译期钉（R20.06 体系；r2014d/r2013d 腿内复述先例——头钉被删即双红）。
