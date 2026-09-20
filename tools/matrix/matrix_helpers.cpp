@@ -157,6 +157,8 @@ void MatrixRun::runAll()
 
     section45_savepath_opt(); // t1070 流式/存档路径优化合集三件（置尾先例沿用：r2044a 零变化墙 / r2044b 件一承重[双计数对账：executed 推进而 generated 恒冻 + 逐位回灌] / r2044c 件三承重[重建计数 +1/0/0 + 冻结点三面] / r2044d 结构钉[件一权威源钉族 + 件二量化注锚 + 桥顶针 + 禁触面反探]，r2044b 真会话真线程波 + r2044c 真链 × 真桥单例，rig 零接触）
 
+    section46_skeleton_integrity(); // t1071 测试骨架完整性合集（置尾先例沿用：r2045a 件一承重 / r2045b 件二承重 / r2045c+d 结构钉——纯源码钉零世界腿，rig 零接触）
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";

@@ -1238,6 +1238,9 @@ add_executable(redstone_matrix_test
     #   缓冲复用诊断面 + 桥内长活 coordinator——backgroundgeneration/gamesession/savecoordinator/
     #   savebridge 系已列）。
     tools/matrix/section45_savepath_opt.cpp
+    # t1071 测试骨架完整性合集探针附加：矩阵 harness 自身（accounting 钉面 + t789 加固钉面 +
+    #   md5 修订留痕锚 + flake 名单在场钉——纯源码钉零世界腿，src/ 与 tools/ 只读）。
+    tools/matrix/section46_skeleton_integrity.cpp
     # t1022 键位映射表探针附加：Core 层 KeybindManager（默认表完整性 / 冲突拒收 / settings.json
     #   round-trip——显式 storePath 密闭不触真实档）。PlayerController setKey 规范化消费同链直编。
     src/Core/keybindmanager.cpp
