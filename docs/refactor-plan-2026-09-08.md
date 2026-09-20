@@ -3891,3 +3891,59 @@ fixed 零变化墙（Clean 路径行为/返回语义/saveOkCount 逐位同）｜
 ### 验收（腿族 filter r2034）
 
 fixed 异步 ≡ 同步逐位等价墙（r2026b 端到端化）｜风暴场景（注入 dayMul 跨门）主线程单帧应用有界+队列排干收敛｜env 回退回归｜F3 行核验｜fixed 既有 vertex/mesh/影族全绿。
+
+---
+
+## §30 C4 昼夜天光 shader uniform 化设计（草案 v1 —— 2026-09-20 主控执笔；**只立项不开工**，待 P5 实机数据 + §30.6 四问定夺）
+
+> 状态：设计草案。依据 = vulkan-rhi-and-simd-survey-2026-08-21 §2.4-C4（survey:143「dayMul 合成挪进 shader，可立刻消灭 sun 步进重烘——但 B1 的 uniform 化会让这笔投资报废，且引入首批自定义 shader 风险」；survey:3 状态注记「C4 维持按 P5 实测数据再定」）。t1060（§29.7，r2034）已把黎明 dayMul 跨门重烘后台化分帧摊平（world.h:236-252），但仍是「重烘」而非「零重烘」；本节把 C4 从登记项升格为可执行设计——**范围收窄为 dayMul-only**（sunDir 影因子 uniform 化不可行，§30.2 论证），全部现状断言带 file:line，可直接复核。任何一行实现都等用户 md 定向后才动。
+
+### 30.1 现状机制盘点（读码立证）
+
+链路五段，自上而下：
+
+1. **时间源（Game 层）**：WorldClock 10Hz tick（kTickMs=100ms，worldclock.h:185）派生 dayPhase/skyLight（NOTIFY dayPhaseChanged，worldclock.h:61-62）与量化太阳（kSunSteps=72，worldclock.h:202；跨步才 emit sunChanged，worldclock.cpp:212-222）；周期 kDaySecs=1200s / 调试 kFastSecs=30s（worldclock.h:186-187）；t155 编辑活跃期太阳步进节流（kEditCooldownMs=1500，worldclock.h:207）。
+2. **QML 标量合成**：`terrainLight(m) = minLight + (1-minLight)×m`（Main.qml:2627-2631；floor = window.minLight 滑条 Main.qml:265/:13175）→ `property real skyDayMul: terrainLight(worldClock.skyLight).r`（Main.qml:279，10Hz 刷新）；skyBaseColor 缓存先例（Main.qml:267-276）证明本段已是「10Hz 单点重算、面只读」形态。
+3. **注入 Renderer**：六段 Model delegate 各绑 `sunDir: worldClock.sunDir` + `dayMul: window.skyDayMul`（terrain Main.qml:4919/:4923、water :4949/:4953、lava :4979/:4983、glass :5012/:5016、ice :5053/:5057、cutout 恢复态 :5111/:5115；t860 折叠后 cutout 段默认停建，chunkgeometry.h:78-91）；掉落沙/方块 BlockCube 同款（Main.qml:7935/:8060-8098；blockcube.cpp:127-134 setter → rebuild，量少无风暴面）。
+4. **量化门 + 重烘触发**：setDayMul（chunkgeometry.cpp:106-121）→ sunRebuildDue（chunkgeometry.cpp:135-172）事件 (d)「dayMul 累计 |Δ| ≥ kDayMulThresh=0.03」（:146/:156）→ `buildMesh(RebuildReason::Sun)`（:120，绕 chunk dirty）；窗外段静默跟随 + m_lightStale 光照欠账（:112-116、h:362，t972 渐进同步队列排空 Main.qml:825-854）；t472 视距门（h:140-160）。sun 侧并行事件 (a) 影带穿越/(b) 仰角方位角/(c) 120s 硬顶（:149-171）——生产 1200s 天约每 30-70s 一次，与 dayMul 的黎明 ~225 段风暴（world.h:210-211 用户亲测）不同频。
+5. **顶点烘焙（MeshBuilder 单一权威）**：采集定格 bake.dayMul/sunDir 进快照元数据（meshbuilder.h:76-77/:99-113；chunkgeometry.cpp:422-436 同步路径 / :453-464 异步提交路径，两路同格）→ 烘焙公式 `vc = clamp(max(sky/15 × (1-软影) × dayMul, block/15), kVcMin, kVcMax)`（meshbuilder.cpp:317-324 R19 B6 公式注释；烘焙点五处 + BlockCube 同步——chunkgeometry.h:55 自述：cross :426-428、异形面 :450-451、流体变高面 :689-690、greedy :879、立方面 :960-962）→ AO×brightMul 乘在钳制**后**（:963-970）→ `Vtx.r=g=b=vcl; Vtx.a=1.0f`（:980；Vtx = stride 48 的 pos3+normal3+uv2+color4，**alpha 通道闲置**，partialblockgeometry.h:18-23）→ 灌 QQuick3D（chunkgeometry.cpp:548-580，文档序）→ PrincipledMaterial{NoLighting + vertexColorsEnabled}，最终色 = baseColor × vertexColor × map（chunkgeometry.cpp:574 注释；六段材质 Main.qml:4929/:4956/:4986/:5028/:5072/:5118）。
+6. **sunDir 的顶点产物 = PCF 影因子，非方向调制**：t151/t153 起「方向太阳 faceVc」已被真光场+PCF 替代（meshbuilder.cpp:309 注释原话「替代 t123 方向太阳 faceVc」）；现行五处烘焙公式里**不存在** faceNormal·sunDir 项——sunDir 唯一顶点产物 = `sunShadowColumnTop` 沿 heightmap 步进的影因子（voxellight.h:81-95，kMaxShadow=2 步 × 2×2 PCF）。worldclock.h:30-32 的「faceNormal·sunDir 烘进顶点色」是 t123 时代陈旧头注释（登记 doc-nit，随单顺手修正）。**这一事实直接决定 C4 范围**（§30.2 选型 3）。
+7. **重烘计数/观测面**：meshN 族事件计数（meshbuilder.cpp:257-263：meshN/meshNdirty/meshNsun/meshNwater）→ F3 win 行 `mesh X(Nreb [Dd Ss Ww])  worker N`（frameprofiler.cpp:183-189）；mesh 桶分段口径（提交=采集、交付=灌注，chunkgeometry.cpp:415/:451/:499）；F3 mesh 行（Main.qml:655）。异步面（§29.7 t1060）：enableFixedAsyncBake / harvestBuiltChunkMeshes / kFixedMeshHarvestPerBeat=16（world.h:207-252，黎明星空→白天 ~225 段 ~1.5s 渐变）；env 回退 QTVOXEL_SYNC_BAKE（world.cpp:682-686）；收割拍 = StreamingBridge::pumpTick 挂 WorldClock::ticked（streamingbridge.cpp:146/:162-189）；F3 stream 行 sub/mesh 域（world.cpp:722/:748）。
+
+### 30.2 QtQuick3D 材质约束调研（两条路线 + 选型建议）
+
+- **路线 A（唯一可行路线）：CustomMaterial 自定义材质**。前提事实：全仓零自定义 shader（本设计日 grep `CustomMaterial|qt_add_shaders|.qsb` 全仓零命中——survey:35「零自定义 shader」陈述至今成立）。**为什么 PrincipledMaterial 内无第三条路**：C4 需要表达「dayMul 只乘 sky 项、与 block 项取 max 后钳制」的合成式，而 PrincipledMaterial 的最终色固定为 baseColor × vertexColor × map 三乘，无任意 uniform 注入口、无分量级乘法口。唯一等价物 = 把乘子留在 QML baseColor——这正是 R19 B6 **被否决**的旧设计（chunkgeometry.h:53-56 自述根因：baseColor 同时压暗 block 通道 → 夜间火把 0.93×0.4=0.37 不发光）；1×1 纹理乘、emissive 注入等变体同样无口可入。故路线 B 之外只有 CustomMaterial 一条路。CustomMaterial 机制要点（P1 spike 逐项验证，不预断）：shader 源经 qt_add_shaders 烘 .qsb（PLAN §2-L 既有管线位）；顶点 COLOR 属性可读性；uniform 推送机制（CustomMaterial 对象动态属性 → shader uniform，或 C++ 侧子类推送）；Mask 模式（fragment 端 discard 复刻 alphaCutoff）/Blend/opacity 与透明队列分类；六段材质逐字迁移面。
+- **路线 B（现状，排除）：动态顶点更新 = 重烘本体**。t1060 已把重烘后台化分帧（world.h:236-252），但每段仍要重跑 mesher + GPU 重传。「用顶点更新追 uniform」与 C4 目标（零重烘）同义反复；登记为 C4 失败时的现状回退面，不是路线。
+- **选型建议（三点）**：①取路线 A；②**范围收窄为 dayMul-only**——sunDir 影因子 uniform 化 = 把 heightmap 列顶数据纹理化 + 顶点着色器内重算 PCF 步进 = B 自研层资产（survey:107 B1 原文把 dayMul/sunDir uniform 化并列，但那是「自研 shader 自由光照」语境；Quick3D 抽象面内影因子无数据可读），超出 C4 域，登记 B1 联动项；③sun 侧事件 (a)/(b)/(c) 重烘**保留**（低频、t1060 已摊平），C4 只退役事件 (d)。
+
+### 30.3 顶点语义断代（兼容策略核心）
+
+- **双源问题**：旧 mesh 顶点里烤了旧 dayMul、新 shader uniform 是新值 → 二次调暗。且 C4 的顶点格式**语义本身要变**——shader 要做 max+clamp，顶点必须携带未合成的分量：`R = sky/15 × (1-sh)`（裸天光）、`G = block/15`（裸方光）、`A = AO × brightMul`（时间不变乘子，保「乘在钳制后」语义 meshbuilder.cpp:963-970——alpha 通道现闲置 :980 恰好承接，**stride 48 不变、顶点格式布局零变化**）；shader 端 `light = clamp(max(R×uDayMul, G), kVcMin, kVcMax) × A`。B 通道空出（填 1.0，登记留用）。greedy 合并键 = MaskEntry{tile, sky, block, hydr}（meshbuilder.cpp:756-761），与 dayMul 无关——拆分后键语义不变，greedy 面零波及。
+- **常量镜像钉**：kVcMin/kVcMax 现为 C++ constexpr（voxellight.h 权威，meshbuilder.cpp:322-323 消费）→ shader 端镜像 + 编译期/腿级互钉（t1056 松耦合 static_assert 先例，dev-plan.md:4267）。
+- **断代 vs 开关：推荐断代（无 QTVOXEL_C4 运行期开关）**。理由：(a) 顶点语义与材质必须**原子同切**——开关实态 = mesher 双通道语义 + QML 双材质集两份永久双路径，违反「MeshBuilder 单一权威/禁两份逻辑并存」纪律（r2013/r2020d 反探族断言面全表翻倍）；(b) 字节等价腿族（r2013a/r2026b/r2034a）在双路径下要维护双权威逐位对，断代只重锚一次；(c) 顶点缓冲**零持久化**（mesh 每次进世界重建，worldstore 不含任何网格数据）→ 断代无存档影响，重启全量重建即收敛；(d) 回退杠杆 = git revert（语义类风险的正确杠杆；env 开关先例 QTVOXEL_SYNC_BAKE 防的是「调度」类风险，对「语义」类风险防护错位）。视觉断代先例 = t860 cutout 折叠（chunkgeometry.h:78-91，降级杠杆走显式开关而非双路径并存）。
+- **BlockCube（掉落物）不迁移**：量少重烘成本可忽略（blockcube.cpp:127 注释自述「掉落沙数量少」）、保 PrincipledMaterial + 现行烘焙语义 → 与 C4 材质零交集、无双源面。六段 ChunkGeometry 是唯一迁移面。
+
+### 30.4 迁移步骤（P 阶段化，每相位独立 fix/test/docs 闭环，串行）
+
+- **P1 CustomMaterial 原型（矩阵域/隔离场景，不入 app 视觉面）**：terrain 段单 chunk 原型 + 顶点通道拆分先行版；spike 清单 = COLOR 属性可读 / uniform 推送机制 / Mask discard 与 t442 叶隙 parity / Blend 半透分类 / 冰 opaque pass 归属 / D3D11 alphaCutoff 契约重验（chunkgeometry.h:70）/ lit 红线等价判据重建（lessons-learned:202「默认 lit 不渲染」对 CustomMaterial 的对应结论）/ AOT 跨单元绑定面（§30.5）。产出 spike 结论 + go/no-go——失败任一项 → C4 关闭登记 B1 联动。
+- **P2 六段铺开（app 内原子落地）**：MeshBuilder 顶点通道拆分（六段全量）+ 六 CustomMaterial（terrain/water/lava/glass/ice + cutout 恢复态杠杆面同步 CustomMaterial 化，防两态材质基座分裂）+ uniform 推送接线（window.skyDayMul → 材质属性）；岩浆暖色 baseColor 转材质 tint uniform（保自发光观感 Main.qml:4986 注释语义）。材质单例化（六实例服务 500 Model）登记为相邻优化非本相位必需（per-Model 实例的 10Hz uniform 属性写成本可忽略）。
+- **P3 昼夜门改 uniform 推送 + 重烘触发退役**：setDayMul 退役 / sunRebuildDue 事件 (d) 摘除（:146/:156）/ m_lastBakedDayMul 账本退役（h:356）/ lightStale 的 dayMul 分量摘除（:112-116）/ ChunkGeometry.dayMul Q_PROPERTY 退役（h:60；BlockCube 独立属性不受影响）/ QML `dayMul:` 绑定 ×6 拆除；minLight 滑条改走 uniform——即时生效免重烘（副作用增益：设置面板调暗度从「等下个量化门」变即时）。sunDir/setSunDir 面原样（影域保留）。
+- **P4 矩阵腿同变更修订 + F3 语义登记**：r2034b 承重语义反转重设计（dayMul 跨门 → **零提交零 streamSub 增量**；原腿「跨门 → 提交数=段数 36 → 收割拍 16/拍排干」——dev-plan.md:4283、tools/matrix/section35_fixed_async_bake.cpp:277-412）；section04 t972 欠账腿的 dayMul 分量退役（tools/matrix/section04_instancing.cpp:4712/:4813/:4942「窗外跨阈值 dayMul → lightStale 记账」；deferredRebuild 分量保留）；r2013a/r2026a/r2026b/r2034a 字节权威重锚（内部一致性腿两侧同变更即绿——重锚的是 PASS 文本与锚定 authority，非行为）；vertex/mesh/t1023 AO 家族按通道拆分修订；r2030a **不受影响**论证留痕（影域列顶快照与 dayMul 无交——meshbuilder.h:96-97 域只服务 PCF）；t857 renderStats（draw/pass 数应不变——P2 阴性验证项）；F3 win 行 meshNsun 语义登记（昼夜驱动的 sun 计数面归零，余量 = 影带/方向事件）。
+- **P5 实机调参验收**：debugFast 30s 天黎明观感（星→昼**即时平滑** vs t1060 的 ~1.5s 渐变）；F3 黎明窗 mesh reb=0 / win 行 worker=0；性能对照（t1060 摊平 vs C4 零重烘的边际差——四问 4 的裁定数据）；六段目视回归（叶隙/水面/岩浆自发光/玻璃/冰/cutout 恢复态杠杆）。
+
+### 30.5 风险登记
+
+- **RHI 囚笼（PLAN §2-A）**：字面不触——qt_add_shaders 是构建期工具链、.qsb 是产物数据，应用源码零 `QRhi*`/`QShader` 标识符，include-guard grep 不命中。精神面：shader 源文件是渲染域新资产，建议落 `src/Renderer/shaders/`（Renderer 驻地）+ CMake qt_add_shaders，PLAN §2-A 处置注记随 P1 头注释立证（四问确认项）。
+- **性能面论证**：uniform 每帧推送成本 ≈ 0 增量——每 draw 本就推送材质 uniform 块，C4 改的是**值**不是路径；推送侧变更 = 10Hz × 6（单例化）或 ×500（per-Model 实例）次 QML 属性写，对比重烘 ~0.45ms/段 × 黎明 ~225 段（t1060 前单帧 ~100ms 尖刺 / t1060 后 ~1.5s 后台渐变）是数量级差。**诚实登记**：t1060 已消主线程尖刺，C4 的边际收益 = ①黎明零 CPU mesher/零 GPU 重传 ②昼夜过渡即时平滑（非 1.5s 渐变，MC Beta 1.8 口径「Day/night cycles no longer require chunk updates and have a smooth transition」——world.h:241-243 引证在案）③minLight 调参免重烘 ④重烘预算中 event(d) 永久退役。是否值得六段材质改写 = P5 数据 + 用户裁定。
+- **六段材质差异交互**：①冰**不透明 pass** 语义（t495 根治——冰-水透明排序 z-fight 的修法就是冰走 opaque 写深度，Main.qml:5060-5071）→ CustomMaterial 混合分类必须保冰 opaque，否则 t495 回归；②水/玻璃 opacity Blend 半透 + 透明队列排序不变量；③Mask discard 复刻 alphaCutoff（terrain 叶隙 + cutout 门/活板门；chunkgeometry.h:70 D3D11 契约重验）；④岩浆暖色乘转 tint uniform 保自发光观感；⑤lit 红线（lessons-learned:202）对 CustomMaterial 的等价判据在 P1 重建（CustomMaterial 无 lighting 属性，须验证默认不进 PBR 光照路径）。
+- **矩阵腿改造面（预判名单）**：r2034b（语义反转重设计）/ section04 t972 dayMul 欠账分量（退役）/ r2013a·r2026a-d·r2034a（字节与结构权威重锚）/ r2030a（论证不受影响）/ vertex·mesh·t1023 家族（通道拆分面）/ t860 cutout 折叠族（恢复态材质同步）/ t857 renderStats（阴性验证）。BlockCube 族零影响（不迁移）。
+- **存档/资产零影响论证**：顶点缓冲永不持久化（mesh 进世界即重建）；worldstore/chunkstore 零触碰；图集/贴图资产零变化（CustomMaterial 复用同 baseColorMap）；shader 源为新增代码资产、非 MC 衍生物（shader 标识符 uDayMul 等遵守 PLAN §9 零 MC 专有名词纪律）。
+- **QML AOT 跨单元绑定教训**（lessons-learned QML 绑定 AOT 条目族）：skyDayMul → 材质 uniform 的绑定若跨 QML 单元有 AOT 不重算风险——设计取向：材质留 Main.qml 同单元内联（现状同款）或 C++ 侧推送，P1 spike 验证 10Hz 刷新到位。
+- **工程量诚实估计**：六段材质全量改写 × 全顶点语义 × 矩阵多族修订 = survey「根治但大改」原话的实义；P1 spike 本身就是去风险闸门，spike 失败即止损关闭（沉没成本 = 一个原型相位），登记 B1 联动（B 路线里 uniform 化是原生能力，survey:107）。
+
+### 30.6 需要用户回答的四个问题（md 修正通道，其余按建议列执行）
+
+1. 断代（无运行期开关，回退 = git revert）还是 QTVOXEL_C4 feature 开关？（建议：断代——开关实态 = 两份永久双路径，违反单一权威纪律）
+2. CustomMaterial 侵入面（六段材质全量改写 + Mask/Blend/opaque/alphaCutoff 四条 D3D11 契约重验）是否可接受？（建议：可接受——PrincipledMaterial 无 uniform 注入口，路线唯一；R19 B6 的 baseColor 载体案已被证伪）
+3. C4-v1 范围收窄为 dayMul-only（sunDir 影因子留烘焙，事件 (a)/(b)/(c) 保留，登记 B1 联动）？（建议：接受——影因子 uniform 化需 heightmap 上 GPU，超出 Quick3D 抽象面）
+4. 开工时机：等 P5 实机数据（t1060 后黎明实测帧率/观感）确认残余痛点再动，还是即刻 P1 spike？（建议：等数据——t1060 已摊平主线程尖刺，C4 是边际收益 + 观感升级，非急症）
