@@ -1,6 +1,11 @@
 // tools/matrix/section01_redstone_core.cpp —— R20.03 测试分层段 TU
 // 原 tools/redstone_matrix_test.cpp L296-6156 逐字节搬移（段 md5: 6c8067b13c0a35d2f369022d516a83b6；
 // 8 段拼接 == 原 main 体，md5 82ac70c7ede1a2ed647fea738734be6b，存证 build/r2003_proof/）。
+// **t1071 同变更修订**（治理 §6.1 harness 明确错误纠偏，非削钉）：删原 L37 段内局部失败账本声明
+//   （该局部遮蔽 MatrixRun::totalFail 成员 → 本段 78 处 ++totalFail 全落在写不出去的局部上，
+//   段内腿 FAIL 永不进 runAll 套件汇总行与进程退出码——实证 build/matrix_t1070_final_t789flake.log
+//   t789 FAIL 而套件 total FAIL:0 EXIT=0）。段 md5 为搬移时点存证非行为钉：本修后文本不再与
+//   搬移件逐字节等价，修订在场锚（r2045c）钉「原 md5 留痕 + 本修订注」双面，禁静默再改写。
 #include "matrix_helpers.h"
 
 void MatrixRun::section01_redstone_core()
@@ -34,7 +39,12 @@ void MatrixRun::section01_redstone_core()
     };
 
     qInfo().noquote() << "=== t740 redstone activation matrix (World-layer harness) ===";
-    int totalFail = 0;
+    // t1071 同变更修订：本行原为段内局部失败账本声明（初值 0 的局部 int，遮蔽 MatrixRun::totalFail
+    //   成员——读码定案：该局部自初始化后**从未被读**（段内本无独立子块汇总输出，78 处 ++totalFail
+    //   全部打在它身上 = 写不出去的死账），「t740 子块自身汇总」的真实语义从来只有一条 = 并入套件
+    //   总账；删声明后全段记账落回成员，与 section02-08 拆段件既有语义逐位对齐。承重证据 =
+    //   r2045a 钉面 + 阴性注入传播轮（build/matrix_r2045_neg1_*.log：修后注入必败断言 → 套件
+    //   total FAIL:1 EXIT=1；修前同注入 + 遮蔽声明在位 → total FAIL:0 EXIT=0 = 缺失能力复现）。
     for (const SourceDef &src : sources) {
         for (const RecvDef &rc : recvs)
             runLeg(QStringLiteral("%1->%2").arg(QLatin1String(src.name), QLatin1String(rc.name)), [&]() {
@@ -5525,8 +5535,17 @@ void MatrixRun::section01_redstone_core()
     //    ① 色板契约：sheepWoolTintForIndex(0..15) 全有名非空 + 关键色精确核对（白 #ffffff 恒等 / 黑
     //       #1e1e26 / 棕 #734b2d——浏览器 woolPalette / build_wool.py 同值镜像，漂移即 FAIL）；
     //    ② spawn 分布：多轮「刷 ~60 只 → clearAll 清场」累计 4800 样本按自然权重采样（kCap=64 是产品
-    //       硬上限单轮封顶；粉 0.164% 在小样本下断言天生 flaky，大样本压 P(漏粉)<0.05%）→ 白主导（>60%）
-    //       + 六自然色全出现（粉 ≥1，灰/浅灰/棕/黑另设 0.4× 下限带）+ 上溢带护栏（≤2.5×名义+0.02）
+    //       硬上限单轮封顶）。**t1071 加固**：旧「六自然色全出现」绝对断言退役（flake 实证：t1070 期间
+    //       全矩阵一轮真红——build/matrix_t1070_final_t789flake.log；粉 λ≈7.68 下 P(0 粉)≈e^−7.68
+    //       ≈0.046%，尾事件真发生，复跑即绿）。确定性替代（断言语义不减，仍测调色板权重分布）：
+    //       - 粉「在场」语义退役到**确定性源钉**（entitymanager.cpp kSheepNaturalWeights 表项逐字
+    //         钉死——旧采样断言只能概率性证明权重>0，源钉更强且零 flake，r2045b 承载）；
+    //       - 采样面 = 统计带：白主导 >60%（39σ）+ 灰/浅灰/棕/黑 0.4× 下限带 + 上溢带 ≤2.5×名义
+    //         +0.02 + **非白总数双窗 [Σλ−4σ, Σλ+4σ]**（t1071 新增：单色带查单色漂移，聚合双窗查
+    //         「多色同向小漂移」——各色 1.5× 漂移单色带仍绿、聚合窗必红 = 非冗余检测面；4σ 裕度选型：
+    //         3σ 单边 P≈0.13% 比被退役的旧粉断言 0.046% 还差，4σ≈3e-5 = 14× 优于旧面）。
+    //       粉的下限带不可入 0.4× 族：N=4800 下 0.4×名义≈3 只 → P(≤3)≈4.8%，比旧绝对断言还差
+    //       100 倍——粉只走上溢窗 + 确定性源钉（下方注释同记）。
     //       + 无表外色（只允许 {0,6,7,8,12,15}）+ 非 sheep mob（猪对照）恒 0 不受污染；
     //    ③ 剪羊毛掉对应色：shearSheep 发 sheepSheared(x,y,z,woolIdx) 携带与 sheepWoolAt 一致的下标
     //       （QML 层 sheepWoolDropId 映射在呈现层，C++ 锁信号载荷正确性）；已剪再剪不发（幂等回归，
@@ -5538,9 +5557,10 @@ void MatrixRun::section01_redstone_core()
     //       pack 态 fur 染色 / 浏览器变体联动）需人工目视。
     runLegMulti({ "t789 sheep natural colors: 16-entry tint palette valid with white-identity/black/brown anchors m"
         "irroring browser woolPalette, 4800 spawns over clear-all rounds follow natural weights (white >6"
-        "0% dominant, pink/gray/light-gray/brown/black all appear, no out-of-table colors, pigs unpollute"
-        "d), shearSheep carries the sheep's own index and re-shear stays silent, mobDied payload equals t"
-        "he died sheep's index, breeding babies inherit a parent color (not rerolled)" }, [&]() {
+        "0% dominant, non-white total and each color within statistical bands, pink presence pinned by "
+        "the exact weight table, no out-of-table colors, pigs unpolluted), shearSheep carries the sheep'"
+        "s own index and re-shear stays silent, mobDied payload equals the died sheep's index, breeding "
+        "babies inherit a parent color (not rerolled)" }, [&]() {
         bool ok = true;
         EntityManager em789;
         // ① 色板契约（16 下标全覆盖 + 白恒等 + 两关键色锚点）。
@@ -5559,8 +5579,8 @@ void MatrixRun::section01_redstone_core()
         }
         // ② spawn 自然色分布：多轮清场重刷累计 kSheepTotal=4800 样本（名义权重 白 .8184 / 黑·灰·浅灰 .05
         //    各 / 棕 .03 / 粉 .0016）。kCap=64 是产品硬上限 → 单轮 spawn 至 ~60 只（留猪对照位），clearAll
-        //    释放全部槽后再刷下一轮；粉期望 λ=4800×.0016≈7.9，P(全轮漏粉)<0.05%（单轮 600 样本 λ≈1 时
-        //    P(漏)≈37% 天生 flaky，故取大样本）。
+        //    释放全部槽后再刷下一轮。t1071 修订注：旧口径「粉 λ≈7.9 → P(全轮漏粉)<0.05%」被 t1070 期间
+        //    全矩阵实锤证伪（尾事件真发生）——绝对出现类断言在薄尾色上天生不稳，现役断言面见段头 t1071 注。
         constexpr int kSheepPerRound = 60;
         constexpr int kSheepRounds = 80;   // 80 × 60 = 4800 样本
         constexpr int kSheepTotal = kSheepPerRound * kSheepRounds;
@@ -5600,11 +5620,11 @@ void MatrixRun::section01_redstone_core()
         for (int c = 0; c < 6; ++c) {
             const int idx = naturalColors[c];
             if (c > 0) {
-                // 下限带：粉 ≥1（λ≈7.9 下 P(0) 可忽略）；黑/灰/浅灰/棕另设 0.4× 名义下限（4800 样本下
-                //   0.4×5%=1920 vs σ≈31、0.4×3%=1152 vs σ≈25 —— 偏离 30σ+ 只可能是权重表漂移而非采样噪声）。
+                // 下限带：仅灰/浅灰/棕/黑入 0.4× 名义下限（大 λ 色才有可用的统计下界——t1071 加固：
+                //   粉 λ≈7.68 下 0.4×名义≈3 只 → P(≤3)≈4.8% 比退役的旧绝对断言 0.046% 还差 100 倍
+                //   → 粉下限带不可入；粉在场语义由确定性源钉 { 6, 16 } 承载，r2045b 钉面）。
                 const double share = double(cnt[idx]) / double(kSheepTotal);
-                if ((idx == 6 && cnt[idx] < 1)
-                    || (idx != 6 && share < nominal[c] * 0.4)) {
+                if (idx != 6 && share < nominal[c] * 0.4) {
                     qInfo().noquote() << "  [t789 diag] natural color" << idx << "underflow:"
                                       << cnt[idx] << "/" << kSheepTotal;
                     ok = false;
@@ -5615,6 +5635,23 @@ void MatrixRun::section01_redstone_core()
                                       << "far over nominal" << nominal[c];
                     ok = false;
                 }
+            }
+        }
+        // t1071 统计稳健锚：非白总数双窗 [Σλ−4σ, Σλ+4σ]（λ̄ = 1−白名义 = 0.1816，N=4800 →
+        //   λ≈871.7 / σ≈26.7 → 窗 ≈ [765, 979]）。检测面：下侧抓「多色塌向白」（单色下限带合计
+        //   仅 346 只，聚合下窗 765 = 更强的联合约束），上侧抓「多色同向膨胀」（各色独立 1.5×
+        //   漂移时单色上溢带仍绿而聚合上窗必红）——4σ 裕度选型记于段头 t1071 注。
+        {
+            const double pNonWhite = nominal[1] + nominal[2] + nominal[3] + nominal[4] + nominal[5];
+            const double lam = pNonWhite * double(kSheepTotal);
+            const double sig = std::sqrt(lam * (1.0 - pNonWhite));
+            int nonWhite = 0;
+            for (int c = 1; c < 6; ++c) nonWhite += cnt[naturalColors[c]];
+            if (double(nonWhite) < lam - 4.0 * sig || double(nonWhite) > lam + 4.0 * sig) {
+                qInfo().noquote() << "  [t789 diag] non-white total" << nonWhite
+                                  << "outside 4-sigma band" << (lam - 4.0 * sig)
+                                  << ".." << (lam + 4.0 * sig);
+                ok = false;
             }
         }
         for (int idx = 0; idx < 16; ++idx) {
@@ -5750,8 +5787,9 @@ void MatrixRun::section01_redstone_core()
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| t789 sheep natural colors: 16-entry tint palette valid with white-identity/"
                              "black/brown anchors mirroring browser woolPalette, 4800 spawns over clear-all "
-                             "rounds follow natural weights (white >60% dominant, pink/gray/light-gray/"
-                             "brown/black all appear, no out-of-table colors, pigs unpolluted), shearSheep "
+                             "rounds follow natural weights (white >60% dominant, non-white total and each "
+                             "color within statistical bands, pink presence pinned by the exact weight "
+                             "table, no out-of-table colors, pigs unpolluted), shearSheep "
                              "carries the sheep's own index and re-shear stays silent, mobDied payload "
                              "equals the died sheep's index, breeding babies inherit a parent color (not "
                              "rerolled)";
