@@ -497,17 +497,34 @@ Window {
                 ++created
             }
         }
+        const doomedGeos = []                // t1069 精确摘除集：被销组全部段 geometry（与渐进
+                                             //   同步队列条目同域 = ChunkGeometry* 身份面）
         for (const kk in groups) {           // 旧有新无：整组销毁（destroy 延迟到事件循环，安全）
             const grp = groups[kk]
-            for (let s = 0; s < grp.segs.length; ++s)
-                if (grp.segs[s]) grp.segs[s].destroy()
+            for (let s = 0; s < grp.segs.length; ++s) {
+                if (grp.segs[s]) {
+                    if (grp.segs[s].geometry) doomedGeos.push(grp.segs[s].geometry)
+                    grp.segs[s].destroy()
+                }
+            }
             ++destroyed
         }
         window.terrainGeos = geos
         window.chunkObjects = objs
         window.chunkKeys = newKeys
-        window._meshSyncQueue = []           // 被销组可能仍在渐进同步队列（悬空 geometry 引用）→ 清；
-                                             //   欠账由稳态扫描 ≤16 tick 重填（正确性无损，t972 泵自愈面）。
+        // t1069 精确摘除（t1063 关单登记微优化——替代旧「全清」）：只把被销组条目从渐进同步
+        //   队列摘净（悬空 geometry 引用防面**不弱化**：patch 后队列 ∩ 被销组 geometry = ∅），
+        //   幸存组条目原序保留直达泵面（旧全清把幸存组已排队欠账一并作废、稳态扫描 ≤16 tick
+        //   才重填 = 无害但浪费的重复渐进重建）。kickWorldMeshSync 进世界全量重填与稳态扫描
+        //   兜底两语义零触碰；泵排空前仍有三条件复查守卫（幸存条目若已被 catch-up 重建则跳过，
+        //   身份失配的条目不可能在队——本摘除恰保证这点）。
+        if (doomedGeos.length > 0) {
+            const kept = []
+            const stale = window._meshSyncQueue
+            for (let qi = 0; qi < stale.length; ++qi)
+                if (doomedGeos.indexOf(stale[qi]) < 0) kept.push(stale[qi])
+            window._meshSyncQueue = kept
+        }
         if (created > 0 || destroyed > 0) {
             window.recomputeMeshStats()      // 地形段集变了 → 全幅顶点/三角面汇总刷新
             window._refreshChunkVisibility() // 新组补算重建窗口标志（幸存组一致保持；F3 窗口账同步）
