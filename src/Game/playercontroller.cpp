@@ -2478,7 +2478,7 @@ void PlayerController::applyGolemLaunch(float dirX, float dirZ)
 }
 
 // t758 暗渊珠落点传送（机制等价 MC 1.0 ender pearl 落地把掷出者传过去 + 传送代价；见头文件注释）。
-//   EntityManager.enderPearlLanded(x,y,z)（珍珠接触格）经 Main.qml Connections 路由调本方法。流程：
+//   EntityManager.abyssPearlLanded(x,y,z)（珍珠接触格）经 Main.qml Connections 路由调本方法。流程：
 //   (1) 防御：无世界 / 死亡态（掷出后珍珠飞行中被怪打死）→ 不传（尸体原地）；
 //   (2) 落点列钳到世界内（信号坐标本就在界内 —— 越界移除不发本信号；防御性再钳一次）；
 //   (3) B11 安全落点扫描：自命中格向下找首个碰撞支撑 → 立位 = 支撑上一格，复查脚位 + 头位（玩家
@@ -2493,9 +2493,9 @@ void PlayerController::applyGolemLaunch(float dirX, float dirZ)
 //   (4) 瞬移（loadSavedState 模式）：骑乘先下坐骑（同 respawn；防传后仍挂远处坐骑）→ m_pos 直写格中心
 //       脚位 + 清 m_vel / m_knockback + **m_peakY 重置**（防下一 tick 误判「瞬移落差」摔伤）+ emit
 //       positionChanged（相机跟随刷新）；
-//   (5) 传送伤害：仅 Survival 发 fallDamageTaken(kEnderPearlTpDamage, EnderPearlTp)（呈现层路由护甲减伤
+//   (5) 传送伤害：仅 Survival 发 fallDamageTaken(kAbyssPearlTpDamage, AbyssPearlTp)（呈现层路由护甲减伤
 //       → takeDamage，死因文案「被暗渊珠传送撕碎」；Creative 无伤传送，机制等价 MC 创造无敌）。
-void PlayerController::applyEnderPearlTeleport(int x, int y, int z)
+void PlayerController::applyAbyssPearlTeleport(int x, int y, int z)
 {
     if (!m_world || m_dead) return; // 无世界 / 死亡态不传（尸体原地；珍珠白耗）
     // 落点列钳到世界内（防御；信号坐标本就在界内）。
@@ -2508,7 +2508,7 @@ void PlayerController::applyEnderPearlTeleport(int x, int y, int z)
         BlockRegistry::BlockAABB boxes[BlockRegistry::kMaxAABBsPerCell];
         return m_world->collisionAABBsAt(cx, cy, cz, boxes, BlockRegistry::kMaxAABBsPerCell) > 0;
     };
-    int yy = y; // 自命中格向下扫（y 越上界无害：越界无碰撞盒 → 视作开放，同 endereye 落物扫描）
+    int yy = y; // 自命中格向下扫（y 越上界无害：越界无碰撞盒 → 视作开放，同 abyssEye 落物扫描）
     int footY = -1;
     while (yy >= 0) {
         if (cellBlocked(lx, yy, lz)) {
@@ -2542,7 +2542,7 @@ void PlayerController::applyEnderPearlTeleport(int x, int y, int z)
     emit positionChanged(); // 相机 / 第三人称模型跟随刷新
     // 传送伤害（仅 Survival；Creative 无伤传送。fallDamageTaken → 呈现层护甲减伤 → takeDamage，红闪 / 死因链全复用）。
     if (m_mode == Survival)
-        emit fallDamageTaken(kEnderPearlTpDamage, PlayerState::EnderPearlTp);
+        emit fallDamageTaken(kAbyssPearlTpDamage, PlayerState::AbyssPearlTp);
     qInfo("player ender-pearl teleported to %d,%d,%d", lx, footY, lz);
 }
 
@@ -4069,17 +4069,17 @@ void PlayerController::placeBlock()
     // t729 暗渊之眼掷出（用户「直接右键的话是可以放出来生成他的实体，一样的贴图，并且会飞向最近的地下要塞结构的
     //   地方，就是那个3×3的传送门的地方移动一定的距离之后...重新变化为掉落物，或者直接碎掉」；机制等价 MC 1.0
     //   暗渊之眼 ender eye）：手持 EndEyeId（0x23A，t726 合成产物）右键 → 从眼位朝**最近要塞暗渊门**掷出（t757 两段式：远段升空指示 / 近段下探，初速方向随段取）
-    //   暗渊之眼（EntityManager::spawnEnderEye），速度 ~kEnderEyeUseSpeed=4（EntityManager::kEnderEyeSpeed 是 private
+    //   暗渊之眼（EntityManager::spawnAbyssEye），速度 ~kAbyssEyeUseSpeed=4（EntityManager::kAbyssEyeSpeed 是 private
     //   不能跨层读，故本层自定同值常量，同箭/雪球本地常量模式）。朝向 = player眼位 → world.strongholdPortal* 中心格
     //   的水平方向 + 略向上偏置（机制等价 MC 暗渊之眼飞行略升）→ 归一化 × 速度。World::hasStronghold() 无要塞（世界
-    //   未建 / 空）→ 任意方向坠落（兜底不崩）。眼睛飞行 kEnderEyeDist 后 80% 变掉落物（可捡回）/ 20% 碎裂无掉落；
+    //   未建 / 空）→ 任意方向坠落（兜底不崩）。眼睛飞行 kAbyssEyeDist 后 80% 变掉落物（可捡回）/ 20% 碎裂无掉落；
     //   玩家朝要塞方向走多次使用可逐步逼近（本工程单要塞）。**不要求 m_hasHit**（瞄准的是传送门方向非方块命中格）；
     //   眼睛非方块（材料段）→ selectedBlock 归 Air，须在 `m_selectedBlock == Air` 守卫之前分流（同雪球/蛋/生物蛋
     //   分支模式）。spectator 已被入口 canPlace() 守卫拦截；Creative / Survival 均可掷。生存消耗 1 暗渊之眼 / 创造
     //   不耗。分层：掷出属 Game/Physics（读视线 + 查 World::strongholdPortal* + 调 EntityManager），不改栅格语义。
     if (m_hotbar && m_world && m_entityManager && heldItemId == RecipeRegistry::EndEyeId) {
-        constexpr float kPlayerEyeUseSpeed = 4.0f; // 玩家掷暗渊之眼速度（blocks/s；同 EntityManager::kEnderEyeSpeed）
-        constexpr float kPlayerEyeNearDist = 50.0f; // t757 两段切换阈值（blocks；同 EntityManager::kEnderEyeNearDist —— private 跨层不可读，同值自定，同上常量先例）
+        constexpr float kPlayerEyeUseSpeed = 4.0f; // 玩家掷暗渊之眼速度（blocks/s；同 EntityManager::kAbyssEyeSpeed）
+        constexpr float kPlayerEyeNearDist = 50.0f; // t757 两段切换阈值（blocks；同 EntityManager::kAbyssEyeNearDist —— private 跨层不可读，同值自定，同上常量先例）
         const QVector3D eye = position();
         // 初速方向（t757 两段式）：有要塞时按掷出点水平距离分段 —— 远段 = 纯水平朝传送门（爬升全交
         //   EntityManager tick 的缺口收敛 + 转向平滑，见下方分支注释）；近段 =
@@ -4112,7 +4112,7 @@ void PlayerController::placeBlock()
         const float dlen = dir.length();
         if (dlen > 1e-3f) {
             const QVector3D vel = dir / dlen * kPlayerEyeUseSpeed;
-            m_entityManager->spawnEnderEye(eye + lookDirection() * 0.5f, vel); // origin = 眼位 + 视前移 0.5（防贴墙入墙）
+            m_entityManager->spawnAbyssEye(eye + lookDirection() * 0.5f, vel); // origin = 眼位 + 视前移 0.5（防贴墙入墙）
             if (m_mode != Creative)
                 m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 暗渊之眼（创造不耗）
             m_lastPlaceMs = now;
@@ -4121,19 +4121,19 @@ void PlayerController::placeBlock()
         return; // 暗渊之眼（抛出成功 / 已回退）不再走方块放置路径
     }
     // t758 暗渊珠投掷传送（任务行：右键掷暗渊珠 → 抛物线飞行 → 落点把玩家传送过去；机制等价 MC 1.0
-    //   ender pearl）：手持 EnderPearlId（0x243，t726 杀夜行者掉落）右键 → spawnEnderPearl 从眼位沿视线
+    //   ender pearl）：手持 AbyssPearlId（0x243，t726 杀夜行者掉落）右键 → spawnAbyssPearl 从眼位沿视线
     //   方向以 kPlayerPearlSpeed 抛出（t835④ 高初速 + Entities 层轻重力抛物；无蓄力右键即抛；t835⑤ 疾跑
     //   态初速 ×1.3）。任意方块接触（t835① 含铁轨/薄板等非整格）/ 入液缓沉到底（t835②）/ 寿命兜底 →
-    //   EntityManager emit enderPearlLanded(落点格) → 呈现层路由 applyEnderPearlTeleport（安全
+    //   EntityManager emit abyssPearlLanded(落点格) → 呈现层路由 applyAbyssPearlTeleport（安全
     //   落点扫描 + 瞬移 + 传送伤害，机制语义收口在 Game 层）。**不做 mob 命中**（珍珠只传送掷出者自己，撞
     //   mob 穿过 —— 取舍见 EntityManager 头文件注释）。**不要求 m_hasHit**（瞄准的是抛物弹道非方块命中格）；
     //   暗渊珠非方块（材料段）→ selectedBlock 归 Air，须在 `m_selectedBlock == Air` 守卫之前分流（同雪球 /
     //   蛋 / 眼分支模式）。spectator 已被入口 canPlace() 守卫拦截；Creative / Survival 均可掷。生存消耗 1
-    //   暗渊珠 / 创造不耗（传送伤害亦仅 Survival，见 applyEnderPearlTeleport）。分层（PLAN §2）：掷出属
+    //   暗渊珠 / 创造不耗（传送伤害亦仅 Survival，见 applyAbyssPearlTeleport）。分层（PLAN §2）：掷出属
     //   Game/Physics（读视线 + 调 EntityManager），不改栅格语义。
-    if (m_hotbar && m_world && m_entityManager && heldItemId == RecipeRegistry::EnderPearlId) {
+    if (m_hotbar && m_world && m_entityManager && heldItemId == RecipeRegistry::AbyssPearlId) {
         // vel = 视线方向 × kPlayerPearlSpeed（t835④：12 → 24；机制等价 MC 1.0 投掷物初速 1.5 blocks/tick=30
-        //   量级）。配 Entities 层珠专属轻重力 kEnderPearlGravity=12（MC 投掷物 0.03/tick²=12 vs 世界 28）→
+        //   量级）。配 Entities 层珠专属轻重力 kAbyssPearlGravity=12（MC 投掷物 0.03/tick²=12 vs 世界 28）→
         //   平抛 ~10 格 / 45° 满抛 ~48 格，对齐 MC 珍珠 ~30-50 格投掷距离；旧 12+共用重力 28 时 45° 满抛
         //   仅 ~5 格（「珍珠扔不远」）。雪球 / 蛋 / 眼仍 12 不动（各自手感已锚定）。本地常量（同
         //   kPlayerSnowballSpeed 模式，Entities 层速度常量不跨层读；矩阵探针以镜像常量同步，改值须两处同步）。
@@ -4146,7 +4146,7 @@ void PlayerController::placeBlock()
         const QVector3D look = lookDirection();
         // origin = 眼位 + 视线前移 0.5（防贴墙 spawn 入墙即被 tick 判方块命中，同雪球模式）。
         const QVector3D origin = eye + look * 0.5f;
-        m_entityManager->spawnEnderPearl(origin, look * throwSpeed);
+        m_entityManager->spawnAbyssPearl(origin, look * throwSpeed);
         if (m_mode != Creative)
             m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 暗渊珠（创造不耗）
         m_lastPlaceMs = now;

@@ -848,10 +848,10 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         {0x239, QStringLiteral("gunpowder.png")},      // 火药（t485：杀潜行者掉落；TNT 合成原料）
         // t497 暗渊之眼（EndEyeId=0x23A）：机制等价 MC 1.0 ender eye（要塞宝藏箱战利品；右键暗渊门激活）。
         //   t487 引入物品但 itemFilenameMap 漏映射 → pack 启用时仍走自绘 Canvas（drawEndEye）。补映射 → pack 有
-        //   ender_eye.png 时改用包内贴图（alpha-test 透明底，机制等价 MC item icon）；包缺 → 安全跳过保自绘。
+        //   ender_eye.png 时改用包内贴图（alpha-test 透明底，机制等价 MC item icon）；包缺 → 安全跳过保自绘。（§9 读取面）
         //   注：MC「末影珍珠 ender_pearl」（§9 记载：MC 物品名引用）是另一物品（合成暗渊之眼的原料），本工程无独立物品 id 故不映射；
-        //   本工程的「暗渊之眼」即机制等价物，故 ender_eye.png 是其正确 pack 图标。
-        {0x23A, QStringLiteral("ender_eye.png")},        // 暗渊之眼（t497：pack 启用用包内贴图，回落 drawEndEye 自绘）
+        //   本工程的「暗渊之眼」即机制等价物，故 ender_eye.png 是其正确 pack 图标。（§9 读取面）
+        {0x23A, QStringLiteral("ender_eye.png")},        // 暗渊之眼（t497：pack 启用用包内贴图，回落 drawEndEye 自绘）（§9 读取面）
         // t507 木碗 / 蘑菇汤（bowl / mushroom_stew）：pack item 目录通常有 bowl.png / mushroom_stew.png。包内缺则
         //   安全跳过（保留自绘 MaterialIcon）。
         {0x23B, QStringLiteral("bowl.png")},              // 木碗（t507）
@@ -872,11 +872,11 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         //   此处接 item 图标映射，包内缺则安全跳过回退 MaterialIcon drawPainting 自绘）。
         {0x242, QStringLiteral("painting.png")},         // 画作（t720：8 木棒+1 羊毛合成；右键墙贴画）
         // t726 暗渊链路（机制等价 MC 1.0 ender pearl / blaze powder / blaze rod；结成暗渊之眼端剂）：
-        //   pack item 目录有 ender_pearl.png / blaze_powder.png / blaze_rod.png 则接（alpha-test 透明底，
-        //   机制等价 MC item icon）；包缺 → 安全跳过保自绘（drawEnderPearl / drawBlazePowder / drawBlazeRod）。
+        //   pack item 目录有 ender_pearl.png / blaze_powder.png / blaze_rod.png 则接（alpha-test 透明底，（§9 读取面）
+        //   机制等价 MC item icon）；包缺 → 安全跳过保自绘（drawAbyssPearl / drawBlazePowder / drawBlazeRod）。
         //   （夜行者/燃烬者生物蛋 0x246/0x247 的 pack 映射 t785 补——见下方 t785 蛋 4 行；本体贴图经
         //   mobEntityMap 16/17 映射到 enderman/blaze 子目录。）
-        {0x243, QStringLiteral("ender_pearl.png")},      // 暗渊珠（t726：杀夜行者掉落；暗渊之眼原料）
+        {0x243, QStringLiteral("ender_pearl.png")},      // 暗渊珠（t726：杀夜行者掉落；暗渊之眼原料）（§9 读取面）
         {0x244, QStringLiteral("blaze_powder.png")},     // 燃烬粉（t726：燃烬棒冶炼产物；暗渊之眼原料）
         {0x245, QStringLiteral("blaze_rod.png")},        // 燃烬棒（t726：怒焰人死亡掉落；烧燃烬粉）
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint item 318）：pack item 目录有 flint.png 则接

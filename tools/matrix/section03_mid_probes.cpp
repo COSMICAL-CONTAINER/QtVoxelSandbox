@@ -2153,20 +2153,20 @@ void MatrixRun::section03_mid_probes()
                              "(burn loop now routes through recheckAttachmentsAfterClear)";
     });
 
-    // ── P-t835 暗渊珠五项修探针（Entities 层 EntityManager 直编 + Game 层 applyEnderPearlTeleport 直调，
+    // ── P-t835 暗渊珠五项修探针（Entities 层 EntityManager 直编 + Game 层 applyAbyssPearlTeleport 直调，
     //    同 t774 / t852 先例；独立小世界 96×40×96 不动主世界 rig——96 高世界地形+树冠最高 ~81，y≥84 天空
     //    带免凿，rig 地板摆 y=83 顶面 84）：
     //    (a) ①任意接触必传送：铁轨 / 火把（无碰撞盒非整格）+ 木压力板（薄碰撞盒）三柱，珠垂直落上 →
-    //        enderPearlLanded 落点 = **非整格自身格**（旧 collisionAABBsAt 点测穿过它落到下方支撑格 = 根因）；
-    //        Game 侧 applyEnderPearlTeleport：轨/火把格 → 玩家立**其格内**（y=84，穿模贴脚同 MC）；板格 →
-    //        立其顶（y=85，薄盒是碰撞支撑）；Survival 传送自伤恰发一次 (5, EnderPearlTp)。
+    //        abyssPearlLanded 落点 = **非整格自身格**（旧 collisionAABBsAt 点测穿过它落到下方支撑格 = 根因）；
+    //        Game 侧 applyAbyssPearlTeleport：轨/火把格 → 玩家立**其格内**（y=84，穿模贴脚同 MC）；板格 →
+    //        立其顶（y=85，薄盒是碰撞支撑）；Survival 传送自伤恰发一次 (5, AbyssPearlTp)。
     //    (b) ②液体缓沉：水柱 5 深 / 岩浆柱 4 深——入液不即时传送（40 tick 仍存活且已入液），稳态下沉速度带
     //        水 ~1.5 b/s / 岩浆 ~0.7 b/s（岩浆明显更慢），最终沉到液体底接触底面格才传送（落点=底面格，
     //        Game 侧从底面格传送 → 玩家立于水格 y=84——旧 isSolid 把水当实心全列 abort 的回归面）。
     //    (c) ③虚空/出界不传送：整柱清空到 y=0 的虚空列，珠一路无接触落出底部 → 移除且零 landed；
     //        水平飞出 XZ 边界同（出界消散，MC 珍珠入虚空有去无回）。
     //    (d) ④抛距加长：平抛 v=24（镜像 kPlayerPearlSpeed）自 6 格高 → 理论落距 24 格（t=√(2·6/12)=1s，
-    //        kEnderPearlGravity=12 轻重力直证）；45° 满抛 → ~50 格带（旧 12+重力 28 只 ~5 格）。
+    //        kAbyssPearlGravity=12 轻重力直证）；45° 满抛 → ~50 格带（旧 12+重力 28 只 ~5 格）。
     //    (e) ⑤疾跑加成：平抛 v=24 与 v=24×1.3（镜像 kPearlSprintFactor，对齐 t51 Sprint ×1.3）落距比
     //        ∈[1.27,1.33]；镜像常量值锁（Game 层掷出分支本地 constexpr 探针不可达，P18 镜像同步模式）。
     runLegMulti({ "t835 ender pearl five fixes: (1) any-contact teleports - pearl lands ON rail/torch/plate cell it"
@@ -2174,10 +2174,10 @@ void MatrixRun::section03_mid_probes()
         " b/s steady band) then teleport at liquid-bottom cell, player placed in water cell; (3) void & o"
         "ut-of-bounds fall removes pearl with ZERO teleport; (4) flat throw v=24 drops ~24 blocks (light "
         "gravity 12), 45deg ~50 blocks; (5) sprint 1.3x speed -> range ratio 1.27..1.33 + Survival tp sel"
-        "f-damage (5, EnderPearlTp) exactly once per teleport" }, [&]() {
+        "f-damage (5, AbyssPearlTp) exactly once per teleport" }, [&]() {
         // 镜像常量（与实现侧私有/函数本地常量文档值同步，改值须两处同步；P18 镜像模式——Entities 层
-        //   kEnderPearlGravity / Game 层掷珠分支 kPlayerPearlSpeed/kPearlSprintFactor 均探针不可达）：
-        constexpr float kMirrorPearlGravity = 12.0f;       // EntityManager::kEnderPearlGravity（t835④ 珠轻重力；MC 投掷物 12 vs 世界 28）
+        //   kAbyssPearlGravity / Game 层掷珠分支 kPlayerPearlSpeed/kPearlSprintFactor 均探针不可达）：
+        constexpr float kMirrorPearlGravity = 12.0f;       // EntityManager::kAbyssPearlGravity（t835④ 珠轻重力；MC 投掷物 12 vs 世界 28）
         constexpr float kMirrorPearlSpeed = 24.0f;        // kPlayerPearlSpeed（t835④ 12→24；MC 投掷物 1.5 b/t=30 量级）
         constexpr float kMirrorPearlSprintFactor = 1.3f;  // kPearlSprintFactor（t835⑤ 疾跑初速系数；t51 Sprint ×1.3 同源）
         Q_UNUSED(kMirrorPearlGravity); // 带断言（平抛 6 格落差 t=√(2·6/12)=1s → 落距=初速）即其数值锁；显式引用免 -Wunused
@@ -2185,7 +2185,7 @@ void MatrixRun::section03_mid_probes()
         wP.setWidth(96); wP.setDepth(40); wP.setHeight(96); wP.setSeed(77);
         EntityManager ents;
         int landedCount = 0; int lastLx = -1, lastLy = -1, lastLz = -1;
-        QObject::connect(&ents, &EntityManager::enderPearlLanded, &ents,
+        QObject::connect(&ents, &EntityManager::abyssPearlLanded, &ents,
                          [&](int x, int y, int z) { ++landedCount; lastLx = x; lastLy = y; lastLz = z; });
         const QVector3D farListener(-1000.0f, 10.0f, -1000.0f);
         const auto tickPearls = [&](int n) { for (int i = 0; i < n; ++i) ents.tick(0.016f, &wP, farListener, 0.3f, 1.8f, false); };
@@ -2205,7 +2205,7 @@ void MatrixRun::section03_mid_probes()
             wP.setBlock(d.x, floorY, az, BR::Stone, 0);   // 支撑地板
             wP.setBlock(d.x, floorY + 1, az, d.id, 0);    // 非整格本体（轨/火把贴地、板贴支撑面）
             const int before = landedCount;
-            const int pearl = ents.spawnEnderPearl(QVector3D(d.x + 0.5f, 88.0f, az + 0.5f), QVector3D(0, 0, 0));
+            const int pearl = ents.spawnAbyssPearl(QVector3D(d.x + 0.5f, 88.0f, az + 0.5f), QVector3D(0, 0, 0));
             tickPearls(80); // 88→入格 ~45 tick 内必中
             // Entities 半面：落点 = 非整格自身格（floorY+1）——旧判据穿过它落进下方支撑格（floorY）。
             if (landedCount != before + 1 || lastLx != d.x || lastLy != floorY + 1 || lastLz != az) {
@@ -2215,7 +2215,7 @@ void MatrixRun::section03_mid_probes()
             }
             Q_UNUSED(pearl);
         }
-        // Game 半面：applyEnderPearlTeleport 直调（Survival）——轨/火把立格内、板立其顶 + 自伤恰一次 (5, EnderPearlTp)。
+        // Game 半面：applyAbyssPearlTeleport 直调（Survival）——轨/火把立格内、板立其顶 + 自伤恰一次 (5, AbyssPearlTp)。
         PlayerController pc;
         pc.setWorld(&wP);
         pc.setMode(PlayerController::Survival);
@@ -2223,14 +2223,14 @@ void MatrixRun::section03_mid_probes()
         QObject::connect(&pc, &PlayerController::fallDamageTaken, &pc,
                          [&](int hp, int cause) { ++dmgHits; dmgHp = hp; dmgCause = cause; });
         for (const DecorRig &d : decors) {
-            pc.applyEnderPearlTeleport(d.x, floorY + 1, az); // 落点 = 珠接触格（ Entities 半面同参）
+            pc.applyAbyssPearlTeleport(d.x, floorY + 1, az); // 落点 = 珠接触格（ Entities 半面同参）
             const float gotY = pc.feetPosition().y();
             if (qAbs(gotY - d.tpFootY) > 0.01f) {
                 okA = false;
                 qInfo().noquote() << "  t835(a) tp diag:" << d.name << "footY" << gotY << "(expect" << d.tpFootY << ")";
             }
         }
-        okA = okA && dmgHits == 3 && dmgHp == 5 && dmgCause == int(PlayerState::EnderPearlTp);
+        okA = okA && dmgHits == 3 && dmgHp == 5 && dmgCause == int(PlayerState::AbyssPearlTp);
         ok = ok && okA;
 
         // ---- (b) ②液体缓沉：水柱（5 深）/ 岩浆柱（4 深）----
@@ -2241,7 +2241,7 @@ void MatrixRun::section03_mid_probes()
         wP.setBlock(24, floorY, lz2, BR::Stone, 0);
         // 水：40 tick 仍存活（不即时传送）且已入液；稳态带 |dy|/tick ∈ [0.019,0.027]（1.5 b/s·dt±余量）；沉底传送。
         const int beforeW = landedCount;
-        const int pearlW = ents.spawnEnderPearl(QVector3D(20.5f, 91.0f, wz + 0.5f), QVector3D(0, 0, 0));
+        const int pearlW = ents.spawnAbyssPearl(QVector3D(20.5f, 91.0f, wz + 0.5f), QVector3D(0, 0, 0));
         tickPearls(40);
         const float yW40 = ents.posAt(pearlW).y();
         bool okW = ents.aliveAt(pearlW) && yW40 < 89.0f && yW40 > 84.0f; // 已入液未到底未传送
@@ -2256,12 +2256,12 @@ void MatrixRun::section03_mid_probes()
         okW = okW && !ents.aliveAt(pearlW) && landedCount == beforeW + 1
                  && lastLx == 20 && lastLy == floorY && lastLz == wz; // 落点 = 液体底面格
         // Game 半面：从水底格传送 → 玩家立水格 y=84（水无碰撞可立入；旧 isSolid 把水当实心全列 abort）。
-        pc.applyEnderPearlTeleport(20, floorY, wz);
+        pc.applyAbyssPearlTeleport(20, floorY, wz);
         okW = okW && qAbs(pc.feetPosition().y() - float(floorY + 1)) < 0.01f
                  && qAbs(pc.feetPosition().x() - 20.5f) < 0.01f;
         // 岩浆：同构更慢（0.7 b/s 稳态带更窄）+ 沉底传送（①岩浆接触同样必传送，传送不点燃——MC 1.0 语义）。
         const int beforeL = landedCount;
-        const int pearlL = ents.spawnEnderPearl(QVector3D(24.5f, 90.0f, lz2 + 0.5f), QVector3D(0, 0, 0));
+        const int pearlL = ents.spawnAbyssPearl(QVector3D(24.5f, 90.0f, lz2 + 0.5f), QVector3D(0, 0, 0));
         tickPearls(80); // 入液 + 减速收敛（vy 4.9→0.7 需 ~22 tick）
         bool okL = ents.aliveAt(pearlL);
         float sinkL = 0.0f;
@@ -2281,10 +2281,10 @@ void MatrixRun::section03_mid_probes()
         const int vz = 18;
         for (int y = 0; y < 96; ++y) wP.setBlock(30, y, vz, BR::Air, 0); // 整柱清到 y=0（虚空列）
         const int beforeV = landedCount;
-        const int pearlV = ents.spawnEnderPearl(QVector3D(30.5f, 90.0f, vz + 0.5f), QVector3D(0, 0, 0));
+        const int pearlV = ents.spawnAbyssPearl(QVector3D(30.5f, 90.0f, vz + 0.5f), QVector3D(0, 0, 0));
         tickPearls(300); // 90→0 自由落 ~242 tick，越 y<0 出界移除
         bool okV = !ents.aliveAt(pearlV) && landedCount == beforeV; // 移除且零传送
-        const int pearlX = ents.spawnEnderPearl(QVector3D(94.5f, 90.0f, vz + 0.5f), QVector3D(30.0f, 0, 0));
+        const int pearlX = ents.spawnAbyssPearl(QVector3D(94.5f, 90.0f, vz + 0.5f), QVector3D(30.0f, 0, 0));
         tickPearls(10);  // ~0.5 格/tick → 3 tick 内飞出 x>96 出界移除
         okV = okV && !ents.aliveAt(pearlX) && landedCount == beforeV;
         ok = ok && okV;
@@ -2297,7 +2297,7 @@ void MatrixRun::section03_mid_probes()
         float rangeCells[2] = { -1.0f, -1.0f };
         for (int s = 0; s < 2; ++s) {
             const int before = landedCount;
-            const int pearl = ents.spawnEnderPearl(QVector3D(8.5f, 90.0f, rz + 0.5f),
+            const int pearl = ents.spawnAbyssPearl(QVector3D(8.5f, 90.0f, rz + 0.5f),
                                                    QVector3D(shots[s].speed, 0, 0));
             tickPearls(120); // 6 格落差 t=1s=62 tick，余量足
             if (!ents.aliveAt(pearl) && landedCount == before + 1)
@@ -2311,7 +2311,7 @@ void MatrixRun::section03_mid_probes()
                 && rangeCells[1] / rangeCells[0] >= 1.27f && rangeCells[1] / rangeCells[0] <= 1.33f;
         // ④补充：45° 满抛 v=24 → ~50 格带（自 y=86 上升弧越世界顶 y≥96 = 空气无碰撞照飞；旧物理只 ~5 格）。
         const int before45 = landedCount;
-        const int pearl45 = ents.spawnEnderPearl(QVector3D(8.5f, 86.0f, rz + 0.5f),
+        const int pearl45 = ents.spawnAbyssPearl(QVector3D(8.5f, 86.0f, rz + 0.5f),
                                                  QVector3D(24.0f * 0.7071f, 24.0f * 0.7071f, 0));
         tickPearls(260); // 满弧 ~2.9s ≈ 183 tick + 余量
         okD = okD && !ents.aliveAt(pearl45) && landedCount == before45 + 1
@@ -2331,7 +2331,7 @@ void MatrixRun::section03_mid_probes()
                              "player placed in water cell; (3) void & out-of-bounds fall removes pearl with ZERO "
                              "teleport; (4) flat throw v=24 drops ~24 blocks (light gravity 12), 45deg ~50 blocks; "
                              "(5) sprint 1.3x speed -> range ratio 1.27..1.33 + Survival tp self-damage (5, "
-                             "EnderPearlTp) exactly once per teleport";
+                             "AbyssPearlTp) exactly once per teleport";
     });
 
     // ── t837(1) 画作支撑失撑 World 钩子族探针（World rig 直编；setBlock / clearBlockSilent 双入口 + M1 邻画
@@ -3448,7 +3448,7 @@ void MatrixRun::section03_mid_probes()
     //   目标；本工程箭按空碰撞盒穿过植物）。修法 = 判据改「本格存在碰撞 sub-AABB」（判据本质化：旧
     //   5 id 豁免族全 ShapeNone 无盒 → 语义天然保留；铁轨/压力板/台阶等薄盒族仍命中 → t835「落铁轨
     //   必传送」不回归；未来新无碰撞方块自动正确）。锁法：两列对照直落 ——
-    //   (a) 草丛列（石上 TallGrass）：珠穿过草格、命中**下方石格**才 enderPearlLanded（旧「任意实存」
+    //   (a) 草丛列（石上 TallGrass）：珠穿过草格、命中**下方石格**才 abyssPearlLanded（旧「任意实存」
     //       判据在草格即结算 → 落点 y = 草格 ≠ 石格 → 红）；
     //   (b) 铁轨列（石上 Rail）：珠在**轨格**即命中（薄盒存在 → t835 落轨传送语义钉死）。
     runLegMulti({ "review25 #5 pearl plant pass-through: pearl falling through a TallGrass cell (ShapeNone, no coll"
@@ -3478,15 +3478,15 @@ void MatrixRun::section03_mid_probes()
             int landedCnt = 0;
             int lx[2] = { -1, -1 }, ly[2] = { -1, -1 };
             QMetaObject::Connection cL = QObject::connect(
-                    &ents, &EntityManager::enderPearlLanded, &ents,
+                    &ents, &EntityManager::abyssPearlLanded, &ents,
                     [&](int x, int y, int z) {
                         Q_UNUSED(z);
                         if (landedCnt < 2) { lx[landedCnt] = x; ly[landedCnt] = y; }
                         ++landedCnt;
                     });
-            ents.spawnEnderPearl(QVector3D(x0 + 0.5f, kRigY + 3.5f, z0 + 0.5f),
+            ents.spawnAbyssPearl(QVector3D(x0 + 0.5f, kRigY + 3.5f, z0 + 0.5f),
                                  QVector3D(0.0f, -2.0f, 0.0f));
-            ents.spawnEnderPearl(QVector3D(x0 + 3.5f, kRigY + 3.5f, z0 + 0.5f),
+            ents.spawnAbyssPearl(QVector3D(x0 + 3.5f, kRigY + 3.5f, z0 + 0.5f),
                                  QVector3D(0.0f, -2.0f, 0.0f));
             for (int t = 0; t < 200 && landedCnt < 2; ++t)
                 ents.tick(0.016, &w, QVector3D(x0 + 2.0f, kRigY + 3.0f, z0 + 0.5f), 0.3f, 1.8f, false);
@@ -5251,7 +5251,7 @@ Item {
     });
 
     // ── P-t881 鱼线最大长度探针（32 格断线，行为级）──
-    //    pc 真甩竿 → settle（近距 ~2 格）→ pc.tick 线仍持；applyEnderPearlTeleport 把玩家拉到 ~53 格
+    //    pc 真甩竿 → settle（近距 ~2 格）→ pc.tick 线仍持；applyAbyssPearlTeleport 把玩家拉到 ~53 格
     //    （loadSavedState 会 cancelFishing 不可用——传送是唯一不撞钓鱼态的移位口）→ 传送本身不断线
     //    （检测在 updateFishing）→ 首 pc.tick 断线：浮标槽释放 + fishing 复位 + 耐久不变 + 零 fishCaught。
     runLegMulti({ "t881 fishing line max length: eye-to-bobber 3D distance beyond 32 blocks snaps the line on the n"
@@ -5307,7 +5307,7 @@ Item {
         pumpFor(17); pc.tick(); // 近距镜像 tick（~2 格）→ 线仍持（fishing 保持 + 浮标活）
         ok = ok && pc.fishing() && ents.aliveAt(bob);
         const int dur0 = hb.durabilityAt(0);
-        pc.applyEnderPearlTeleport(44, fy + 2, 42); // 玩家 → (44.5, fy+1, 42.5)（传送不撞钓鱼态）
+        pc.applyAbyssPearlTeleport(44, fy + 2, 42); // 玩家 → (44.5, fy+1, 42.5)（传送不撞钓鱼态）
         ok = ok && pc.fishing();                    // 传送本身不断线（检测在 updateFishing 镜像段）
         pumpFor(17); pc.tick();                     // → 断线
         ok = ok && !pc.fishing() && !ents.aliveAt(bob) && caught == 0

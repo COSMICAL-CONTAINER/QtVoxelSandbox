@@ -52,7 +52,7 @@
                           //   玩家态 JSON 落盘读回；World 层直编，t622 序列化链首次自动化覆盖）
 #include "partialblockgeometry.h" // t737 拐角象限断言（mesher 同源调用）
 #include "minecartmanager.h"      // t737 环线矿车绕圈断言（骑乘 / 空车两路）
-#include "entitymanager.h"        // 审查 #1 末影眼巡航高度回归探针（spawnEnderEye + enderEyeCruiseYAt）
+#include "entitymanager.h"        // 审查 #1 末影眼巡航高度回归探针（spawnAbyssEye + abyssEyeCruiseYAt）
 #include "resourcepackmanager.h"  // t785 生物蛋探针（生成式染色表 spawnEggTint 条目存在性直调）
 #include "keybindmanager.h"       // t1022 键位重映射探针（默认表完整性 / 冲突拒收 / settings.json round-trip）
 #include "itementitymanager.h"    // t804 掉落物火焚探针（item 入 Fire 格 0.8s 焚毁 + itemBurned 烟信号）

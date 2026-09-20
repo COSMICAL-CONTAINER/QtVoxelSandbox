@@ -320,13 +320,17 @@ public:
     //   无 MC 1.0 mcMaterialId 映射（id > kMcMaterialId 表界 0x22E → -1 → 回退自绘；painting 物品 321
     //   经 itemFilenameMap 单独接，不走材料段 MC 表）。
     static constexpr int PaintingId      = 0x242; // 画作：8 木棒+1 羊毛合成；右键墙贴画（t720/t721）
-    // t726 暗渊珠（ender_pearl：材料段 0x243）：机制等价 MC 1.0 ender pearl —— 杀夜行者（MobNightwalker，
+    // ── t1068 §9 Ender 族改名映射表（item 域锚；全表对照见 blockregistry.h 头注；数值 id 零变化 = 存档安全铁律）──
+    //   原 EnderPearlId→AbyssPearlId（0x243 不变）、原 EnderPearlTp（死因枚举）→AbyssPearlTp（16 不变）。（§9）
+    //   原 EndEyeId 0x23A 沿 t1067 未动（End 词根另族，不在本批）；豁免面 = resourcepackmanager 读取面
+    //   ender_pearl.png / ender_eye.png（§9 读取面）+ 两处映射头注对照记载。
+    // t726 暗渊珠（材料段 0x243）：机制等价 MC 1.0 ender pearl —— 杀夜行者（MobNightwalker，
     //   t727）掉落 0-1 颗；弹射物瞬移（t727 夜行者被弹射物砸中即瞬移闪避，暗渊珠为其同源瞬移物）预留。
     //   可堆叠 64（走材料段默认）；非方块（材料段）→ 右键不放置。图标：MaterialIcon 自绘深青绿圆珠 +
-    //   高光（drawEnderPearl，§9 原创）；pack 映射 itemFilenameMap 0x243 → ender_pearl.png。
+    //   高光（drawAbyssPearl，§9 原创）；pack 映射 itemFilenameMap 0x243 → ender_pearl.png。
     //   无 MC 1.0 mcMaterialId 映射（id > 0x22E 越 kMcMaterialId 表界 → -1 → 回退自绘；MC 名经
     //   itemFilenameMap 单独接）。暗渊珠 + 燃烬粉 → 暗渊之眼（shapeless 配方，见 recipe.cpp）。
-    static constexpr int EnderPearlId    = 0x243; // 暗渊珠：杀夜行者掉落；与燃烬粉合成暗渊之眼（t726）
+    static constexpr int AbyssPearlId    = 0x243; // 暗渊珠：杀夜行者掉落；与燃烬粉合成暗渊之眼（t726）
     // t726 燃烬粉（blaze_powder：材料段 0x244）：机制等价 MC 1.0 blaze powder —— 燃烬棒（BlazeRodId）
     //   在熔炉冶炼的产物（t726；机制等价 MC「blaze rod 烧成 blaze powder」）；亦可由（未来）燃烬人
     //   （Blaze→Emberling，机制等价 MC 怒焰人）击杀掉落。可堆叠 64（走材料段默认）；非方块 → 右键不放置。
