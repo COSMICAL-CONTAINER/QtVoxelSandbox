@@ -1230,6 +1230,10 @@ add_executable(redstone_matrix_test
     #   旧词根清零钉/用户可见面钉/结构钉——worldstore/recipe/hotbar 系已列）。
     tools/matrix/section42_ip_root_rename.cpp
     tools/matrix/section43_ender_root_rename.cpp
+    # t1069 残余清偿合集探针附加：入口分歧腿口径收窄承重 + 渐进同步队列精确摘除承重（生产
+    #   patchChunkSlotPool 原文抽取执行 + 固定世界 comparator 敏感面 + 结构钉——worldstore/
+    #   world/chunklifecycle/streamingbridge 系已列）。
+    tools/matrix/section44_residual_pair.cpp
     # t1022 键位映射表探针附加：Core 层 KeybindManager（默认表完整性 / 冲突拒收 / settings.json
     #   round-trip——显式 storePath 密闭不触真实档）。PlayerController setKey 规范化消费同链直编。
     src/Core/keybindmanager.cpp

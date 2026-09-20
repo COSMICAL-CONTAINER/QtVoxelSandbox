@@ -153,6 +153,8 @@ void MatrixRun::runAll()
 
     section43_ender_root_rename(); // t1068 §9 Ender 族改名收口（置尾先例沿用：r2042a 旧行为等价墙[眼 kind 7 + 巡航高度掷出眼位+8 + 飞行态非碎裂 / 珠 kind 8 + 非整格接触落点=自身格经改名信号 / 改名钩子传送立位 + Survival 自伤恰一次 (5, AbyssPearlTp) + Creative 零伤 / shapeless 珠+燃烬粉答不变眼 id + 内部字面 abyss_eye + 半配方对照 null / 真临时库存读往返双物品 id/count/名逐位保真=存档安全铁律行为级] / r2042b 旧词根清零钉[src/ 全树八词根命中行必携 §9 记载标记 + 每文件计数 11/6/3/4 = 总 24，盘点口径漂移即红；Enderman 已 t727 改名不入扫面] / r2042c 用户可见面钉[nameForBlock 双物品新名 + 死因文案在场 + 读取面图标路径字面 + 自绘入口 + 调色板 id 面，displayName 本批零改动] / r2042d 结构钉[数值 id 逐位 0x243/0x23A/7/8/16 + 编译期 static_assert 互钉 + 改名族声明面源钉 + QML kind/delegate/handler 面 + t1068 映射头注锚串裸文本在场钉]，各腿自建 fresh 世界/临时库，rig 零接触）
 
+    section44_residual_pair(); // t1069 残余清偿合集（置尾先例沿用：r2043a 既有行为零变化墙[相邻族腿名计数源钉 ×3 + 池路径契约钉 + 生产 patch 体原文抽取执行初建/单键驱逐/重加全链池行为逐位] / r2043b 口径收窄承重[收窄门逐字源钉 + 固定世界 comparator 敏感面行为柱：旧列高基准盲区的块缘带体素腐败必被全逐位比对捕获 + 退役留痕锚] / r2043c 精确摘除承重（生产 patch 体原文执行——抽取 harness 强于镜像 wrapper 一档：测生产体本身非同构体）/ r2043d 结构钉[摘除谓词族源钉 + 全清写点精确计数恰两处 + 两消费端/稳态兜底契约句零触碰反探 + 段入口 comparator 锚 + PASS 如实化锚 + 退役留痕锚]，各腿自建 fresh 世界，rig 零接触）
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";
