@@ -143,6 +143,13 @@ struct GeneratedChunkData
             && blocks == o.blocks && states == o.states;
     }
 
+    // t1070 件一（§29.5-W3「Load job worker 空跑消除」转正）：true = Load kind 完成的**键载体
+    // 信封**（meta 齐、blocks/states 保持空 → valid()==false 防当地形载荷误用）。选型依据见
+    // BackgroundGenerationWorker::threadLoop 注——worker 消费 submit 前置的 kind 域短路地形
+    // 生成；内容唯一通路仍是收割拍 blob 物化 / 确定性重生成（数据从不来自 worker，r2025b
+    // 铁律），信封只为保住「每完成 job 恰一条自持缓冲」的同拍双消配对（#7 契约）。
+    bool loadCarrier = false;
+
 private:
     size_t index(int lx, int ly, int lz) const
     {
@@ -314,6 +321,14 @@ public:
         std::lock_guard<std::mutex> lk(m_mu);
         return m_executed;
     }
+    // t1070 件一诊断面（矩阵 r2044b 断言用；锁护卫）：真实地形生成次数——Generate kind 专计
+    //   （Load 信封短路不计 = 「空跑消除」的行为级锚；executedCount 仍计 Load 完成 = 边①②照
+    //   常驱动的对账面）。
+    quint64 generatedCount() const
+    {
+        std::lock_guard<std::mutex> lk(m_mu);
+        return m_generated;
+    }
 
 private:
     struct Task
@@ -340,13 +355,43 @@ private:
                 t = m_tasks.front();
                 m_tasks.pop_front();
             }
-            // 纯函数生成（锁外）：TerrainGen 只读 + 局部缓冲——无共享可变态（线程安全根据）。
-            std::unique_ptr<GeneratedChunkData> data = generateTerrainChunk(m_terrain, t.req.key);
+            // ── t1070 件一（§29.5-W3「Load job worker 空跑消除」转正）：Load kind 执行体恒快速
+            //    完成。依据链：worker 零 World 指针纪律不动 → 「有存档」信息由 submit 前置
+            //    （driver savedContentQuery 命中才选 Load kind，chunkstreamdriver.h P3 缝）——
+            //    载荷 (kind,key) 内已含全部所需信息，worker 侧消费 kind 域短路地形生成（旧形态
+            //    造一份注定被 blob 回灌覆盖的地形缓冲 = worker 线程纯浪费）。读码定选型：
+            //    **worker 侧 kind 短路**而非「Load 不进 worker 同步完成」——后者要请求编排层
+            //    （generationjob.h）认 kind 执行语义 = 编排层越权策略语义，且同步插队会扰动异
+            //    步账面的 FIFO 完成序（takeCompletedAsync 对账面）。**数据面唯一通路不变**：
+            //    Load 完成只投键载体信封（loadCarrier，零地形载荷），内容唯一来源仍是收割拍
+            //    restoreChunkFromBlob（命中）/ loadChunkAt 确定性重生成（读败降级，gamesession.h
+            //    路由面）——数据从不来自 worker（r2025b 铁律）；信封保持「每完成 job 恰一条自
+            //    持缓冲」的同拍双消配对（#7 契约，漏配对 = 收割面断链）。
+            std::unique_ptr<GeneratedChunkData> data;
+            bool terrainGenerated = false; // 诊断面与被计工作同条件（防「按 kind 计数」与实际脱钩）
+            if (t.req.kind == GenerationJobKind::Load) {
+                // 键载体信封：meta 齐 + 数组空（valid()==false = 不可当地形载荷消费的编译期外
+                // 防御面）；生成恒成功面同款语义（无失败路径）。
+                data = std::make_unique<GeneratedChunkData>();
+                data->key = t.req.key;
+                data->seed = quint32(m_terrain.seed()); // int → quint32 补码映射（同 generateTerrainChunk）
+                data->generatorVersion = TerrainGen::kGeneratorVersion;
+                data->originX = t.req.key.cx * TerrainGen::kChunkSize;
+                data->originZ = t.req.key.cz * TerrainGen::kChunkSize;
+                data->height = m_terrain.dims().height;
+                data->loadCarrier = true;
+            } else {
+                // 纯函数生成（锁外）：TerrainGen 只读 + 局部缓冲——无共享可变态（线程安全根据）。
+                data = generateTerrainChunk(m_terrain, t.req.key);
+                terrainGenerated = true;
+            }
             {
                 std::lock_guard<std::mutex> lk(m_mu);
                 m_done.push_back(CompletedGeneration{ t.jobId, Error{} }); // 生成恒成功面（纯函数无失败路径）
                 m_data.push_back(std::move(data));
                 ++m_executed;
+                if (terrainGenerated)
+                    ++m_generated; // t1070 诊断面：真实地形生成计数（与生成调用同条件——Load 信封不计）
             }
         }
     }
@@ -360,6 +405,7 @@ private:
     std::deque<std::unique_ptr<GeneratedChunkData>> m_data; // 与 m_done 同序的自持缓冲
     std::thread::id m_execThreadId; // threadLoop 入口定格（线程身份对账）
     quint64 m_executed = 0;     // 已执行任务计数（诊断）
+    quint64 m_generated = 0;    // t1070 件一：真实地形生成计数（Generate 专计；诊断面）
     bool m_stop = false;        // 停止标志（析构置位；见头注退出语义）
     std::thread m_thread;       // 线程体最后声明（构造序收尾）
     std::thread::id m_threadId; // 线程启动后于构造体定格

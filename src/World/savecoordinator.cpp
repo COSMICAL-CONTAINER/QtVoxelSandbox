@@ -188,6 +188,7 @@ bool SaveCoordinator::ensureBuffer(const WorldSaveSnapshot &snap)
     if (!dimsMatch) {
         delete m_buffer;
         m_buffer = new World();
+        ++m_bufferRebuilds; // t1070 件三诊断面：重建恰落此分支（同 dims 连续保存复用 = 不进此分支）
         // 尺寸 setter 各触一次 worldgen（一次性建造成本；复用面见头注登记），beginLoad 随即
         // 零填充覆盖。
         m_buffer->setWidth(snap.width);

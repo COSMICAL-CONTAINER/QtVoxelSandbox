@@ -927,18 +927,22 @@ inline void GameSession::pumpStreamingTick()
     }
     FrameProfiler::instance()->addCount("streamOut", outcomesDrained);
     // ④ #7 同拍双面·数据面（漏取 = m_data 无界积压——#7 原文）：主线程落位唯一通路。
-    //    §29.5-W3 路由：附加表命中（= 该 chunk 曾驱逐落盘，行只增不删故命中稳定）→
-    //    World::restoreChunkFromBlob 直接物化（跳过 population——存档内容已是终态，头注立证）；
-    //    未命中 → W2 现行 adoptGeneratedChunk 生成路径。命中但 blob 读回失败（病/尺寸守卫拒）
-    //    → 降级生成路径并告警（诚实降级 + 驱逐面已保内容，无正确性损失面——重载内容退化为
-    //    重derive 是已登记的尺寸守卫语义[worldstore loadChunks 同门]）。
+    //    §29.5-W3 路由（t1070 件一/件二修订后）：附加表命中（= 该 chunk 曾驱逐落盘，行只增
+    //    不删故命中稳定）→ World::restoreChunkFromBlob 直接物化（跳过 population——存档内容
+    //    已是终态，头注立证）；未命中 → 按完成 job 的种别收尾：Load 键载体信封（t1070 件一
+    //    ——worker 不再为 Load 空跑地形生成）→ World::loadChunkAt 确定性重生成（与 worker 缓
+    //    冲同 seed 同内容的诚实降级面，数据仍从不来自 worker[r2025b 铁律]）；Generate 缓冲
+    //    → W2 现行 adoptGeneratedChunk 生成路径（逐位原样）。
+    //    t1070 件二：命中探测由 loadChunk 单查承担——旧 `hasChunk && loadChunk` 双查中的
+    //    hasChunk 是每完成 job 一次的冗余连接开关（loadChunk 自身的 miss/读败面产出同一
+    //    stored=false，语义逐位等价）；量化与「不加存在缓存」的取舍登记见 chunkstore.h
+    //    hasChunk 注。
     std::unique_ptr<GeneratedChunkData> data;
     qint64 adoptedDrained = 0; // t1059 F3 stream 行 adopt 域的本拍增量
     while (m_streamWorker->takeResultData(data)) {
         if (data) {
             ChunkStoreBlob blob;
             const bool stored = m_chunkStore && m_chunkStore->isBound()
-                && m_chunkStore->hasChunk(data->key.cx, data->key.cz)
                 && m_chunkStore->loadChunk(data->key.cx, data->key.cz, blob);
             bool restored = false;
             if (stored) {
@@ -948,8 +952,12 @@ inline void GameSession::pumpStreamingTick()
                     qWarning() << "GameSession: chunk_edits blob restore failed for"
                                << data->key.cx << data->key.cz << "- degrading to regeneration";
             }
-            if (!restored)
-                m_world.adoptGeneratedChunk(data->key.cx, data->key.cz, *data);
+            if (!restored) {
+                if (data->loadCarrier) // t1070 件一：Load 信封零地形载荷——降级 = 确定性重生成
+                    restored = m_world.loadChunkAt(data->key.cx, data->key.cz);
+                else
+                    m_world.adoptGeneratedChunk(data->key.cx, data->key.cz, *data);
+            }
         }
         ++m_streamAdoptedCount;
         ++adoptedDrained;

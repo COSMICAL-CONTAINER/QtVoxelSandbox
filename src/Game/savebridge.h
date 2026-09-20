@@ -43,10 +43,11 @@
 //   · **冻结机制不接线选型（§29.6 转抄）**：r2015 ①冻结-持久化分离的 freeze 缓冲在生产冗余——
 //     保存链同步单线程无重入（t1055 核），世界不可能在写中途变化；生产只取其簿记面（marker/
 //     代次/Interrupted/complete 权威）。freeze 面随 coordinator 协议原样保留（字节面恒等无行为
-//     差；首次保存的缓冲惰性重建成本 = r2015 已登记的一次性面），不做生产开关、不另建第二份冻结
-//     实现；freeze 面的独立行为证明留矩阵测试域（r2015b）。成本登记：coordinator 首保存对宿主
-//     dims 重建冻结缓冲（new World + dims setter 各触一次 worldgen ≈ 4 次一次性生成成本，跨保存
-//     复用；生产接线若在意该成本属后续单优化面，§29.6 原文）。
+//     差），不做生产开关、不另建第二份冻结实现；freeze 面的独立行为证明留矩阵测试域（r2015b）。
+//     成本登记（t1070 件三修订）：coordinator 首保存对宿主 dims 重建冻结缓冲（new World + dims
+//     setter 各触一次 worldgen ≈ 4 次一次性生成成本，跨保存复用；§29.6 原文登记的「后续单优化
+//     面」已由**桥内长活 coordinator**兑现——见 m_coord 注；旧逐保存栈上实例形态的每保存重付
+//     面 = Review_2026-09-18 #1，随本单关闭）。
 //   · **SaveFaultHook 生产零挂载**：桥内钩子缺省恒空 = 生产形态恒不注入；矩阵腿经 C++ 面
 //     setFaultHook 挂注入（r2015 五段缝语义原样——本桥不复制协议，只转发钩子）。
 //
@@ -107,6 +108,9 @@ public:
     SaveGenerationInfo recoveryInfo(const QString &worldFile) const;
     // 故障注入缝转发（测试专用，生产零挂载——挂载点全 src 树仅矩阵腿；r2015 五段语义原样）。
     void setFaultHook(SaveFaultHook hook) { m_faultHook = std::move(hook); }
+    // t1070 件三诊断面（矩阵 r2044c 断言用；C++ only 非 QML）：桥内长活 coordinator 的冻结
+    //   缓冲重建计数透传（语义与陈旧防面论证见 m_coord 注 / savecoordinator.h ensureBuffer 注）。
+    int frozenBufferRebuildCount() const { return m_coord.bufferRebuildCount(); }
 
 private:
     SaveBridge() = default;
@@ -118,6 +122,18 @@ private:
     static QString resolveSavePath(const QString &file);
 
     SaveFaultHook m_faultHook; // 生产恒空（缺省无钩 = 生产形态；逐保存转发给 coordinator）
+    // **t1070 件三（Review_2026-09-18 #1 清偿）：长活 coordinator**——r2015「冻结缓冲跨保存
+    //   复用」的实现前提（旧形态 = 逐保存栈上实例 → 复用被打断，每次保存重付 ≈4 次一次性
+    //   worldgen + 4 条统计 qInfo）。桥是进程级 QML 单例（GUI 线程单线程消费），coordinator
+    //   与其冻结缓冲 World 随桥长活：首保存按 dims 重建一次，此后同 dims 保存全复用
+    //   （bufferRebuildCount 诊断面 + frozenBufferRebuildCount 透传 = 行为级锚）。陈旧冻结点
+    //   防面（判据读码定，宁可失效勤）：①快照**每保存重新冻结**（captureSnapshot 是对活体的
+    //   唯一读点——复用的只是 World 壳非冻结点本身）；②beginLoad 每保存把缓冲网格重置全零
+    //   再全量重放冻结点——复用缓冲的内容面与「每保存新建」逐字节等价，「窗内改动活体→重读
+    //   = 冻结点 ≠ 活体」承重墙逐位不弱化（r2044c 行为级复验）；③dims 变化（跨世界）走
+    //   ensureBuffer 既有重建分支，bind 每保存重绑 store/路径（逐调用传入语义不变，无陈旧
+    //   绑定面）。只读恢复面（recoveryInfo）仍用栈上局部实例——recover 不触冻结缓冲。
+    SaveCoordinator m_coord;
 };
 
 #endif // SAVEBRIDGE_H
