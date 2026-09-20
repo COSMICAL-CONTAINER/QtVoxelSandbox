@@ -1229,6 +1229,7 @@ add_executable(redstone_matrix_test
     # t1067 §9 区隔改名批收口探针附加：Core/Game/World 传送门族直编（行为等价墙 + 真临时库存读往返 +
     #   旧词根清零钉/用户可见面钉/结构钉——worldstore/recipe/hotbar 系已列）。
     tools/matrix/section42_ip_root_rename.cpp
+    tools/matrix/section43_ender_root_rename.cpp
     # t1022 键位映射表探针附加：Core 层 KeybindManager（默认表完整性 / 冲突拒收 / settings.json
     #   round-trip——显式 storePath 密闭不触真实档）。PlayerController setKey 规范化消费同链直编。
     src/Core/keybindmanager.cpp
