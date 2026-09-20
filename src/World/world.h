@@ -344,7 +344,7 @@ public:
             && (stateAt(x, y, z) & BlockRegistry::ChestStateStrongholdFlag) != 0;
     }
     // t729 最近要塞（暗渊门）坐标 getter（placeStronghold 记录；详见 m_strongholdPortal* 字段头注释）。
-    //   暗渊之眼（EnderEye）右键掷出的**飞行目标**：Game/Physics 层（PlayerController）据玩家眼位 → 本传送门
+    //   暗渊之眼（AbyssEye）右键掷出的**飞行目标**：Game/Physics 层（PlayerController）据玩家眼位 → 本传送门
     //   中心方向计算飞行初速，把眼睛导向要塞（机制等价 MC 1.0 暗渊之眼寻路要塞）。玩家朝要塞方向走多次使用
     //   可逐步逼近（本工程单要塞，方向恒指向它）。分层（PLAN §2）：纯只读查询（无世界创建则恒 false），
     //   Q_INVOKABLE 兼 F3 调试 / 未来 HUD 展示；Game 层 C++ 亦直调。坐标 = 传送门房 12 框架环中心格

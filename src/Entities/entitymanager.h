@@ -157,7 +157,7 @@ public:
     // 实体外观种类（Q_ENUM 供 QML 渲染分流：Mob=纯色立方 / Item=掉落物（vestigial，实际由 ItemEntityManager
     // 管）/ FallingBlock=贴图方块 / Arrow=箭矢投射物（t283 骷髅弓箭手远程射出，细长杆定向 Model）/
     // Snowball=雪球投射物（t482 雪傀儡远程攻击，白色小球定向 Model，低伤害 + 减速））。
-    enum Kind { Mob, Item, FallingBlock, Arrow, Snowball, Egg, Fireball, EnderEye, EnderPearl, Bobber }; // t583 加 Egg（鸡蛋投掷物，QML 卵形 Model 分流）；t728 加 Fireball（燃烬者火球，直线弹道 + 点燃，QML 橙黄火球 Model 分流）；t729 加 EnderEye（暗渊之眼，玩家右键掷出寻路要塞，QML 小绿瞳珠 Model + 碎裂动画）；t758 加 EnderPearl（暗渊珠，玩家右键掷出受重力抛物飞行，落点把玩家传送过去，QML 深绿小珠 Model 分流）；t836 加 Bobber（钓鱼浮标投射物，玩家右键甩竿抛出，轻重力抛物 → 落水浮定 / 落陆静止 / 飞行段可钩 mob，渲染走 Main.qml player.fishing 专属 delegate 非本 Repeater）
+    enum Kind { Mob, Item, FallingBlock, Arrow, Snowball, Egg, Fireball, AbyssEye, AbyssPearl, Bobber }; // t583 加 Egg（鸡蛋投掷物，QML 卵形 Model 分流）；t728 加 Fireball（燃烬者火球，直线弹道 + 点燃，QML 橙黄火球 Model 分流）；t729 加 AbyssEye（暗渊之眼，玩家右键掷出寻路要塞，QML 小绿瞳珠 Model + 碎裂动画）；t758 加 AbyssPearl（暗渊珠，玩家右键掷出受重力抛物飞行，落点把玩家传送过去，QML 深绿小珠 Model 分流）；t836 加 Bobber（钓鱼浮标投射物，玩家右键甩竿抛出，轻重力抛物 → 落水浮定 / 落陆静止 / 飞行段可钩 mob，渲染走 Main.qml player.fishing 专属 delegate 非本 Repeater）
     Q_ENUM(Kind)
 
     // t240 mob 子类 id（与 Entity.mobType 同值；Q_ENUM 供 QML 据 mobTypeAt 选 MobModel 比例 + 贴图）。
@@ -426,29 +426,29 @@ public:
     //   燃烧态（igniteFlammableAt）；非可燃 → 火球来向空气格置立地火（==Air 门）。
     Q_INVOKABLE int spawnFireball(const QVector3D &origin, const QVector3D &vel, int igniteChancePct = 20);
     // t729 暗渊之眼投射物（玩家右键 EndEyeId 掷出；机制等价 MC 1.0 暗渊之眼 ender eye —— 右键掷出寻路要塞）：
-    //   在 origin 处生成携带 3D 速度 vel（blocks/s，初速朝最近要塞暗渊门方向，速度 ~kEnderEyeSpeed=4）的
-    //   小绿瞳珠实体。kind=EnderEye、pushable=false（玩家走碰不推）、halfW/halfH=0.16（小珠视觉 + 碰撞最小）。
-    //   entity.enderEyeDistLeft = 随机 [kEnderEyeDistMin(10), Max(16)] 剩余飞行距离（blocks）→ tick 递减，<=0 即
-    //   「判定结算」：80%（kEnderEyeDropChance）→ emit enderEyeBecameItem（呈现层转发 ItemEntityManager.spawnItem
-    //   生成**掉落物实体**，可捡回 —— 机制等价 MC 暗渊之眼落地变掉落物）+ 移除；20% → 进入碎裂态（enderEyeShatter
-    //   倒计 kEnderEyeShatterTime，QML 播缩小淡出 + 玻璃碎裂粒子）→ 归零移除**无掉落**。vx/vy/vz 复用 3D 速度
+    //   在 origin 处生成携带 3D 速度 vel（blocks/s，初速朝最近要塞暗渊门方向，速度 ~kAbyssEyeSpeed=4）的
+    //   小绿瞳珠实体。kind=AbyssEye、pushable=false（玩家走碰不推）、halfW/halfH=0.16（小珠视觉 + 碰撞最小）。
+    //   entity.abyssEyeDistLeft = 随机 [kAbyssEyeDistMin(10), Max(16)] 剩余飞行距离（blocks）→ tick 递减，<=0 即
+    //   「判定结算」：80%（kAbyssEyeDropChance）→ emit abyssEyeBecameItem（呈现层转发 ItemEntityManager.spawnItem
+    //   生成**掉落物实体**，可捡回 —— 机制等价 MC 暗渊之眼落地变掉落物）+ 移除；20% → 进入碎裂态（abyssEyeShatter
+    //   倒计 kAbyssEyeShatterTime，QML 播缩小淡出 + 玻璃碎裂粒子）→ 归零移除**无掉落**。vx/vy/vz 复用 3D 速度
     //   （不走 Mob 击退衰减分支，无冲突）。t757：飞行目标改两段式（远=升空指示 / 近=下探逼近，见 tick 分支），
-    //   vel 只作初速（tick 内转向平滑接管），spawn 另记 enderEyeCruiseY = origin.y()+kEnderEyeClimbHeight。
+    //   vel 只作初速（tick 内转向平滑接管），spawn 另记 abyssEyeCruiseY = origin.y()+kAbyssEyeClimbHeight。
     //   达 kCap → 跳过 + 告警（防溢出）。返槽索引（调试用）；达 kCap → -1。
-    Q_INVOKABLE int spawnEnderEye(const QVector3D &origin, const QVector3D &vel);
-    // t758 暗渊珠投射物（玩家右键 EnderPearlId 掷出；机制等价 MC 1.0 ender pearl —— 右键掷出受重力抛物飞行，
+    Q_INVOKABLE int spawnAbyssEye(const QVector3D &origin, const QVector3D &vel);
+    // t758 暗渊珠投射物（玩家右键 AbyssPearlId 掷出；机制等价 MC 1.0 ender pearl —— 右键掷出受重力抛物飞行，
     //   落点把掷出者传送过去 + 传送附带伤害）：在 origin 处生成携带 3D 速度 vel（blocks/s，含 vy 抛物）的小珠
-    //   实体。kind=EnderPearl、pushable=false（玩家走碰不推）、halfW/halfH=kEnderPearlHalfDim（深绿小珠视觉 +
-    //   碰撞最小；命中判定走点格不读它）。tick 内 EnderPearl 分支：轻重力改 vy（t835④ kEnderPearlGravity=12
+    //   实体。kind=AbyssPearl、pushable=false（玩家走碰不推）、halfW/halfH=kAbyssPearlHalfDim（深绿小珠视觉 +
+    //   碰撞最小；命中判定走点格不读它）。tick 内 AbyssPearl 分支：轻重力改 vy（t835④ kAbyssPearlGravity=12
     //   抛物）+ 速度位移 + **方块接触即结算**（t835① 判据=本格任意方块实存（铁轨/火把/压力板等无碰撞盒
-    //   非整格同样算接触）→ emit enderPearlLanded(命中格) → 呈现层路由 PlayerController.applyEnderPearlTeleport
-    //   扫安全落点瞬移玩家 + 扣传送伤害）+ 移除；t835② 入水/岩浆改缓沉（终速 kEnderPearlWaterSink/LavaSink +
+    //   非整格同样算接触）→ emit abyssPearlLanded(命中格) → 呈现层路由 PlayerController.applyAbyssPearlTeleport
+    //   扫安全落点瞬移玩家 + 扣传送伤害）+ 移除；t835② 入水/岩浆改缓沉（终速 kAbyssPearlWaterSink/LavaSink +
     //   水平阻尼），沉到液体底接触底面才结算；寿命到期视作「悬空落点」同样结算（B11 向下找支撑传送，防极端
     //   上抛珍珠永久滞留；液体缓沉期暂停倒计）；越界（世界外 / 虚空）静默移除**不传送**（t835③ 防传到不可玩
     //   位置）。**不做 mob 命中**（取舍：珍珠只传送掷出者自己，撞 mob 穿过 —— MC 对 mob 命中亦仅传送掷者，
     //   伤害分支 v1 不做）。vx/vy/vz 复用 3D 速度（不走 Mob 击退衰减分支，无冲突）。达 kCap → 跳过 + 告警
     //   （防溢出）。返槽索引（调试用）；达 kCap → -1。
-    Q_INVOKABLE int spawnEnderPearl(const QVector3D &origin, const QVector3D &vel);
+    Q_INVOKABLE int spawnAbyssPearl(const QVector3D &origin, const QVector3D &vel);
     // t836 钓鱼浮标投射物（玩家右键甩竿抛出；机制等价 MC 1.0 fishing bobber）：在 origin 处生成携带 3D 速度
     //   vel（blocks/s，初速沿玩家视线 = Game 层 kFishCastSpeed）的小浮标实体。kind=Bobber、pushable=false（玩家
     //   走碰不推）、halfW/halfH=kBobberHalfDim（小浮标视觉 + 碰撞最小）。castSerial = 甩竿序号（Game 层每次甩竿
@@ -503,15 +503,15 @@ public:
     //   返 bool：拉拽**实际生效**才 true（R19.13 终审 B-L2：目标 dead / 非 Mob / 越界 → false，caller 据此
     //   不扣钓竿耐久——旧版 void 无条件扣 5 = 对垂死 mob 收竿白损耐久）。bump revision（QML 位移绑定刷新）。
     bool pullMobToward(int mobIdx, const QVector3D &towardPos, float speed, float upSpeed);
-    // t729 供 QML delegate 判「暗渊之眼是否碎裂态」（enderEyeShatter>0 → 播缩小淡出 + 玻璃碎裂粒子动画，规避
-    //   了「碎裂瞬间即移除 → 动画播不出」的呈现问题；动画由 delegate 播，C++ 延迟 kEnderEyeShatterTime 才释放
-    //   槽）。越界 / 非 EnderEye / 非碎裂 → false（同 aliveAt 语义，越界安全）。
+    // t729 供 QML delegate 判「暗渊之眼是否碎裂态」（abyssEyeShatter>0 → 播缩小淡出 + 玻璃碎裂粒子动画，规避
+    //   了「碎裂瞬间即移除 → 动画播不出」的呈现问题；动画由 delegate 播，C++ 延迟 kAbyssEyeShatterTime 才释放
+    //   槽）。越界 / 非 AbyssEye / 非碎裂 → false（同 aliveAt 语义，越界安全）。
     Q_INVOKABLE bool shatteringAt(int i) const;
-    // 审查 #1 回归探针：读第 i 个暗渊之眼的远段巡航高度 enderEyeCruiseY（spawn 时定死 = 掷出眼位 Y +
-    //   kEnderEyeClimbHeight=8）。离线矩阵测试 spawn 后断言该值 == origin.y()+8——t758 插入新 spawn 函数时
+    // 审查 #1 回归探针：读第 i 个暗渊之眼的远段巡航高度 abyssEyeCruiseY（spawn 时定死 = 掷出眼位 Y +
+    //   kAbyssEyeClimbHeight=8）。离线矩阵测试 spawn 后断言该值 == origin.y()+8——t758 插入新 spawn 函数时
     //   本赋值曾被 diff 静默吞掉（字段无写入点 → 升空巡航整体死码，运行期无任何报错面），此访问器 + 探针
-    //   是唯一防线。越界 / 非活体 EnderEye → 0.0f（同 aliveAt 越界安全语义）。
-    Q_INVOKABLE float enderEyeCruiseYAt(int i) const;
+    //   是唯一防线。越界 / 非活体 AbyssEye → 0.0f（同 aliveAt 越界安全语义）。
+    Q_INVOKABLE float abyssEyeCruiseYAt(int i) const;
     // t176 存档：清空所有实体（切世界 / 退出存档前调，防上一世界的 mob / 下落方块残留进新世界）。
     //   t437：改「释放全部活体槽位」而非「清空 vector」。根因：旧 m_entities.clear() 把 count→0，QML
     //   Repeater count 随之→0；但 reparent 进 mobHost 的 3D delegate（QQuick3DNode，非 QQuickItem）不进
@@ -1227,18 +1227,18 @@ signals:
     //   （PLAN §2 分层：Entities 层发语义事件、呈现层只消费）。孵化小鸡是 Entities 层内部行为（spawnMobCore
     //   → entitiesChanged），不经本信号。
     void eggBreak(float x, float y, float z);
-    // t729 暗渊之眼飞行判定结算「变掉落物」（机制等价 MC 1.0 暗渊之眼飞距后落地变掉落物可捡回）：EnderEye tick
-    //   飞行距（enderEyeDistLeft）归零且掷中 80% 掉落分支时发 —— 坐标 = floor(pos)（与 spawnItem 整数格约定一致，
+    // t729 暗渊之眼飞行判定结算「变掉落物」（机制等价 MC 1.0 暗渊之眼飞距后落地变掉落物可捡回）：AbyssEye tick
+    //   飞行距（abyssEyeDistLeft）归零且掷中 80% 掉落分支时发 —— 坐标 = floor(pos)（与 spawnItem 整数格约定一致，
     //   便于 ItemEntityManager 落在眼睛落点）。呈现层（Main.qml）Connections 据它转发 ItemEntityManager.spawnItem
     //   (0x23A=EndEyeId ×1)（同 mobDied→spawnItem 模式；单向事件流，PLAN §2 分层：Entities 层发语义事件、呈现层只
     //   消费路由到 Game 层 ItemEntityManager，不反向依赖）。20% 碎裂分支不发本信号（无掉落物）。
-    void enderEyeBecameItem(int x, int y, int z);
-    // t758 暗渊珠落点结算（机制等价 MC 1.0 ender pearl 落地把掷出者传送到落点）：EnderPearl tick 命中方块 /
-    //   寿命兜底到期时发 —— 坐标 = floor(命中点 / 到期点)（整数格，与 enderEyeBecameItem 约定一致）。呈现层
-    //   （Main.qml）Connections 据它路由 PlayerController.applyEnderPearlTeleport（落点列向下扫安全立位瞬移玩家 +
+    void abyssEyeBecameItem(int x, int y, int z);
+    // t758 暗渊珠落点结算（机制等价 MC 1.0 ender pearl 落地把掷出者传送到落点）：AbyssPearl tick 命中方块 /
+    //   寿命兜底到期时发 —— 坐标 = floor(命中点 / 到期点)（整数格，与 abyssEyeBecameItem 约定一致）。呈现层
+    //   （Main.qml）Connections 据它路由 PlayerController.applyAbyssPearlTeleport（落点列向下扫安全立位瞬移玩家 +
     //   传送伤害，机制语义收口在 Game 层；单向事件流，PLAN §2 分层：Entities 发语义事件、呈现层只消费路由，
     //   同 emberFireballHitPlayer 模式）。越界（世界外 / 跌出底部）移除不发本信号（珍珠白耗，防传到不可玩位置）。
-    void enderPearlLanded(int x, int y, int z);
+    void abyssPearlLanded(int x, int y, int z);
     // t836 钓鱼浮标咬钩（浮标在水中等待到点、进入咬钩窗口时发）：坐标 = 浮标 float 世界坐标（呈现层据它在
     //   浮标位迸发水花粒子 + 竿尖微动可选）。机制等价 MC 1.0「浮标短暂下沉 ~0.5s 窗口」的起始沿。单向事件流
     //   （PLAN §2 分层：Entities 层发语义事件、呈现层只消费；收竿获物语义收口在 Game 层拉 bobberHasBiteAt 查询）。
@@ -1423,17 +1423,17 @@ private:
         // t728 燃烬者（Emberling）喷火球冷却（仅 mobType==MobEmberling 用；其余 mob 留默认 0 不触发）：
         //   aiEmberling 倒减（射程 6-16 区间返 0 → 喷一发火球 + 重置随机 [kEmberlingFireIntervalMin,Max]）。
         float fireCooldown = 0.0f;   // 到下次喷火球倒计时（秒；仅 MobEmberling 用）
-        // t729 暗渊之眼投射物（kind==EnderEye）专用（其余实体留默认 0 不读）：
-        //   enderEyeDistLeft = 剩余飞行距离（blocks；spawn 时=随机 [kEnderEyeDistMin,Max]（10..16），tick 按速度
-        //   递减，<=0 → 判定结算：80% 变掉落物（emit enderEyeBecameItem + 移除）/ 20% 进碎裂态）。
-        //   enderEyeShatter  >0 = 碎裂态倒计时（秒；tick 递减，期间 QML delegate 播缩小淡出 + 玻璃碎裂粒子动画
+        // t729 暗渊之眼投射物（kind==AbyssEye）专用（其余实体留默认 0 不读）：
+        //   abyssEyeDistLeft = 剩余飞行距离（blocks；spawn 时=随机 [kAbyssEyeDistMin,Max]（10..16），tick 按速度
+        //   递减，<=0 → 判定结算：80% 变掉落物（emit abyssEyeBecameItem + 移除）/ 20% 进碎裂态）。
+        //   abyssEyeShatter  >0 = 碎裂态倒计时（秒；tick 递减，期间 QML delegate 播缩小淡出 + 玻璃碎裂粒子动画
         //   （shatteringAt=true），归零 → 释放槽（无掉落物）。延迟移除让动画可见（同 mob deathTimer 窗口模式）。
-        //   vx/vy/vz 复用作 EnderEye 3D 飞行速度（同 Arrow / Snowball / Fireball 复用约定，不走 Mob 击退衰减）。
-        //   t757 两段式新增 enderEyeCruiseY = 远段巡航高度（blocks；spawn 时 = 掷出眼位 Y + kEnderEyeClimbHeight。
-        //   远段（水平距传送门 > kEnderEyeNearDist）未到该高度前带爬升分量，到达后平飞，绝不向下；近段不读它）。
-        float enderEyeDistLeft = 0.0f; // 剩余飞行距离（blocks；仅 kind==EnderEye 用）
-        float enderEyeShatter = 0.0f;  // 碎裂态倒计时（秒；仅 kind==EnderEye 用；>0 = 正在碎裂动画，归零移除）
-        float enderEyeCruiseY = 0.0f;  // t757 远段巡航高度（blocks；仅 kind==EnderEye 远段用，spawn 时定死不随地形变）
+        //   vx/vy/vz 复用作 AbyssEye 3D 飞行速度（同 Arrow / Snowball / Fireball 复用约定，不走 Mob 击退衰减）。
+        //   t757 两段式新增 abyssEyeCruiseY = 远段巡航高度（blocks；spawn 时 = 掷出眼位 Y + kAbyssEyeClimbHeight。
+        //   远段（水平距传送门 > kAbyssEyeNearDist）未到该高度前带爬升分量，到达后平飞，绝不向下；近段不读它）。
+        float abyssEyeDistLeft = 0.0f; // 剩余飞行距离（blocks；仅 kind==AbyssEye 用）
+        float abyssEyeShatter = 0.0f;  // 碎裂态倒计时（秒；仅 kind==AbyssEye 用；>0 = 正在碎裂动画，归零移除）
+        float abyssEyeCruiseY = 0.0f;  // t757 远段巡航高度（blocks；仅 kind==AbyssEye 远段用，spawn 时定死不随地形变）
         // t836 钓鱼浮标态（仅 kind==Bobber 用；其余实体留默认不读；全部带 DMI——聚合初始化缺省 + 槽复用
         //   move 入槽覆盖回默认，t811/t477 教训）：
         //   bobberState 四态机（kBobberSt* 常量）：Flying 抛物飞行 / Water 水中浮定待咬 / Ground 陆上静止 /
@@ -2598,58 +2598,58 @@ private:
                   "kFireballIgniteChance 改值须同步 spawnFireball 默认参与 Entity::fireballIgnitePct DMI（三处镜像）");
     // t729 暗渊之眼投射物常量（机制等价 MC 1.0 暗渊之眼 ender eye：右键掷出、直线寻路要塞、飞距后落地变掉落物 /
     //   小概率碎裂无掉落）。数值为本工程小世界量身调，非 MC 精确复刻（PLAN §4 机制对标非数值 1:1）：
-    //   - kEnderEyeSpeed：飞行速度（blocks/s；恒定模长，两段共用，玩家可侧身看它飞）。
-    //   - kEnderEyeDistMin / Max：飞行判定距离随机带（blocks；飞这么多后判定 —— 机制等价 MC 暗渊之眼飞行一段后
+    //   - kAbyssEyeSpeed：飞行速度（blocks/s；恒定模长，两段共用，玩家可侧身看它飞）。
+    //   - kAbyssEyeDistMin / Max：飞行判定距离随机带（blocks；飞这么多后判定 —— 机制等价 MC 暗渊之眼飞行一段后
     //     落地/碎裂，玩家据此逐步逼近要塞）。取 10..16：短跳虽够玩家跟追逐步逼近，又不横穿整张地图。
-    //   - kEnderEyeDropChance：判定后「变掉落物」概率（80%，机制等价 MC 暗渊之眼大部分落地变掉落物可回收；
+    //   - kAbyssEyeDropChance：判定后「变掉落物」概率（80%，机制等价 MC 暗渊之眼大部分落地变掉落物可回收；
     //     20% 碎裂无掉落，防无限回收刷分 + 让「碎掉」这一结果存在）。
-    //   - kEnderEyeShatterTime：碎裂动画窗口（秒；C++ 延迟移除，QML 在此窗口播缩小淡出 + 玻璃碎裂粒子）。
-    //   - kEnderEyeHalfDim：半宽 / 半高（blocks；小绿瞳珠视觉 + 碰撞最小）。
+    //   - kAbyssEyeShatterTime：碎裂动画窗口（秒；C++ 延迟移除，QML 在此窗口播缩小淡出 + 玻璃碎裂粒子）。
+    //   - kAbyssEyeHalfDim：半宽 / 半高（blocks；小绿瞳珠视觉 + 碰撞最小）。
     //   t757 两段式定位（远指示 / 近逼近）：旧版掷出即直线朝地下传送门中心钻，远处玩家看不出方向指示还易丢眼；
-    //   改两段 —— 眼与传送门**水平距离** > kEnderEyeNearDist 时只升空平飞朝要塞方向指示（绝不向下钻地），
+    //   改两段 —— 眼与传送门**水平距离** > kAbyssEyeNearDist 时只升空平飞朝要塞方向指示（绝不向下钻地），
     //   进入阈值内才恢复「朝传送门中心直线逼近（可下探）」。飞距判定（distLeft 递减 → 80/20 结算）两段通用不变：
-    //   - kEnderEyeNearDist：两段切换水平距离阈值（blocks；~50 格内要塞方向已明确，转入下探逼近段。取 50：
+    //   - kAbyssEyeNearDist：两段切换水平距离阈值（blocks；~50 格内要塞方向已明确，转入下探逼近段。取 50：
     //     指示段足够长（本工程地图尺度）且逼近段覆盖结构外围，可调）。
-    //   - kEnderEyeClimbHeight：远段巡航高度 = 掷出眼位 Y + 本值（blocks；升到玩家上方合理高度后平飞 ——
+    //   - kAbyssEyeClimbHeight：远段巡航高度 = 掷出眼位 Y + 本值（blocks；升到玩家上方合理高度后平飞 ——
     //     树冠/丘陵之上、可远距目视的指示高度）。
-    //   - kEnderEyeTurnRate：每 tick 速度方向向目标方向指数趋近的速率（1/秒；帧率无关 blend = 1−exp(−rate·dt)）。
+    //   - kAbyssEyeTurnRate：每 tick 速度方向向目标方向指数趋近的速率（1/秒；帧率无关 blend = 1−exp(−rate·dt)）。
     //     两段切换（50 格阈值）方向突变由它平滑成圆弧；取舍：单参数指数趋近同时覆盖「初速修正 / 阈值切换 /
     //     阈值邻域抖动（来回穿越时方向连续）」三类过渡，免掉专用插值带 + 额外常量。
-    static constexpr float kEnderEyeSpeed        = 4.0f;  // 暗渊之眼飞行速度（blocks/s）
-    static constexpr float kEnderEyeDistMin      = 10.0f; // 判定飞行距离下界（blocks）
-    static constexpr float kEnderEyeDistMax      = 16.0f; // 判定飞行距离上界（blocks）
-    static constexpr int   kEnderEyeDropChance   = 80;    // 判定后变掉落物概率（%）
-    static constexpr float kEnderEyeShatterTime  = 0.6f;  // 碎裂动画窗口（秒；延迟移除让动画可见）
-    static constexpr float kEnderEyeHalfDim      = 0.16f; // 暗渊之眼半宽/半高（blocks）
-    static constexpr float kEnderEyeRiseOff      = 0.25f; // 飞行略升垂直偏置（blocks/s；t757 起仅保留在掷出初速方向里（Game 层 +0.25 上偏），tick 不再叠加 —— 远段爬升已并入两段转向）
-    static constexpr float kEnderEyeNearDist     = 50.0f; // t757 两段切换水平距离阈值（blocks；>50 远段升空指示 / ≤50 近段下探逼近）
-    static constexpr float kEnderEyeClimbHeight  = 8.0f;  // t757 远段巡航高度 = 掷出眼位 Y + 8（blocks；玩家上方合理指示高度）
-    static constexpr float kEnderEyeTurnRate     = 6.0f;  // t757 速度方向趋近速率（1/s；指数平滑，两段切换圆弧过渡）
+    static constexpr float kAbyssEyeSpeed        = 4.0f;  // 暗渊之眼飞行速度（blocks/s）
+    static constexpr float kAbyssEyeDistMin      = 10.0f; // 判定飞行距离下界（blocks）
+    static constexpr float kAbyssEyeDistMax      = 16.0f; // 判定飞行距离上界（blocks）
+    static constexpr int   kAbyssEyeDropChance   = 80;    // 判定后变掉落物概率（%）
+    static constexpr float kAbyssEyeShatterTime  = 0.6f;  // 碎裂动画窗口（秒；延迟移除让动画可见）
+    static constexpr float kAbyssEyeHalfDim      = 0.16f; // 暗渊之眼半宽/半高（blocks）
+    static constexpr float kAbyssEyeRiseOff      = 0.25f; // 飞行略升垂直偏置（blocks/s；t757 起仅保留在掷出初速方向里（Game 层 +0.25 上偏），tick 不再叠加 —— 远段爬升已并入两段转向）
+    static constexpr float kAbyssEyeNearDist     = 50.0f; // t757 两段切换水平距离阈值（blocks；>50 远段升空指示 / ≤50 近段下探逼近）
+    static constexpr float kAbyssEyeClimbHeight  = 8.0f;  // t757 远段巡航高度 = 掷出眼位 Y + 8（blocks；玩家上方合理指示高度）
+    static constexpr float kAbyssEyeTurnRate     = 6.0f;  // t757 速度方向趋近速率（1/s；指数平滑，两段切换圆弧过渡）
     // t758 暗渊珠投射物常量（机制等价 MC 1.0 ender pearl：右键掷出受重力抛物飞行，落点把掷出者传送到落点 +
     //   传送附带伤害）。数值为本工程小世界量身调，非 MC 精确复刻（PLAN §4 机制对标非数值 1:1）：
-    //   - kEnderPearlLifetime：最长飞行秒（寿命兜底「命中」—— 悬空到期视作落点结算传送，落点列向下找支撑，
+    //   - kAbyssPearlLifetime：最长飞行秒（寿命兜底「命中」—— 悬空到期视作落点结算传送，落点列向下找支撑，
     //     防极端上抛珍珠永久滞留堆积）。取 8（> t835④ 新物理下满初速 24 的 45° 全弧滞空 ~2.9s，正常抛掷
     //     方块落点先到，兜底不抢戏）。t835②：液体缓沉期**暂停倒计**（深水柱缓沉可超 8s，防到期把掷出者
     //     半水传送——到期语义是「悬空兜底」，液体里本就在缓沉有落点，不属于悬空）。
-    //   - kEnderPearlHalfDim：半宽 / 半高（blocks；深绿小珠视觉 + 碰撞最小；命中判定走点格不读它，同火球）。
-    //   - t835④ kEnderPearlGravity：珠专属轻重力 12（blocks/s²；机制等价 MC 1.0 投掷物重力 0.03/tick²=12
+    //   - kAbyssPearlHalfDim：半宽 / 半高（blocks；深绿小珠视觉 + 碰撞最小；命中判定走点格不读它，同火球）。
+    //   - t835④ kAbyssPearlGravity：珠专属轻重力 12（blocks/s²；机制等价 MC 1.0 投掷物重力 0.03/tick²=12
     //     vs 玩家/世界 kGravity=28 —— MC 投掷物本就比玩家轻重力 → 弧平远）。与 Game 层初速 12→24（见
     //     kPlayerPearlSpeed）双调：平抛 ~10 格 / 45° 满抛 ~48 格，对齐 MC 珍珠 ~30-50 格投掷距离；旧共用
     //     kGravity=28 时 45° 满抛仅 ~5 格（「珍珠扔不远」的物理面，t835④「抛距加长」）。
-    //   - t835② kEnderPearlWaterSink / kEnderPearlLavaSink：液体缓沉终速（blocks/s，向下为负取绝对值；
+    //   - t835② kAbyssPearlWaterSink / kAbyssPearlLavaSink：液体缓沉终速（blocks/s，向下为负取绝对值；
     //     机制等价 MC 投掷物入液后受强阻尼缓沉）。入水/岩浆不立即传送：重力压 vy 到 −sink 终速缓沉，沉到
     //     液体底（底面方块接触）才结算传送。岩浆更粘 → 终速更慢（同向 MC 岩浆阻力 > 水）。
-    //   - t835② kEnderPearlLiquidDrag：液体水平阻力率（1/s；入液后水平速度指数衰减 ~0.2s 基本停 →
+    //   - t835② kAbyssPearlLiquidDrag：液体水平阻力率（1/s；入液后水平速度指数衰减 ~0.2s 基本停 →
     //     「滑入几格后竖直缓沉」而非全程匀速滑入）。
-    //   传送伤害常量在 Game 层（PlayerController::kEnderPearlTpDamage —— 伤害发射属 Game/Physics，单一权威
+    //   传送伤害常量在 Game 层（PlayerController::kAbyssPearlTpDamage —— 伤害发射属 Game/Physics，单一权威
     //   置于消费点近旁；初速/疾跑系数常量在 Game 层掷出分支本地（kPlayerPearlSpeed/kPearlSprintFactor，
     //   同雪球先例））。
-    static constexpr float kEnderPearlLifetime   = 8.0f;  // 暗渊珠最长飞行（秒；寿命兜底命中传送；液体缓沉期暂停）
-    static constexpr float kEnderPearlHalfDim    = 0.14f; // 暗渊珠半宽/半高（blocks）
-    static constexpr float kEnderPearlGravity    = 12.0f; // t835④ 珠专属轻重力（blocks/s²；MC 投掷物 12 vs 世界 28）
-    static constexpr float kEnderPearlWaterSink  = 1.5f;  // t835② 水中缓沉终速（blocks/s）
-    static constexpr float kEnderPearlLavaSink   = 0.7f;  // t835② 岩浆缓沉终速（blocks/s；更粘更慢）
-    static constexpr float kEnderPearlLiquidDrag = 5.0f;  // t835② 液体水平阻力率（1/s；~0.2s 水平速度基本停）
+    static constexpr float kAbyssPearlLifetime   = 8.0f;  // 暗渊珠最长飞行（秒；寿命兜底命中传送；液体缓沉期暂停）
+    static constexpr float kAbyssPearlHalfDim    = 0.14f; // 暗渊珠半宽/半高（blocks）
+    static constexpr float kAbyssPearlGravity    = 12.0f; // t835④ 珠专属轻重力（blocks/s²；MC 投掷物 12 vs 世界 28）
+    static constexpr float kAbyssPearlWaterSink  = 1.5f;  // t835② 水中缓沉终速（blocks/s）
+    static constexpr float kAbyssPearlLavaSink   = 0.7f;  // t835② 岩浆缓沉终速（blocks/s；更粘更慢）
+    static constexpr float kAbyssPearlLiquidDrag = 5.0f;  // t835② 液体水平阻力率（1/s；~0.2s 水平速度基本停）
     // t836 钓鱼浮标常量（机制对齐 MC 1.0 钓鱼：甩竿抛物 → 浮标入水等 5-30s → 咬钩 0.5s 窗口内收竿获物）。
     //   - kBobberGravity：浮标专属轻重力 12（blocks/s²；对齐 t835④ 投掷物家族轻重力——MC 投掷物 0.03/t²=12
     //     vs 世界 28；弧线自然、甩距由 Game 层 kFishCastSpeed=15 决定 → 45° 满甩 ~19 格）。

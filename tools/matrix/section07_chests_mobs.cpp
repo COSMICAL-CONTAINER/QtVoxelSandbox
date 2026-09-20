@@ -6299,7 +6299,7 @@ Item {
     // ── P-t1023 性能批三（R19.20；docs/perf-batch3-research-2026-09.md）三腿 ──
     //   (a) 隐藏 delegate 永停表动画 `running: visible` 门控源码钉（t1007 治理路径 b/c 最小步；
     //       QML visible:false 不暂停 Animation on（t561 火焰同源）——槽池 200 item delegate 的
-    //       rotY+bobY 与 47 mob delegate 的 endereye/enderpearl spin 在空槽/隐藏态恒烧 GUI 帧）。
+    //       rotY+bobY 与 47 mob delegate 的 abyssEye/abyssPearl spin 在空槽/隐藏态恒烧 GUI 帧）。
     //   (b) AO 环境光遮蔽行为级（t1023 平滑光照调研首批小步；ChunkGeometry 直驱 t860 先例 +
     //       vertexData 直读 t965 先例）：默认关平坦基线 / 开启角点曲线精确值 / round-trip 逐字节。
     //   (c) meshing 线程模式事实钉（t906 复核）：src/ 零线程原语 与 F3 `threads: 0/0 (sync meshing)`
@@ -6311,7 +6311,7 @@ Item {
         "loat on every delegate including empty/picked-up hidden slots (~2x slots of constant animation b"
         "urn) and all 47 mob delegates kept the ender-eye/ender-pearl roll spinning regardless of entKind"
         " - the fix gates all four infinite animations on delegate/node visibility (running: entRoot.visi"
-        "ble / endereyeNode.visible / enderpearlNode.visible), the t696 established pattern; hidden deleg"
+        "ble / abyssEyeNode.visible / abyssPearlNode.visible), the t696 established pattern; hidden deleg"
         "ates stop paying animation ticks and slot-reuse restarts from 'from' = fresh-entity semanticsdia"
         "g rotY %1 bobY %2 eye %3 pearl %4" }, [&]() {
         QString qml;
@@ -6354,11 +6354,11 @@ Item {
                 "NumberAnimation on rotY { from: 0; to: 360; duration: 3000; loops: Animation.Infinite; running: entRoot.visible }"));
             const bool gateBobY = code.contains(QStringLiteral("SequentialAnimation on bobY"))
                                   && countOf(code, QStringLiteral("running: entRoot.visible")) >= 2;
-            // mob 族同向（t1007-c）：endereye/enderpearl spin（面内 roll）running 绑各自 kind 门控节点。
+            // mob 族同向（t1007-c）：abyssEye/abyssPearl spin（面内 roll）running 绑各自 kind 门控节点。
             const bool gateEye = code.contains(QStringLiteral(
-                "NumberAnimation on spin { from: 0; to: 360; duration: 1500; loops: Animation.Infinite; running: endereyeNode.visible }"));
+                "NumberAnimation on spin { from: 0; to: 360; duration: 1500; loops: Animation.Infinite; running: abyssEyeNode.visible }"));
             const bool gatePearl = code.contains(QStringLiteral(
-                "NumberAnimation on spin { from: 0; to: 360; duration: 1200; loops: Animation.Infinite; running: enderpearlNode.visible }"));
+                "NumberAnimation on spin { from: 0; to: 360; duration: 1200; loops: Animation.Infinite; running: abyssPearlNode.visible }"));
             const bool okGate = gateRotY && gateBobY && gateEye && gatePearl;
             if (!okGate) ++totalFail;
             qInfo().noquote() << (okGate ? "PASS" : "FAIL")
@@ -6369,8 +6369,8 @@ Item {
                                  " of constant animation burn) and all 47 mob delegates kept the"
                                  " ender-eye/ender-pearl roll spinning regardless of entKind - the"
                                  " fix gates all four infinite animations on delegate/node visibility"
-                                 " (running: entRoot.visible / endereyeNode.visible /"
-                                 " enderpearlNode.visible), the t696 established pattern; hidden"
+                                 " (running: entRoot.visible / abyssEyeNode.visible /"
+                                 " abyssPearlNode.visible), the t696 established pattern; hidden"
                                  " delegates stop paying animation ticks and slot-reuse restarts"
                                  " from 'from' = fresh-entity semantics"
                               << (okGate ? QString()

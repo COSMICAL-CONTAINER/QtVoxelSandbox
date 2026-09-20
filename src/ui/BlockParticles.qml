@@ -86,7 +86,7 @@ Node {
     }
     // t729 暗渊之眼碎裂（机制等价 MC 暗渊之眼破裂无回收）：浅珠绿玻璃碎屑 + 小幅四散 + 弱重力（同雪沫碎裂
     //   手感）。原点 = float 世界坐标（眼睛碎裂点，非方块格中心 → 不加 +0.5，同 burstSnowball 模式）。色为珠绿
-    //   玻璃（对齐 entity_endereye 珠身绿；用户「直接碎掉的动画」→ 玻璃碎裂粒子 + delegate 缩小淡出双呈现）。
+    //   玻璃（对齐 entity_abyss_eye 珠身绿；用户「直接碎掉的动画」→ 玻璃碎裂粒子 + delegate 缩小淡出双呈现）。
     //   数量少（8，小珠）。t729 delegate 检测 shatteringAt(index) 翻 true 时调。
     function burstGlassShatter(px, py, pz) {
         burstFloat(px, py, pz, 8, "#6fce9c", 0.07, 1.8, 1.2, 1.6, 0.6, 6.0)

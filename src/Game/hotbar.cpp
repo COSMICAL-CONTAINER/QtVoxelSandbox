@@ -643,7 +643,7 @@ QVariantList Hotbar::creativeMaterials() const
         //   合成暗渊之眼（复用 EndEyeId 0x23A：见 t487 暗渊之眼——同一机制的被动/暗渊眼即其同源产物）。
         //   创造调色板补全便于测试整条合成链（destructive-test 直接取原料合眼）。可堆叠 64（走材料段默认）；
         //   非方块 → 右键不放置。MaterialIcon 自绘图标（珠=深青绿圆珠 粉=橙黄火粉堆 棒=橙黄火棒）。
-        int(RecipeRegistry::EnderPearlId),       // 暗渊珠：杀夜行者掉落；与燃烬粉合成暗渊之眼（t726/t727）
+        int(RecipeRegistry::AbyssPearlId),       // 暗渊珠：杀夜行者掉落；与燃烬粉合成暗渊之眼（t726/t727）
         int(RecipeRegistry::BlazePowderId),      // 燃烬粉：燃烬棒冶炼产物；与暗渊珠合成暗渊之眼（t726）
         int(RecipeRegistry::BlazeRodId),         // 燃烬棒：怒焰人死亡掉落；熔炉冶炼为燃烬粉（t726）
         // （t785：夜行者/燃烬者生物蛋原列在此段之后——已移上方蛋区与其它蛋同列，见 SpawnEggSquidId 后注释。）
@@ -1177,7 +1177,7 @@ QString Hotbar::nameForBlock(int blockId) const
         // t720 画作（机制等价 MC 1.0 painting；8 木棒+1 羊毛合成；右键墙侧面贴画）。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::PaintingId)      return QStringLiteral("画作");       // 8 木棒+1 羊毛合成；右键墙贴画
         // t726 暗渊链路（机制等价 MC 1.0 ender pearl / blaze powder / blaze rod）。零 MC 专名（§9）。
-        if (blockId == RecipeRegistry::EnderPearlId)    return QStringLiteral("暗渊珠");     // 杀夜行者掉落；暗渊之眼原料；右键投掷 → 落点传送（t758，tooltip 显名不含动作提示 —— 同雪球/蛋口径）
+        if (blockId == RecipeRegistry::AbyssPearlId)    return QStringLiteral("暗渊珠");     // 杀夜行者掉落；暗渊之眼原料；右键投掷 → 落点传送（t758，tooltip 显名不含动作提示 —— 同雪球/蛋口径）
         if (blockId == RecipeRegistry::BlazePowderId)   return QStringLiteral("燃烬粉");     // 燃烬棒冶炼产物；暗渊之眼原料
         if (blockId == RecipeRegistry::BlazeRodId)      return QStringLiteral("燃烬棒");     // 怒焰人死亡掉落；烧燃烬粉
         // t727 生物蛋（夜行者）：末影人同源敌对潜行者的生成蛋。零 MC 专名（§9）。
@@ -2336,7 +2336,7 @@ int Hotbar::armorEnchantLevelSum(int enchantId) const
 // t476 受击减伤 EPF（机制等价 MC 1.0 Enchantment Protection Factor）。PlayerState::DeathCause 序数：
 //   Generic=0/Fall=1/Suffocation=2/Drowning=3/Starvation=4/Shambler=5/Bones=6/Spider=7/Stalker=8/Fire=9/Cactus=10
 //   /Tnt=11/GolemLaunchFall=12（t655，同 Fall 走摔落保护）/GolemSlain=13/Nightwalker=14/Emberling=15
-//   （t728 燃烬者火球 → 火焰族）/EnderPearlTp=16（t758 暗渊珠传送自伤 → 摔落族）。
+//   （t728 燃烬者火球 → 火焰族）/AbyssPearlTp=16（t758 暗渊珠传送自伤 → 摔落族）。
 //   通用 Protection（每级 1 EPF）对所有来源生效；专项保护（每级 2 EPF）仅对匹配来源生效：
 //     Fall→摔落保护 / Fire→火焰保护 / Bones(骷髅箭)→弹射物保护 / Stalker(爆炸)→火焰保护（MC 火焰保护亦减爆炸）。
 //   EPF 总和交 caller cap（≤0.85 减伤比）+ 换算减伤比例；本方法只汇总 EPF 原始值。
@@ -2346,7 +2346,7 @@ int Hotbar::armorProtectionFactor(int cause) const
     switch (cause) {
     case 1:  epf += armorEnchantLevelSum(EnchantRegistry::FeatherFall) * 2; break;    // Fall
     case 12: epf += armorEnchantLevelSum(EnchantRegistry::FeatherFall) * 2; break;    // t655 GolemLaunchFall（铁傀儡击飞摔落：本体是摔落伤害 → 摔落保护同 Fall）
-    case 16: epf += armorEnchantLevelSum(EnchantRegistry::FeatherFall) * 2; break;    // t763 EnderPearlTp 暗渊珠传送自伤（MC 1.0 末影珠落地伤走摔落减伤；此前漏路由 → 摔落保护对它无效）
+    case 16: epf += armorEnchantLevelSum(EnchantRegistry::FeatherFall) * 2; break;    // t763 AbyssPearlTp 暗渊珠传送自伤（MC 1.0 末影珠落地伤走摔落减伤；此前漏路由 → 摔落保护对它无效）
     case 9:  epf += armorEnchantLevelSum(EnchantRegistry::FireProtection) * 2; break; // Fire
     case 6:  epf += armorEnchantLevelSum(EnchantRegistry::ProjectileProt) * 2; break; // Bones = 骷髅箭（弹射物）
     case 8:  epf += armorEnchantLevelSum(EnchantRegistry::FireProtection) * 2; break; // Stalker 爆炸（火焰保护亦减爆炸）

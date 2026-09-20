@@ -1479,7 +1479,7 @@ void MatrixRun::section01_redstone_core()
 
     // ── t763 附魔数值生效链探针（纯 Game 层表 + Hotbar 实例，无 World/QML）：① 锐锋→攻击伤害输入链
     //    （钻石剑基础 7 + 锐锋 III ×0.5 = 8.5，attackMob 同公式；tooltip 文本源 enchantListText 出「锐锋 III」）；
-    //    ② 保护族 EPF 路由（含本任务补的 Emberling=15 → 火焰保护 / EnderPearlTp=16 → 摔落保护两条新路由，
+    //    ② 保护族 EPF 路由（含本任务补的 Emberling=15 → 火焰保护 / AbyssPearlTp=16 → 摔落保护两条新路由，
     //    修前二者漏专项加成）；③ 耐久附魔消耗概率（控制组无附魔必损；耐久 III 400 次受击损耗 ≈300，
     //    75% 损 / 25% 跳过，容差 ±40≈4.6σ 防偶发 FAIL）。
     runLegMulti({ "enchant effect chain: sharpness 7+1.5=8.5 + tooltip text source; EPF routing fire/emberling/pear"
@@ -1510,7 +1510,7 @@ void MatrixRun::section01_redstone_core()
                   && hb.armorProtectionFactor(15) == 6   // Emberling 火球（t728）：t763 补路由（修前 0）
                   && hb.armorProtectionFactor(1) == 0    // Fall：无摔落保护
                   && hb.armorProtectionFactor(4) == 0;   // Starvation：无通用保护
-        // 加靴子摔落保护 II + 头盔通用保护 II：Fall(1)/EnderPearlTp(16) = 2+4 = 6；Fire(9) = 2+6 = 8；Starvation = 2。
+        // 加靴子摔落保护 II + 头盔通用保护 II：Fall(1)/AbyssPearlTp(16) = 2+4 = 6；Fire(9) = 2+6 = 8；Starvation = 2。
         hb.armorSetStack(3, diaBoots, 1, 100, QVariantList{feather2, 0, 0, 0}, QString());
         hb.armorSetStack(0, diaHelm, 1, 100, QVariantList{prot2, 0, 0, 0}, QString());
         ok = ok && hb.armorProtectionFactor(1) == 6
@@ -2084,17 +2084,17 @@ void MatrixRun::section01_redstone_core()
     });
 
     // ── 审查 #1 末影眼巡航高度回归探针（Entities 层 EntityManager 直编，同 t737 MinecartManager 先例）：
-    //    t758 插入 spawnEnderPearl 时 spawnEnderEye 的 enderEyeCruiseY 赋值被 diff 吞掉 → 字段全工程无写入
+    //    t758 插入 spawnAbyssPearl 时 spawnAbyssEye 的 abyssEyeCruiseY 赋值被 diff 吞掉 → 字段全工程无写入
     //    点（只剩默认 0.0f）→ tick 远段爬升分量恒 0，升空巡航整体死码且运行期无任何报错面。spawn 两枚不同
-    //    高度的眼，断言巡航高度 == origin.y() + 8（kEnderEyeClimbHeight），防同类「插函数吞赋值」静默回归。
+    //    高度的眼，断言巡航高度 == origin.y() + 8（kAbyssEyeClimbHeight），防同类「插函数吞赋值」静默回归。
     runLegMulti({ "ender-eye spawn records cruise Y = origin.y()+8 at two throw heights (regression guard, review #"
         "1)" }, [&]() {
         EntityManager ents;
-        const int s1 = ents.spawnEnderEye(QVector3D(10.5f, 20.0f, 10.5f), QVector3D(1.0f, 0.5f, 0.0f));
-        const int s2 = ents.spawnEnderEye(QVector3D(12.5f, 33.0f, 12.5f), QVector3D(0.0f, 0.2f, 1.0f));
+        const int s1 = ents.spawnAbyssEye(QVector3D(10.5f, 20.0f, 10.5f), QVector3D(1.0f, 0.5f, 0.0f));
+        const int s2 = ents.spawnAbyssEye(QVector3D(12.5f, 33.0f, 12.5f), QVector3D(0.0f, 0.2f, 1.0f));
         const bool ok = s1 >= 0 && s2 >= 0
-                        && std::abs(ents.enderEyeCruiseYAt(s1) - 28.0f) < 1e-4f
-                        && std::abs(ents.enderEyeCruiseYAt(s2) - 41.0f) < 1e-4f;
+                        && std::abs(ents.abyssEyeCruiseYAt(s1) - 28.0f) < 1e-4f
+                        && std::abs(ents.abyssEyeCruiseYAt(s2) - 41.0f) < 1e-4f;
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
                           << "| ender-eye spawn records cruise Y = origin.y()+8 at two throw heights "

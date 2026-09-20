@@ -52,6 +52,21 @@
 //   豁免面（旧词根字面合法存留，行携 §9 标记）：resourcepackmanager 资源包读取面（用户包内 MC 布局文件名
 //           nether_portal.png——§9 机制等价记载合法）+ kMcBlockId 迁移文档表 MC 侧行标签 + 本表与
 //           world.h World 写入钩子族映射头注的对照记载。
+//
+// ── t1068 §9 Ender 族改名映射表（t1067 登记后续批；数值 id 零变化 = 存档安全铁律——saves 存数值 id，改名零迁移）──
+//   标识符：原 EnderEye→AbyssEye（暗渊之眼实体/投射物；§9 记载：机制等价 MC 1.0 eye of ender）；（§9）
+//           原 EnderPearl→AbyssPearl（暗渊珠实体/物品；§9 记载：机制等价 MC 1.0 ender pearl）。
+//   常量/方法/信号族：原 spawnEnderEye→spawnAbyssEye、原 enderEyeBecameItem→abyssEyeBecameItem、原 enderEyeCruiseYAt→（§9）
+//           abyssEyeCruiseYAt、原 spawnEnderPearl→spawnAbyssPearl、原 enderPearlLanded→abyssPearlLanded、（§9）
+//           原 applyEnderPearlTeleport→applyAbyssPearlTeleport、原 kEnderEye*/kEnderPearl* 常量族→kAbyssEye*/kAbyssPearl*、（§9）
+//           原 enderEye{DistLeft,Shatter,CruiseY} 字段族→abyssEye{DistLeft,Shatter,CruiseY}、原 EnderPearlId→（§9）
+//           AbyssPearlId（0x243 不变）、原 EnderPearlTp（死因枚举）→AbyssPearlTp（16 不变）、原 enderpearlNode/（§9）
+//           endereyeNode→abyssPearlNode/abyssEyeNode（QML delegate id / 连接处理器名随信号族同步）。（§9）
+//   内部分类字面：配方表 name 原 "ender_eye"→"abyss_eye"（豁免论证：仅配方调试读面，零存档/资源包消费方）。（§9）
+//   资产文件名：textures/entity_endereye.png→entity_abyss_eye.png（git mv 字节同内容；t807 起无运行期引用面）。（§9）
+//   豁免面（旧词根字面合法存留，行携 §9 标记）：resourcepackmanager 资源包读取面（用户包内 MC 布局文件名
+//           ender_eye.png / ender_pearl.png——MC 物品图标布局名，机制等价记载合法）+ item 域（recipe.h）映射头注（§9）
+//           对照记载。Enderman→Nightwalker 已于 t727 §9 改名，本批不涉（仅机制等价注释记载合法存留）。
 class BlockRegistry
 {
 public:

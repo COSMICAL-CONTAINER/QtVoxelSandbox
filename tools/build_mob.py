@@ -29,7 +29,7 @@
   mob_pig.png / mob_cow.png / mob_sheep.png / mob_sheep_sheared.png（t749 剪毛羊裸肤+残羊毛块）/ mob_shambler.png /
   mob_chicken.png / mob_squid.png / mob_wolf.png /
   mob_ocelot.png / mob_cat_tabby.png / mob_cat_ginger.png / mob_cat_cream.png / mob_silverfish.png \
-  mob_nightwalker.png / mob_nightwalker_eyes.png / mob_fireball.png / entity_endereye.png
+  mob_nightwalker.png / mob_nightwalker_eyes.png / mob_fireball.png / entity_abyss_eye.png
 
 依赖：仅 PIL，无外部贴图。与 build_farmland.py / build_tall_grass.py / build_chest.py 同风格（程序
 生成原创像素图，§9 override (a)）。
@@ -761,7 +761,7 @@ def make_fireball():
     print("wrote", os.path.relpath(out, HERE), img.size)
 
 
-def make_endereye():
+def make_abyss_eye():
     """暗渊之眼实体贴图（t729；机制等价 MC 1.0 ender eye 末影之眼）：16×16 小绿瞳珠 —— 深绿珠底 + 中央暗绿
     竖瞳 + 白色高光（读作「小绿瞳珠」；对齐 EndEyeId 0x23A 材料段程序图标 drawEndEye 的绿瞳观感，§9 原创程序
     自绘非照搬 MC 资产）。t757 改**满幅不透明**：delegate 是 UnitCube 每面整铺 [0,1]²，旧版圆形珠 + 透明四角
@@ -794,7 +794,7 @@ def make_endereye():
         (4, 5), (5, 5),
         (5, 3),
     ], hi)
-    out = os.path.join(SRC, "entity_endereye.png")
+    out = os.path.join(SRC, "entity_abyss_eye.png")
     img.save(out)
     print("wrote", os.path.relpath(out, HERE), img.size)
 
@@ -849,7 +849,7 @@ def main():
     make_nightwalker()
     make_nightwalker_eyes()
     make_fireball()
-    make_endereye()
+    make_abyss_eye()
     make_heart()
 
 

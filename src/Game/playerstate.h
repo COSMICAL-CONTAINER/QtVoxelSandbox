@@ -104,12 +104,12 @@ public:
     //   aiNightwalker 蓄力重拳 mobAttackedPlayer 携 MobNightwalker → QML 映射本死因，文案「被夜行者重拳击杀」）。
     //   t728 再追 1：Emberling=被燃烬者的火球焚杀（烈焰人，§9 改名；Fireball tick 命中玩家 mobAttackedPlayer 携
     //   MobEmberling → QML 映射本死因，文案「被燃烬者的火球焚杀」）。
-    //   t758 再追 1：EnderPearlTp=被暗渊珠传送撕碎（暗渊珠落点传送的固定代价伤害；PlayerController
-    //   applyEnderPearlTeleport 经 fallDamageTaken(5, EnderPearlTp) 发 → 呈现层路由 takeDamage，文案原创
+    //   t758 再追 1：AbyssPearlTp=被暗渊珠传送撕碎（暗渊珠落点传送的固定代价伤害；PlayerController
+    //   applyAbyssPearlTeleport 经 fallDamageTaken(5, AbyssPearlTp) 发 → 呈现层路由 takeDamage，文案原创
     //   §9）。**追加在末尾**（同上纪律：armorProtectionFactor 按序数 switch 有 default 兜底，DeathCause 不进存档）。
     //   t794 再追 1：Anvil=被落下的铁砧砸死（下落铁砧砸中玩家；EntityManager tick FallingBlock 砸伤分支
     //   mobAttackedPlayer 携 MobAnvil 哨兵 → 呈现层映射本死因，同 MobTnt 先例）。
-    enum DeathCause { Generic = 0, Fall, Suffocation, Drowning, Starvation, Shambler, Bones, Spider, Stalker, Fire, Cactus, Tnt, GolemLaunchFall, GolemSlain, Nightwalker, Emberling, EnderPearlTp, Anvil };
+    enum DeathCause { Generic = 0, Fall, Suffocation, Drowning, Starvation, Shambler, Bones, Spider, Stalker, Fire, Cactus, Tnt, GolemLaunchFall, GolemSlain, Nightwalker, Emberling, AbyssPearlTp, Anvil };
     Q_ENUM(DeathCause)
 
     explicit PlayerState(QObject *parent = nullptr);

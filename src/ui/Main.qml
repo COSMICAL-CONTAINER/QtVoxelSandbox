@@ -3088,7 +3088,7 @@ Window {
                 if (Math.random() < 0.5) itemEntities.spawnItem(x, y, z, 49, 1)      // 红花（罂粟）~50% ×1
             } else if (mobType === EntityManager.MobNightwalker) {
                 // t727 夜行者掉落：暗渊珠 ×0-1（mechanic-equivalent MC 1.0 enderman 掉 ender pearl；spec「死亡掉落
-                //   0-1 暗渊珠」，机制等价 MC 末影人 50% 掉 1 颗珍珠）。0x243 = RecipeRegistry::EnderPearlId（暗渊珠，
+                //   0-1 暗渊珠」，机制等价 MC 末影人 50% 掉 1 颗珍珠）。0x243 = RecipeRegistry::AbyssPearlId（暗渊珠，
                 //   §9 改名：机制等价 MC ender pearl —— 抛掷传送；t726 材料段）。⚠️ QML 不 import C++ 静态类故用字面量，
                 //   同 onMobDied 既有约定。恒 50% 单件（0 或 1，机制等价 MC 末影人 0-1 pearl；t726 已建配方锚定掉落源）。
                 //   暗渊珠可作「闪避传送」交互道具（t726 投掷即传）→ 非战斗资源，让玩家见到夜行者即知「打它有传送珠」。
@@ -3136,19 +3136,19 @@ Window {
         //   0x22B = RecipeRegistry::EggId（材料段蛋物品；⚠️ QML 不 import C++ 静态类故字面量，同 onMobDied 约定）。
         //   单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费，同 sheepSheared / mobDied 模式）。
         function onChickenLaidEgg(x, y, z) { itemEntities.spawnItem(x, y, z, 0x22B, 1) }
-        // t729 暗渊之眼飞行判定「变掉落物」（EntityManager EnderEye tick 飞距结算 80% 分支发）：转发到
+        // t729 暗渊之眼飞行判定「变掉落物」（EntityManager AbyssEye tick 飞距结算 80% 分支发）：转发到
         //   ItemEntityManager.spawnItem 生成**掉落物实体**（EndEyeId 0x23A 暗渊之眼 ×1）—— 玩家走近可捡回，反复
         //   使用逐步逼近要塞（机制等价 MC 暗渊之眼落地变掉落物可回收）。0x23A = RecipeRegistry::EndEyeId（⚠️ QML
         //   不 import C++ 静态类故用字面量，同 onMobDied 既有约定）。坐标 = 眼睛落点货架 floor(pos)（与 spawnItem
         //   整数格约定一致）。单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费路由到 Game 层 item 管理）。
-        function onEnderEyeBecameItem(x, y, z) { itemEntities.spawnItem(x, y, z, 0x23A, 1) }
-        // t758 暗渊珠落点传送（EntityManager EnderPearl tick 命中方块 / 寿命兜底到期发 enderPearlLanded(落点格)）：
-        //   转发到 PlayerController.applyEnderPearlTeleport —— 落点列向下扫安全立位（脚位 + 头位非实体 + 下方 solid
-        //   支撑）瞬移玩家 + 传送伤害（Survival 扣 kEnderPearlTpDamage=5HP 走 onFallDamageTaken 护甲减伤链，死因
-        //   EnderPearlTp「被暗渊珠传送撕碎」；Creative 无伤传送，机制等价 MC 1.0 ender pearl 传送代价）。越界（世界
+        function onAbyssEyeBecameItem(x, y, z) { itemEntities.spawnItem(x, y, z, 0x23A, 1) }
+        // t758 暗渊珠落点传送（EntityManager AbyssPearl tick 命中方块 / 寿命兜底到期发 abyssPearlLanded(落点格)）：
+        //   转发到 PlayerController.applyAbyssPearlTeleport —— 落点列向下扫安全立位（脚位 + 头位非实体 + 下方 solid
+        //   支撑）瞬移玩家 + 传送伤害（Survival 扣 kAbyssPearlTpDamage=5HP 走 onFallDamageTaken 护甲减伤链，死因
+        //   AbyssPearlTp「被暗渊珠传送撕碎」；Creative 无伤传送，机制等价 MC 1.0 ender pearl 传送代价）。越界（世界
         //   外 / 虚空）移除不发本信号（珍珠白耗）。单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费
         //   路由到 Game 层方法，同 emberFireballHitPlayer→applyStatusEffect 模式）。
-        function onEnderPearlLanded(x, y, z) { player.applyEnderPearlTeleport(x, y, z) }
+        function onAbyssPearlLanded(x, y, z) { player.applyAbyssPearlTeleport(x, y, z) }
         // t836 钓鱼浮标咬钩（EntityManager Bobber Water 态等待到点、进咬钩窗口沿发；坐标 = 浮标 float 世界坐标）：
         //   转发到 BlockParticles.burstWaterSplash 在浮标位迸发水花粒子（水色上溅；机制等价 MC 1.0 咬钩水花 +
         //   「浮标下沉 ~0.5s 窗口」的视觉提示）。单向事件流（PLAN §2 分层：Entities 发语义事件、呈现层只消费）。
@@ -4700,12 +4700,12 @@ Window {
         //   build_entities_pack.py 程序生成 entity_emberling.png，§9a 区隔不照搬 MC）。MobModel 单头盒每面铺整张
         //   （pack 关全脸 [0,1]²；pack 开 blazing blaze.png 走 T 字 UV）。独立环绕竖棒由 delegate 补（纯色烟灰橙棒）。
         Texture { id: mobEmberlingTex; source: "qrc:/textures/entity_emberling.png"; generateMipmaps: false }
-        // t807 暗渊之眼/暗渊珠投掷物贴图退役：旧版投掷物专用三级贴图（endereyeTex 程序小绿瞳珠实体图 /
-        //   endereyePackTex / enderpearlPackTex 两级 pack item 图）不再声明 —— t807 把两者投掷物改**掉落物式渲染
-        //   语义**（BillboardQuad 单面 billboard + MaterialIcon item 图标，见 mobHost Repeater 内 EnderEye /
-        //   EnderPearl delegate）：MaterialIcon 内部自带「pack 命中 itemIconSource → 自绘 Canvas」两级（0x23A
-        //   drawEndEye / 0x243 drawEnderPearl），与掉落物 Repeater 材料段同源同图，修掉「六面立方铺同一张
-        //   item 图标 → 六面都是眼睛/珠」的贴图错渲染。entity_endereye.png（build_mob.py 产物）保留在 qrc 但
+        // t807 暗渊之眼/暗渊珠投掷物贴图退役：旧版投掷物专用三级贴图（abyssEyeTex 程序小绿瞳珠实体图 /
+        //   abyssEyePackTex / abyssPearlPackTex 两级 pack item 图）不再声明 —— t807 把两者投掷物改**掉落物式渲染
+        //   语义**（BillboardQuad 单面 billboard + MaterialIcon item 图标，见 mobHost Repeater 内 AbyssEye /
+        //   AbyssPearl delegate）：MaterialIcon 内部自带「pack 命中 itemIconSource → 自绘 Canvas」两级（0x23A
+        //   drawEndEye / 0x243 drawAbyssPearl），与掉落物 Repeater 材料段同源同图，修掉「六面立方铺同一张
+        //   item 图标 → 六面都是眼睛/珠」的贴图错渲染。entity_abyss_eye.png（build_mob.py 产物）保留在 qrc 但
         //   QML 不再引用（16×16 程序图零成本，不删图免连锁改 build_mob.py / CMake 资源清单）。
         // t727 夜行者眼睛发光层：透明底 + 亮紫白竖眼（build_mob.py 程序生成）。QML 顶层小盒铺这张（MobModel 头
         //   前上层）—— 机制等价末影人魅眼（§9 原创配色）。pack 命中 enderman_eyes 时切 pack 贴图（见下）。
@@ -10430,73 +10430,73 @@ Window {
                             materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#fff4c4" }
                         }
                     }
-                    // t729 暗渊之眼（EnderEye；机制等价 MC 1.0 暗渊之眼 ender eye —— 玩家右键 EndEyeId 掷出寻路要塞，
+                    // t729 暗渊之眼（AbyssEye；机制等价 MC 1.0 暗渊之眼 ender eye —— 玩家右键 EndEyeId 掷出寻路要塞，
                     //   §9 改名 + 原创模型/贴图）。t807 改**掉落物式贴图**：BillboardQuad 单面 billboard 恒正对相机铺
-                    //   item 图标（MaterialIcon 0x23A，内部两级：pack 命中 ender_eye.png / pack 关 drawEndEye 自绘），
+                    //   item 图标（MaterialIcon 0x23A，内部两级：pack 命中 ender_eye.png / pack 关 drawEndEye 自绘），（§9 读取面）
                     //   与掉落物 Repeater 材料段同源同图 —— 修掉旧版「六面立方铺同一张贴图 → 六面都是眼睛」的贴图
                     //   错渲染（用户实测主诉）。飞行自旋改**面内 roll**（绕 billboard 自身 Z：eulerRotation.z = spin，
                     //   fromEulerAngles 按 Z→X→Y 应用 → roll 先在图标自身平面内打转、再随相机朝向摆正，读作
                     //   「翻滚的眼珠」；旧版绕 Y 转对恒正对相机的面片无视觉意义）。飞距判结（C++ tick 位移 +
-                    //   结算）：80% 变掉落物（enderEyeBecameItem → 掉落物实体可捡回）→ 移除；20% 碎裂 —— 本
+                    //   结算）：80% 变掉落物（abyssEyeBecameItem → 掉落物实体可捡回）→ 移除；20% 碎裂 —— 本
                     //   delegate 据 shatteringAt(index) 翻 true 播 burstGlassShatter 玻璃碎屑 + 缩小 (shatterScale→0)
-                    //   + 淡出 (shatterFade→0)，归零后 C++ 释放槽（配合 kEnderEyeShatterTime 延迟移除让动画可见）。
+                    //   + 淡出 (shatterFade→0)，归零后 C++ 释放槽（配合 kAbyssEyeShatterTime 延迟移除让动画可见）。
                     //   slot 复用（新眼 / 空槽）→ entShatter 翻 false → 复位珠体（shatterScale/Fade 回 1.0），同 mob
                     //   deathTilt/wasDead 复位模式。飞行略升由 C++ 位移驱动（本 delegate 只做面内自旋 + 碎裂动画）。
                     //   alpha 契约沿掉落物材料段（t85 alpha-test）：alphaCutoff 0.5 + opacity 0.99 → 图标透明底像素
                     //   丢弃、仅眼珠像素显。baseColor 乘 terrainLight 夜间变暗（同掉落物统一）。NoLighting（红线：
                     //   可见 Model 必须 NoLighting）。
                     Node {
-                        id: endereyeNode
-                        visible: { const _r = mon.revision; return _r >= 0 ? (entKind === EntityManager.EnderEye) : false }
+                        id: abyssEyeNode
+                        visible: { const _r = mon.revision; return _r >= 0 ? (entKind === EntityManager.AbyssEye) : false }
                         // 碎裂淡出（QtQuick3D Node opacity 影响整棵子树）；珠体展示时恒 1.0。
                         property real shatterFade: 1.0
                         property real shatterScale: 1.0
-                        opacity: endereyeNode.shatterFade
+                        opacity: abyssEyeNode.shatterFade
                         property bool entShatter: { const _r = mon.revision; return _r >= 0 ? entityManager.shatteringAt(index) : false }
                         property bool wasShatter: false
                         // 碎裂起始（20% 分支）：玻璃碎屑 + 缩小淡出动画；slot 复用（新眼进入）→ 复位珠体。
                         onEntShatterChanged: {
-                            if (endereyeNode.entShatter && !endereyeNode.wasShatter) {
-                                endereyeNode.wasShatter = true
+                            if (abyssEyeNode.entShatter && !abyssEyeNode.wasShatter) {
+                                abyssEyeNode.wasShatter = true
                                 if (particleLoader.item) {
                                     const sp = entityManager.posAt(index)
                                     particleLoader.item.burstGlassShatter(sp.x, sp.y, sp.z)
                                 }
                                 shatterAnim.restart()
-                            } else if (!endereyeNode.entShatter) {
-                                endereyeNode.wasShatter = false // slot 复用 / 释放：复位（新眼或空槽 → 珠体恢复 1.0）
-                                endereyeNode.shatterScale = 1.0
-                                endereyeNode.shatterFade = 1.0
+                            } else if (!abyssEyeNode.entShatter) {
+                                abyssEyeNode.wasShatter = false // slot 复用 / 释放：复位（新眼或空槽 → 珠体恢复 1.0）
+                                abyssEyeNode.shatterScale = 1.0
+                                abyssEyeNode.shatterFade = 1.0
                             }
                         }
                         SequentialAnimation {
                             id: shatterAnim
                             running: false
                             ParallelAnimation {
-                                NumberAnimation { target: endereyeNode; property: "shatterScale"; to: 0.0; duration: 500; easing.type: Easing.InQuad }
-                                NumberAnimation { target: endereyeNode; property: "shatterFade"; to: 0.0; duration: 400; easing.type: Easing.InQuad }
+                                NumberAnimation { target: abyssEyeNode; property: "shatterScale"; to: 0.0; duration: 500; easing.type: Easing.InQuad }
+                                NumberAnimation { target: abyssEyeNode; property: "shatterFade"; to: 0.0; duration: 400; easing.type: Easing.InQuad }
                             }
                         }
                         // 飞行自旋（t807 面内 roll：billboard 恒正对相机，图标绕自身 Z 原地打转读作「翻滚的眼珠」）；
                         //   碎裂窗口由缩放淡出覆盖视觉。t1023：mob 族同向门控（t1007 治理路径 c）——entKind
-                        //   非 EnderEye 的 47 槽 delegate 里本动画也恒跑；running 绑本节点 visible（kind 门控）。
+                        //   非 AbyssEye 的 47 槽 delegate 里本动画也恒跑；running 绑本节点 visible（kind 门控）。
                         property real spin: 0
-                        NumberAnimation on spin { from: 0; to: 360; duration: 1500; loops: Animation.Infinite; running: endereyeNode.visible }
+                        NumberAnimation on spin { from: 0; to: 360; duration: 1500; loops: Animation.Infinite; running: abyssEyeNode.visible }
                         Node { // 珠体承载层（碎裂缩放作用层；billboard 朝相机旋转在 Model 上，均匀缩放与旋转可交换）
-                            scale: Qt.vector3d(endereyeNode.shatterScale, endereyeNode.shatterScale, endereyeNode.shatterScale)
+                            scale: Qt.vector3d(abyssEyeNode.shatterScale, abyssEyeNode.shatterScale, abyssEyeNode.shatterScale)
                             Model {
                                 geometry: BillboardQuad {}
                                 scale: Qt.vector3d(0.30, 0.30, 0.30) // 同掉落物材料段 billboard 统一尺寸
                                 // billboard 朝相机（同掉落物材料段：世界欧拉 = 相机欧拉 → +Z 恒指回相机正面恒可见；
-                                //   本 delegate 根 Node 对 EnderEye 恒 (0,0,0) 旋转（bodyYaw/deathTilt 仅 Mob 态），
+                                //   本 delegate 根 Node 对 AbyssEye 恒 (0,0,0) 旋转（bodyYaw/deathTilt 仅 Mob 态），
                                 //   无需抵消继承；roll=spin 面内自旋）。
-                                eulerRotation: Qt.vector3d(cam.eulerRotation.x, cam.eulerRotation.y, endereyeNode.spin)
+                                eulerRotation: Qt.vector3d(cam.eulerRotation.x, cam.eulerRotation.y, abyssEyeNode.spin)
                                 materials: PrincipledMaterial {
                                     lighting: PrincipledMaterial.NoLighting
                                     alphaCutoff: 0.5
                                     opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
                                     baseColor: terrainLight(worldClock.skyLight)
-                                    // MaterialIcon 内部两级：pack 命中 ender_eye.png item 图 / pack 关 drawEndEye
+                                    // MaterialIcon 内部两级：pack 命中 ender_eye.png item 图 / pack 关 drawEndEye（§9 读取面）
                                     //   自绘（透明底），与掉落物材料段同一图标 —— 掉落物式渲染语义的图源单一权威。
                                     baseColorMap: Texture {
                                         flipV: false
@@ -10506,36 +10506,36 @@ Window {
                             }
                         }
                     }
-                    // t758 暗渊珠（EnderPearl；机制等价 MC 1.0 ender pearl —— 玩家右键 EnderPearlId 掷出受重力
-                    //   抛物飞行，落点把玩家传送过去；§9 区隔 + 原创视觉）。t807 改**掉落物式贴图**（同 EnderEye
+                    // t758 暗渊珠（AbyssPearl；机制等价 MC 1.0 ender pearl —— 玩家右键 AbyssPearlId 掷出受重力
+                    //   抛物飞行，落点把玩家传送过去；§9 区隔 + 原创视觉）。t807 改**掉落物式贴图**（同 AbyssEye
                     //   分支）：BillboardQuad 单面 billboard 恒正对相机铺 item 图标（MaterialIcon 0x243，内部两级：
-                    //   pack 命中 ender_pearl.png / pack 关 drawEnderPearl 自绘透明底）—— 修掉旧版 pack 命中时
+                    //   pack 命中 ender_pearl.png / pack 关 drawAbyssPearl 自绘透明底）—— 修掉旧版 pack 命中时（§9 读取面）
                     //   「六面立方铺同一张珍珠图标」同病（t807 主诉暗渊之眼的同族：立方六面都是珠），并顺带以
                     //   item 图标替代程序双色深绿小方珠回退（与掉落物 Repeater 材料段同源同图，渲染语义统一）。
                     //   飞行自旋改面内 roll（绕 billboard 自身 Z；珠形近圆对称 → 自旋仅高光微动，保留无害）。
-                    //   命中（方块 / 寿命兜底）→ C++ emit enderPearlLanded → 呈现层路由 applyEnderPearlTeleport
+                    //   命中（方块 / 寿命兜底）→ C++ emit abyssPearlLanded → 呈现层路由 applyAbyssPearlTeleport
                     //   传送（珠落即传，槽即时释放无碎裂动画）。alpha 契约沿掉落物材料段：alphaCutoff 0.5 +
                     //   opacity 0.99（透明底像素丢弃）；baseColor 乘 terrainLight 夜间变暗（同掉落物统一）。
                     //   NoLighting（红线：可见 Model 必须 NoLighting）。
                     Node {
-                        id: enderpearlNode
-                        visible: { const _r = mon.revision; return _r >= 0 ? (entKind === EntityManager.EnderPearl) : false }
+                        id: abyssPearlNode
+                        visible: { const _r = mon.revision; return _r >= 0 ? (entKind === EntityManager.AbyssPearl) : false }
                         // 飞行自旋（t807 面内 roll：billboard 恒正对相机，图标绕自身 Z 打转；珠形近对称仅高光微动）。
-                        //   t1023：mob 族同向门控（同 endereyeNode）。
+                        //   t1023：mob 族同向门控（同 abyssEyeNode）。
                         property real spin: 0
-                        NumberAnimation on spin { from: 0; to: 360; duration: 1200; loops: Animation.Infinite; running: enderpearlNode.visible }
+                        NumberAnimation on spin { from: 0; to: 360; duration: 1200; loops: Animation.Infinite; running: abyssPearlNode.visible }
                         Model {
                             geometry: BillboardQuad {}
                             scale: Qt.vector3d(0.30, 0.30, 0.30) // 同掉落物材料段 billboard 统一尺寸
-                            // billboard 朝相机（同掉落物材料段：世界欧拉 = 相机欧拉；delegate 根对 EnderPearl 恒
+                            // billboard 朝相机（同掉落物材料段：世界欧拉 = 相机欧拉；delegate 根对 AbyssPearl 恒
                             //   (0,0,0) 旋转，无需抵消继承；roll=spin 面内自旋）。
-                            eulerRotation: Qt.vector3d(cam.eulerRotation.x, cam.eulerRotation.y, enderpearlNode.spin)
+                            eulerRotation: Qt.vector3d(cam.eulerRotation.x, cam.eulerRotation.y, abyssPearlNode.spin)
                             materials: PrincipledMaterial {
                                 lighting: PrincipledMaterial.NoLighting
                                 alphaCutoff: 0.5
                                 opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
                                 baseColor: terrainLight(worldClock.skyLight)
-                                // MaterialIcon 内部两级：pack 命中 ender_pearl.png item 图 / pack 关 drawEnderPearl
+                                // MaterialIcon 内部两级：pack 命中 ender_pearl.png item 图 / pack 关 drawAbyssPearl（§9 读取面）
                                 //   自绘（透明底），与掉落物材料段同一图标（t497 教训：QUrl 判空已在 MaterialIcon
                                 //   内部以 source.toString().length 正确处理，本处无需再两级探测）。
                                 baseColorMap: Texture {

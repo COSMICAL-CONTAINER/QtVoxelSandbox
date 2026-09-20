@@ -401,12 +401,12 @@ EntityManager::EntityManager(QObject *parent) : QObject(parent)
 //     wolfTamed/wolfSitting→wolfTamedAt/wolfSittingAt；ocelotTamed/ocelotSitting/ocelotVariant→…At；
 //     fuseTimer→inflateAt（潜行者蓄力膨胀）；aimTimer→drawAmountAt（骸骨拉弓）；
 //     enraged/rageTimer→enragedAt/nightwalkerRageProgressAt；golemWindup→golemAttackPoseAt；
-//     enderEyeShatter→shatteringAt；armorHelmet/Chest/Legs/Boots→mobArmorAt。
+//     abyssEyeShatter→shatteringAt；armorHelmet/Chest/Legs/Boots→mobArmorAt。
 //   **刻意排除**的字段（每 tick 恒变但零视觉 → 入指纹会让静置 mob 每 emit 空转 bump，正是本修复要消灭的
 //   浪费）：AI/节流计时器（wanderTimer/ambientTimer/aiAccum/hostileAccum/stepAccum/losCacheTimer/
 //   shadeRescanTimer/teleportCooldown…）、经济计时器（eggTimer/swimTimer/growTimer/regrowCooldown/
 //   breedCooldown）、内部快照（spawnSerial/deathBurned/deathBaby/deathSheared/deathTimer）、
-//   arrowLife/enderEyeDistLeft/bobber 族（寿命/驱动计时，呈现走 player.fishing 镜像非本 delegate）。
+//   arrowLife/abyssEyeDistLeft/bobber 族（寿命/驱动计时，呈现走 player.fishing 镜像非本 delegate）。
 //   其中「值翻转才可见」的计时器（growTimer→baby、regrowCooldown→sheared…）以对应布尔/值字段入指纹，
 //   翻转帧必 bump，语义无损。
 //   碰撞概率口径：64 位 FNV-1a + boost 式混合，47 槽 × ~20 emit/s 连玩一年 ≈ 3e9 次比对，生日碰撞
@@ -438,7 +438,7 @@ quint64 EntityManager::slotFingerprint(size_t i) const
     mixB(h, e.wolfTamed); mixB(h, e.wolfSitting);
     mixB(h, e.ocelotTamed); mixB(h, e.ocelotSitting); mixI(h, e.ocelotVariant);
     mixF(h, e.fuseTimer); mixF(h, e.aimTimer);
-    mixB(h, e.enraged); mixF(h, e.rageTimer); mixF(h, e.golemWindup); mixF(h, e.enderEyeShatter);
+    mixB(h, e.enraged); mixF(h, e.rageTimer); mixF(h, e.golemWindup); mixF(h, e.abyssEyeShatter);
     mixI(h, e.armorHelmet); mixI(h, e.armorChest); mixI(h, e.armorLegs); mixI(h, e.armorBoots);
     return h;
 }
@@ -917,13 +917,13 @@ void EntityManager::flushPendingShots()
     m_pendingArrows.clear();
 }
 // t729 生成暗渊之眼投射物（玩家右键 EndEyeId 掷出；见头文件注释）：存 origin + 3D 速度 vel（blocks/s，初速方向
-//   由 Game 层算；t757 两段式接管后 vel 仅作初速，tick 内转向平滑修正）+ kind=EnderEye + pushable=false +
-//   halfW/halfH=0.16（小绿瞳珠小体视觉 + 碰撞最小；命中检测走距离判定不读 halfW）。entity.enderEyeDistLeft =
-//   随机 [kEnderEyeDistMin,Max]（10..16）剩余飞行距离 → tick 递减归零结算；enderEyeShatter=0（飞行态）；
-//   enderEyeCruiseY = origin.y()+kEnderEyeClimbHeight（t757 远段巡航高度）。vx/vy/vz 复用 3D 速度（如
-//   spawnFireball）。bump revision → QML Repeater 追加 delegate（EnderEye 分支小绿瞳珠 Model）。达 kCap →
+//   由 Game 层算；t757 两段式接管后 vel 仅作初速，tick 内转向平滑修正）+ kind=AbyssEye + pushable=false +
+//   halfW/halfH=0.16（小绿瞳珠小体视觉 + 碰撞最小；命中检测走距离判定不读 halfW）。entity.abyssEyeDistLeft =
+//   随机 [kAbyssEyeDistMin,Max]（10..16）剩余飞行距离 → tick 递减归零结算；abyssEyeShatter=0（飞行态）；
+//   abyssEyeCruiseY = origin.y()+kAbyssEyeClimbHeight（t757 远段巡航高度）。vx/vy/vz 复用 3D 速度（如
+//   spawnFireball）。bump revision → QML Repeater 追加 delegate（AbyssEye 分支小绿瞳珠 Model）。达 kCap →
 //   跳过 + 告警（防溢出）。返新槽索引（调试用）；达 kCap → -1。
-int EntityManager::spawnEnderEye(const QVector3D &origin, const QVector3D &vel)
+int EntityManager::spawnAbyssEye(const QVector3D &origin, const QVector3D &vel)
 {
     if (m_liveCount >= kCap) {
         qCWarning(lcEnt) << "entity cap reached (" << kCap << "); ender eye spawn skipped at" << origin;
@@ -931,31 +931,31 @@ int EntityManager::spawnEnderEye(const QVector3D &origin, const QVector3D &vel)
     }
     Entity e;
     e.pos = origin;
-    e.halfW = kEnderEyeHalfDim; // 小绿瞳珠小体视觉 + 碰撞最小
-    e.halfH = kEnderEyeHalfDim;
+    e.halfW = kAbyssEyeHalfDim; // 小绿瞳珠小体视觉 + 碰撞最小
+    e.halfH = kAbyssEyeHalfDim;
     e.pushable = false; // 玩家走碰不推（同箭 / 雪球 / 火球）
-    e.kind = EnderEye;
-    e.vx = vel.x(); // 复用 vx/vy/vz 作 3D 速度（EnderEye 不走 Mob 击退衰减分支，无冲突）
+    e.kind = AbyssEye;
+    e.vx = vel.x(); // 复用 vx/vy/vz 作 3D 速度（AbyssEye 不走 Mob 击退衰减分支，无冲突）
     e.vy = vel.y();
     e.vz = vel.z();
     // 判定飞行距离随机带（机制等价 MC 暗渊之眼飞行一段后落地/碎裂；玩家据此逐步逼近要塞）。
-    e.enderEyeDistLeft = kEnderEyeDistMin
-        + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kEnderEyeDistMax - kEnderEyeDistMin);
-    e.enderEyeShatter = 0.0f; // 飞行态（非碎裂）
-    // t757 远段巡航高度：掷出眼位 + kEnderEyeClimbHeight（spawn 定死不随地形变 —— 眼睛无方块碰撞，
+    e.abyssEyeDistLeft = kAbyssEyeDistMin
+        + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f * (kAbyssEyeDistMax - kAbyssEyeDistMin);
+    e.abyssEyeShatter = 0.0f; // 飞行态（非碎裂）
+    // t757 远段巡航高度：掷出眼位 + kAbyssEyeClimbHeight（spawn 定死不随地形变 —— 眼睛无方块碰撞，
     //   平飞穿山可接受；换算依据是「玩家上方的指示高度」而非地表，故以掷出点为基准最直观）。
-    //   审查 #1 回归补回：t758 插入 spawnEnderPearl 时本赋值被 diff 吞掉 → 字段全工程无写入点（只剩
+    //   审查 #1 回归补回：t758 插入 spawnAbyssPearl 时本赋值被 diff 吞掉 → 字段全工程无写入点（只剩
     //   头文件默认 0.0f）→ tick 远段 gap 恒负、爬升分量恒 0，升空巡航整体死码。矩阵测试有断言防线。
-    e.enderEyeCruiseY = origin.y() + kEnderEyeClimbHeight;
+    e.abyssEyeCruiseY = origin.y() + kAbyssEyeClimbHeight;
     const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
     notifyEntitiesChanged();
     return slot;
 }
-// t758 生成暗渊珠投射物（玩家右键 EnderPearlId 掷出；见头文件注释）：存 origin + 3D 速度 vel（含 vy 抛物）+
-//   kind=EnderPearl + pushable=false + 寿命。halfW/halfH=kEnderPearlHalfDim（深绿小珠视觉 + 碰撞最小；命中
-//   判定走点格不读它）。bump revision → QML Repeater 追加 delegate（EnderPearl 分支深绿小珠 Model）。达 kCap →
+// t758 生成暗渊珠投射物（玩家右键 AbyssPearlId 掷出；见头文件注释）：存 origin + 3D 速度 vel（含 vy 抛物）+
+//   kind=AbyssPearl + pushable=false + 寿命。halfW/halfH=kAbyssPearlHalfDim（深绿小珠视觉 + 碰撞最小；命中
+//   判定走点格不读它）。bump revision → QML Repeater 追加 delegate（AbyssPearl 分支深绿小珠 Model）。达 kCap →
 //   跳过 + 告警（防溢出）。返新珠槽索引（调试用）；达 kCap → -1。
-int EntityManager::spawnEnderPearl(const QVector3D &origin, const QVector3D &vel)
+int EntityManager::spawnAbyssPearl(const QVector3D &origin, const QVector3D &vel)
 {
     if (m_liveCount >= kCap) {
         qCWarning(lcEnt) << "entity cap reached (" << kCap << "); ender pearl spawn skipped at" << origin;
@@ -963,14 +963,14 @@ int EntityManager::spawnEnderPearl(const QVector3D &origin, const QVector3D &vel
     }
     Entity e;
     e.pos = origin;
-    e.halfW = kEnderPearlHalfDim; // 深绿小珠视觉 + 碰撞最小
-    e.halfH = kEnderPearlHalfDim;
+    e.halfW = kAbyssPearlHalfDim; // 深绿小珠视觉 + 碰撞最小
+    e.halfH = kAbyssPearlHalfDim;
     e.pushable = false; // 玩家走碰不推（同箭 / 雪球 / 眼）
-    e.kind = EnderPearl;
-    e.vx = vel.x(); // 复用 vx/vy/vz 作 3D 速度（EnderPearl 不走 Mob 击退衰减分支，无冲突）
+    e.kind = AbyssPearl;
+    e.vx = vel.x(); // 复用 vx/vy/vz 作 3D 速度（AbyssPearl 不走 Mob 击退衰减分支，无冲突）
     e.vy = vel.y();
     e.vz = vel.z();
-    e.arrowLife = kEnderPearlLifetime; // 寿命兜底「命中」（悬空到期视作落点结算传送）
+    e.arrowLife = kAbyssPearlLifetime; // 寿命兜底「命中」（悬空到期视作落点结算传送）
     const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
     notifyEntitiesChanged();
     return slot;
@@ -1325,22 +1325,22 @@ bool EntityManager::isSlowedAt(int i) const
     return e.alive && e.kind == Mob && e.slowTimer > 0.0f;
 }
 
-// t729 第 i 个实体是否「暗渊之眼碎裂态」（enderEyeShatter>0）。QML EnderEye delegate 据它翻 to 缩小 + 淡出 +
-//   玻璃碎裂粒子动画（shatteringAt=true 的窗口内）。越界 / 非 EnderEye / 非碎裂 → false（同 aliveAt 越界安全）。
+// t729 第 i 个实体是否「暗渊之眼碎裂态」（abyssEyeShatter>0）。QML AbyssEye delegate 据它翻 to 缩小 + 淡出 +
+//   玻璃碎裂粒子动画（shatteringAt=true 的窗口内）。越界 / 非 AbyssEye / 非碎裂 → false（同 aliveAt 越界安全）。
 bool EntityManager::shatteringAt(int i) const
 {
     if (i < 0 || i >= int(m_entities.size())) return false;
     const Entity &e = m_entities[size_t(i)];
-    return e.alive && e.kind == EnderEye && e.enderEyeShatter > 0.0f;
+    return e.alive && e.kind == AbyssEye && e.abyssEyeShatter > 0.0f;
 }
 
 // 审查 #1 回归探针（头文件注释详述动机）：读第 i 个暗渊之眼的远段巡航高度。离线矩阵测试 spawn 后断言
-//   == origin.y()+kEnderEyeClimbHeight，防「插入新 spawn 函数被 diff 吞赋值 → 巡航死码」静默回归复刻。
-float EntityManager::enderEyeCruiseYAt(int i) const
+//   == origin.y()+kAbyssEyeClimbHeight，防「插入新 spawn 函数被 diff 吞赋值 → 巡航死码」静默回归复刻。
+float EntityManager::abyssEyeCruiseYAt(int i) const
 {
     if (i < 0 || i >= int(m_entities.size())) return 0.0f;
     const Entity &e = m_entities[size_t(i)];
-    return (e.alive && e.kind == EnderEye) ? e.enderEyeCruiseY : 0.0f;
+    return (e.alive && e.kind == AbyssEye) ? e.abyssEyeCruiseY : 0.0f;
 }
 
 // t951 灼烧级日光暴露采样单一权威（契约见头文件声明）。从 tickHostileLife 内联判定提炼——燃烧扣血与
@@ -6881,43 +6881,43 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             continue; // Fireball 不走 Mob AI / resting / 击退衰减
         }
 
-        // --- EnderEye（t729 暗渊之眼投射物；t757 两段式定位）：寻路要塞 + 飞距结算（变掉落物 / 碎裂无掉落）---
+        // --- AbyssEye（t729 暗渊之眼投射物；t757 两段式定位）：寻路要塞 + 飞距结算（变掉落物 / 碎裂无掉落）---
         //   机制等价 MC 1.0 暗渊之眼 ender eye：右键掷出 → 寻路要塞（t757 远段升空平飞指示 / 近段下探逼近，
-        //   速度 ~kEnderEyeSpeed=4，玩家可侧身看它飞）→ 飞行一段后判定：80% 变**掉落物实体**（emit
-        //   enderEyeBecameItem，可捡回）、20% 碎裂（缩小淡出 + 玻璃碎裂粒子，无掉落）。本分支两态：飞行态
-        //   （enderEyeShatter==0，两段转向 + 位移 + distLeft 递减）/ 碎裂态（enderEyeShatter>0，仅倒计，QML
+        //   速度 ~kAbyssEyeSpeed=4，玩家可侧身看它飞）→ 飞行一段后判定：80% 变**掉落物实体**（emit
+        //   abyssEyeBecameItem，可捡回）、20% 碎裂（缩小淡出 + 玻璃碎裂粒子，无掉落）。本分支两态：飞行态
+        //   （abyssEyeShatter==0，两段转向 + 位移 + distLeft 递减）/ 碎裂态（abyssEyeShatter>0，仅倒计，QML
         //   delegate 播动画；归零释放槽无掉落）。无重力（非抛物）、无方块碰撞（机制等价 MC 暗渊之眼透过地形
         //   感应要塞；豆腐脑如穿墙亦可接受，距离短）。
-        if (e.kind == EnderEye) {
-            if (e.enderEyeShatter > 0.0f) {
+        if (e.kind == AbyssEye) {
+            if (e.abyssEyeShatter > 0.0f) {
                 // 碎裂态：倒计时（QML delegate 据 shatteringAt 播缩小淡出 + 玻璃碎裂粒子动画），归零 → 释放槽
                 //   （无掉落物，机制等价 MC 暗渊之眼破裂无回收）。
-                e.enderEyeShatter -= float(dt);
+                e.abyssEyeShatter -= float(dt);
                 dirty = true;
-                if (e.enderEyeShatter <= 0.0f) {
+                if (e.abyssEyeShatter <= 0.0f) {
                     toRemove.push_back(idx);
                     dirty = true;
                 }
                 continue; // 碎裂态不走飞行 / Mob AI / resting
             }
             // 飞行态（t757 两段式）：每 tick 先按段算「目标方向」，再把当前速度方向向它指数趋近（平滑转向），
-            //   然后恒速 kEnderEyeSpeed 位移 + 剩余距离递减（按速度模长；两段通用不动）。
-            //   远段（与传送门水平距离 > kEnderEyeNearDist=50）：目标 = 水平朝要塞 + 未达巡航高度
-            //   （enderEyeCruiseY = 掷出眼位 + 8）时带爬升分量（缺口 >3 格满爬 1.0，与水平 1:1 ≈ 45°；临近
+            //   然后恒速 kAbyssEyeSpeed 位移 + 剩余距离递减（按速度模长；两段通用不动）。
+            //   远段（与传送门水平距离 > kAbyssEyeNearDist=50）：目标 = 水平朝要塞 + 未达巡航高度
+            //   （abyssEyeCruiseY = 掷出眼位 + 8）时带爬升分量（缺口 >3 格满爬 1.0，与水平 1:1 ≈ 45°；临近
             //   线性收敛到 0 → 平飞），垂直分量恒 >= 0 —— **绝不向下钻地**。旧版直线朝地下传送门中心钻，远处
             //   玩家看不出方向指示还容易把眼丢进地形里；本段让眼升到玩家上空朝要塞平飞 = 空中方向指示。
             //   平飞穿山可接受（眼睛本就无方块碰撞，机制等价「透过地形感应要塞」）。
             //   近段（≤ 50）：目标 = 传送门中心方向（可下探逼近结构 —— t729 寻路语义保留，无缝衔接远段）。
             //   无要塞（世界未建 / 空存档）：不算目标方向 → 保持 spawn 初速直线飞（Game 层初速已含 +0.25 略升
-            //   偏置，兜底不崩，同旧版行为；kEnderEyeRiseOff 由此只在初速里生效，tick 不再叠加）。
+            //   偏置，兜底不崩，同旧版行为；kAbyssEyeRiseOff 由此只在初速里生效，tick 不再叠加）。
             if (world->hasStronghold()) {
                 const float pdx = float(world->strongholdPortalX()) + 0.5f - e.pos.x();
                 const float pdz = float(world->strongholdPortalZ()) + 0.5f - e.pos.z();
                 const float horizDist = std::sqrt(pdx * pdx + pdz * pdz);
                 QVector3D desired;
-                if (horizDist > kEnderEyeNearDist) {
+                if (horizDist > kAbyssEyeNearDist) {
                     // 远段：水平单位向量 + 爬升分量（缺口 >3 满爬 / 0..3 线性收敛 / 负值截 0 —— 绝不向下）
-                    const float gap = e.enderEyeCruiseY - e.pos.y();
+                    const float gap = e.abyssEyeCruiseY - e.pos.y();
                     const float climb = gap > 3.0f ? 1.0f : std::max(gap, 0.0f) / 3.0f;
                     desired = QVector3D(pdx / horizDist, climb, pdz / horizDist).normalized();
                 } else {
@@ -6928,17 +6928,17 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     const float dl = desired.length();
                     if (dl > 1e-3f) desired = desired / dl;
                 }
-                // 指数趋近（帧率无关 blend = 1 − exp(−kEnderEyeTurnRate·dt)）：50 格阈值切换 / 初速与目标方向
+                // 指数趋近（帧率无关 blend = 1 − exp(−kAbyssEyeTurnRate·dt)）：50 格阈值切换 / 初速与目标方向
                 //   的偏差都被平滑成圆弧（阈值邻域来回穿越时方向连续，无硬折角）。归一化后回写恒定模长
-                //   kEnderEyeSpeed —— 速度大小恒定，只转向（distLeft 按模长递减不受影响）。
+                //   kAbyssEyeSpeed —— 速度大小恒定，只转向（distLeft 按模长递减不受影响）。
                 QVector3D curDir(e.vx, e.vy, e.vz);
                 const float cl = curDir.length();
                 if (cl > 1e-4f) curDir = curDir / cl; else curDir = desired;
-                const float blend = 1.0f - std::exp(-kEnderEyeTurnRate * float(dt));
+                const float blend = 1.0f - std::exp(-kAbyssEyeTurnRate * float(dt));
                 QVector3D nd = curDir + (desired - curDir) * blend;
                 const float nl = nd.length();
                 if (nl > 1e-4f) {
-                    nd = nd / nl * kEnderEyeSpeed;
+                    nd = nd / nl * kAbyssEyeSpeed;
                     e.vx = nd.x();
                     e.vy = nd.y();
                     e.vz = nd.z();
@@ -6947,11 +6947,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             const float spd = std::sqrt(e.vx * e.vx + e.vy * e.vy + e.vz * e.vz);
             const QVector3D next = e.pos + QVector3D(e.vx, e.vy, e.vz) * float(dt); // t757：独立 rise 偏置移除（爬升并入远段方向），直线位移不变
             e.pos = next;
-            if (spd > 1e-4f) e.enderEyeDistLeft -= spd * float(dt);
+            if (spd > 1e-4f) e.abyssEyeDistLeft -= spd * float(dt);
             dirty = true;
             // 判定结算：剩余飞行距离归零 → 掷判定（80% 掉落物 / 20% 碎裂）。
-            if (e.enderEyeDistLeft <= 0.0f) {
-                if (QRandomGenerator::global()->bounded(100) < kEnderEyeDropChance) {
+            if (e.abyssEyeDistLeft <= 0.0f) {
+                if (QRandomGenerator::global()->bounded(100) < kAbyssEyeDropChance) {
                     // 80% → 变**掉落物实体**（机制等价 MC 暗渊之眼落地变掉落物可回收；emit 语义事件，呈现层转发
                     //   ItemEntityManager.spawnItem 生成 item 实体，玩家走近可捡回 —— 反复使用逐步逼近要塞）。
                     // 审查修 B11（t724-t729 复盘）：眼睛无方块碰撞（设计上穿墙），结算点可能在实体格内（掉落物
@@ -6972,22 +6972,22 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         }
                     }
                     if (!settled) dropY = qFloor(e.pos.y()); // 全柱无空位 → 原位置（同旧行为兜底）
-                    emit enderEyeBecameItem(dropX, dropY, dropZ);
+                    emit abyssEyeBecameItem(dropX, dropY, dropZ);
                     toRemove.push_back(idx);
                     dirty = true;
                 } else {
                     // 20% → 碎裂：进入碎裂态（QML delegate 播缩小淡出 + 玻璃碎裂粒子，无掉落物）。
-                    e.enderEyeShatter = kEnderEyeShatterTime;
+                    e.abyssEyeShatter = kAbyssEyeShatterTime;
                     dirty = true;
                 }
             }
-            continue; // EnderEye 不走 Mob AI / resting / 击退衰减
+            continue; // AbyssEye 不走 Mob AI / resting / 击退衰减
         }
 
-        // --- EnderPearl（t758 暗渊珠投掷物；t835 五项修）：轻重力抛物 + 任意接触命中 + 液体缓沉 + 出界/虚空不传 ---
-        //   机制等价 MC 1.0 ender pearl：右键掷出受重力抛物飞行（t835④ 珠专属轻重力 kEnderPearlGravity=12，
-        //   MC 投掷物 0.03/tick²=12 vs 世界 28），接触即结算 —— emit enderPearlLanded(落点格) → 呈现层路由
-        //   PlayerController.applyEnderPearlTeleport（安全落点扫描 + 瞬移玩家 + 传送伤害，机制语义收口在
+        // --- AbyssPearl（t758 暗渊珠投掷物；t835 五项修）：轻重力抛物 + 任意接触命中 + 液体缓沉 + 出界/虚空不传 ---
+        //   机制等价 MC 1.0 ender pearl：右键掷出受重力抛物飞行（t835④ 珠专属轻重力 kAbyssPearlGravity=12，
+        //   MC 投掷物 0.03/tick²=12 vs 世界 28），接触即结算 —— emit abyssPearlLanded(落点格) → 呈现层路由
+        //   PlayerController.applyAbyssPearlTeleport（安全落点扫描 + 瞬移玩家 + 传送伤害，机制语义收口在
         //   Game 层）。**不做 mob 命中**（取舍：珍珠只传送掷出者自己，撞 mob 穿过 —— MC 对 mob 命中亦仅传送
         //   掷者，伤害分支 v1 不做，同头文件注释）。t835 三项 tick 侧改动：
         //   ① 有形接触必传送：命中判据从 collisionAABBsAt 点在盒内（t762 引入）放宽为**本格任意方块实存**
@@ -7000,8 +7000,8 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         //   「格内有没有东西」判接触 —— 机制等价 MC 1.0 珍珠对任何具形方块（含轨道、薄板）都算落地、
         //   对无碰撞格（空气 / 液体② / 门面 / 火 / 植物族）穿过（植物穿过与箭的「空碰撞盒即穿」同义；
         //   箭是点在盒内、珍珠按格接触，差异是 t835 防薄盒穿透漏传送的有意取舍）。
-        //   ② 液体缓沉：珠所在格为 Water/Lava → 不立即传送，重力把 vy 压到缓沉终速（−kEnderPearlWaterSink/
-        //   LavaSink）+ 水平强阻尼（kEnderPearlLiquidDrag）→ 缓慢沉到液体底（底面方块接触 = ① 判据）才结算
+        //   ② 液体缓沉：珠所在格为 Water/Lava → 不立即传送，重力把 vy 压到缓沉终速（−kAbyssPearlWaterSink/
+        //   LavaSink）+ 水平强阻尼（kAbyssPearlLiquidDrag）→ 缓慢沉到液体底（底面方块接触 = ① 判据）才结算
         //   传送。寿命倒计暂停（深水柱缓沉可超 8s，防到期把掷出者半水传送）。机制等价 MC 投掷物入液强阻尼
         //   缓沉；岩浆更粘 → 终速更慢。岩浆接触同样必传送（①）—— 传送本身**不附带点燃**（MC 1.0 珍珠传送
         //   无着火；「传送 5 格内着火」是 1.x 后期机制，不做）。传送后玩家若立于岩浆格，走既有岩浆接触伤害
@@ -7009,24 +7009,24 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         //   ③ 虚空/出界不传送：一路无接触落出世界底（y<0）/ 飞出 XZ 边界 → 静默移除**不传送**（防把玩家传
         //   到界外/虚空不可玩位置；珍珠白耗。机制取舍：MC 珍珠入虚空同样有去无回）。寿命兜底（悬空到期）
         //   仍传送（B11 落点列向下找支撑）。
-        if (e.kind == EnderPearl) {
+        if (e.kind == AbyssPearl) {
             // ② 液体缓沉态判定按**当前格**（本 tick 起点所在格）：进入液体格的下一 tick 起接管物理。
             const quint8 curId = world->blockAt(qFloor(e.pos.x()), qFloor(e.pos.y()), qFloor(e.pos.z()));
             const bool inLiquid = (curId == BlockRegistry::Water || curId == BlockRegistry::Lava);
             if (inLiquid) {
                 // 缓沉：重力压 vy 到 −sink 终速 + 水平指数阻尼（~0.2s 基本停 → 竖直缓沉）；寿命暂停（见②）。
-                const float sink = (curId == BlockRegistry::Lava) ? kEnderPearlLavaSink : kEnderPearlWaterSink;
-                e.vy = qMax(e.vy - kEnderPearlGravity * float(dt), -sink);
-                const float dragMul = qMax(0.0f, 1.0f - kEnderPearlLiquidDrag * float(dt));
+                const float sink = (curId == BlockRegistry::Lava) ? kAbyssPearlLavaSink : kAbyssPearlWaterSink;
+                e.vy = qMax(e.vy - kAbyssPearlGravity * float(dt), -sink);
+                const float dragMul = qMax(0.0f, 1.0f - kAbyssPearlLiquidDrag * float(dt));
                 e.vx *= dragMul;
                 e.vz *= dragMul;
             } else {
                 e.arrowLife -= float(dt); // 寿命倒计（复用 arrowLife；仅空中递减，液体缓沉期暂停）
-                e.vy -= kEnderPearlGravity * float(dt); // ④ 轻重力抛物（12 vs 世界 28，MC 投掷物同源）
+                e.vy -= kAbyssPearlGravity * float(dt); // ④ 轻重力抛物（12 vs 世界 28，MC 投掷物同源）
             }
             const QVector3D next = e.pos + QVector3D(e.vx, e.vy, e.vz) * float(dt);
             bool remove = false;
-            bool landed = false; // 命中结算（接触 / 寿命兜底）→ emit enderPearlLanded（传送掷出者）
+            bool landed = false; // 命中结算（接触 / 寿命兜底）→ emit abyssPearlLanded（传送掷出者）
             // 寿命兜底命中：悬空到期视作落点结算（落点列向下找支撑传送，防极端上抛珍珠永久滞留堆积）。
             if (e.arrowLife <= 0.0f) { remove = true; landed = true; }
             // ① 有形接触命中 → 即结算（撞地 / 撞墙 / 踩铁轨/薄板：落点 = 接触格，Game 层扫描从该格起向下
@@ -7063,14 +7063,14 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     remove = true;
                 }
             }
-            // 命中结算 → emit 落点格（floor(next)，整数格约定同 enderEyeBecameItem；呈现层路由传送）。
+            // 命中结算 → emit 落点格（floor(next)，整数格约定同 abyssEyeBecameItem；呈现层路由传送）。
             //   审查修 L2：寿命到期分支（上方）先于越界检查置 landed=true → 到期与出界同 tick 时越界检查被
             //   !remove 短路，仍会 emit 越界坐标把掷出者传到界外 / 虚空。emit 前补界内校验（与越界兜底同
             //   口径）：落点出界 → 只移除不传送（珍珠白耗，语义与「越界不传送」注释一致）。
             if (remove && landed
                 && next.x() >= 0.0f && next.z() >= 0.0f
                 && next.x() <= worldW && next.z() <= worldD && next.y() >= 0.0f) {
-                emit enderPearlLanded(qFloor(next.x()), qFloor(next.y()), qFloor(next.z()));
+                emit abyssPearlLanded(qFloor(next.x()), qFloor(next.y()), qFloor(next.z()));
             }
             if (remove) {
                 toRemove.push_back(idx);
@@ -7079,7 +7079,7 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 e.pos = next; // 继续飞行
                 dirty = true;
             }
-            continue; // EnderPearl 不走 Mob AI / resting / 击退衰减
+            continue; // AbyssPearl 不走 Mob AI / resting / 击退衰减
         }
 
         // --- Bobber（t836 钓鱼浮标投射物）：轻重力抛物 + 飞行段钩 mob + 落水浮定待咬 / 落陆静止 + 出界消散 ---

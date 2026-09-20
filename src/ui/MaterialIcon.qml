@@ -1788,7 +1788,7 @@ Item {
             //   + 中央高光 + 暗底影（暗渊之眼的「眼珠」同源材质——暗渊珠即其原料珠体）。机制等价 MC ender
             //   pearl 图标；纯原创自绘（§9a）。配色：pearlBase #1a5a4a（深青绿底）/ pearlMid #2a8a6a（球体
             //   中段绿）/ pearlLight #8ae8b8（受光高光亮绿）/ dark #0a3a2a（底阴影）/ spark #d0f8e0（高光点）。
-            const drawEnderPearl = () => {
+            const drawAbyssPearl = () => {
                 const pearlBase = "#1a5a4a", pearlMid = "#2a8a6a", pearlLight = "#8ae8b8"
                 const dark = "#0a3a2a", spark = "#d0f8e0"
                 // 圆球形外廓（row 6..18，最宽 14；上下收窄表「球体」）
@@ -1997,7 +1997,7 @@ Item {
             case 0x23F: drawCompass();            break // t567 指南针（4 铁锭+1 红石合成；HUD 指针指向出生点）
             case 0x240: drawClock();              break // t568 钟（4 金锭+1 红石合成；HUD 显示当前昼夜相位）
             case 0x242: drawPainting();           break // t720 画作（8 木棒+1 羊毛合成；右键墙贴画）
-            case 0x243: drawEnderPearl();         break // t726 暗渊珠（杀夜行者掉落；暗渊之眼原料）
+            case 0x243: drawAbyssPearl();         break // t726 暗渊珠（杀夜行者掉落；暗渊之眼原料）
             case 0x244: drawBlazePowder();        break // t726 燃烬粉（燃烬棒冶炼产物；暗渊之眼原料）
             case 0x245: drawBlazeRod();           break // t726 燃烬棒（怒焰人死亡掉落；烧燃烬粉）
             case 0x246: drawSpawnEgg("nightwalker"); break // t727 生物蛋（夜行者；右键 → 生成夜行者）
