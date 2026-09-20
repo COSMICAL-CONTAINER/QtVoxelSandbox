@@ -1234,6 +1234,10 @@ add_executable(redstone_matrix_test
     #   patchChunkSlotPool 原文抽取执行 + 固定世界 comparator 敏感面 + 结构钉——worldstore/
     #   world/chunklifecycle/streamingbridge 系已列）。
     tools/matrix/section44_residual_pair.cpp
+    # t1070 流式/存档路径优化合集三件探针附加：World/Game 层直编（Load 短路信封路由 + 冻结
+    #   缓冲复用诊断面 + 桥内长活 coordinator——backgroundgeneration/gamesession/savecoordinator/
+    #   savebridge 系已列）。
+    tools/matrix/section45_savepath_opt.cpp
     # t1022 键位映射表探针附加：Core 层 KeybindManager（默认表完整性 / 冲突拒收 / settings.json
     #   round-trip——显式 storePath 密闭不触真实档）。PlayerController setKey 规范化消费同链直编。
     src/Core/keybindmanager.cpp

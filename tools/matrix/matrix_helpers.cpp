@@ -155,6 +155,8 @@ void MatrixRun::runAll()
 
     section44_residual_pair(); // t1069 残余清偿合集（置尾先例沿用：r2043a 既有行为零变化墙[相邻族腿名计数源钉 ×3 + 池路径契约钉 + 生产 patch 体原文抽取执行初建/单键驱逐/重加全链池行为逐位] / r2043b 口径收窄承重[收窄门逐字源钉 + 固定世界 comparator 敏感面行为柱：旧列高基准盲区的块缘带体素腐败必被全逐位比对捕获 + 退役留痕锚] / r2043c 精确摘除承重（生产 patch 体原文执行——抽取 harness 强于镜像 wrapper 一档：测生产体本身非同构体）/ r2043d 结构钉[摘除谓词族源钉 + 全清写点精确计数恰两处 + 两消费端/稳态兜底契约句零触碰反探 + 段入口 comparator 锚 + PASS 如实化锚 + 退役留痕锚]，各腿自建 fresh 世界，rig 零接触）
 
+    section45_savepath_opt(); // t1070 流式/存档路径优化合集三件（置尾先例沿用：r2044a 零变化墙 / r2044b 件一承重[双计数对账：executed 推进而 generated 恒冻 + 逐位回灌] / r2044c 件三承重[重建计数 +1/0/0 + 冻结点三面] / r2044d 结构钉[件一权威源钉族 + 件二量化注锚 + 桥顶针 + 禁触面反探]，r2044b 真会话真线程波 + r2044c 真链 × 真桥单例，rig 零接触）
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";
