@@ -1260,6 +1260,9 @@ add_executable(redstone_matrix_test
     #   结构钉——entityshadowfield/blobshadowgeometry 系新列，world/entitymanager/playercontroller
     #   系已列）。
     tools/matrix/section49_entity_blob_shadow.cpp
+    # t1076 大核流式世界负向走查零收敛复现定界探针附加：Game/World 层直编（真链负向走查收敛
+    #   断言 + 四域失败签名 diag——streamingbridge/world/chunklifecycle/frameprofiler 系已列）。
+    tools/matrix/section50_streaming_negative_walk.cpp
     src/Game/entityshadowfield.cpp
     src/Game/entityshadowfield.h
     src/Renderer/blobshadowgeometry.cpp

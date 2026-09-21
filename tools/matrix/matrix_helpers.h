@@ -457,4 +457,11 @@ private:
                                   //   [采样权威门/几何契约/QML 接线与材质契约/注册族 + Main.qml
                                   //   零对地采样反探 + EntityStore 零触碰反探]——fixed 48×48×96
                                   //   s82 + sparse radius-0 孪生，rig 世界 w 零接触，接 section48）
+    void section50_streaming_negative_walk(); // t1076 大核流式世界负向走查零收敛复现定界段（置尾
+                                  //   先例沿用：r2049 负向走查收敛断言[生产尺寸真链逐 chunk 负向
+                                  //   走查 (4,5)→(-3,5) 每站有界泵拍 → 终站静置 ±2 方窗 25 键
+                                  //   deadline 150000ms 收敛 + 六态直方/F3 流式行差分/驻留键样
+                                  //   本/loadChunkAt 兜底探针四域失败签名 diag]——fixed 48×48×96
+                                  //   s82 + sparse 核心 160×160×96 s82 + 真临时库，rig 世界
+                                  //   w 零接触，接 section49）
 };
