@@ -448,4 +448,13 @@ private:
                                   //   r2047d 结构钉[负坐标安全标脏 floorDiv 循环 + sparse 统一物化门边界读
                                   //   分支 + sparse 无界盒 + 旧码三字面反探禁出]——fixed 48×48×96 s82 +
                                   //   sparse 核心 160×160×96 ×2 + 真临时库，rig 世界 w 零接触，接 section47）
+    void section49_entity_blob_shadow(); // t1075 blob 软阴影（玩家+生物贴地投影）探针段（置尾
+                                  //   先例沿用：r2048a 平地贴地承重墙[玩家+双 mob 贴地 Y/alpha/
+                                  //   半径 + 指纹差分零变化零 bump + 几何可数通道] / r2048b 悬崖
+                                  //   边缘+腾空衰减[悬浮块顶满档→同高悬空淡出 0.25→中空 0.625→
+                                  //   超窗缺席单调链] / r2048c 未物化缺席+fixed/sparse 贴地逐位
+                                  //   一致[radius-0 同 seed 孪生 + 按需物化缝] / r2048d 结构钉
+                                  //   [采样权威门/几何契约/QML 接线与材质契约/注册族 + Main.qml
+                                  //   零对地采样反探 + EntityStore 零触碰反探]——fixed 48×48×96
+                                  //   s82 + sparse radius-0 孪生，rig 世界 w 零接触，接 section48）
 };
