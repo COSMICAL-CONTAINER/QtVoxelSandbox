@@ -1242,6 +1242,9 @@ add_executable(redstone_matrix_test
     #   md5 修订留痕锚 + flake 名单在场钉——纯源码钉零世界腿，src/ 与 tools/ 只读）。
     tools/matrix/section46_skeleton_integrity.cpp
     tools/matrix/section47_streaming_outer_content.cpp
+    # t1074 无限世界外环挖方块全黑探针附加：World 层直编（增量光照域门/盒钳制/边界读/负坐标标脏
+    #   四面 + 真链出核挖掘/火把行为柱——world/streamingbridge/chunklifecycle 系已列）。
+    tools/matrix/section48_streaming_outer_light.cpp
     # t1022 键位映射表探针附加：Core 层 KeybindManager（默认表完整性 / 冲突拒收 / settings.json
     #   round-trip——显式 storePath 密闭不触真实档）。PlayerController setKey 规范化消费同链直编。
     src/Core/keybindmanager.cpp

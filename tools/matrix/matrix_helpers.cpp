@@ -161,6 +161,8 @@ void MatrixRun::runAll()
 
     section47_streaming_outer_content(); // t1073 流式外环内容三合一诊断修复（置尾先例沿用：r2046a fixed 零变化墙[双 generate 逐位恒等 + 单一权威钉 + 旧钳制反探] / r2046b 外环内容承重墙[生产尺寸真链走查出核：外环树/矿/carve 齐备 + 走回重物化逐位] / r2046c 刷怪域承重[外环黑夜自然刷怪 + 外环日光燃烧 + AI 钳制不拽核] / r2046d 结构钉[扩展域单点 + lattice 带族 + 域门调用面 + 反探族]，fixed 48×48×96 s82 + sparse 核心 160×160×96 ×2 + 真临时库，rig 零接触）
 
+    section48_streaming_outer_light(); // t1074 无限世界外环挖方块全黑（置尾先例沿用：r2047a fixed 零变化墙[fixed 挖掘/火把行为柱 + Fixed 分支字面钉] / r2047b 外环全黑复现+修复承重[生产尺寸真链出核：播种柱 + 挖掘亮 + 跨 chunk 火把] / r2047c 负坐标外环腿[负侧播种柱 + 挖掘亮 + 负侧火把跨 chunk] / r2047d 结构钉[floorDiv 标脏循环 + sparse 边界读分支 + sparse 无界盒 + 旧码反探]，fixed 48×48×96 s82 + sparse 核心 160×160×96 ×2 + 真临时库，rig 零接触）
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";

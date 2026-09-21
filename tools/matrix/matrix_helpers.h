@@ -440,4 +440,12 @@ private:
                                   //   r2046d 结构钉[扩展域置位单点 + lattice 带族 + 域门调用面 + 反探族]——
                                   //   fixed 48×48×96 s82 + sparse 核心 160×160×96 ×2 + 真临时库，rig 世界
                                   //   w 零接触，接 section46）
+    void section48_streaming_outer_light(); // t1074 无限世界外环挖方块全黑探针段（置尾先例沿用：
+                                  //   r2047a fixed 零变化墙[fixed 挖掘/火把行为柱 + 域门/盒钳制 Fixed 分支
+                                  //   字面钉] / r2047b 外环全黑复现+修复承重[生产尺寸真链出核 6 chunk：
+                                  //   播种柱 + 挖掘 2 深=挖出格天光满 + 跨 chunk 缘火把方块光渗入] /
+                                  //   r2047c 负坐标外环腿[负侧播种柱 + 挖掘亮 + 负侧 chunk 缘火把跨 chunk] /
+                                  //   r2047d 结构钉[负坐标安全标脏 floorDiv 循环 + sparse 统一物化门边界读
+                                  //   分支 + sparse 无界盒 + 旧码三字面反探禁出]——fixed 48×48×96 s82 +
+                                  //   sparse 核心 160×160×96 ×2 + 真临时库，rig 世界 w 零接触，接 section47）
 };
