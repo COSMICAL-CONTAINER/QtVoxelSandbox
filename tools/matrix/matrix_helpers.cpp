@@ -159,6 +159,8 @@ void MatrixRun::runAll()
 
     section46_skeleton_integrity(); // t1071 测试骨架完整性合集（置尾先例沿用：r2045a 件一承重 / r2045b 件二承重 / r2045c+d 结构钉——纯源码钉零世界腿，rig 零接触）
 
+    section47_streaming_outer_content(); // t1073 流式外环内容三合一诊断修复（置尾先例沿用：r2046a fixed 零变化墙[双 generate 逐位恒等 + 单一权威钉 + 旧钳制反探] / r2046b 外环内容承重墙[生产尺寸真链走查出核：外环树/矿/carve 齐备 + 走回重物化逐位] / r2046c 刷怪域承重[外环黑夜自然刷怪 + 外环日光燃烧 + AI 钳制不拽核] / r2046d 结构钉[扩展域单点 + lattice 带族 + 域门调用面 + 反探族]，fixed 48×48×96 s82 + sparse 核心 160×160×96 ×2 + 真临时库，rig 零接触）
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";

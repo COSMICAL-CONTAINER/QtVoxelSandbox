@@ -341,8 +341,10 @@ void MatrixRun::section25_sparseworld()
         " fixed world and a sparse world sharing seed and generation dims agree bitwise on"
         " both pure gates - heightAt and biomeIdAt - across the loaded region AND negative"
         " coordinates, both worlds matching a direct TerrainGen instance; the negative-coordinate"
-        " chunks' pure-terrain band below the population reach matches the authority chunk buffer"
-        " voxel-bitwise in id and state; and the inland center chunk anchors every column top to"
+        " chunks' bedrock cap band matches the authority terrain buffer with the deterministic"
+        " placeBedrock predicate applied (t1073 outer-plane population reach made bedrock apply"
+        " beyond the core), voxel-bitwise in id and state with carve-mouth escape on non-bedrock"
+        " cells; and the inland center chunk anchors every column top to"
         " either the pure heightAt surface with biome-consistent ids or a worldgen population"
         " feature block)"), [&]() {
         bool ok = true;
@@ -376,8 +378,13 @@ void MatrixRun::section25_sparseworld()
         pureOk = pureOk && pureCols == 81;
         ok = ok && pureOk;
 
-        // ② 负坐标 chunk 纯地形带 [y∈0,5) 对权威缓冲逐体素恒等（id+state；带 = bedrockTop 4
-        //    之上 1 格、ore yMin 5 之下——population 零触达区 = 纯 fillTerrainColumn 输出）：
+        // ② 负坐标 chunk 地表盖帽带 [y∈0,5) 对权威缓冲逐体素恒等（id+state；带 = 基岩域本身
+        //    [0,bedrockTop=4]）。t1073 口径修订（留痕）：外环/负坐标 population 扩展域落地后，
+        //    placeBedrock 的 (b)窗 重放对负坐标 chunk 生效（旧码窗口归一钳入核心域 → 负坐标
+        //    population 全 no-op → 本带曾是「population 零触达区」）——世界面 = 权威地形缓冲 +
+        //    确定性基岩盖帽（hashVoxel(seed,x,y,z)%100 < (5-y)*25 → Bedrock，placeBedrock 同式
+        //    纯函数，经公开 tg.hashVoxel 同源直算）+ 非基岩格的蠕虫 carve 豁口（隧道可达层可被
+        //    掏空 → Air 豁免；基岩格 carve 恒跳过）。
         const ChunkKey kKeys[] = { ChunkKey{ -1, -1 }, ChunkKey{ -1, 3 } };
         bool bufOk = true;
         for (const ChunkKey &k : kKeys) {
@@ -391,8 +398,14 @@ void MatrixRun::section25_sparseworld()
                 for (int lx = 0; bufOk && lx < 16; ++lx) {
                     const int wx = k.cx * 16 + lx, wz = k.cz * 16 + lz;
                     for (int y = 0; y < 5; ++y) {
-                        if (ws.blockAt(wx, y, wz) != buf->blockAt(lx, y, lz)
-                            || ws.stateAt(wx, y, wz) != buf->stateAt(lx, y, lz)) {
+                        const bool isBed = int(tg.hashVoxel(kSeed, wx, y, wz) % 100u)
+                            < (5 - y) * 25; // placeBedrock 同式盖帽谓词（单一权威 hashVoxel）
+                        const quint8 wantId = isBed ? quint8(BR::Bedrock)
+                                                    : buf->blockAt(lx, y, lz);
+                        const quint8 gotId = ws.blockAt(wx, y, wz);
+                        const bool carveMouth = !isBed && gotId == BR::Air; // 蠕虫掏空豁口
+                        if (gotId != wantId
+                            || (!carveMouth && ws.stateAt(wx, y, wz) != buf->stateAt(lx, y, lz))) {
                             bufOk = false;
                             diag += QStringLiteral("[voxel %1,%2 lx=%3 lz=%4 y=%5 w=%6/%7 a=%8/%9] ")
                                         .arg(k.cx).arg(k.cz).arg(lx).arg(lz).arg(y)
