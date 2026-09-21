@@ -21,9 +21,9 @@ last_completed_task: t1060 fixed 世界 bake 异步化——C1 完全体（filte
 last_completed_task_prev: t1072 survey 收尾设计批（docs-only——refactor-plan §30 C4 shader uniform 化草案 + §31 C2/C7/SIMD/多 worker 四项组合，两实两降；不计代码闭环）
 last_completed_task_commits: fix(t1073) + test(t1073)（本 docs 提交收口；哈希 f025b53 / ae2c3f0）
 last_verified_commit: test(t1073)（矩阵 **719 PASS / 0 FAIL ×2**：matrix_t1073_{pos,final}.log 双日志在案 EXIT=0；715 权威[t1071 final] diff = +4 恰 r2046a-d + r2022c 同变更修订行；pos/final 腿集合 md5 恒等 ce57c281…；阴性两轮恰红 b/c 单腿载荷吻合根因指纹[NEG-1 trees=0 ores=0 treeChunks=0/49 / NEG-2 hostiles=0]；主控独立复验 r2046 4/0 新链二进制 + 脱离式全量独立复跑 719/0 完整通过 matrix_orch_t1073_verify.log）
-last_governance_review: 2026-09-18（audit #13 GREEN——W5b/t1055/t1056/t1057/t1058/t1059 六闭环 648→667/0；证据面铁律连续第三窗零违例；审计 #9 候选表全退役、agent-review 全清偿或改判；管线到 P5 等用户真机；详见 governance-audit-2026-09-18.md）
-governance_review_due: true（5/5 闭环达成 → 审计 #16 到期，2026-09-21 主控派只读独立 agent 执行；09:13 panic 笔记的「YELLOW/GOV-20260921-1」作废——t1073 已核实绿，恢复链留痕见 dev-plan 关单条目）
-completed_tasks_since_governance_review: 5（t1071 闭环 + t1072 docs-only[不计] + t1073 闭环；审计 #15 GREEN 于 2026-09-20）
+last_governance_review: 2026-09-21（audit #16 GREEN 有保留——t1071/t1072/t1073 三闭环证据链全实核通过[日志存在性/数字/腿集合/注入三段存证逐一对上]；4 项账面卫生发现 F1-F4 本 docs 批内全部清偿：F1 t1072 条目补录/F2 auto-backlog 摘 t1073/F3 md5 提取配方补注/F4 冒烟证据回填保全；假警报翻案合规认定；本地 ahead 47；详见 governance-audit-2026-09-21.md）
+governance_review_due: false
+completed_tasks_since_governance_review: 0（审计 #16 GREEN 于 2026-09-21；此后新闭环从 0 重计，t1074 在飞未计）
 next_task: **t1074 外环挖方块全黑（R21.1 P0 第 2 项，在飞）→ t1075 玩家/生物 blob 阴影（第 3 项）→ auto-backlog.md 候选池**；用户侧并行 = P5 实机清单 + §30.6/§31 设计决策 + 择机 push（本地领先远端 30+ 笔）
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
