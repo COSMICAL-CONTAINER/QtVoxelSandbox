@@ -1504,12 +1504,29 @@ private:
     // 部分 per-column 型 pass 增加**窗口参数** (wx0, wx1, wz0, wz1)——约定 wx1 <= wx0（默认全 0）
     //   = 全核心域 [0,m_width)×[0,m_depth)（**fixed generate() 调用点零改动 = 逐位原样**，零变化
     //   墙的结构性事实）；sparse population 传 chunk scaffold 窗（自身 ±1 chunk = MC population
-    //   「features 可越界写入但限于邻近 3×3 chunk 区域」的同构窗口）。窗口在 pass 体内**钳入核心
-    //   域**后作循环界——候选域超窗即与 fixed 全域重放结果对 C 列逐位一致（读闭合论证见处置表）。
+    //   「features 可越界写入但限于邻近 3×3 chunk 区域」的同构窗口）。
+    // 窗口归一**唯一权威 = populationWindow()**（下方声明）：窗口在 pass 体内经它钳界——核心内
+    //   锚 = 窗 ∩ 核心域（候选域超窗即与 fixed 全域重放结果对 C 列逐位一致，读闭合论证见处置表）；
+    //   **外环锚（t1073）= 窗原样不钳**——外环锚的窗 ∩ 核心域恒空/缺自身列 → 旧码 population 全
+    //   no-op = 外环无树/矿/洞/植物的病灶（t1073 修）；外环候选域 = 锚 ±1 chunk 脚手架窗整体，
+    //   写入仍由 ChunkManager population 写域钳制（锚 ±1 chunk）+ 未物化写门双重守卫 → 每 chunk
+    //   内容 = 其自身锚重放的纯函数（跨锚溢写恒被丢弃 = 顺序无关，处置表「两序同空」铁律不破）。
     // trace-global 型（carveCaves worm / carveCanyon）窗口只用于跳过不触窗的写原语（bbox 早退），
-    //   路径推导仍全域（纯函数链）→ 同 seed 逐位同结果。
+    //   路径推导仍全域（纯函数链）→ 同 seed 逐位同结果（外环锚的 worm lattice 见 carveCaves 的
+    //   扩展域带；carveCanyon 路径推导仍锚定核心盒边 = 登记的平面扩展限制）。
     // 确定性树木生成（PLAN §2-K）：在 generate() 末段于 grass 表层种橡树（原木主干+树叶球冠）。
     // 位置/形状纯由 seed 决定；禁用任何运行期随机源（QTime/时钟/全局 RNG）。
+    // ── t1073 窗口归一唯一权威（值聚合 + 纯查询）────────────────────────────────────────
+    // win=false = 全核心域（fixed generate 全 pass 调用形态，逐位原样）；win=true = population
+    //   窗口重放形态，核心内锚钳窗入核心域、外环锚（m_popWindowExtended）窗原样（语义见上）。
+    //   全部 (b) 级窗口 pass 的循环界**只经本函数取得**（禁第二份钳制式散落——既往每 pass 五行
+    //   内联归一自本单起收口，扩展分支单点可摘 = 阴性轮的单一变异面）。
+    struct PopulationWindow
+    {
+        bool win = false; // 窗口重放形态（false = fixed 全核心域形态）
+        int xLo = 0, xHi = 0, zLo = 0, zHi = 0; // 半开区间 [Lo, Hi)
+    };
+    PopulationWindow populationWindow(int wx0, int wx1, int wz0, int wz1) const;
     void placeTrees(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0); // 遍历列、密度+间距筛选后散布
     // 单棵树：主干 trunkH 格 + 树冠。leafRand = 该列哈希的高位，驱动树冠四角叶的有无 → 每棵树冠轮廓
     // 各异（贴近 MC 橡树自然参差）。纯由 seed 派生（确定性，PLAN §2-K）。
@@ -1546,8 +1563,10 @@ private:
     //   矿石）。密度低（网格间距 / 命中概率常量在 .cpp 可调）；置于 carveCaves 前 → 洞穴自然切穿矿袋
     //   暴露沙砾于洞壁（同矿石「carve 暴露」语义）。纯函数于 seed（hashColumn + seed 偏移）→ 同 seed
     //   同矿袋分布（PLAN §2-K）。沙砾受重力：暴露面朝下挖空后塌落由游玩期 maybeTriggerFallingBlock
-    //   触发（worldgen 静态放置无需预检支撑）。
-    void placeGravelPockets();
+    //   触发（worldgen 静态放置无需预检支撑）。t1073 起窗口参数同 placeTrees 约定（默认全 0 =
+    //   全核心域原样；sparse population 传 scaffold 窗——候选 lattice 带 = 窗 ± kCell 覆盖袋心
+    //   jitter±4 + 半径≤3 的全部触窗写入；fixed 全域调用零改动）。
+    void placeGravelPockets(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t119 底层基岩（PLAN §2-K 确定性）：地形填充后在 y 0..4 铺一层 Bedrock（不可破坏，hardness=-1.0）。
     // 厚度按 hashVoxel 坑洼（底实顶疏，机制等价 MC 1.0 基岩层）。仅覆盖最底几格；同 seed → 同分布。
     void placeBedrock(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
@@ -1633,8 +1652,10 @@ private:
     //   3×3 可通行大洞口（自地表下挖到既有洞穴顶格）。仅该列近表有 cave air 才开口 → 永不产孤立竖井（修 t339
     //   「无洞挖出 1×1 矿井」问题）。山坡低侧地形已低于洞口 → 该侧壁天然裸露可走入；高侧深入山体 = 山坡洞口观感。
     //   修 t309「1×1 竖井 + 3×3 仅 1 格浅坑」太窄不可走 → 现 3×3 全高。避开沙漠 / 沙滩 / 水下 / 低洼。纯函数于 seed
-    //   （hashColumn + 已生成 chunk 的纯几何查询）→ 同 seed 同洞口分布（PLAN §2-K）。
-    void carveCaveEntrances();
+    //   （hashColumn + 已生成 chunk 的纯几何查询）→ 同 seed 同洞口分布（PLAN §2-K）。t1073 起窗口参数同
+    //   placeTrees 约定（默认全 0 = 全核心域原样；sparse population 传 scaffold 窗——候选 lattice 带覆盖
+    //   jitter±2 + 3×3 开口的全部触窗写入；核心边界 2 格让位检查仅非扩展域形态生效）。
+    void carveCaveEntrances(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t342 大峡谷地貌（spec「地表长条裂缝（露天峡谷），内壁露矿石」）：scatterOres / carveCaves 之后、fillWater
     //   之前，确定性生成约 1 条贯穿地图的长窄露天峡谷。路径 = 长程 worm（自边界附近确定性出发、朝对侧 noise 缓
     //   弯行进 + 向 baseYaw 弱回复 → 蜿蜒贯穿）；横截面 = 上宽下窄阶梯 V 形（fbm 调制 → 弯曲峡壁）。自地表
@@ -1664,14 +1685,19 @@ private:
     //   之后，地下深处确定性散布小型封闭水洼——carve 一个小椭球空腔（air 气室）+ 底层铺一层水源（state=0），
     //   形成「封闭洞穴静止水层」。空腔被周围实体岩石天然封闭 → 水源无水平 air 邻居可蔓延 → 稳态
     //   （tickWaterFlow 不扩散）；气室无天光 → 黑暗（机制等价 MC 1.0 地下水湖 / 封闭水洼）。纯函数于 seed
-    //   （hashColumn）→ 同 seed 同水池分布（PLAN §2-K）。
-    void placeUndergroundWaterPools();
+    //   （hashColumn）→ 同 seed 同水池分布（PLAN §2-K）。t1073 起窗口参数同 placeTrees 约定（默认全 0 =
+    //   全核心域原样；sparse population 传 scaffold 窗——候选 lattice 带覆盖 jitter±3 + 半径≤3 圆盘的
+    //   全部触窗写入；核心边界 3 格让位检查仅非扩展域形态生效）。
+    void placeUndergroundWaterPools(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t343 地下岩浆湖（spec「Y<30 随机封闭岩浆湖」；机制等价 MC 1.0 地下岩浆湖）：carveCaves /
     //   carveCaveEntrances 之后、fillWater 之前，地下深处（y < kLavaLakeMaxY=30）确定性散布小型封闭岩浆湖——
     //   carve 一个小椭球空腔（air 气室）+ 底层铺一层岩浆源（state=0），形成「封闭洞穴岩浆湖」。空腔被周围实体
     //   岩石天然封闭 → 岩浆源无水平 air 邻居可蔓延 → 稳态（tickLavaFlow 不扩散）；气室无天光 → 黑暗（机制等价
     //   MC 1.0 地下岩浆湖 / 封闭熔岩洼地）。纯函数于 seed（hashColumn）→ 同 seed 同岩浆湖分布（PLAN §2-K）。
-    void placeLavaLakes();
+    //   t1073 起窗口参数同 placeTrees 约定（默认全 0 = 全核心域原样；sparse population 传 scaffold 窗
+    //   ——候选 lattice 带覆盖 jitter±4 + 半径≤3 圆盘的全部触窗写入；核心边界 3 格让位检查仅非扩展域
+    //   形态生效）。
+    void placeLavaLakes(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t392 地下地牢（spec「地下小结构（圆石/石砖/苔石房），中央刷怪笼 + 1 战利品箱；worldgen 地下随机放置
     //   （一定密度）」；机制等价 MC 1.0 地牢 / 怪物房间）。carveCaves / carveCaveEntrances / placeLavaLakes 之后、
     //   fillWater 之前，地下深处（y ∈ [kBedrockTop+3, kDungeonMaxY]）确定性散布小型封闭房间：carve 一个
@@ -1808,8 +1834,10 @@ private:
     //   肉眼可见）。t340：(a) fbm 调制每格有效半径 → 弯曲湖岸 / 半岛（非正圆）；(b) 约 half 湖在湖床之下藏空心穹顶
     //   气室（1 层石顶托水源 + stone 封闭 → 稳定 air 气室），「地表浅湖」与「地表浅湖 + 下伏空腔」两形态混排。
     //   仅 plains/forest，避开沙滩 / 水下 / 海平面附近（湖独立于海）。纯函数于 seed（hashColumn / fbm）→ 同 seed
-    //   同湖泊分布（PLAN §2-K）。
-    void placeSurfaceLakes();
+    //   同湖泊分布（PLAN §2-K）。t1073 起窗口参数同 placeTrees 约定（默认全 0 = 全核心域原样；sparse
+    //   population 传 scaffold 窗——候选 lattice 带覆盖 jitter±3 + rad≤3 盘 + rad+1 湖岸扫描的全部触窗
+    //   写入；rad+1 边界让位检查仅非扩展域形态生效）。
+    void placeSurfaceLakes(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t151 真光场**全量**重算（PLAN §2-H / §M）：per-voxel BFS flood-fill 天光（自顶，sky=15）+ 火把方块光
     //   （radius14，block=14），衰减 1、仅穿过非遮光格、取 max。**仅 worldgen 末调一次**（全图 147k 体素 ×2
     //   通道约数十 ms，玩家编辑频率下不可接受）。玩家编辑走增量 recomputeLightAround()（t154）。
@@ -1894,6 +1922,13 @@ private:
     // qInfo 不落盘（每 chunk 重放都会打印、且计数为窗口投影值，落盘只会制造误导性日志噪声；
     // fixed generate() 全域运行恒 false = 日志输出逐字原样，零变化墙）。
     bool m_worldgenQuiet = false;
+    // t1073 外环 population 扩展域标志：sparsePopulateChunk 置位（仅当锚 chunk 完全在核心域 chunk
+    // 盒外）——置位期间 populationWindow() 的窗口归一**不钳核心域**、setVoxelIfAir / carve 原语的
+    // x/z 核心边界让位检查跳过（外环锚的候选域 = scaffold 窗整体；写入仍由 ChunkManager 的
+    // population 写域钳制 + 未物化写门双重守卫）。fixed generate() 与核心内锚窗口重放恒 false =
+    // 全部旧钳制面逐位原样（r2022c/r2023 族 fixed 恒等钉的零变化墙）。作用域 = sparsePopulateChunk
+    // 的 ② pass 重放段（置位/复位成对，同 m_worldgenQuiet 纪律；无异常路径，线性无重入）。
+    bool m_popWindowExtended = false;
     // t185 水流 tick 节流计数：tickWaterFlow() 每 100ms 被 WorldClock.ticked 调一次；累积到 kFlowTickInterval
     //   才把波前推进 1 格（~0.3s 一格 → 1 格/tick 流动动画可见）。MC 自身约 0.25s/格，本工程取 3（0.3s）平衡
     //   动画可见度与扫描开销（全图扫水格 ~1-2ms + 波前少量写入）。

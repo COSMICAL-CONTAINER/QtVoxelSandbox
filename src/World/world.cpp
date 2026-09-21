@@ -387,24 +387,33 @@ void World::sparsePopulateChunk(int cx, int cz)
     // 写域钳制（锚 ±1 chunk = scaffold 窗）：窗外候选溢写恒拒——「邻块已/未物化」两序下同为
     // 拒 = 顺序无关（r2023c 恰红实证的溢写污染面）；真邻块终态由此免受他块 population 触碰。
     // scatterOres 传窗 = cell 循环 + tryOre 读写域双钳（脉形走向的体素态耦合 → 读域出窗即两
-    // 序不齐；处置表 (c) 替代条目）。其余全域 pass（gravel/entrances/pools/lava/lakes）候选循
+    // 序不齐；处置表 (c) 替代条目）。其余全域 pass（gravel/entrances/pools/lakes）候选循
     // 环本身 O(核心域网格) 廉价，窗外写入被本钳制拒绝 = 与 fixed 对 C 列的影响逐位同空。静默
     // 标志避免每 chunk 重放的确定性计数日志刷屏（fixed 全域运行恒 false = 日志逐字原样）。
+    // ── t1073 外环扩展域：锚 chunk 在核心域 chunk 盒外（负 / ≥ 核心 chunk 计数）→ m_popWindow
+    // Extended 置位——populationWindow() 归一不钳核心域 + setVoxelIfAir / carve 原语让位检查跳过。
+    // 旧码窗口归一恒钳入 [0,m_width)×[0,m_depth)（= 核心域）：外环锚的窗 ∩ 核心域恒空/缺自身列
+    // → 候选循环为空 → 外环 chunk 无树/矿/洞/植物（用户真机走查三症状之二）。核心内锚保持钳制
+    // = fixed 恒等面逐位原样（r2022c/r2023 族钉）；外环候选域 = scaffold 窗整体，写入仍由上方
+    // 写域钳制 + 未物化写门双重守卫 → 每 chunk 内容 = 其自身锚重放的纯函数（跨锚溢写恒被丢弃，
+    // 「两序同空」铁律不破）。置位/复位与 m_worldgenQuiet 成对（线性无重入，无异常路径）。
+    m_popWindowExtended = (cx < 0 || cz < 0
+                           || cx >= m_chunks.chunksX() || cz >= m_chunks.chunksZ());
     m_chunks.setPopulationWriteClamp(true, cx, cz);
     m_worldgenQuiet = true;
     placeBedrock(wx0, wx1, wz0, wz1);
     scatterOres(wx0, wx1, wz0, wz1);
-    placeGravelPockets();
+    placeGravelPockets(wx0, wx1, wz0, wz1);
     carveCaves(wx0, wx1, wz0, wz1);
-    carveCaveEntrances();
-    placeUndergroundWaterPools();
-    placeLavaLakes();
+    carveCaveEntrances(wx0, wx1, wz0, wz1);
+    placeUndergroundWaterPools(wx0, wx1, wz0, wz1);
+    placeLavaLakes(wx0, wx1, wz0, wz1);
     carveCanyon(wx0, wx1, wz0, wz1);
     pruneFloatingSnowLayers(wx0, wx1, wz0, wz1);
     pruneUnsupportedWorldgenRails(wx0, wx1, wz0, wz1);
     fillWater(wx0, wx1, wz0, wz1);
     freezeSurfaceWater(wx0, wx1, wz0, wz1);
-    placeSurfaceLakes();
+    placeSurfaceLakes(wx0, wx1, wz0, wz1);
     placeSwampPools(wx0, wx1, wz0, wz1);
     placeTrees(wx0, wx1, wz0, wz1);
     placeJungleTrees(wx0, wx1, wz0, wz1);
@@ -416,6 +425,7 @@ void World::sparsePopulateChunk(int cx, int cz)
     placeSweetBerryBushes(wx0, wx1, wz0, wz1);
     m_worldgenQuiet = false;
     m_chunks.setPopulationWriteClamp(false, cx, cz);
+    m_popWindowExtended = false; // t1073：扩展域复位（与置位成对——population 段外恒 false）
 
     // ── ③ 索引收尾 + ④ 读域拆卸/恢复 ────────────────────────────────────────────────────
     // 新建脚手架：⑥⑦ 合法边 + releaseSparseChunk 擦槽（数据不保留——正式物化时由
@@ -496,6 +506,41 @@ void World::rebuildPopulationCellIndexes(int cx, int cz, const ChunkKey *scaffol
             }
         }
     }
+}
+
+// ── t1073 外环扩展域：population 窗口归一唯一权威（语义论证见 world.h 声明注释）────────
+// fixed（win=false）= 全核心域 [0,m_width)×[0,m_depth) 原样（generate 全 pass 调用形态逐位）；
+// population 窗口重放（win=true）：
+//   · 核心内锚（m_popWindowExtended=false）= 旧归一逐位原样——窗 ∩ 核心域（候选域超窗即与
+//     fixed 全域重放对 C 列逐位一致，r2023b/c 恰红实证的读/写闭合口径不变）；
+//   · 外环锚（m_popWindowExtended=true）= 窗原样不钳。旧码恒钳入核心域：外环锚的窗 ∩ 核心域
+//     恒空/缺自身列 → 候选循环为空 → 外环 chunk 无树/矿/洞/植物（用户真机走查病灶）。外环
+//     候选域 = scaffold 窗（锚 ±1 chunk）整体；写入由 ChunkManager population 写域钳制（锚
+//     ±1 chunk）+ 未物化写门双重守卫 → 每 chunk 内容 = 其自身锚重放的纯函数（跨锚溢写恒被
+//     scaffold 拆卸/快照恢复丢弃 = 顺序无关，「两序同空」铁律不破）。
+World::PopulationWindow World::populationWindow(int wx0, int wx1, int wz0, int wz1) const
+{
+    PopulationWindow w;
+    w.win = wx1 > wx0;
+    if (!w.win) {
+        w.xLo = 0;
+        w.xHi = m_width;
+        w.zLo = 0;
+        w.zHi = m_depth;
+        return w; // fixed 全核心域形态（generate 调用形态，逐位原样）
+    }
+    if (m_popWindowExtended) {
+        w.xLo = wx0;
+        w.xHi = wx1;
+        w.zLo = wz0;
+        w.zHi = wz1;
+        return w; // 外环锚：scaffold 窗原样（不钳核心域）
+    }
+    w.xLo = std::max(wx0, 0);
+    w.xHi = std::min(wx1, m_width);
+    w.zLo = std::max(wz0, 0);
+    w.zHi = std::min(wz1, m_depth);
+    return w; // 核心内锚：窗 ∩ 核心域（旧归一逐位原样）
 }
 
 // 按需物化单 chunk（sparse 模式；W2 驱动接线的生产缝——本单生产零调用 = app 零变化）。
@@ -6197,7 +6242,14 @@ void World::setVoxelIfAir(int x, int y, int z, quint8 id)
 // t310 带 state 版：草变种 worldgen 需写 state（矮/中/高）。其余语义同上（仅写空气格）。
 void World::setVoxelIfAir(int x, int y, int z, quint8 id, quint8 state)
 {
-    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+    // t1073 外环扩展域：m_popWindowExtended（sparse population，锚在核心域外）期间 x/z 不钳核心
+    // 域——外环锚的树 / 植物候选列在核心域外，旧码此处硬拒 = 树冠 / 草 / 花全无的第三道病灶。
+    // 窗外写入仍由 ChunkManager population 写域钳制（锚 ±1 chunk）+ 未物化写门双重守卫；y 域两
+    // 形态同构照钳。fixed 与核心内锚恒 false = 旧边界逐位原样。
+    if (y < 0 || y >= m_height)
+        return;
+    if (!m_popWindowExtended
+        && (x < 0 || z < 0 || x >= m_width || z >= m_depth))
         return; // 世界越界跳过（setVoxelIfAir 已含边界判，配合 placeTrees 的钳制双重保险）
     if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air)
         return;
@@ -6351,14 +6403,16 @@ void World::placeJungleTreeAt(int x, int surfaceY, int z, int trunkH, quint32 le
 //   （经 hashColumn）→ 同 seed 同分布；禁用任何运行期随机源（PLAN §2-K）。
 void World::placeJungleTrees(int wx0, int wx1, int wz0, int wz1)
 {
-    // §29.5-W1b 窗口归一（placeTrees 同款，见其体内注释）。
-    const bool win = wx1 > wx0;
-    const int xLo = win ? std::max(wx0, 0) : 0;
-    const int xHi = win ? std::min(wx1, m_width) : m_width;
-    const int zLo = win ? std::max(wz0, 0) : 0;
-    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+    // §29.5-W1b 窗口归一（placeTrees 同款，见其体内注释）。t1073：窗相对 occupied 栅格同款。
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    const bool win = pw.win;
+    const int xLo = pw.xLo;
+    const int xHi = pw.xHi;
+    const int zLo = pw.zLo;
+    const int zHi = pw.zHi;
+    const int occW = xHi - xLo, occH = zHi - zLo; // 窗相对栅格尺寸（≥0）
 
-    std::vector<char> occupied(size_t(m_width) * size_t(m_depth), 0); // 主干占用栅格（1=该列已有树干）
+    std::vector<char> occupied(size_t(occW > 0 ? occW : 0) * size_t(occH > 0 ? occH : 0), 0); // 主干占用栅格（1=该列已有树干；窗相对索引）
 
     constexpr int kMinJungleTrunk = 5; // 丛林主干最少格数（spec「树干更高 ~5-7」；高于橡树 4）
     constexpr int kMaxJungleTrunk = 7; // 最多 7（同橡树上限，但下界更高 → 平均更高）
@@ -6379,12 +6433,13 @@ void World::placeJungleTrees(int wx0, int wx1, int wz0, int wz1)
             if (r % 100u >= kJungleTreePct) continue; // 密度筛选
 
             // 间距：主干列的 3×3 邻域（chebyshev 距离 ≤1）不得已有树干 → 保证主干间距 ≥2 列（同 placeTrees）。
+            // t1073：窗相对索引（窗外 = 栅格外 = 本轮未种——与旧全局栅格的 OOB 跳过同值语义）。
             bool tooClose = false;
             for (int dz = -1; dz <= 1 && !tooClose; ++dz) {
                 for (int dx = -1; dx <= 1; ++dx) {
                     const int nx = x + dx, nz = z + dz;
-                    if (nx < 0 || nz < 0 || nx >= m_width || nz >= m_depth) continue;
-                    if (occupied[size_t(nx) + size_t(m_width) * size_t(nz)]) { tooClose = true; break; }
+                    if (nx < xLo || nz < zLo || nx >= xHi || nz >= zHi) continue;
+                    if (occupied[size_t(nx - xLo) + size_t(occW) * size_t(nz - zLo)]) { tooClose = true; break; }
                 }
             }
             if (tooClose) continue;
@@ -6397,7 +6452,7 @@ void World::placeJungleTrees(int wx0, int wx1, int wz0, int wz1)
             if (trunkH > maxTrunkH) trunkH = maxTrunkH;
 
             placeJungleTreeAt(x, surfaceY, z, trunkH, r >> 16); // leafRand 高位 → 伞缘四角叶有无（每棵轮廓各异）
-            occupied[size_t(x) + size_t(m_width) * size_t(z)] = 1;
+            occupied[size_t(x - xLo) + size_t(occW) * size_t(z - zLo)] = 1; // t1073：窗相对索引
             ++placed;
         }
     }
@@ -6412,15 +6467,19 @@ void World::placeJungleTrees(int wx0, int wx1, int wz0, int wz1)
 //   hills 零星。机制等价 MC 1.0 森林/平原树密度分化。密度纯函数于 seed + biomeAt → 同 seed 同树分布。
 void World::placeTrees(int wx0, int wx1, int wz0, int wz1)
 {
-    // §29.5-W1b 窗口归一（本文件同款：wx1<=wx0 = 全核心域原样；sparse 传 scaffold 窗钳入核心域
-    // ——候选域 ⊆ [0,m_width)² 恒与 fixed 相同域约定，occupied 栅格索引安全）。
-    const bool win = wx1 > wx0;
-    const int xLo = win ? std::max(wx0, 0) : 0;
-    const int xHi = win ? std::min(wx1, m_width) : m_width;
-    const int zLo = win ? std::max(wz0, 0) : 0;
-    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+    // §29.5-W1b 窗口归一（本文件同款：wx1<=wx0 = 全核心域原样；sparse 传 scaffold 窗）。t1073：
+    // occupied 栅格改**窗相对索引**（窗内列零偏移落格）——旧全局索引 x + m_width*z 只能表达核心域
+    // 内列，外环扩展域窗（核心域外）无处落格；窗相对栅格对核心内锚语义逐位等价（窗外的邻域查
+    // 询 = 栅格外 = 本轮未种 = 旧 OOB 跳过同值）。
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    const bool win = pw.win;
+    const int xLo = pw.xLo;
+    const int xHi = pw.xHi;
+    const int zLo = pw.zLo;
+    const int zHi = pw.zHi;
+    const int occW = xHi - xLo, occH = zHi - zLo; // 窗相对栅格尺寸（≥0）
 
-    std::vector<char> occupied(size_t(m_width) * size_t(m_depth), 0); // 主干占用栅格（1=该列已有树干）
+    std::vector<char> occupied(size_t(occW > 0 ? occW : 0) * size_t(occH > 0 ? occH : 0), 0); // 主干占用栅格（1=该列已有树干；窗相对索引）
 
     constexpr int kMinTrunk    = 4; // 主干最少格数
     constexpr int kMaxTrunk    = 7; // 最多 7（低洼处可达）；高处按世界高度钳到 4 → 高度自然参差（用户诉求）
@@ -6467,12 +6526,13 @@ void World::placeTrees(int wx0, int wx1, int wz0, int wz1)
             if (r % 100u >= densityPct) continue; // 密度筛选
 
             // 间距：主干列的 3×3 邻域（chebyshev 距离 ≤1）不得已有树干 → 保证主干间距 ≥2 列。
+            // t1073：窗相对索引（窗外 = 栅格外 = 本轮未种——与旧全局栅格的 OOB 跳过同值语义）。
             bool tooClose = false;
             for (int dz = -1; dz <= 1 && !tooClose; ++dz) {
                 for (int dx = -1; dx <= 1; ++dx) {
                     const int nx = x + dx, nz = z + dz;
-                    if (nx < 0 || nz < 0 || nx >= m_width || nz >= m_depth) continue;
-                    if (occupied[size_t(nx) + size_t(m_width) * size_t(nz)]) { tooClose = true; break; }
+                    if (nx < xLo || nz < zLo || nx >= xHi || nz >= zHi) continue;
+                    if (occupied[size_t(nx - xLo) + size_t(occW) * size_t(nz - zLo)]) { tooClose = true; break; }
                 }
             }
             if (tooClose) continue;
@@ -6496,7 +6556,7 @@ void World::placeTrees(int wx0, int wx1, int wz0, int wz1)
             } else {
                 placeTreeAt(x, surfaceY, z, trunkH, r >> 16);
             }
-            occupied[size_t(x) + size_t(m_width) * size_t(z)] = 1;
+            occupied[size_t(x - xLo) + size_t(occW) * size_t(z - zLo)] = 1; // t1073：窗相对索引
             ++placed;
         }
     }
@@ -6522,11 +6582,12 @@ void World::placeTrees(int wx0, int wx1, int wz0, int wz1)
 void World::placeTallGrass(int wx0, int wx1, int wz0, int wz1)
 {
     // §29.5-W1b 窗口归一（placeTrees 同款）。
-    const bool win = wx1 > wx0;
-    const int xLo = win ? std::max(wx0, 0) : 0;
-    const int xHi = win ? std::min(wx1, m_width) : m_width;
-    const int zLo = win ? std::max(wz0, 0) : 0;
-    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    const bool win = pw.win;
+    const int xLo = pw.xLo;
+    const int xHi = pw.xHi;
+    const int zLo = pw.zLo;
+    const int zHi = pw.zHi;
 
     // t337 群系密度表（% of grass 列生草丛）：forest 茂盛 / plains 适中 / hills 稀疏（spec「森林多草，草原适量草」）。
     constexpr int kPlainsGrassPct = 18; // 草原适量（spec「草原=少树适量草」：开阔点缀；旧 40% 偏密致全图铺草）
@@ -6604,11 +6665,12 @@ void World::placeTallGrass(int wx0, int wx1, int wz0, int wz1)
 void World::placeDesertFlora(int wx0, int wx1, int wz0, int wz1)
 {
     // §29.5-W1b 窗口归一（placeTrees 同款）。
-    const bool win = wx1 > wx0;
-    const int xLo = win ? std::max(wx0, 0) : 0;
-    const int xHi = win ? std::min(wx1, m_width) : m_width;
-    const int zLo = win ? std::max(wz0, 0) : 0;
-    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    const bool win = pw.win;
+    const int xLo = pw.xLo;
+    const int xHi = pw.xHi;
+    const int zLo = pw.zLo;
+    const int zHi = pw.zHi;
 
     constexpr unsigned kCactusPct   = 3;  // 仙人掌密度（% of 沙漠沙顶列；稀疏点缀）
     constexpr unsigned kDeadBushPct = 6;  // 枯死的灌木密度（% of 沙漠沙顶列；适中点缀）
@@ -6686,11 +6748,12 @@ void World::placeDesertFlora(int wx0, int wx1, int wz0, int wz1)
 void World::placeSwampPools(int wx0, int wx1, int wz0, int wz1)
 {
     // §29.5-W1b 窗口归一（placeTrees 同款）。
-    const bool win = wx1 > wx0;
-    const int xLo = win ? std::max(wx0, 0) : 0;
-    const int xHi = win ? std::min(wx1, m_width) : m_width;
-    const int zLo = win ? std::max(wz0, 0) : 0;
-    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    const bool win = pw.win;
+    const int xLo = pw.xLo;
+    const int xHi = pw.xHi;
+    const int zLo = pw.zLo;
+    const int zHi = pw.zHi;
 
     int pools = 0;
     for (int x = xLo; x < xHi; ++x) {
@@ -6725,11 +6788,12 @@ void World::placeSwampPools(int wx0, int wx1, int wz0, int wz1)
 void World::placeSwampFlora(int wx0, int wx1, int wz0, int wz1)
 {
     // §29.5-W1b 窗口归一（placeTrees 同款）。
-    const bool win = wx1 > wx0;
-    const int xLo = win ? std::max(wx0, 0) : 0;
-    const int xHi = win ? std::min(wx1, m_width) : m_width;
-    const int zLo = win ? std::max(wz0, 0) : 0;
-    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    const bool win = pw.win;
+    const int xLo = pw.xLo;
+    const int xHi = pw.xHi;
+    const int zLo = pw.zLo;
+    const int zHi = pw.zHi;
 
     constexpr unsigned kLilyPct   = 25; // 睡莲密度（% of 沼泽水格；水面点缀，非满铺）
     constexpr unsigned kMushPct   = 8;  // 蘑菇密度（% of 沼泽草岛格；稀疏阴暗处冒头）
@@ -6771,11 +6835,12 @@ void World::placeSwampFlora(int wx0, int wx1, int wz0, int wz1)
 void World::placeFlowers(int wx0, int wx1, int wz0, int wz1)
 {
     // §29.5-W1b 窗口归一（placeTrees 同款）。
-    const bool win = wx1 > wx0;
-    const int xLo = win ? std::max(wx0, 0) : 0;
-    const int xHi = win ? std::min(wx1, m_width) : m_width;
-    const int zLo = win ? std::max(wz0, 0) : 0;
-    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    const bool win = pw.win;
+    const int xLo = pw.xLo;
+    const int xHi = pw.xHi;
+    const int zLo = pw.zLo;
+    const int zHi = pw.zHi;
 
     // 各群系花密度（% of grass 列）。机制等价 MC 1.0 各群系花点缀密度分化：
     //   plains 多彩（草原花海，spec「平原多彩」）、forest 适中（林下小花）、swamp 适中（湿地野花）、hills 稀疏（裸岩少花）。
@@ -6852,11 +6917,12 @@ void World::placeSugarcane(int wx0, int wx1, int wz0, int wz1)
 {
     // §29.5-W1b 窗口归一（placeTrees 同款）。邻水判定 4 邻 × 2 层读 ±1 列 ⊆ scaffold 窗
     //（窗口含 scaffold ±1 chunk = 16 列余量 ≥ 1），读闭合见 sparsePopulateChunk 处置表。
-    const bool win = wx1 > wx0;
-    const int xLo = win ? std::max(wx0, 0) : 0;
-    const int xHi = win ? std::min(wx1, m_width) : m_width;
-    const int zLo = win ? std::max(wz0, 0) : 0;
-    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    const bool win = pw.win;
+    const int xLo = pw.xLo;
+    const int xHi = pw.xHi;
+    const int zLo = pw.zLo;
+    const int zHi = pw.zHi;
 
     constexpr unsigned kSugarcanePct = 10; // 邻水沙滩列生甘蔗密度（% of 邻水沙顶列；机制等价 MC 水边甘蔗稀疏散布
                                           //  t547④：30% → 10%（1/3），「沙滩生成太频繁」——甘蔗成片过长，降密度）
@@ -6930,11 +6996,12 @@ void World::placeSugarcane(int wx0, int wx1, int wz0, int wz1)
 void World::placeSweetBerryBushes(int wx0, int wx1, int wz0, int wz1)
 {
     // §29.5-W1b 窗口归一（placeTrees 同款）。
-    const bool win = wx1 > wx0;
-    const int xLo = win ? std::max(wx0, 0) : 0;
-    const int xHi = win ? std::min(wx1, m_width) : m_width;
-    const int zLo = win ? std::max(wz0, 0) : 0;
-    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    const bool win = pw.win;
+    const int xLo = pw.xLo;
+    const int xHi = pw.xHi;
+    const int zLo = pw.zLo;
+    const int zHi = pw.zHi;
 
     constexpr unsigned kBushPct = 5; // 雪原雪顶列生浆果丛密度（% of 雪顶列；低密度点缀，机制等价 MC 浆果丛稀疏）
     int placed = 0;
@@ -6973,11 +7040,12 @@ void World::placeSweetBerryBushes(int wx0, int wx1, int wz0, int wz1)
 void World::freezeSurfaceWater(int wx0, int wx1, int wz0, int wz1)
 {
     // §29.5-W1b 窗口归一（placeTrees 同款）。
-    const bool win = wx1 > wx0;
-    const int xLo = win ? std::max(wx0, 0) : 0;
-    const int xHi = win ? std::min(wx1, m_width) : m_width;
-    const int zLo = win ? std::max(wz0, 0) : 0;
-    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    const bool win = pw.win;
+    const int xLo = pw.xLo;
+    const int xHi = pw.xHi;
+    const int zLo = pw.zLo;
+    const int zHi = pw.zHi;
 
     if (kWaterLevel >= m_height) return; // 极端：世界高度不足（防御）
     int frozen = 0;
@@ -7134,11 +7202,12 @@ void World::tickIceMelt()
 void World::placeBedrock(int wx0, int wx1, int wz0, int wz1)
 {
     // §29.5-W1b 窗口归一（placeTrees 同款）。
-    const bool win = wx1 > wx0;
-    const int xLo = win ? std::max(wx0, 0) : 0;
-    const int xHi = win ? std::min(wx1, m_width) : m_width;
-    const int zLo = win ? std::max(wz0, 0) : 0;
-    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    const bool win = pw.win;
+    const int xLo = pw.xLo;
+    const int xHi = pw.xHi;
+    const int zLo = pw.zLo;
+    const int zHi = pw.zHi;
 
     constexpr int kBedrockTop = 4; // 基岩层上界（含）；y 0..4 共 5 层
     if (m_height <= 0) return;     // 极端：无高度世界不铺基岩（防御）
@@ -7200,11 +7269,12 @@ void World::scatterOres(int wx0, int wx1, int wz0, int wz1)
     // 以 tryOre 失位（offStone）反馈走向 = 体素态耦合形状，读域出窗即两序不齐（r2023c 恰红实
     // 证）→ cell 循环与 tryOre 上下界同钳窗，窗外位置恒「拒」= 确定性（fixed win=false 全域
     // 原样；sparse 面的跨 cell 交互缺口如实登记为 (c) 替代——见 sparsePopulateChunk 处置表）。
-    const bool win = wx1 > wx0;
-    const int xLo = win ? std::max(wx0, 0) : 0;
-    const int xHi = win ? std::min(wx1, m_width) : m_width;
-    const int zLo = win ? std::max(wz0, 0) : 0;
-    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    const bool win = pw.win;
+    const int xLo = pw.xLo;
+    const int xHi = pw.xHi;
+    const int zLo = pw.zLo;
+    const int zHi = pw.zHi;
 
     constexpr int kBedrockTop = 4; // 同 placeBedrock：基岩层 y 0..4 不布矿（旧 kOreMin=5 同源）
     constexpr int kCell       = 16; // 成脉网格（MC chunk 水平口径）
@@ -7246,8 +7316,12 @@ void World::scatterOres(int wx0, int wx1, int wz0, int wz1)
     // 置矿原语：越界 / 基岩层 / 海列 / stone 区段上界（y > h-3，同旧「y < h-2」）/ 非 Stone 拒绝。
     //   heightAt 逐格调 → 矿带按列自适应；先到先得由「仅置换 Stone」保证（重叠带稀有矿优先）。
     //   §29.5-W1b：窗口模式额外钳 x/z 读写域（窗外恒 false = 走向确定性，见函数头注释）。
+    //   t1073：外环扩展域（m_popWindowExtended）x/z 不再钳核心域——外环锚的窗在核心域外，旧码
+    //   此处硬拒 = 外环零矿的第二道病灶；窗外写入仍由 ChunkManager population 写域钳制（锚 ±1
+    //   chunk）+ 未物化写门双重守卫；y 域两形态同构照钳。fixed / 核心内锚 = 旧边界逐位原样。
     const auto tryOre = [&](int x, int y, int z, quint8 id) -> bool {
-        if (x < 0 || x >= m_width || z < 0 || z >= m_depth || y < 0 || y >= m_height) return false;
+        if (y < 0 || y >= m_height) return false;
+        if (!m_popWindowExtended && (x < 0 || x >= m_width || z < 0 || z >= m_depth)) return false;
         if (win && (x < xLo || x >= xHi || z < zLo || z >= zHi)) return false;
         if (y <= kBedrockTop) return false;
         const int h = std::min(heightAt(x, z), m_height - 1);
@@ -7262,11 +7336,12 @@ void World::scatterOres(int wx0, int wx1, int wz0, int wz1)
     int placedByKind[kOreKindCount] = {};
 
     // §29.5-W1b：cell 循环窗口化（覆盖窗 ±1 cell = 脉 reach ≤8 的全部可能源 cell；窗外 stamp
-    // 由 tryOre 域门恒拒）。fixed（win=false）= 全域原样。
-    const int cLo0 = win ? std::max(0, zLo - kCell) : 0;
-    const int cHi0 = win ? std::min(m_depth, zHi + kCell) : m_depth;
-    const int cLo1 = win ? std::max(0, xLo - kCell) : 0;
-    const int cHi1 = win ? std::min(m_width, xHi + kCell) : m_width;
+    // 由 tryOre 域门恒拒）。fixed（win=false）= 全域原样。t1073：外环扩展域不钳核心域（外环锚
+    // 的源 cell 域 = 窗 ±1 cell 整体；脉 reach ≤ 8 ⊆ ±1 cell 覆盖，跨 cell 交互缺口口径不变）。
+    const int cLo0 = win ? (m_popWindowExtended ? zLo - kCell : std::max(0, zLo - kCell)) : 0;
+    const int cHi0 = win ? (m_popWindowExtended ? zHi + kCell : std::min(m_depth, zHi + kCell)) : m_depth;
+    const int cLo1 = win ? (m_popWindowExtended ? xLo - kCell : std::max(0, xLo - kCell)) : 0;
+    const int cHi1 = win ? (m_popWindowExtended ? xHi + kCell : std::min(m_width, xHi + kCell)) : m_width;
     for (int cz = cLo0; cz < cHi0; cz += kCell) {
         for (int cx = cLo1; cx < cHi1; cx += kCell) {
             // review0906 #11：cell 中心列高**不再作海列整格跳过**——旧口径按中心列一票否决整个
@@ -7275,8 +7350,12 @@ void World::scatterOres(int wx0, int wx1, int wz0, int wz1)
             //   （h ≤ wl+1 即拒；veinN 计算便宜，纯海 cell 的脉在逐列 tryOre 全数被拒 = 零成本余量）。
             //   hc 仍保留：煤带（kind==1）上界的 cell 列高自适应（纯海 cell 中煤落点 y 同受逐列
             //   tryOre 兜底，无矿溢出）。
-            const int hc = std::min(heightAt(std::min(cx + kCell / 2, m_width - 1),
-                                             std::min(cz + kCell / 2, m_depth - 1)), m_height - 1);
+            //   t1073：heightAt 是无界纯函数，外环扩展域的 cell 中心列不再钳入核心域（旧码钳制
+            //   只为核心边界安全，钳值会改 hc → 煤带上界随之漂移；核心内锚/固定域保持旧钳制逐位）。
+            const int hc = m_popWindowExtended
+                ? std::min(heightAt(cx + kCell / 2, cz + kCell / 2), m_height - 1)
+                : std::min(heightAt(std::min(cx + kCell / 2, m_width - 1),
+                                    std::min(cz + kCell / 2, m_depth - 1)), m_height - 1);
             for (int k = 0; k < kOreKindCount; ++k) {
                 const VeinProfile &p = kProfiles[k];
                 // 每 cell 脉数 = base + (hash%100 < frac)%（每矿种独立盐流，确定性）。
@@ -7390,8 +7469,17 @@ void World::scatterOres(int wx0, int wx1, int wz0, int wz1)
 //   几格即遇——机制等价 MC gravel 浅层常见；留 ≥4 格顶盖防直接露天成「砾石丘」）。pass 序：scatterOres 之后
 //   （矿石先占位、砾袋不覆盖矿石）/ carveCaves 之前（后到的 carve 切穿矿袋 → 洞壁裸露沙砾，同矿石暴露语义）。
 //   海域列不跳过：纯替换无空腔（对比 placeUndergroundWaterPools 挖空腔须避海水柱），海底之下砾石袋自然。
-void World::placeGravelPockets()
+void World::placeGravelPockets(int wx0, int wx1, int wz0, int wz1)
 {
+    // t1073：窗口参数 + 外环扩展域（见 world.h 声明注释）：non-ext = 核心域 lattice 原样（整域
+    // 循环界不变，fixed 全域与核心内锚 population 逐位原样——窗外候选写入本就被写域钳制拒）；
+    // ext = 窗 ± kBand 的全局对齐 lattice（袋心 jitter±4 + 半径≤3 → reach ≤ 7 ≤ band 16）。
+    const bool ext = m_popWindowExtended;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    // （win 未取：本 pass 写域触达只取决于 ext——ext 恒蕴含 win=true，见下方 lattice 带；fixed /
+    //   核心内锚形态 pw 即全核心域或窗∩核心域，循环界不消费 pw——保持整域原样 = 逐位零变化面。）
+    const int xLo = pw.xLo, xHi = pw.xHi, zLo = pw.zLo, zHi = pw.zHi;
+
     constexpr int     kPocketGrid = 16;     // 候选网格间距（密度主旋钮：越大越稀；同 kPoolGrid 量级）
     constexpr unsigned kPocketPct = 45u;    // 候选命中概率（密度副旋钮：越大越多；t761 取值 → 每图约十余袋）
     constexpr int     kBedrockTop = 4;      // 不动基岩（同 carveCaves / placeBedrock）
@@ -7400,15 +7488,25 @@ void World::placeGravelPockets()
 
     int placed = 0;
     const int pocketSeed = m_seed + 7610; // 矿袋哈希偏移（与其它 worldgen hashColumn 解耦）
-    for (int bx = kPocketGrid / 2; bx < m_width; bx += kPocketGrid) {
-        for (int bz = kPocketGrid / 2; bz < m_depth; bz += kPocketGrid) {
+    constexpr int kBand = 16; // t1073：ext lattice 带（袋心 jitter±4 + 半径≤3 → reach ≤ 7 ≤ 16）
+    int bxLo = kPocketGrid / 2, bxHi = m_width, bzLo = kPocketGrid / 2, bzHi = m_depth;
+    if (ext) {
+        bxLo = kPocketGrid / 2
+             + kPocketGrid * floorDiv(xLo - kBand - kPocketGrid / 2 + kPocketGrid - 1, kPocketGrid);
+        bxHi = xHi + kBand;
+        bzLo = kPocketGrid / 2
+             + kPocketGrid * floorDiv(zLo - kBand - kPocketGrid / 2 + kPocketGrid - 1, kPocketGrid);
+        bzHi = zHi + kBand;
+    }
+    for (int bx = bxLo; bx < bxHi; bx += kPocketGrid) {
+        for (int bz = bzLo; bz < bzHi; bz += kPocketGrid) {
             const quint32 r = hashColumn(pocketSeed, bx, bz);
             if ((r % 100u) >= kPocketPct) continue; // 概率筛选
             const int span = kPocketGrid / 2;
             const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
             const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
             const int cx = bx + jx, cz = bz + jz;
-            if (cx < 3 || cz < 3 || cx >= m_width - 3 || cz >= m_depth - 3) continue; // 留 3 格边界（半径 ≤3 不越界）
+            if (!ext && (cx < 3 || cz < 3 || cx >= m_width - 3 || cz >= m_depth - 3)) continue; // 留 3 格边界（半径 ≤3 不越界；t1073 扩展域由写域钳制守卫）
             const int h = std::min(heightAt(cx, cz), m_height - 1);
             // 浅层带 y 范围：地表下 [kShallowMin, kShallowMax]（顶盖 ≥4 格；浅层富集）。
             const int yHi = h - kShallowMin;
@@ -7470,11 +7568,12 @@ void World::carveCaves(int wx0, int wx1, int wz0, int wz1)
     // §29.5-W1b 窗口归一（placeTrees 同款）。(a) 阈值噪声逐体素纯函数 → 窗口化逐位等价；
     // (b) worm 路径纯 noise3 位置链（零体素读）仍**全域 trace**，仅对不触窗口的 carveSphere
     // 作 bbox 早退（球心距窗 > 半径+1 的球其写域必在窗外 = 拒写同义，C 列内容逐位不受影响）。
-    const bool win = wx1 > wx0;
-    const int xLo = win ? std::max(wx0, 0) : 0;
-    const int xHi = win ? std::min(wx1, m_width) : m_width;
-    const int zLo = win ? std::max(wz0, 0) : 0;
-    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    const bool win = pw.win;
+    const int xLo = pw.xLo;
+    const int xHi = pw.xHi;
+    const int zLo = pw.zLo;
+    const int zHi = pw.zHi;
 
     constexpr int kBedrockTop   = 4;     // 基岩层上界（与 placeBedrock 同源；不挖基岩）
     constexpr int kSurfaceCeil  = 4;     // 表面之下留几格（保 ≥1 石顶：dirt 在 [h-2,h-1]、grass 在 h，故 h-3 起挖则留 y=h-3 石顶）
@@ -7539,7 +7638,11 @@ void World::carveCaves(int wx0, int wx1, int wz0, int wz1)
                     const double gz = double(cz + oz) + 0.5 - pz;
                     if (gx * gx + gy * gy + gz * gz > r2) continue;
                     const int x = cx + ox, y = cy + oy, z = cz + oz;
-                    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth) continue;
+                    // t1073：外环扩展域 x/z 不再钳核心域（外环锚的球心/写域可在核心域外；窗外写入
+                    // 由 population 写域钳制拒——「拒写同义」语义在扩展域同样闭合）；y 域照钳。
+                    if (y < 0 || y >= m_height) continue;
+                    if (!m_popWindowExtended
+                        && (x < 0 || z < 0 || x >= m_width || z >= m_depth)) continue;
                     const quint8 b = m_chunks.blockAt(x, y, z);
                     if (b == BlockRegistry::Air || b == BlockRegistry::Bedrock || b == BlockRegistry::Water) continue;
                     m_chunks.setBlock(x, y, z, BlockRegistry::Air);
@@ -7554,10 +7657,24 @@ void World::carveCaves(int wx0, int wx1, int wz0, int wz1)
     // 确定性起点：hashColumn 散布网格（seed +7919 偏移 → 与树/草的 hashColumn(m_seed,...) 解耦）。
     //   每格 1 候选：hash 低位 50% 概率生 worm（密度控制：网格 + 概率双重）；起点在 cell 内 ±抖动；
     //   起始 yaw 由 hash 高位派生（0..2π 全方位）→ worm 朝向各异。y 选 [bedrockTop+2, h-ceil-1] 内随机层。
+    //   t1073 外环扩展域：fixed / 核心内锚 = 核心域 lattice 原样；外环锚 = **窗 ±kPopReach 带的
+    //   全局对齐 lattice**（相位 8 mod 16 单一权威——跨锚重放对同一 lattice 点派生同 worm 起点，
+    //   每 chunk 内容 = 其自身锚重放的纯函数；worm 寿命 60 步 × 0.75 步距 ≈ 45 格 reach ≤ 带 48
+    //   = 带外 worm 起点写域不可能触窗 = 排除即「拒写同义」，处置表语义不破）。
     int placedStarts = 0;
     const int caveSeed = m_seed + 7919; // 洞穴哈希偏移（与树/草 hashColumn 解耦；纯整数加，确定性）
-    for (int bx = kWormGrid / 2; bx < m_width; bx += kWormGrid) {
-        for (int bz = kWormGrid / 2; bz < m_depth; bz += kWormGrid) {
+    constexpr int kPopReach = 48; // t1073：外环扩展域 lattice 带（worm reach 上界取整到 16 网格粒度）
+    const bool ext = m_popWindowExtended;
+    int bxLo = kWormGrid / 2, bxHi = m_width, bzLo = kWormGrid / 2, bzHi = m_depth;
+    if (ext) {
+        // 全局对齐 lattice 下界：最小 bx ≡ 8 (mod 16) 且 ≥ xLo - kPopReach（floorDiv 单一权威取相位）。
+        bxLo = kWormGrid / 2 + kWormGrid * floorDiv(xLo - kPopReach - kWormGrid / 2 + kWormGrid - 1, kWormGrid);
+        bxHi = xHi + kPopReach;
+        bzLo = kWormGrid / 2 + kWormGrid * floorDiv(zLo - kPopReach - kWormGrid / 2 + kWormGrid - 1, kWormGrid);
+        bzHi = zHi + kPopReach;
+    }
+    for (int bx = bxLo; bx < bxHi; bx += kWormGrid) {
+        for (int bz = bzLo; bz < bzHi; bz += kWormGrid) {
             const quint32 r = hashColumn(caveSeed, bx, bz);
             if ((r & 1u) == 0u) continue; // 50% 概率生 worm（密度控制）
             // cell 内 ±span/2 抖动（避免网格化排列的机械感）
@@ -7565,7 +7682,7 @@ void World::carveCaves(int wx0, int wx1, int wz0, int wz1)
             const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
             const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
             const int sx = bx + jx, sz = bz + jz;
-            if (sx < 1 || sz < 1 || sx >= m_width - 1 || sz >= m_depth - 1) continue; // 留 1 格边界
+            if (!ext && (sx < 1 || sz < 1 || sx >= m_width - 1 || sz >= m_depth - 1)) continue; // 留 1 格边界（扩展域由写域钳制守卫）
             const int h = std::min(heightAt(sx, sz), m_height - 1);
             const int yLo = kBedrockTop + 2;
             const int yHi = h - kSurfaceCeil - 1;
@@ -7603,9 +7720,14 @@ void World::carveCaves(int wx0, int wx1, int wz0, int wz1)
             w.x += cp * std::cos(w.yaw) * kWormStep;
             w.y +=     std::sin(w.pitch) * kWormStep;
             w.z += cp * std::sin(w.yaw) * kWormStep;
-            // 出界 → 杀 worm。
-            if (w.x < 1.0 || w.z < 1.0 || w.x >= double(m_width) - 1.0 || w.z >= double(m_depth) - 1.0) break;
-            if (w.y < double(kBedrockTop + 1) || w.y >= double(m_height) - 1) break;
+            // 出界 → 杀 worm。t1073：外环扩展域 x/z 不杀（无界平面；寿命 60 步上界自限，窗外写
+            // 由 population 写域钳制拒）；y 界照杀。fixed / 核心内锚 = 旧 x/z 杀界逐位原样。
+            if (ext) {
+                if (w.y < double(kBedrockTop + 1) || w.y >= double(m_height) - 1) break;
+            } else {
+                if (w.x < 1.0 || w.z < 1.0 || w.x >= double(m_width) - 1.0 || w.z >= double(m_depth) - 1.0) break;
+                if (w.y < double(kBedrockTop + 1) || w.y >= double(m_height) - 1) break;
+            }
             ++step;
             --w.life;
             // 分叉：每 kForkEvery 步、且 worm 总数 < kMaxWorms 时，按 hashVoxel(seed,id,step,0x7027) % 100 概率生子。
@@ -7647,11 +7769,12 @@ void World::carveCaves(int wx0, int wx1, int wz0, int wz1)
 void World::fillWater(int wx0, int wx1, int wz0, int wz1)
 {
     // §29.5-W1b 窗口归一（placeTrees 同款）。
-    const bool win = wx1 > wx0;
-    const int xLo = win ? std::max(wx0, 0) : 0;
-    const int xHi = win ? std::min(wx1, m_width) : m_width;
-    const int zLo = win ? std::max(wz0, 0) : 0;
-    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    const bool win = pw.win;
+    const int xLo = pw.xLo;
+    const int xHi = pw.xHi;
+    const int zLo = pw.zLo;
+    const int zHi = pw.zHi;
 
     int waterCells = 0;
     for (int x = xLo; x < xHi; ++x) {
@@ -7690,8 +7813,16 @@ void World::fillWater(int wx0, int wx1, int wz0, int wz1)
 //   （海 + 沙滩，避免海水灌入 / 沙底）/ 低洼（surfaceY <= waterLevel+2 → 洞口会灌海水）。经 m_chunks.setBlock
 //   直写（跨 chunk 路由 + 标脏 + heightmap 增量维护），不发 blockBroken（worldgen 既有约定）。纯函数于 seed
 //   （hashColumn + 已生成 chunk 的纯几何查询）→ 同 seed 同洞口分布。
-void World::carveCaveEntrances()
+void World::carveCaveEntrances(int wx0, int wx1, int wz0, int wz1)
 {
+    // t1073：窗口参数 + 外环扩展域（见 world.h 声明注释）：non-ext = 核心域 lattice 原样（整域
+    // 循环界不变）；ext = 窗 ± kBand 的全局对齐 lattice（jitter±2 + 3×3 开口 → reach ≤ 3 ≤ band 16）。
+    const bool ext = m_popWindowExtended;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    // （win 未取：本 pass 写域触达只取决于 ext——ext 恒蕴含 win=true，见下方 lattice 带；fixed /
+    //   核心内锚形态 pw 即全核心域或窗∩核心域，循环界不消费 pw——保持整域原样 = 逐位零变化面。）
+    const int xLo = pw.xLo, xHi = pw.xHi, zLo = pw.zLo, zHi = pw.zHi;
+
     constexpr int kEntranceGrid   = 10;      // 候选网格间距（比旧 t309 的 18 更密 → 更多洞口）
     constexpr unsigned kEntrancePct = 60u;   // 候选命中概率（%；比旧 30 更高 → 更多洞口）
     constexpr int kBedrockTop      = 4;      // 不挖基岩（与 carveCaves / placeBedrock 同源）
@@ -7701,8 +7832,18 @@ void World::carveCaveEntrances()
 
     int placed = 0;
     const int entranceSeed = m_seed + 3091;  // 洞口哈希偏移（与树 / 草 / 洞穴 hashColumn 解耦；纯整数加，确定性）
-    for (int bx = kEntranceGrid / 2; bx < m_width; bx += kEntranceGrid) {
-        for (int bz = kEntranceGrid / 2; bz < m_depth; bz += kEntranceGrid) {
+    constexpr int kBand = 16; // t1073：ext lattice 带
+    int bxLo = kEntranceGrid / 2, bxHi = m_width, bzLo = kEntranceGrid / 2, bzHi = m_depth;
+    if (ext) {
+        bxLo = kEntranceGrid / 2
+             + kEntranceGrid * floorDiv(xLo - kBand - kEntranceGrid / 2 + kEntranceGrid - 1, kEntranceGrid);
+        bxHi = xHi + kBand;
+        bzLo = kEntranceGrid / 2
+             + kEntranceGrid * floorDiv(zLo - kBand - kEntranceGrid / 2 + kEntranceGrid - 1, kEntranceGrid);
+        bzHi = zHi + kBand;
+    }
+    for (int bx = bxLo; bx < bxHi; bx += kEntranceGrid) {
+        for (int bz = bzLo; bz < bzHi; bz += kEntranceGrid) {
             const quint32 r = hashColumn(entranceSeed, bx, bz);
             if ((r % 100u) >= kEntrancePct) continue; // 概率筛选
             // 网格内 ±span/2 抖动（避免网格化排列的机械感，同 carveCaves worm 起点抖动）。
@@ -7710,7 +7851,7 @@ void World::carveCaveEntrances()
             const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
             const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
             const int x = bx + jx, z = bz + jz;
-            if (x < 2 || z < 2 || x >= m_width - 2 || z >= m_depth - 2) continue; // 留 2 格边界（3×3 开口不越界）
+            if (!ext && (x < 2 || z < 2 || x >= m_width - 2 || z >= m_depth - 2)) continue; // 留 2 格边界（3×3 开口不越界；t1073 扩展域由写域钳制守卫）
             if (seaColumnHeight(x, z) >= 0) continue; // 海域（海 + 沙滩）不开口（避免海水灌入 / 沙底）
             const Biome bio = biomeAt(x, z);
             if (bio == Biome::Desert) continue; // 沙漠沙底不开口（无草 / 土 → 暴露纯沙不像洞口）
@@ -7776,11 +7917,12 @@ void World::carveCanyon(int wx0, int wx1, int wz0, int wz1)
     // §29.5-W1b 窗口归一（carveCaves 同款）：路径推导（noise2 位置链 + 起点 hash）纯函数仍全域
     // trace；仅对不触窗口的 carveDisc/排水带/侧洞作 bbox 早退（写域必在窗外 = 拒写同义，C 列
     // 内容逐位不受影响；fixed win=false 永不早退 = 逐位原样）。
-    const bool win = wx1 > wx0;
-    const int xLo = win ? std::max(wx0, 0) : 0;
-    const int xHi = win ? std::min(wx1, m_width) : m_width;
-    const int zLo = win ? std::max(wz0, 0) : 0;
-    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    const bool win = pw.win;
+    const int xLo = pw.xLo;
+    const int xHi = pw.xHi;
+    const int zLo = pw.zLo;
+    const int zHi = pw.zHi;
 
     constexpr int kFloor       = 22;    // 峡谷底 y（远高于基岩层 0..4，carveDisc 另跳过 Bedrock；落在矿层带内 → 峡壁裸露煤/铜/铁/金矿层）
     constexpr int kBaseRadius  = 3;     // 底部半径（窄底；直径 ~6）
@@ -7824,7 +7966,9 @@ void World::carveCanyon(int wx0, int wx1, int wz0, int wz1)
                 const double gz = double(icz + oz) + 0.5 - cz;
                 if (gx * gx + gz * gz > r2) continue;
                 const int x = icx + ox, z = icz + oz;
-                if (x < 0 || z < 0 || x >= m_width || z >= m_depth) continue;
+                // t1073：外环扩展域 x/z 不再钳核心域（盘心/写域可在核心域外；窗外写入由 population
+                // 写域钳制拒）；fixed / 核心内锚 = 旧边界逐位原样。
+                if (!m_popWindowExtended && (x < 0 || z < 0 || x >= m_width || z >= m_depth)) continue;
                 if (seaColumnHeight(x, z) >= 0) continue; // 海域（海 + 沙滩）不开峡（峡谷为陆地地貌）
                 const quint8 b = m_chunks.blockAt(x, y, z);
                 // t376：地下水池（placeUndergroundWaterPools，先于峡谷）若与峡谷相交，carve 会把池水暴露给
@@ -7887,7 +8031,8 @@ void World::carveCanyon(int wx0, int wx1, int wz0, int wz1)
             for (int oz = -kDrainRadius; oz <= kDrainRadius; ++oz) {
                 if (ox * ox + oz * oz > R2) continue;
                 const int x = p.ix + ox, z = p.iz + oz;
-                if (x < 0 || z < 0 || x >= m_width || z >= m_depth) continue;
+                // t1073：外环扩展域 x/z 不钳核心域（同 carveDisc 口径；窗外写入由写域钳制拒）。
+                if (!m_popWindowExtended && (x < 0 || z < 0 || x >= m_width || z >= m_depth)) continue;
                 if (seaColumnHeight(x, z) >= 0) continue; // 海域不排（海独立于峡谷）
                 const int topY = std::min(p.surfaceY, m_height - 1);
                 for (int y = kFloor; y <= topY; ++y) {
@@ -7946,11 +8091,12 @@ void World::carveCanyon(int wx0, int wx1, int wz0, int wz1)
 void World::pruneFloatingSnowLayers(int wx0, int wx1, int wz0, int wz1)
 {
     // §29.5-W1b 窗口归一（placeTrees 同款）：逐列扫描读自身列正下方一格，窗口化逐位等价。
-    const bool win = wx1 > wx0;
-    const int xLo = win ? std::max(wx0, 0) : 0;
-    const int xHi = win ? std::min(wx1, m_width) : m_width;
-    const int zLo = win ? std::max(wz0, 0) : 0;
-    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    const bool win = pw.win;
+    const int xLo = pw.xLo;
+    const int xHi = pw.xHi;
+    const int zLo = pw.zLo;
+    const int zHi = pw.zHi;
 
     int pruned = 0;
     for (int x = xLo; x < xHi; ++x) {
@@ -7981,11 +8127,12 @@ void World::pruneFloatingSnowLayers(int wx0, int wx1, int wz0, int wz1)
 void World::pruneUnsupportedWorldgenRails(int wx0, int wx1, int wz0, int wz1)
 {
     // §29.5-W1b 窗口归一（placeTrees 同款）：逐列扫描读自身列正下方一格，窗口化逐位等价。
-    const bool win = wx1 > wx0;
-    const int xLo = win ? std::max(wx0, 0) : 0;
-    const int xHi = win ? std::min(wx1, m_width) : m_width;
-    const int zLo = win ? std::max(wz0, 0) : 0;
-    const int zHi = win ? std::min(wz1, m_depth) : m_depth;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    const bool win = pw.win;
+    const int xLo = pw.xLo;
+    const int xHi = pw.xHi;
+    const int zLo = pw.zLo;
+    const int zHi = pw.zHi;
 
     int pruned = 0;
     for (int x = xLo; x < xHi; ++x) {
@@ -8008,8 +8155,16 @@ void World::pruneUnsupportedWorldgenRails(int wx0, int wx1, int wz0, int wz1)
 //   carve 一个小圆盘空腔（底层水源 + 上方 air 气室），空腔被周围实体岩石天然封闭 → 水源稳态（不蔓延）+ 黑暗。
 //   y 范围 (bedrockTop+3, h-surfaceCeil-airAbove-1]：紧贴基岩之上 + 地表之下足够深（上方留石顶 → 封闭）。
 //   经 m_chunks.setBlock 直写；纯函数于 seed → 同 seed 同水池分布。
-void World::placeUndergroundWaterPools()
+void World::placeUndergroundWaterPools(int wx0, int wx1, int wz0, int wz1)
 {
+    // t1073：窗口参数 + 外环扩展域（见 world.h 声明注释）：non-ext = 核心域 lattice 原样（整域
+    // 循环界不变）；ext = 窗 ± kBand 的全局对齐 lattice（jitter±3 + 半径≤3 圆盘 → reach ≤ 6 ≤ band 16）。
+    const bool ext = m_popWindowExtended;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    // （win 未取：本 pass 写域触达只取决于 ext——ext 恒蕴含 win=true，见下方 lattice 带；fixed /
+    //   核心内锚形态 pw 即全核心域或窗∩核心域，循环界不消费 pw——保持整域原样 = 逐位零变化面。）
+    const int xLo = pw.xLo, xHi = pw.xHi, zLo = pw.zLo, zHi = pw.zHi;
+
     constexpr int kPoolGrid      = 14;      // 候选网格间距
     constexpr unsigned kPoolPct  = 40u;     // 候选命中概率
     constexpr int kBedrockTop    = 4;       // 不动基岩（同 carveCaves / placeBedrock）
@@ -8018,15 +8173,25 @@ void World::placeUndergroundWaterPools()
 
     int placed = 0;
     const int poolSeed = m_seed + 5309; // 水池哈希偏移（与其它 worldgen hashColumn 解耦）
-    for (int bx = kPoolGrid / 2; bx < m_width; bx += kPoolGrid) {
-        for (int bz = kPoolGrid / 2; bz < m_depth; bz += kPoolGrid) {
+    constexpr int kBand = 16; // t1073：ext lattice 带
+    int bxLo = kPoolGrid / 2, bxHi = m_width, bzLo = kPoolGrid / 2, bzHi = m_depth;
+    if (ext) {
+        bxLo = kPoolGrid / 2
+             + kPoolGrid * floorDiv(xLo - kBand - kPoolGrid / 2 + kPoolGrid - 1, kPoolGrid);
+        bxHi = xHi + kBand;
+        bzLo = kPoolGrid / 2
+             + kPoolGrid * floorDiv(zLo - kBand - kPoolGrid / 2 + kPoolGrid - 1, kPoolGrid);
+        bzHi = zHi + kBand;
+    }
+    for (int bx = bxLo; bx < bxHi; bx += kPoolGrid) {
+        for (int bz = bzLo; bz < bzHi; bz += kPoolGrid) {
             const quint32 r = hashColumn(poolSeed, bx, bz);
             if ((r % 100u) >= kPoolPct) continue; // 概率筛选
             const int span = kPoolGrid / 2;
             const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
             const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
             const int cx = bx + jx, cz = bz + jz;
-            if (cx < 3 || cz < 3 || cx >= m_width - 3 || cz >= m_depth - 3) continue; // 留 3 格边界（半径 ≤3 不越界）
+            if (!ext && (cx < 3 || cz < 3 || cx >= m_width - 3 || cz >= m_depth - 3)) continue; // 留 3 格边界（半径 ≤3 不越界；t1073 扩展域由写域钳制守卫）
             if (seaColumnHeight(cx, cz) >= 0) continue; // t338：海域已有海，不叠地下水池（heightAt 为纯自然高度，会按自然高度算 y 范围误挖入海水柱）
             const int h = std::min(heightAt(cx, cz), m_height - 1);
             // 水池 y 范围：基岩之上 ~ 地表之下足够深（保上方有石顶 → 封闭黑暗）。
@@ -8073,8 +8238,16 @@ void World::placeUndergroundWaterPools()
 //   上方气室），但填 Lava 源（state=0）且仅散布于 y < kLavaLakeMaxY(30) 的地下深处。空腔被周围实体岩封闭 →
 //   岩浆源无水平 air 邻居 → 稳态（tickLavaFlow 不扩散）；气室无天光 → 黑暗（仅岩浆自发光暖色，但本工程岩浆段
 //   走 NoLighting 材质非真光源，气室仍记为暗）。纯函数于 seed → 同 seed 同岩浆湖分布。
-void World::placeLavaLakes()
+void World::placeLavaLakes(int wx0, int wx1, int wz0, int wz1)
 {
+    // t1073：窗口参数 + 外环扩展域（见 world.h 声明注释）：non-ext = 核心域 lattice 原样（整域
+    // 循环界不变）；ext = 窗 ± kBand 的全局对齐 lattice（jitter±4 + 半径≤3 圆盘 → reach ≤ 7 ≤ band 16）。
+    const bool ext = m_popWindowExtended;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    // （win 未取：本 pass 写域触达只取决于 ext——ext 恒蕴含 win=true，见下方 lattice 带；fixed /
+    //   核心内锚形态 pw 即全核心域或窗∩核心域，循环界不消费 pw——保持整域原样 = 逐位零变化面。）
+    const int xLo = pw.xLo, xHi = pw.xHi, zLo = pw.zLo, zHi = pw.zHi;
+
     constexpr int kPoolGrid      = 16;      // 候选网格间距（比水池略稀 → 岩浆湖更稀有）
     constexpr unsigned kPoolPct  = 30u;     // 候选命中概率
     constexpr int kBedrockTop    = 4;       // 不动基岩（同 carveCaves / placeBedrock）
@@ -8082,15 +8255,25 @@ void World::placeLavaLakes()
 
     int placed = 0;
     const int poolSeed = m_seed + 9309; // 岩浆湖哈希偏移（与其它 worldgen hashColumn 解耦）
-    for (int bx = kPoolGrid / 2; bx < m_width; bx += kPoolGrid) {
-        for (int bz = kPoolGrid / 2; bz < m_depth; bz += kPoolGrid) {
+    constexpr int kBand = 16; // t1073：ext lattice 带
+    int bxLo = kPoolGrid / 2, bxHi = m_width, bzLo = kPoolGrid / 2, bzHi = m_depth;
+    if (ext) {
+        bxLo = kPoolGrid / 2
+             + kPoolGrid * floorDiv(xLo - kBand - kPoolGrid / 2 + kPoolGrid - 1, kPoolGrid);
+        bxHi = xHi + kBand;
+        bzLo = kPoolGrid / 2
+             + kPoolGrid * floorDiv(zLo - kBand - kPoolGrid / 2 + kPoolGrid - 1, kPoolGrid);
+        bzHi = zHi + kBand;
+    }
+    for (int bx = bxLo; bx < bxHi; bx += kPoolGrid) {
+        for (int bz = bzLo; bz < bzHi; bz += kPoolGrid) {
             const quint32 r = hashColumn(poolSeed, bx, bz);
             if ((r % 100u) >= kPoolPct) continue; // 概率筛选
             const int span = kPoolGrid / 2;
             const int jx = int((r >> 1) & 0xFu) % (span + 1) - span / 2;
             const int jz = int((r >> 5) & 0xFu) % (span + 1) - span / 2;
             const int cx = bx + jx, cz = bz + jz;
-            if (cx < 3 || cz < 3 || cx >= m_width - 3 || cz >= m_depth - 3) continue; // 留 3 格边界
+            if (!ext && (cx < 3 || cz < 3 || cx >= m_width - 3 || cz >= m_depth - 3)) continue; // 留 3 格边界（t1073 扩展域由写域钳制守卫）
             if (seaColumnHeight(cx, cz) >= 0) continue; // 海域不叠岩浆湖（避免与海水柱冲突）
             // 岩浆湖 y 范围：基岩之上 ~ kLavaLakeMaxY 之下（spec「Y<30」）。地下深处封闭洞穴。
             const int yLo = kBedrockTop + 3;
@@ -9968,8 +10151,17 @@ void World::placeStronghold()
 //   （per-lake hash 位）在湖床之下藏一个空心穹顶气室（保留 1 层石顶 → 水源不漏；穹顶被 stone 封闭 → 稳定 air 气室），
 //   形成「地表浅湖 + 下伏空腔」与「纯地表浅湖」两种形态混排。仅 plains/forest；避开沙滩 / 水下 / 海平面附近（湖独立
 //   于海）。经 m_chunks.setBlock 直写；fbm / hashColumn 纯函数 → 同 seed 同湖形（PLAN §2-K）。
-void World::placeSurfaceLakes()
+void World::placeSurfaceLakes(int wx0, int wx1, int wz0, int wz1)
 {
+    // t1073：窗口参数 + 外环扩展域（见 world.h 声明注释）：non-ext = 核心域 lattice 原样（整域
+    // 循环界不变）；ext = 窗 ± kBand 的全局对齐 lattice（jitter±3 + rad≤3 盘 + rad+1 岸扫描 →
+    // reach ≤ 7 ≤ band 16）。non-ext 的 rad+1 边界让位检查保持逐位原样。
+    const bool ext = m_popWindowExtended;
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    // （win 未取：本 pass 写域触达只取决于 ext——ext 恒蕴含 win=true，见下方 lattice 带；fixed /
+    //   核心内锚形态 pw 即全核心域或窗∩核心域，循环界不消费 pw——保持整域原样 = 逐位零变化面。）
+    const int xLo = pw.xLo, xHi = pw.xHi, zLo = pw.zLo, zHi = pw.zHi;
+
     // 湖泊密度标定（密度 ∝ pct/grid²）。t375 把 grid 18→12、pct 25→50（密度约 4.5×）后实测「湖太多」，
     //   t427 仅下调命中概率（pct 50→20；grid 保留 12 以维持细网格的空间均匀分布）→ 密度约 0.14，介于
     //   t375 前「太少」(0.077) 与 t375 后「太多」(0.347) 之间 = 偶发 / 适度。不动「局部低洼」几何判定
@@ -9981,8 +10173,18 @@ void World::placeSurfaceLakes()
     int placed = 0;
     int caverns = 0; // t340：湖下空心穹顶气室计数（形态混排核对）
     const int lakeSeed = m_seed + 7309; // 湖泊哈希偏移（与其它 worldgen hashColumn 解耦）
-    for (int bx = kLakeGrid / 2; bx < m_width; bx += kLakeGrid) {
-        for (int bz = kLakeGrid / 2; bz < m_depth; bz += kLakeGrid) {
+    constexpr int kBand = 16; // t1073：ext lattice 带
+    int bxLo = kLakeGrid / 2, bxHi = m_width, bzLo = kLakeGrid / 2, bzHi = m_depth;
+    if (ext) {
+        bxLo = kLakeGrid / 2
+             + kLakeGrid * floorDiv(xLo - kBand - kLakeGrid / 2 + kLakeGrid - 1, kLakeGrid);
+        bxHi = xHi + kBand;
+        bzLo = kLakeGrid / 2
+             + kLakeGrid * floorDiv(zLo - kBand - kLakeGrid / 2 + kLakeGrid - 1, kLakeGrid);
+        bzHi = zHi + kBand;
+    }
+    for (int bx = bxLo; bx < bxHi; bx += kLakeGrid) {
+        for (int bz = bzLo; bz < bzHi; bz += kLakeGrid) {
             const quint32 r = hashColumn(lakeSeed, bx, bz);
             if ((r % 100u) >= kLakePct) continue; // 概率筛选
             const int span = kLakeGrid / 2;
@@ -9991,9 +10193,9 @@ void World::placeSurfaceLakes()
             const int x = bx + jx, z = bz + jz;
             const int rad = 2 + int((r >> 9) & 1u); // 半径 2..3
             const bool wantCavern = (r >> 17) & 1u;  // t340：约半数湖下藏空心穹顶气室（形态混排：地表浅湖 / 湖+下伏空腔）
-            // 留 rad+1 边界（局部低洼判定扫 disc + 湖岸外圈，须全在界内）。
-            if (x - (rad + 1) < 0 || z - (rad + 1) < 0
-                || x + (rad + 1) >= m_width || z + (rad + 1) >= m_depth) continue;
+            // 留 rad+1 边界（局部低洼判定扫 disc + 湖岸外圈，须全在界内）。t1073 扩展域跳过（写域钳制守卫）。
+            if (!ext && (x - (rad + 1) < 0 || z - (rad + 1) < 0
+                || x + (rad + 1) >= m_width || z + (rad + 1) >= m_depth)) continue;
             if (seaColumnHeight(x, z) >= 0) continue; // t338：海域不叠地表湖（海独立于湖；heightAt 纯自然高度会误判海列为可挖平坦地 → 误挖海水柱）
             const Biome bio = biomeAt(x, z);
             if (bio != Biome::Plains && bio != Biome::Forest) continue; // 仅 plains/forest
