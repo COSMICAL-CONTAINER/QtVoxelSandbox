@@ -244,6 +244,16 @@ qt_add_executable(voxelsandbox
     src/Game/tooldropinstancing.h
     src/Game/billboarddropinstancing.cpp
     src/Game/billboarddropinstancing.h
+    # t1075 blob 软阴影（玩家 + 生物的贴地投影）：Game 层 EntityShadowField = 对地采样权威
+    #   （15Hz 空转门节拍 + 指纹差分；supportTopYAt 中心列向下最近承载面 + chunkExistsAt
+    #   未物化缺席门——新代码统一走 WorldFacade 收窄面），Renderer 层 BlobShadowGeometry =
+    #   贴片几何专用面（八边形顶点色径向渐变 disc，全实体合单 Model 单 draw）。对地采样点
+    #   C++ 侧算好随专用面下发，QML 零世界查询零逐帧扫（派工不变量①）；零 MC 资产（程序
+    #   几何 + 顶点色程序渐变，§9 合规）。
+    src/Game/entityshadowfield.cpp
+    src/Game/entityshadowfield.h
+    src/Renderer/blobshadowgeometry.cpp
+    src/Renderer/blobshadowgeometry.h
     # t95 统一实体管理器（Entities 层）：测试生物 / 玩家推动 / 重力。为后续 Mob/AI 系统铺垫统一基类。
     src/Entities/entitymanager.cpp
     src/Entities/entitymanager.h
@@ -1245,6 +1255,15 @@ add_executable(redstone_matrix_test
     # t1074 无限世界外环挖方块全黑探针附加：World 层直编（增量光照域门/盒钳制/边界读/负坐标标脏
     #   四面 + 真链出核挖掘/火把行为柱——world/streamingbridge/chunklifecycle 系已列）。
     tools/matrix/section48_streaming_outer_light.cpp
+    # t1075 blob 软阴影探针附加：Game 层采样权威 + Renderer 层贴片几何直编（对地采样语义行为级
+    #   腿：平地贴地 Y / 悬崖边缘 / 腾空衰减 / 未物化缺席 / fixed-sparse 贴地一致 / 几何可数通道 +
+    #   结构钉——entityshadowfield/blobshadowgeometry 系新列，world/entitymanager/playercontroller
+    #   系已列）。
+    tools/matrix/section49_entity_blob_shadow.cpp
+    src/Game/entityshadowfield.cpp
+    src/Game/entityshadowfield.h
+    src/Renderer/blobshadowgeometry.cpp
+    src/Renderer/blobshadowgeometry.h
     # t1022 键位映射表探针附加：Core 层 KeybindManager（默认表完整性 / 冲突拒收 / settings.json
     #   round-trip——显式 storePath 密闭不触真实档）。PlayerController setKey 规范化消费同链直编。
     src/Core/keybindmanager.cpp

@@ -76,6 +76,12 @@ public:
     int height() const { return m_world->height(); }
     // t360 列顶实面世界 y（PCF 软影采样源；R20.13 快照采集统一走收窄面——World 同名方法逐位转发）。
     float columnTopSurfaceY(int x, int z) const { return m_world->columnTopSurfaceY(x, z); }
+    // t1075 列支撑顶面（对地采样点权威读）：EntityShadowField（Game 层 blob 阴影采样）经本面读
+    //   World::supportTopYAt（碰撞 sub-AABB 真顶单一权威——整立方 cell+1 / 薄层按 state / 无碰撞族
+    //   -1 穿透）。头注②「高频读在本面单一入口收拢」的加行（逐行委托不复制，与上面各查询同门）；
+    //   阴影的贴地语义 = 「实体脚位之下最近的承载面」，与列顶（columnTopSurfaceY）是两个问题——
+    //   洞穴/悬岩下列顶在实体上方，不能当阴影落点。
+    float supportTopYAt(int x, int y, int z) const { return m_world->supportTopYAt(x, y, z); }
 
     // ── chunk 网格门查询（R20.08 示范迁移点专用：mesher 脏门 / 存在门——之前渲染侧经
     //    World::chunks().chunk(cx,cz) 直取 Chunk* 读 dirty()/fluidOnlyDirty()，现收拢为本面

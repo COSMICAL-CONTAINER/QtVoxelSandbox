@@ -2475,6 +2475,18 @@ Window {
         running: window.worldRunning   // review26 #11：同 waterAnimTimer（硬暂停门漩涡冻结）
         onTriggered: window.portalAnimFrame = (window.portalAnimFrame + 1) % resourcePack.portalStripFrames
     }
+    // t1075 blob 软阴影采样权威：对地采样点（贴地 Y / 腾空衰减 alpha）属模拟/权威面，C++ 侧
+    //   算好随专用面（blobShadowGeometry，View3D 内 Model）下发——本对象只持五条指针接线 +
+    //   空转门总闸（running 绑 worldRunning：世界锚定采样，ESC 硬档冻结 = t884 契约；菜单态
+    //   钟停零采样）。QML 零世界查询零逐帧扫（派工不变量①）。
+    EntityShadowField {
+        id: shadowField
+        world: theWorld
+        player: player
+        mobs: entityManager
+        geometry: blobShadowGeometry
+        running: window.worldRunning
+    }
     // perf-t520 进 playing 立即刷新（避免 hudPosText 首帧空白），F3 切换 on 时立即刷一次。
     //   本 two-phase Connections 与 10Hz Timer 并行（Timer 100ms 后接管），用 QML 内置信号无需 triggeredOnStartup。
     Connections {
@@ -6385,6 +6397,30 @@ Window {
                     console.info("[t390] AmbientParticles Loader status = Ready")
                 else if (status === Loader.Error)
                     console.warn("[t390] AmbientParticles Loader status = Error — Particles3D 运行期不可用，环境粒子已降级关闭（§2-E）")
+            }
+        }
+
+        // ── t1075 blob 软阴影（玩家 + 生物的半透明暗椭圆贴地投影）────────────────────────
+        // 单 Model 单几何单 draw：EntityShadowField（Game 层采样权威）按 15Hz 空转门节拍对玩家
+        // 脚位 + 各 Mob 槽做「中心列向下最近承载面」采样（World 支撑真顶查询族单一权威 +
+        // chunk 生命周期存在门），把贴地 Y / 半径 / 腾空衰减 alpha 算好后随专用面
+        // （BlobShadowGeometry quad 缓冲）下发——本 Model 只消费几何，零世界查询零逐帧扫
+        // （派工不变量①：对地采样点 C++ 侧算好，QML 现行玩法路径零迁移只追加本节点）。
+        // 材质契约（lessons t439/t442 透明段 + 第 5 轮可见性）：NoLighting（可见 Model 必设）+
+        // vertexColorsEnabled（per-quad 淡出 alpha 全在顶点色，零 per-quad 材质实例）+
+        // alphaMode:Blend（连续 alpha 走 Blend 非 opacity hack）+ CullNoCulling（八边形扇形
+        // 绕序不承载正确性）。透明 pass 深度写 OFF → 不遮挡实体本体；贴片 +0.03 抬升防与
+        // 地形顶面 z-fight（采样权威算进 quad.y）。
+        Model {
+            id: blobShadowHost
+            geometry: BlobShadowGeometry { id: blobShadowGeometry }
+            visible: blobShadowGeometry.quadCount > 0
+            materials: PrincipledMaterial {
+                lighting: PrincipledMaterial.NoLighting
+                vertexColorsEnabled: true
+                alphaMode: PrincipledMaterial.Blend
+                cullMode: PrincipledMaterial.CullNoCulling
+                baseColor: Qt.rgba(0, 0, 0, 1)
             }
         }
 
