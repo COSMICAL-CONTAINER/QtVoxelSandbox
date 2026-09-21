@@ -104,6 +104,28 @@ constexpr const char *kSheepWoolTints[16] = {
 };
 
 
+// t1073 外环可玩域（spawn 调度 / 敌对日光判定的候选列域门，单一权威谓词）：
+//   fixed 世界 = 核心盒 [0,width)×[0,depth)（旧行为逐位原样——固定世界边界即世界端点）；
+//   sparse 流式世界 = true（x/z 无界平面——width/depth 是核心域尺寸非域界；未物化 chunk 由
+//   下游 air / isCollidable / 光照门天然拒绝，不产生越界生成）。t1073 病灶：黑暗刷怪调度把
+//   候选列钳在核心盒内——玩家走出核心域 > kSpawnMaxDist(40) 后全部候选被拒 = 外环零刷怪。
+static bool columnInPlayableDomain(const World *world, int x, int z)
+{
+    if (!world) return false;
+    if (world->isSparse()) return true;
+    return x >= 0 && z >= 0 && x < world->width() && z < world->depth();
+}
+
+// t1073 外环 AI 钳制域界（游荡 / 传送 / 寻偶跟随的 [ehw, dim-ehw] 位置钳制上界）：
+//   fixed = 世界宽（原样）；sparse = 无界大数（外环生成的 mob 不再被逐 AI 拍拽回核心盒边——
+//   位置钳制是直接赋值，旧值即「外环 mob 首个 AI 拍瞬移到核心域边界」的病灶面）。
+//   mob 存活域自限：kFarDespawn(56) ≤ 生成半径(64)，mob 永不驻留未物化区（脚下碰撞门拒）。
+static float aiClampDomainMax(const World *world, int dim)
+{
+    if (!world) return float(dim);
+    return world->isSparse() ? 1.0e9f : float(dim);
+}
+
 // t670 白天寻阴凉（机制等价 MC 亡灵日间主动找树荫/洞口躲避日光）：在世界里找 (sx,sy,sz) 周围半径 kRadius 内
 //   最近（XZ 距离取小）的「遮荫可站列」。(x, z) 列候选：某脚位层 y（±1 内）下方实体（站得住）+ 身体格空气
 //   （mob 1.8 高占两格）+ 身体格 skyLight < kThresh（遮荫，燃烧判定是 skyLightAt>=15，14 留边缘余量）。
@@ -117,7 +139,7 @@ bool findShadeTarget(World *world, int sx, int sy, int sz, int radius, int kThre
     for (int dz = -radius; dz <= radius; ++dz) {
         for (int dx = -radius; dx <= radius; ++dx) {
             const int x = sx + dx, z = sz + dz;
-            if (x < 0 || z < 0 || x >= world->width() || z >= world->depth()) continue;
+            if (!columnInPlayableDomain(world, x, z)) continue; // t1073：外环平面可寻荫（fixed 核心盒原样）
             for (int y = sy - 1; y <= sy + 2; ++y) {
                 if (y < 1 || y + 2 >= h) continue; // 身体两格 y+1/y+2 需在界内（t690：1.8 高 mob 占两格 ——
                                                      //   旧版只界检 y+1 → y+2 越界读贴边缓存 / 头顶格无校验）
@@ -1351,8 +1373,8 @@ bool EntityManager::sunBurnExposureAt(World *world, float px, float py, float pz
 {
     if (!world) return false;
     const int sx = qFloor(px), sy = qFloor(py), sz = qFloor(pz);
-    if (sx < 0 || sz < 0 || sx >= world->width() || sz >= world->depth()
-        || sy < 0 || sy >= world->height()) return false;
+    // t1073：外环平面可判（fixed 核心盒原样）——旧钳制使外环敌对永不被日光点燃 = 外环白天怪堆积面。
+    if (!columnInPlayableDomain(world, sx, sz) || sy < 0 || sy >= world->height()) return false;
     if (world->skyLightAt(sx, sy, sz) < 15) return false;                  // 有遮挡（树荫 / 屋檐 / 洞口，t280 同列采样）
     if (skyBrightness <= kBurnSkyBrightness) return false;                 // 夜间 / 晨昏（spec「白天燃烧」门）
     if (world->isPrecipitatingAt(sx, sz)) return false;                    // 降水遮日（t385：雨/雪/雷皆豁免）
@@ -1385,8 +1407,8 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
 {
     if (!world) return;
     FrameProfiler::Scope profHostile("mobHostile"); // t500 perf：mob 桶子分解（黑暗刷怪 / 燃烧 / 远距消失）
-    const int worldW = world->width();
-    const int worldD = world->depth();
+    // t1073：worldW/worldD 局部量随候选域门收口 columnInPlayableDomain 退役（sparse 域无界，
+    // 核心盒尺寸不再作刷怪域界）；worldH 仍为 y 域界（两模式同构有限高）。
     const int worldH = world->height();
     bool dirty = false;
     std::vector<int> toRemove; // 远距消失索引（releaseSlot；逆序处理避免索引漂移）
@@ -1470,7 +1492,7 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
                                    + float(rng->bounded(1000)) / 1000.0f * (kSpawnMaxDist - kSpawnMinDist);
                 const int cx = int(pfx + std::cos(ang) * dist);
                 const int cz = int(pfz + std::sin(ang) * dist);
-                if (cx < 0 || cz < 0 || cx >= worldW || cz >= worldD) continue;
+                if (!columnInPlayableDomain(world, cx, cz)) continue; // t1073：外环平面可刷（fixed 核心盒原样——旧钳制使外环走查零刷怪）
                 const int surfH = world->heightAt(cx, cz);
                 if (surfH < 1) continue; // 列无地表（极端情况）
                 // 选地表 or 洞穴（各 50%）：地表贴 surfH+1、洞穴在地表下随机一层。
@@ -5093,7 +5115,8 @@ bool EntityManager::teleportEntity(int idx, Entity &e, World *world, float minDi
 {
     if (!world) return false;
     auto *rng = QRandomGenerator::global();
-    const float wW = float(world->width()), wD = float(world->depth());
+    // t1073：外环不钳核心盒（sparse = 无界大数界；fixed 原样）——旧值使外环瞬移候选恒落核心盒边。
+    const float wW = aiClampDomainMax(world, world->width()), wD = aiClampDomainMax(world, world->depth());
     const float loX = e.halfW, hiX = wW - e.halfW, loZ = e.halfW, hiZ = wD - e.halfW;
     for (int attempt = 0; attempt < kNightwalkerTeleportAttempts; ++attempt) {
         const float dist = minDist + rng->bounded(maxDist - minDist); // [min,max)
@@ -6198,8 +6221,11 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
 {
     if (!world || m_entities.empty()) return;
     FrameProfiler::Scope profLoop("mobLoop"); // t500 perf：mob 桶子分解（EntityManager::tick 整段）
-    const float worldW = float(world->width());
-    const float worldD = float(world->depth());
+    // t1073：AI 位置钳制域界（游荡 / 传送 / 寻偶跟随的 [ehw, dim-ehw]）——sparse = 无界大数（外环
+    // 生成的 mob 不再被逐 AI 拍直接赋值拽回核心盒边）；fixed = 世界宽原样。mob 存活域自限：
+    // kFarDespawn(56) ≤ 生成半径(64) → mob 水平域内恒有已物化地形（脚下碰撞门拒未物化区驻留）。
+    const float worldW = aiClampDomainMax(world, world->width());
+    const float worldD = aiClampDomainMax(world, world->depth());
     bool dirty = false;
     std::vector<int> toRemove; // FallingBlock 着地 / 跌出 + t239 mob deathTimer 到 / void-loss 索引（逆序 erase）
     // t997 爆炸波分期：本 tick 的 primed TNT 引爆预算（每 tick() 调用重置一次）。同帧到期簇 ≤ 预算照旧
