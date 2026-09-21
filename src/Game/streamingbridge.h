@@ -89,7 +89,10 @@ public:
     // 泵拍执行体（生产 = WorldClock::ticked 槽体；矩阵腿直调同体——与生产拍同一函数，无第二份）。
     void pumpTick();
     // 拆会话（进入链换世界 / fixed 清退路径内部使用；矩阵腿间复位缝）。线程件 join 有界（会话
-    // 析构语义——worker 析构 stop + 丢弃计数 + join，绝不挂死）；幂等。
+    // 析构语义——worker 析构 stop + 丢弃计数 + join，绝不挂死）；幂等。t1076 起挂钩（泵拍 /
+    // 位置沿）随会话一并退役：连接断开 + 句柄与记忆指针清零——挂钩生命周期 = 会话生命周期
+    //（两钩的再挂点只在 enterWorld；悬垂记忆指针 × 栈地址复用的「已挂同一源」假幂等 = t1076
+    // 病灶，见 .cpp detachWorld「t1076 挂钩随会话一并退役」段立证）。
     void detachWorld();
 
 private:
@@ -122,8 +125,8 @@ private:
     QPointer<World> m_fixedWorld;           // fixed 收割宿主的世界引用（未进入/流式态 = null）
     QMetaObject::Connection m_pumpConn;     // clock.ticked → pumpTick（幂等挂钩）
     QMetaObject::Connection m_feedConn;     // player.playerChunkChanged → notePlayerChunk（W2 生产链）
-    WorldClock *m_pumpClock = nullptr;      // 已挂泵拍源（重入防御读面）
-    PlayerController *m_feedPlayer = nullptr; // 已挂位置源（重入防御读面）
+    WorldClock *m_pumpClock = nullptr;      // 已挂泵拍源（重入防御读面；t1076 起 detachWorld 清零）
+    PlayerController *m_feedPlayer = nullptr; // 已挂位置源（重入防御读面；t1076 起 detachWorld 清零）
 };
 
 #endif // STREAMINGBRIDGE_H

@@ -176,12 +176,35 @@ void StreamingBridge::pumpTick()
 void StreamingBridge::detachWorld()
 {
     m_session.reset(); // 线程件随会话析构 join 有界（gamesession.h 退出语义）；幂等
+    // ── t1076：挂钩随会话一并退役（悬垂源指针 × 栈地址复用的假幂等收口）─────────────────────
+    // 两钩的再挂点只在 enterWorld 内（下方 ensurePumpHook / ensureFeedHook 的全部生产调用面）
+    // → 挂钩生命周期本就 = 会话生命周期。此前 detachWorld 只拆会话不清挂钩：被挂源对象
+    //（WorldClock / PlayerController）先于本桥消亡的场景（矩阵腿间、换世界换对象接线）下，
+    // Qt 连接随发送者析构自动断开，而 m_pumpClock / m_feedPlayer 记忆指针悬垂——之后落在
+    // 复用栈地址上的新源会被 ensureHook 的「已挂同一源 = 零动作」早退误判为已挂钩（真实连接
+    // 已死）→ clock.ticked 泵拍 / playerChunkChanged 位置沿静默断链 → 会话在活却零提交零采用
+    // 零驱逐（t1076 复现腿 r2049a/b 进入 2 的病灶签名，t1074 实机「负向走查不收敛」的根因）。
+    // 断连 + 句柄与记忆指针清零 = 生命周期对齐的最小收口；「同源重进」路径不经本记忆依赖
+    // （enterWorld 先拆后挂全链），幂等语义不破。
+    if (m_pumpConn) {
+        QObject::disconnect(m_pumpConn);
+        m_pumpConn = QMetaObject::Connection();
+    }
+    m_pumpClock = nullptr;
+    if (m_feedConn) {
+        QObject::disconnect(m_feedConn);
+        m_feedConn = QMetaObject::Connection();
+    }
+    m_feedPlayer = nullptr;
 }
 
 void StreamingBridge::ensurePumpHook(WorldClock *clock)
 {
-    if (!clock || m_pumpClock == clock)
-        return; // 未提供 / 已挂同一源 = 零动作（幂等）
+    // t1076：幂等守卫 = 同源**且连接仍活**（bool(Connection) 对发送者已亡的连接为 false）。
+    // detachWorld 的挂钩退役清零是悬垂假幂等的主收口，本联言是同源场景的防御半边（源对象
+    // 在两次进入之间被销毁重建且同址复用时，不再被「已挂同一源」早退吞掉重挂）。
+    if (!clock || (m_pumpClock == clock && m_pumpConn))
+        return; // 未提供 / 已挂同一源且连接仍活 = 零动作（幂等）
     if (m_pumpConn)
         QObject::disconnect(m_pumpConn); // 换源防御（QML 装配单 clock，生产不走到）
     m_pumpClock = clock;
@@ -191,8 +214,11 @@ void StreamingBridge::ensurePumpHook(WorldClock *clock)
 
 void StreamingBridge::ensureFeedHook(PlayerController *player)
 {
-    if (!player || m_feedPlayer == player)
-        return; // 未提供 / 已挂同一源 = 零动作（幂等）
+    // t1076：幂等守卫 = 同源**且连接仍活**（bool(Connection) 对发送者已亡的连接为 false）。
+    // detachWorld 的挂钩退役清零是悬垂假幂等的主收口，本联言是同源场景的防御半边（源对象
+    // 在两次进入之间被销毁重建且同址复用时，不再被「已挂同一源」早退吞掉重挂）。
+    if (!player || (m_feedPlayer == player && m_feedConn))
+        return; // 未提供 / 已挂同一源且连接仍活 = 零动作（幂等）
     if (m_feedConn)
         QObject::disconnect(m_feedConn);
     m_feedPlayer = player;
