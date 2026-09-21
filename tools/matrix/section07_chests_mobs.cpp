@@ -804,7 +804,10 @@ void MatrixRun::section07_chests_mobs()
         const QString storeCT22 = storeDirC22 + QStringLiteral("/settings.json");
         {
             QFile f(storeCT22);
-            f.open(QIODevice::WriteOnly | QIODevice::Truncate);
+            // t1075 同变更修订（r2003 搬移件，r2045c 治理 §6.1 口径）：既有 -Wunused-result
+            //   警告清偿——fallible open 检查 + 失败 qWarning（t01 教训：检查 + 降级 + 可见诊断）。
+            if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                qWarning() << "[t1075] settings rig write open failed:" << storeCT22;
             f.write("{}");
         }
         KM kbC22;
@@ -834,7 +837,9 @@ void MatrixRun::section07_chests_mobs()
         const QString storeC22b = storeDirC22 + QStringLiteral("/settings_forbidden.json");
         {
             QFile f(storeC22b);
-            f.open(QIODevice::WriteOnly | QIODevice::Truncate);
+            // t1075 同变更修订（同上口径）：open 检查 + 失败 qWarning。
+            if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                qWarning() << "[t1075] settings rig write open failed:" << storeC22b;
             f.write(QByteArray("{\"keyBindings\":{\"jump\":51,\"chat\":16777216}}"));
         }
         KM kbC22b;
@@ -883,7 +888,9 @@ void MatrixRun::section07_chests_mobs()
         const QString storeDT22 = storeDirD22 + QStringLiteral("/settings.json");
         {
             QFile f(storeDT22);
-            f.open(QIODevice::WriteOnly | QIODevice::Truncate);
+            // t1075 同变更修订（同上口径）：open 检查 + 失败 qWarning。
+            if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+                qWarning() << "[t1075] settings rig write open failed:" << storeDT22;
             f.write("{}");
         }
         KM kbD22;

@@ -163,6 +163,8 @@ void MatrixRun::runAll()
 
     section48_streaming_outer_light(); // t1074 无限世界外环挖方块全黑（置尾先例沿用：r2047a fixed 零变化墙[fixed 挖掘/火把行为柱 + Fixed 分支字面钉] / r2047b 外环全黑复现+修复承重[生产尺寸真链出核：播种柱 + 挖掘亮 + 跨 chunk 火把] / r2047c 负坐标外环腿[负侧播种柱 + 挖掘亮 + 负侧火把跨 chunk] / r2047d 结构钉[floorDiv 标脏循环 + sparse 边界读分支 + sparse 无界盒 + 旧码反探]，fixed 48×48×96 s82 + sparse 核心 160×160×96 ×2 + 真临时库，rig 零接触）
 
+    section49_entity_blob_shadow(); // t1075 blob 软阴影（置尾先例沿用：r2048a 平地贴地承重墙[贴地 Y/alpha/半径 + 指纹差分 + 几何可数通道] / r2048b 悬崖边缘+腾空衰减[单调淡出链+超窗缺席] / r2048c 未物化缺席+两模式贴地逐位一致[sparse radius-0 同 seed 孪生] / r2048d 结构钉[采样权威门+几何契约+QML 接线/材质契约+注册族+零对地采样反探+EntityStore 零触碰反探]，fixed 48×48×96 s82 + sparse radius-0 孪生，rig 零接触）
+
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";
