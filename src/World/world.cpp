@@ -2065,8 +2065,14 @@ void World::flushPendingLightEdits()
         anySky = anySky || e.sky;
     }
     const int y1 = anySky ? (H - 1) : std::min(H - 1, y1max);
-    x0 = std::max(0, x0); y0 = std::max(0, y0); z0 = std::max(0, z0);
-    x1 = std::min(W - 1, x1); z1 = std::min(D - 1, z1);
+    // t1074：盒域两模式分流（Fixed 核心盒钳制原样；sparse x/z 不钳——上下界都不钳，负坐标外环
+    //   延迟编辑盒须原样保留；y 域两模式同构仍钳 0）。旧码单边 max(0,·) 会把负侧盒钳掉半边。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        x0 = std::max(0, x0); z0 = std::max(0, z0);
+        x1 = std::min(W - 1, x1); z1 = std::min(D - 1, z1);
+    } else {
+        y0 = std::max(0, y0);
+    }
     if (x0 > x1 || y0 > y1 || z0 > z1) { m_pendingLightEdits.clear(); return; }
     refloodBox(x0, y0, z0, x1, y1, z1, anySky);
     m_pendingLightEdits.clear();
@@ -10413,7 +10419,16 @@ void World::recomputeLightAround(int ex, int ey, int ez, quint8 oldId, quint8 ol
 {
     const int W = m_width, D = m_depth, H = m_height;
     if (W <= 0 || D <= 0 || H <= 0) return;
-    if (ex < 0 || ey < 0 || ez < 0 || ex >= W || ey >= H || ez >= D) return;
+    // t1074 域门（两模式分流；Fixed 分支现行语句原样——零变化墙）：Fixed = 核心盒域界（现行全域
+    //   即核心域，逐位原样）；sparse = y 域两模式同构（有限高）+ x/z 无界——核心 dims 是生成语义
+    //   参数非域界（World::setBlock 的 sparse 写门同式），旧码 ex/ez ≥ W/D 核心盒早退把已物化
+    //   外环 chunk 的编辑增量重 flood 整体吞掉 = 用户真机「外环挖掘方块全黑」病灶（t1073 同族
+    //   「核心域假设泄漏」的光照独立面）。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (ex < 0 || ey < 0 || ez < 0 || ex >= W || ey >= H || ez >= D) return; // 越界拒绝
+    } else {
+        if (ey < 0 || ey >= H) return; // §29.5-W1：y 域两模式同构；x/z 无界
+    }
 
     // t334：遮光变化判据改用 lightOpacity（取代旧 isSolid）—— 半砖放/破（0↔7）、合↔开活版门（0↔15）均能检出
     //   翻转 → 触发重 flood。id 不变且非火把且 lightOpacity 不变（如门开合：lightOpacity 恒 0）→ 光照无变化，早退。
@@ -10427,8 +10442,15 @@ void World::recomputeLightAround(int ex, int ey, int ez, quint8 oldId, quint8 ol
 
     QElapsedTimer t; t.start(); // t155c：测编辑光照开销（找卡顿根因）
     constexpr int R = 15; // = 最大光值：编辑对盒外格（曼哈顿 ≥16）无影响 → 边界种子法成立（见上注释）
-    const int x0 = std::max(0, ex - R), x1 = std::min(W - 1, ex + R);
-    const int z0 = std::max(0, ez - R), z1 = std::min(D - 1, ez + R);
+    // t1074：盒域两模式分流（Fixed 核心盒钳制原样；sparse x/z 不钳核心域）。旧码 min(W-1,·)/max(0,·)
+    //   钳制把外环编辑盒钳成倒置空盒（x0 > x1）→ refloodBox 静默 no-op，与域门早退同病同收口。
+    int x0, x1, z0, z1;
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        x0 = std::max(0, ex - R), x1 = std::min(W - 1, ex + R);
+        z0 = std::max(0, ez - R), z1 = std::min(D - 1, ez + R);
+    } else {
+        x0 = ex - R; x1 = ex + R; z0 = ez - R; z1 = ez + R; // x/z 无界（核心 dims 不钳）
+    }
     int y0, y1;
     if (opacityChanged) {
         // t155c：y0 由 0 改 ey-R（编辑下方光照变化衰减 ≤R，更深处已暗不变 → 不必清/重 seed 全列到底）。
@@ -10464,6 +10486,11 @@ void World::recomputeLightAround(int ex, int ey, int ez, quint8 oldId, quint8 ol
 //   （开阔天空，与 skyLightAt OOB 同语义）；其余世界外（y<0 / x/z 越界）→ 0；盒内世界 → 其当前（未清）光值。
 int World::refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSky)
 {
+    // t1074 防御：退化空盒早退。快照缓冲以 size_t(x1-x0+1) 定容——倒置盒（x0>x1 等）的负差
+    //   会绕成天文容量当抛 length_error（旧码此面被 recomputeLightAround 的核心盒早退掩蔽不可
+    //   达；两模式盒构造现均保证 x0≤x1/y0≤y1/z0≤z1，本门只兜未来 caller 的退化盒）。
+    if (x0 > x1 || y0 > y1 || z0 > z1)
+        return 0;
     // t933 可观测：所有光照重 flood 的单一漏斗计数（编辑增量 recomputeLightAround / 爆炸与级联批量收口 /
     //   流体延迟 flushPendingLightEdits / 叶衰批量均经此）→ F3 cnt 行 1s 窗聚合。稳态（无编辑无坍落）应
     //   恒 0；换世界后仍非 0 = 有跨世界存活的写入源（t933 跨世界泄漏排查的直接判据）。
@@ -10535,7 +10562,13 @@ int World::refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSky
         quint8 s = 0, b = 0;
         if (ny >= H) {
             s = 15; // 世界顶之上 = 开阔天空（顶面采样）
-        } else if (nx >= 0 && nz >= 0 && nx < W && nz < D && ny >= 0) {
+        } else if (m_chunks.mode() == WorldMode::Sparse) {
+            // t1074：sparse x/z 无界——经 ChunkManager 统一物化门读（未物化 = 0 暗边界 / 已物化 =
+            //   现值渗入）。旧码 nx<W/nz<D 核心盒判据把已物化外环邻格误读 0（暗边界）→ 外环 reflood
+            //   的跨 chunk 光回流被核心盒判据掐断（本盒外光种从外环邻格拒收）。
+            s = m_chunks.skyLightAt(nx, ny, nz);
+            b = m_chunks.blockLightAt(nx, ny, nz);
+        } else if (ny >= 0 && nx >= 0 && nz >= 0 && nx < W && nz < D) {
             s = m_chunks.skyLightAt(nx, ny, nz); // 盒内世界格：当前（未清）光值
             b = m_chunks.blockLightAt(nx, ny, nz);
         }
@@ -10619,8 +10652,10 @@ int World::refloodBox(int x0, int y0, int z0, int x1, int y1, int z1, bool doSky
     //   仅方块光变化触发（语义不变）。m_chunks.chunk() 越界返 nullptr（盒内坐标本在界内，安全）。
     constexpr int cs = 16; // Chunk::kSize
     int changedChunks = 0;
-    for (int ccx = x0 / cs; ccx <= x1 / cs; ++ccx) {
-        for (int ccz = z0 / cs; ccz <= z1 / cs; ++ccz) {
+    // t1074：chunk 键用 floorDiv（负坐标外环盒正确取 chunk 索引；Fixed 域坐标恒 ≥0 → floorDiv ==
+    //   截断除法逐位等价零变化）。旧码截断除法在负侧会把盒缘 chunk 键取错位 → 光变 chunk 漏标脏。
+    for (int ccx = floorDiv(x0, cs); ccx <= floorDiv(x1, cs); ++ccx) {
+        for (int ccz = floorDiv(z0, cs); ccz <= floorDiv(z1, cs); ++ccz) {
             Chunk *ch = m_chunks.chunk(ccx, ccz);
             if (!ch) continue;
             const int ax0 = std::max(x0, ccx * cs), ax1 = std::min(x1, ccx * cs + cs - 1);
