@@ -181,7 +181,7 @@ public:
     //   杀鱿鱼掉墨囊（1-3）；墨囊非食物 / 非燃料（§9 简化预留，未来染料 / 书与笔原料）。可堆叠 64；非方块（材料段）
     //   → 右键不放置。MaterialIcon 自绘图标（墨囊黑水滴），创造调色板补全。名称 / 图标全原创（§9 区隔，零 MC 资产）。
     //   **生物蛋（鱿鱼）** SpawnEggSquidId：创造模式物品，右键地面 → EntityManager::spawnMobTyped 生成 MobSquid。
-    static constexpr int InkSacId          = 0x22D; // 墨囊：杀鱿鱼掉落（机制等价 MC 1.0 ink sac；染料 / 书与笔原料预留）
+    static constexpr int InkSacId          = 0x22D; // 墨囊：杀鱿鱼掉落（机制等价 MC 1.0 ink sac）；1:1 转黑染料（t1078）/ 书与笔原料预留
     static constexpr int SpawnEggSquidId   = 0x22E; // 生物蛋（鱿鱼）：右键地面 → 生成鱿鱼（MobSquid）
     // t400 繁殖食物（材料段 0x22F/0x230；机制等价 MC 1.0 胡萝卜 / 马铃薯 —— 猪的繁殖食物）。可堆叠 64；非方块
     //   （材料段）→ 右键走 useBlock「喂食」分支（PlayerController placeBlock 食物分支 → EntityManager::feedMob）：
@@ -373,10 +373,11 @@ public:
     // t788 染料段（DyeIdBase=0x24B）：16 色染料 item 族，机制等价 MC 1.0 染料主干（dye item id 351）——
     //   获得链：四花（红花 FlowerRed=49 / 黄花 FlowerYellow=50 / 蓝花 FlowerBlue=51 / 白花 FlowerWhite=52）
     //   破坏直接掉对应色染料（Core 层 blockregistry.cpp dropId 字面量，见下 static_assert 跨层契约）；
-    //   绿染料额外走熔炉烧仙人掌（smelting.cpp kSmelt，Cactus=42 → DyeGreenId）。染色链：染料 + 白羊毛
+    //   绿染料额外走熔炉烧仙人掌（smelting.cpp kSmelt，Cactus=42 → DyeGreenId）；黑染料由墨囊 1:1 转换
+    //   （t1078，InkSacId=0x22D——MC 1.0 墨囊即黑染料，本工程分立 id 以转换配方桥接）。染色链：染料 + 白羊毛
     //   （Wool=27）→ 对应色羊毛（15 色变体 FirstWoolVariant..LastWoolVariant）；染料 + 白床（BedWhite=78）
-    //   → 对应色床（32 条 shapeless 2×2 配方，见 recipe.cpp）。**范围控制：只做 16 单色直染，混色（二级
-    //   染料合成）不做**。行序 = 羊毛 16 色标准序（白 / 橙 / 品红 / 浅蓝 / 黄 / 柠绿 / 粉红 / 灰 / 浅灰 /
+    //   → 对应色床（32 条 shapeless 2×2 配方，见 recipe.cpp）。**范围：16 单色直染（t788）+ 二级混色 9 色
+    //   与墨囊转黑（t1078，生存链补全后 15/16 色可达；棕色机制源 = 可可豆本工程无 → 仅创造）**。行序 = 羊毛 16 色标准序（白 / 橙 / 品红 / 浅蓝 / 黄 / 柠绿 / 粉红 / 灰 / 浅灰 /
     //   青 / 紫 / 蓝 / 棕 / 绿 / 红 / 黑），与 FirstWoolVariant 起的羊毛变体序严格一致（羊毛 = idx==0 ?
     //   Wool : FirstWoolVariant+idx-1 的下标算术，床色散段 32..39+78..85 须查表）。可堆叠 64（走材料段
     //   默认）；非方块 → 右键不放置。图标：MaterialIcon 自绘彩色粉末堆（drawDye，§9 原创，配色取

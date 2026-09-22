@@ -1097,8 +1097,8 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
     //   （BedWhite=78）→ 对应色床。机制等价 MC 1.0 染料主干（dye + white wool/bed → colored）。
     //   原料侧：染料由四花破坏掉落（红花→红 / 黄花→黄 / 蓝花→蓝 / 白花→白，blockregistry.cpp dropId）
     //   + 熔炉烧仙人掌→绿染料（smelting.cpp）获得；白羊毛由杀羊 / 4 线合成（shaped），白床由 3 白羊毛 +
-    //   3 木板合成。**范围控制：只做 16 单色直染（白染料 + 白羊毛 → 白羊毛为无害直染，同 MC 骨粉语义），
-    //   混色（二级染料合成）不做**。羊毛色序 = 16 色标准序（白复用 Wool=27，其余 FirstWoolVariant=63 起连续）；
+    //   3 木板合成。**范围控制：t788 只做 16 单色直染（白染料 + 白羊毛 → 白羊毛为无害直染，同 MC 骨粉
+    //   语义）；二级混色当时不做，t1078 已补全 9 色混色 + 墨囊转黑（表尾追加，见本表末段）**。羊毛色序 = 16 色标准序（白复用 Wool=27，其余 FirstWoolVariant=63 起连续）；
     //   床色段散布（32..39 + 78..85）须逐条写 id。多重集 {DyeX, Wool} / {DyeX, BedWhite} 各条唯一（染料 id
     //   互异）→ 无序不与既有配方冲突（床族是 6 原料 shaped 3×3，多重集大小不同即排除）。
     { int(RecipeRegistry::Inventory2x2), true,
@@ -1197,6 +1197,53 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
     { int(RecipeRegistry::Inventory2x2), true,
       { RecipeRegistry::DyeBlackId, int(BlockRegistry::BedWhite), 0, 0, 0, 0, 0, 0, 0 },
       int(BlockRegistry::BedBlack),        1, 1, "dye_bed_black" },
+    // t1078 二级混色染料（9 条 shapeless 2×2）：两原/二级染料 → 2 份二级染料（机制等价 MC 1.0 二级染料
+    //   合成的「2 染料入 → 2 染料出」同构形态）。映射（本工程染料 id ← MC 1.0 原料，机制等价）：橙=红+黄
+    //   （rose red + dandelion yellow）/ 浅蓝=蓝+白（lapis + bone meal；本工程蓝色染料即蓝花染料，白染色
+    //   即白花染料）/ 品红=紫+粉（purple + pink）/ 柠绿=绿+白（cactus green + bone meal）/ 粉红=红+白 /
+    //   灰=黑+白（ink sac + bone meal）/ 浅灰=灰+白 / 青=绿+蓝 / 紫=红+蓝。**t1078 交付动机（染料获取
+    //   链补全）**：t788 起 16 色染料仅 5 色有生存源（四花 + 仙人掌烧绿），其余 9 色只可创造取用 → 生存
+    //   「花→染料→羊毛」链断在二级色；本批后 15/16 色生存可达（棕色染料机制源 = 可可豆，本工程无可可豆
+    //   → 维持仅创造，候选池登记）。**选型（落选面）**：MC 三料配方（墨囊+2 白→3 浅灰 / 蓝+2 红+白→4
+    //   品红）不取——只收「2→2」一种形态，链闭合已足且少一类匹配歧义；骨粉不充当白色染料入混色（本工程
+    //   骨粉 BonemealId 0x232 是催熟道具、白染料 DyeWhiteId 0x24B 才入染料段，两 id 分工钉死，边界由
+    //   r2051c 反探）。多重集 {DyeX, DyeY} 各条唯一（染料 id 互异）→ 无序不与既有配方冲突（{Dye, Wool} /
+    //   {Dye, BedWhite} 基料互异；t802 全表自匹配回归自动覆盖本批）。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeRedId,      RecipeRegistry::DyeYellowId, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::DyeOrangeId,       2, 1, "dye_mix_orange" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeBlueId,     RecipeRegistry::DyeWhiteId, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::DyeLightBlueId,    2, 1, "dye_mix_light_blue" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyePurpleId,   RecipeRegistry::DyePinkId, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::DyeMagentaId,      2, 1, "dye_mix_magenta" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeGreenId,    RecipeRegistry::DyeWhiteId, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::DyeLimeId,         2, 1, "dye_mix_lime" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeRedId,      RecipeRegistry::DyeWhiteId, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::DyePinkId,         2, 1, "dye_mix_pink" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeBlackId,    RecipeRegistry::DyeWhiteId, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::DyeGrayId,         2, 1, "dye_mix_gray" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeGrayId,     RecipeRegistry::DyeWhiteId, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::DyeLightGrayId,    2, 1, "dye_mix_light_gray" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeGreenId,    RecipeRegistry::DyeBlueId, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::DyeCyanId,         2, 1, "dye_mix_cyan" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::DyeRedId,      RecipeRegistry::DyeBlueId, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::DyePurpleId,       2, 1, "dye_mix_purple" },
+    // t1078 墨囊 → 黑色染料（1 条 shapeless 2×2 单原料 1:1 转换）。机制等价 MC 1.0「墨囊即黑染料」
+    //   （dye metadata 0 同物异名）；本工程墨囊（InkSacId 0x22D，杀鱿鱼掉落 + 钓鱼垃圾池）与黑染料
+    //   （DyeBlackId 0x25A，染料段末位）是分立 id → 以 1:1 转换桥接（非 1:多，防物品通胀——MC 语义上
+    //   两者本同物）。此前墨囊对染料链是死端（recipe.h 注「染料原料预留」从未接线）。单原料 shapeless
+    //   在 2×2 / 3×3 任意格命中（同 t802 燃烬棒分解 / t1077 骨块拆解同构）；多重集 {InkSacId:1} 唯一。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::InkSacId, 0, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::DyeBlackId,        1, 1, "dye_black_from_ink" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。
