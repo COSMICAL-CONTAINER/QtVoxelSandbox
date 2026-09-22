@@ -40,8 +40,10 @@
 //     扩展分支摘除）恰红；
 //   「刷怪域承重」→ r2046c（真链进入 → 玩家深出核 [300,80]（候选环 [24,40] 全在核心盒外）→
 //     黑夜 tickHostileLife 周期 → 外环自然刷怪 ≥1 且全部出核 → 白昼外环 Shambler 日光燃烧 +
-//     AI 拍后位置不被拽回核心盒[钳制修复的行为柱]）——NEG-2（columnInPlayableDomain sparse
-//     分支翻 false）恰红；
+//     AI 拍后位置不被拽回核心盒[钳制修复的行为柱]；t1079 时序加固：放置位脱甲钉[红面定案 =
+//     t377 随机甲掷骰命中盔 → 盔免烧豁免恒拒，逐拍微迹存证] + 燃烧观察窗天气双钉 + wander
+//     冻结钉位、解冻后补真 AI 拍供钳制柱——见腿内注释）——NEG-2（columnInPlayableDomain
+//     sparse 分支翻 false）恰红；
 //   「结构钉」→ r2046d（扩展域置位单点[sparsePopulateChunk 锚域判定] + 五 lattice pass 窗参数
 //     与 ext 带族 + setVoxelIfAir / carveSphere / tryOre 扩展域三让位面 + 域门调用面 + 旧门反探
 //     族）——两 NEG 均不误伤（钉调用面 / 声明面，不钉被 NEG 摘除的分支字面）。
@@ -557,23 +559,89 @@ Item {
         // 外环日光燃烧：直接放置蹒跚者（确定性 undead——绕开自然刷怪的类型骰，专钉域门日光面）于
         // 已物化外环地表列；昼语义（skyBrightness 1.0）下经 tick() 推进 m_tickPhase（aiTick 节流
         // 沿）→ 曝晒燃烧翻位。旧码 sunBurnExposureAt 核心盒早退 = 恒不燃烧（NEG-2 恰红面）。
+        // t1079 时序加固（确定性化非放宽；红面 [day no hostile burning at outer column] 逐拍微迹
+        // 定案）：根因 = spawnMobCore 的 t377 随机甲掷骰——每个 Shambler 生成经全局 RNG 掷 ~20%
+        // 随机护甲（含头盔 ≈12.5%/只），而 tickHostileLife 燃烧门带 review0830 #6 盔免烧豁免
+        // （armorHelmet==0）→ 掷中盔的放置怪恒不燃烧 = 偶发红（微迹实证：a776[铁盔] 挂身、
+        // 60 拍 b0 恒置而 sky15/rain0/blk0/站位全过——非昼相、非游走、非光照）。加固三面：
+        // ①放置位脱甲钉（t719 setMobArmorSet 越界档 = 四部位清空缝 + 回读守卫[t814 静默拒教训]）
+        //   ——燃烧判定输入确定化，断言本体零放宽；②天气双钉（section11 先例 setWeatherState(0)
+        //   + setWeatherRemainingSec(3600)）——sunBurnExposureAt 降水豁免门恒开且天气转换掷骰
+        //   不进观察窗；③burn 观察窗内 wander 冻结（t1029 缝：早退先于 RNG 消费与位置写入）
+        //   ——曝晒格钉死、观察窗与游走骰解耦；解冻后补真 AI 拍供钳制柱（见下，不空转）。
+        w.setWeatherState(0); // Weather::Clear——降水豁免门恒开（双钉先例 section11）
+        w.setWeatherRemainingSec(3600.0f); // >> 观察窗（≤3s 模拟时）→ 腿内恒晴
         const int sx = 320, sz = 90;
         const int sh = w.heightAt(sx, sz);
         em.spawnHostileMob(sx, sh + 1, sz, EntityManager::MobShambler);
+        int placedSlot = -1; // 放置位脱甲钉：掷中的随机甲（尤其头盔）清空——燃烧门输入确定化
+        for (int i = 0; i < em.cap() && placedSlot < 0; ++i)
+            if (em.aliveAt(i) && em.isHostileAt(i) && qFloor(em.posAt(i).x()) == sx
+                && qFloor(em.posAt(i).z()) == sz)
+                placedSlot = i;
+        const bool stripOk = placedSlot >= 0 && em.setMobArmorSet(placedSlot, -1)
+                             && em.mobArmorAt(placedSlot, 0) == 0;
+        ok = ok && stripOk;
+        if (!stripOk)
+            diag += QStringLiteral("[strip slot=%1] ").arg(placedSlot);
+        em.setWanderFrozen(true); // 观察窗内钉位：曝晒格固定，燃烧判定与游走骰解耦
         bool burning = false;
+        QString burnTrace; // 逐拍微迹（4 帧粒度；仅失败落 diag——单红定位燃烧判定是否发生）
         for (int f = 0; f < 60 && !burning; ++f) {
             em.tick(0.05, &w, playerPos, 0.3f, 1.8f, false, false, 1.0f);
             em.tickHostileLife(0.05, &w, playerPos, 1.0f);
             for (int i = 0; i < em.cap() && !burning; ++i)
                 if (em.aliveAt(i) && em.isHostileAt(i) && em.isBurningAt(i))
                     burning = true;
+            if (f % 4 == 0 && !burning) {
+                const QVector3D tp = em.posAt(1);
+                burnTrace += QStringLiteral("%1:(%2,%3,%4,b%5,s%6,h%7,a%8)")
+                                 .arg(f)
+                                 .arg(tp.x(), 0, 'f', 1)
+                                 .arg(tp.y(), 0, 'f', 1)
+                                 .arg(tp.z(), 0, 'f', 1)
+                                 .arg(em.isBurningAt(1) ? 1 : 0)
+                                 .arg(w.skyLightAt(320, qFloor(tp.y()), 90))
+                                 .arg(em.healthAt(1))
+                                 .arg(em.mobArmorAt(1, 0));
+            }
         }
+        em.setWanderFrozen(false); // 解冻：钳制柱仍走真移动路径（AI 界面真执行，见下）
         ok = ok && burning;
-        if (!burning)
+        if (!burning) {
             diag += QStringLiteral("[day no hostile burning at outer column] ");
+            // 燃烧门失败自诊断（单红定位面——t1079 加固轮追加）：每存活敌对终态 + 曝晒门
+            // 各输入原值（格坐标 / 天光 / 降水 / 身体格与支撑格 id / 地表高）——拒哪扇门一读便知。
+            for (int i = 0; i < em.cap(); ++i) {
+                if (!em.aliveAt(i) || !em.isHostileAt(i))
+                    continue;
+                const QVector3D p = em.posAt(i);
+                const int cxx = qFloor(p.x()), cyy = qFloor(p.y()), czz = qFloor(p.z());
+                diag += QStringLiteral("[hb i=%1 t=%2 pos=%3,%4,%5 burn=%6 hp=%7 sky=%8 rain=%9"
+                                       " blk=%10 sup=%11]")
+                            .arg(i)
+                            .arg(em.mobTypeAt(i))
+                            .arg(p.x(), 0, 'f', 2)
+                            .arg(p.y(), 0, 'f', 2)
+                            .arg(p.z(), 0, 'f', 2)
+                            .arg(em.isBurningAt(i))
+                            .arg(em.healthAt(i))
+                            .arg(w.skyLightAt(cxx, cyy, czz))
+                            .arg(w.isPrecipitatingAt(cxx, czz))
+                            .arg(w.blockAt(cxx, cyy, czz))
+                            .arg(w.blockAt(cxx, cyy - 1, czz));
+            }
+            diag += QStringLiteral("[spawn sh=%1 hm=%2] ").arg(sh).arg(w.heightmapAt(sx, sz));
+            diag += QStringLiteral("[bt %1] ").arg(burnTrace);
+        }
 
-        // AI 钳制柱：燃烧 Shambler 经若干 AI 拍后仍在外环（旧钳制 [ehw, dim-ehw] 直接赋值会把
-        // 外环 mob 首拍拽回核心盒边 x≈160 → 位置出核即红）。
+        // AI 钳制柱：解冻后走若干真 AI 拍（aiWander 移动路径与其界钳制真执行），燃烧 Shambler
+        // 与黑夜刷怪仍在外环（旧钳制 [ehw, dim-ehw] 直接赋值会把外环 mob 首拍拽回核心盒边
+        // x≈160 → 位置出核即红；解冻段游走步长秒级数格，远不足以把 x≥300 拽过 200 界）。
+        for (int f = 0; f < 20; ++f) {
+            em.tick(0.05, &w, playerPos, 0.3f, 1.8f, false, false, 1.0f);
+            em.tickHostileLife(0.05, &w, playerPos, 1.0f);
+        }
         bool stayedOutside = false;
         for (int i = 0; i < em.cap(); ++i) {
             if (!em.aliveAt(i) || !em.isHostileAt(i))
