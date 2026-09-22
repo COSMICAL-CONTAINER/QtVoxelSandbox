@@ -4412,7 +4412,8 @@ void PlayerController::placeBlock()
         }
     }
     // t447 ④ / t791 骨粉催熟（spec「骨粉右键作物→催熟」；t791 平衡：3-4 个骨粉应催熟一株）：手持骨粉
-    //   （BonemealId，材料段非方块）右键命中未成熟作物 / 树苗 / 未成熟浆果丛 → World::applyBonemeal 统一
+    //   （BonemealId，材料段非方块）右键命中未成熟作物 / 树苗 / 未成熟浆果丛 / 草方块（t1077 催生草丛·花）
+    //   → World::applyBonemeal 统一
     //   入口判定 + 应用（Game 层只管命中分流 / 消耗 / 挥手，机制数值全收口 World 层 → 矩阵探针可直调锁数值
     //   分布）。骨粉非方块 → selectedBlock 经 hotbar 归 Air，须在下方 `m_selectedBlock == Air` 守卫之前分流
     //   （同桶 / 锄 / 种子 / 树苗 / 玻璃分支模式）。命中非目标 / 已成熟作物 / 已成熟丛 → applyBonemeal 返
@@ -4422,7 +4423,8 @@ void PlayerController::placeBlock()
     //   setBlock 语义。机制数值（World::applyBonemeal，t791）：作物每骨粉 +2..3 阶段（0..7 共 8 阶段 → 从
     //   阶段 0 恰 3-4 骨粉催熟、期望 ~3.5 次；MC 1.0 为 +2..5 阶段，压缩上界保 spec「3-4 次」带）；树苗
     //   45%/骨粉即时成树（机制等价 MC 1.0 sapling bone meal，概率成树非阶段推进）；浆果丛 +1 阶段（3 阶段
-    //   小丛，2 骨粉催满）。全部哈希确定性（seed+位置+使用序号，PLAN §2-K，无随机源 → 可复现）。
+    //   小丛，2 骨粉催满）；草方块催生草丛/花一片（t1077，见 World::applyBonemeal ④ 头注释）。全部哈希确定性
+    //   （seed+位置+使用序号，PLAN §2-K，无随机源 → 可复现）。
     if (m_hotbar && m_world && heldItemId == RecipeRegistry::BonemealId) {
         if (m_hasHit && m_world->applyBonemeal(m_hitBx, m_hitBy, m_hitBz)) {
             if (m_mode != Creative)

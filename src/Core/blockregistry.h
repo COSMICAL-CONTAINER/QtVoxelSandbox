@@ -1126,7 +1126,19 @@ public:
         //   配方：8 木板环 + 1 红石粉 → 1 音符盒（工作台，MC 1.0 同料）。进红石 tab 创造调色板
         //   （音符盒是红石机关件——红石触发发声）。
         NoteBlock         = 143, // 音符盒：右键调音（0-24 半音循环）+ 攻击/红石上升沿发声；下方方块定音色族
-        Count           = 144, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t1077 骨块（BoneBlock）：机制等价 MC 骨粉 9↔1 压缩存储/装饰方块（MC 1.10+ 才有骨块，1.0 无
+        //   ——kMcBlockId 迁移文档行按「1.0 无」取 0）。骨来源 = 骷髅（Bones）死亡掉骨（loottable 既有挂点
+        //   t299：25% 掉 1..5 骨），1 骨 → 3 骨粉（t447 shapeless 既有），9 骨粉 3×3 满铺 ↔ 1 骨块（本任务新增
+        //   recipe.cpp 双向配方）。整立方 opaque（solid=true / ShapeFull，同 stone_brick 装饰族）、
+        //   hardness=2.0（机制等价 MC 骨块 hardness 2）/ Pickaxe 加速 / minTier=1 + requiresTool=true
+        //   （掉落依赖镐——装饰石质族口径，空手/非镐破块不掉落）。dropId=自身、dropCount=1、maxStack=64。
+        //   各面=bone_block(185)（米骨白 + 骨节环带 + 纵向骨纹 + 散点骨孔；tools/build_bone_block.py 程序
+        //   生成原创像素图 §9a）。音色归 GroupStone（石质敲击，同存储块 / 石砖装饰族）。进创造调色板
+        //   （方块 tab，矿物存储块组尾——9↔1 压缩存储同族）。配方（recipe.cpp）双向：9 骨粉 3×3 满铺 →
+        //   1 块（有序 3×3，仅工作台）；1 块任意格单放 → 9 骨粉（无序 Inventory2x2 / 3×3 均可——单原料
+        //   shapeless，机制等价 MC「9↔1」无损拆装；同 coal_block 家族模式）。
+        BoneBlock         = 144, // 骨块：9 骨粉 ↔ 1 块（骨粉压缩存储/装饰；镐采掘；机制等价 MC 骨块 1.10+）
+        Count           = 145, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -1847,7 +1859,11 @@ public:
     //   t1028：184=note_block（音符盒：深木框 + 居中盆膜 + 原创小音符标记；NoteBlock 各面=本 tile）。
     //       tools/build_note_block.py 程序生成（§9 override (a)；零 MC 资产）。pack 无对应文件
     //       （1.8 包 noteblock.png 命名/画风不合本工程程序瓦片纪律，缺安全跳过保程序瓦片）。
-    static constexpr int AtlasTileCount = 185;
+    //   t1077：185=bone_block（骨块：米骨白 + 横向骨节环带 + 纵向骨纹 + 散点骨孔；BoneBlock 各面=本 tile，
+    //       六面同贴图——骨块无 per-face 语义）。tools/build_bone_block.py 程序生成（§9 override (a)）。
+    //       pack 无对应文件（bone block 是 MC 1.10+ 方块，1.8.2.2 demo 包无此 PNG）→ 映射慷慨登记
+    //       （t627 先例）缺则安全跳过保程序瓦片。
+    static constexpr int AtlasTileCount = 186;
 
     // t668 图集瓦片像素边长（HD 图集：16→64）。**单一权威**：tools/build_atlas.py TILE（打包像素大小）/
     //   ResourcePackManager::kTile（运行期包内贴图缩放目标）与 mesher 半纹素内缩（chunkgeometry hx/hy、

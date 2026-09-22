@@ -746,6 +746,12 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   盆膜 + 原创音符标记；tools/build_note_block.py 程序生成 §9a）。音高 / 通电记忆在 state（低 5 位
     //   pitch + bit5 升沿记忆），表行不表达（同门/轨族 state 语义在 World/mesher 呈现层消费）。
     /* note_block         */ {int(BlockRegistry::NoteBlock),          184,184,184,184, true,  BlockRegistry::ShapeFull,     0.8f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::NoteBlock),         1, 64, "note_block",     "音符盒"},
+    // t1077 骨块（BoneBlock=144）：9 骨粉 ↔ 1 块 压缩存储/装饰方块（机制等价 MC 骨块 1.10+）。整立方 opaque
+    //   （solid=true / ShapeFull，同 stone_brick 装饰族）、hardness=2.0（MC 骨块同档）/ Pickaxe 加速 /
+    //   minTier=1 + requiresTool=true（掉落依赖镐，同装饰石质族——空手/非镐破块不掉）。dropId=自身
+    //   （破块掉同种块）、dropCount=1、maxStack=64。各面=bone_block(185)（米骨白 + 骨节环带；六面同贴图，
+    //   存储块无 per-face 语义；tools/build_bone_block.py 程序生成原创像素图 §9a）。音色归 GroupStone。
+    /* bone_block          */ {int(BlockRegistry::BoneBlock),          185,185,185,185, true,  BlockRegistry::ShapeFull,     2.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::BoneBlock),         1, 64, "bone_block",     "骨块"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -926,6 +932,15 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* mossy_stone_brick      */ 98,  // t998 苔石砖 → MC 1.0 stone brick id 98（metadata 1 = mossy；本工程独立 id）
     /* cracked_stone_brick    */ 98,  // t998 裂纹石砖 → MC 1.0 stone brick id 98（metadata 2 = cracked；本工程独立 id）
     /* iron_bars              */ 101, // t998 铁栏杆 → MC 1.0 iron bars id 101
+    // t1077 对齐补行（注：本行此前缺失——t1028 加 NoteBlock 时漏了本表行，entry 143 靠聚合零填充取 0，
+    //   巧值正确但位置失真；本任务追加 bone_block 行前必须补上，否则骨块行错位进音符盒槽位——t691 同门
+    //   错位坑的变体：**聚合数组尾部追加必须先核全行数**）。音符盒 MC 1.0 存在 id 25。**t691 教训**：
+    //   一行一条目 + 行内注释。
+    /* note_block             */ 25,  // t1077 补行：音符盒 → MC 1.0 note block id 25（此前靠零填充取 0，巧值同）
+    // t1077 骨块 → MC **1.0 无**独立 id（bone block 是 1.10+ 方块，1.10-1.12 数字 id 216）→ 0（=「1.0 无此
+    //   方块」；机制等价实现不受影响——本表仅迁移文档引用，无运行期消费者）。**t691 教训**：一行一条目 +
+    //   行内注释，防聚合初始化零填充回归。
+    /* bone_block             */ 0,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -2797,6 +2812,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case IronDoor: // t722 铁门 → 石质音色（金属质，同 IronBlock / Rail 族；机制等价 MC iron door metal SoundType）
     case IronTrapdoor: // t723 铁活板门 → 石质音色（金属质，同铁门族）
     case IronBars: // t998 铁栏杆 → 石质音色（金属质薄杆，同 iron_block 族；机制等价 MC iron bars metal SoundType）
+    case BoneBlock: // t1077 骨块 → 石质音色（石质整立方，同 stone_brick / 存储块装饰族）
         return GroupStone;
     case Ice: // t395 冰 → 石质音色（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）
     case Glass: // t405 玻璃 → 石质音色（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）

@@ -403,6 +403,10 @@ TILES = [
                                      #    本 tile；机制等价 MC 1.0 iron bars；tools/build_iron_bars.py 程序生成）
     "default_note_block",            # 184 note_block（音符盒各面同贴图；深木框 + 居中盆膜 + 原创小音符标记；NoteBlock 各面=
                                      #    本 tile；机制等价 MC 1.0 note block；tools/build_note_block.py 程序生成 §9a）
+    # t1077 骨块（BoneBlock；机制等价 MC 骨粉 9↔1 压缩存储/装饰方块——9 骨粉 3×3 满铺 ↔ 1 块，可分解回 9 骨粉）。
+    #   米骨白底 + 横向骨节环带 + 纵向骨纹细条 + 散点骨孔（原创自绘 §9a，与羊毛卷绒 / 石砖砖纹 / 石质存储块
+    #   镶格均不同纹）；六面同贴图（骨块无 per-face 语义）。tools/build_bone_block.py 程序生成原创像素图。
+    "default_bone_block",            # 185 bone_block（骨块各面同贴图；米骨白 + 骨节环带；9 骨粉↔1 块）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")
