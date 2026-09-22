@@ -752,6 +752,14 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   （破块掉同种块）、dropCount=1、maxStack=64。各面=bone_block(185)（米骨白 + 骨节环带；六面同贴图，
     //   存储块无 per-face 语义；tools/build_bone_block.py 程序生成原创像素图 §9a）。音色归 GroupStone。
     /* bone_block          */ {int(BlockRegistry::BoneBlock),          185,185,185,185, true,  BlockRegistry::ShapeFull,     2.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::BoneBlock),         1, 64, "bone_block",     "骨块"},
+    // t1080 漏斗（Hopper=145）：收集掉落物 + 容器抽取/输出 + 红石锁停的搬运机关（机制等价 MC 1.5+ hopper，
+    //   机制四语义在 PlayerController::scanHoppers；属性注释见 blockregistry.h Id 枚举 Hopper 行）。整立方
+    //   opaque（solid=true / ShapeFull，同发射器 / 投掷器机关盒家族体量；MC 漏斗异形体 v1 如实降级整立方，
+    //   登记候选池）、hardness=3.0（MC hopper 同档）/ Pickaxe / minTier=1 + requiresTool=true（需镐才掉）。
+    //   dropId=自身、dropCount=1、maxStack=64。贴图 per-face：顶=hopper_top(186 顶箅) / 侧·底=hopper_side(187
+    //   锅体) / 排料口面=hopper_front(188 排料嘴)；mesher tileFor 据 state 选（HopperFacingDownFlag 朝下时
+    //   排料嘴贴底面，见 meshbuilder.cpp Hopper 分支）。音色归 GroupStone（金属质）。
+    /* hopper              */ {int(BlockRegistry::Hopper),             186,187,187,188, true,  BlockRegistry::ShapeFull,     3.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Hopper),            1, 64, "hopper",         "漏斗"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -941,6 +949,10 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     //   方块」；机制等价实现不受影响——本表仅迁移文档引用，无运行期消费者）。**t691 教训**：一行一条目 +
     //   行内注释，防聚合初始化零填充回归。
     /* bone_block             */ 0,
+    // t1080 漏斗 → MC **1.0 无**独立 id（hopper 是 1.5 红石更新的方块）→ 0（=「1.0 无此方块」；机制等价
+    //   实现不受影响——本表仅迁移文档引用，无运行期消费者）。**t691 教训**：一行一条目 + 行内注释，
+    //   防聚合初始化零填充回归（本行是 Count 146 行数的第 145 行，追加后全表行数与 Count 一致）。
+    /* hopper                 */ 0,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");

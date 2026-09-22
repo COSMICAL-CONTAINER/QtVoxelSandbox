@@ -184,6 +184,7 @@ struct SaveRequest
     QVariantList chests;
     QVariantList furnaces;
     QVariantList dispensers;
+    QVariantList hoppers; // t1080 漏斗内容（缺省空 = 不写 hoppers 表，旧构造 caller 向前兼容）
     QVariantMap worldTime;
     QVariantMap bedSpawn;
     QVariantMap playerData;

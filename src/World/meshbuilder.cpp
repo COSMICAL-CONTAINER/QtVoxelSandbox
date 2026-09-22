@@ -143,6 +143,21 @@ static int tileFor(quint8 block, int face, quint8 state)
             return d.topTile;                                            // 顶/底 = furnace_top（复用）
         return d.sideTile;                                               // 其余三侧面 = furnace_side（复用）
     }
+    // t1080 漏斗朝向：排料嘴（hopper_front 188）贴**排料口所朝面**——bit2（HopperFacingDownFlag）置位 =
+    //   朝下 → 排料嘴贴底面（漏斗口朝下往下方容器喂料）；bit2=0 = 水平 → 排料嘴贴 chestFrontFace 解码的
+    //   水平面（同发射器编码）。顶面恒顶箅 hopper_top(186)；其余面锅体 hopper_side(187)。
+    if (block == BlockRegistry::Hopper) {
+        const BlockRegistry::BlockDef &d = BlockRegistry::def(block);
+        if (state & BlockRegistry::HopperFacingDownFlag) {
+            if (face == int(BlockRegistry::Bottom)) return d.frontTile; // 排料嘴（朝下）
+            if (face == int(BlockRegistry::Top)) return d.topTile;      // 顶箅
+            return d.sideTile;                                          // 锅体
+        }
+        const int frontFace = int(BlockRegistry::chestFrontFace(state)); // 排料口所朝水平面
+        if (face == frontFace) return d.frontTile;                       // 排料嘴（水平）
+        if (face == int(BlockRegistry::Top)) return d.topTile;           // 顶箅
+        return d.sideTile;                                               // 锅体（含底面）
+    }
     // t234/t406 耕地：顶面（+Y）恒 farmland_dry(26)（topTile）；湿润等级 0..3（state 低 2 位）由顶点色暗化
     //   体现（darker=wetter，见下方 farmlandHydrBrightMul），不再切换 dry/wet 两贴图（4 级靠顶点色
     //   连续暗化实现，无需扩图集 + 2 贴图）。侧/底 = dirt(2)。

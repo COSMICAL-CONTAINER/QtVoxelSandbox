@@ -407,6 +407,13 @@ TILES = [
     #   米骨白底 + 横向骨节环带 + 纵向骨纹细条 + 散点骨孔（原创自绘 §9a，与羊毛卷绒 / 石砖砖纹 / 石质存储块
     #   镶格均不同纹）；六面同贴图（骨块无 per-face 语义）。tools/build_bone_block.py 程序生成原创像素图。
     "default_bone_block",            # 185 bone_block（骨块各面同贴图；米骨白 + 骨节环带；9 骨粉↔1 块）
+    # t1080 漏斗三张（机制等价 MC 1.5+ hopper 的搬运机关——收集 / 抽取 / 输出 / 红石锁停）。名称 / 贴图
+    #   全原创自绘 §9a（暗铁系金属族：顶箅 / 锅体箍带 / 排料嘴；「漏斗」「Hopper」为通用描述词，零 MC
+    #   专有名词）。tools/build_hopper.py 程序生成原创像素图（§9 override (a)）。
+    "default_hopper_top",            # 186 hopper_top（顶面进料箅：暗铁框 + 中央 3×3 栅格孔阵；Hopper 顶面）
+    "default_hopper_side",           # 187 hopper_side（锅体侧面/底面：暗铁底 + 边框暗带 + 两道箍带 + 四角铆钉）
+    "default_hopper_front",          # 188 hopper_front（排料口面：锅体 + 中央深孔 + 孔下出料槽；mesher 据
+                                     #    state 贴排料口所朝面（同发射器 tileFor 分支），标记输出方向）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

@@ -300,6 +300,11 @@ qt_add_executable(voxelsandbox
     #   结构对齐已 per-block 的 ChestStore（箱子 27 槽）/ FurnaceStore（熔炉 3 槽）。纯存储类（无光 / 无 World 依赖）。
     src/Game/dispenserstore.cpp
     src/Game/dispenserstore.h
+    # t1080 漏斗内容存储 VM（Game 层）：按方块世界坐标键控的 5 槽容腔（机制等价 MC hopper 5 槽）；
+    #   PlayerController::scanHoppers 机制面读写 + 破漏斗清孤儿掉内容 + Main.qml 装配 / 持久化。形状 / 口径
+    #   逐字对齐 DispenserStore 族（同族 per-block 方块内容器，不新开容器抽象）。纯存储类（无光 / 无 World 依赖）。
+    src/Game/hopperstore.cpp
+    src/Game/hopperstore.h
     # progress 玩家进度系统（Game 层 ViewModel）：统计（时间/挖放/路程/击杀/死亡/合成/拾取）+ 成就解锁。
     #   跨世界持久化（同 ChestStore/FurnaceStore，存 worldstore progress 表）。各事件源经 QML 桥接调埋点。
     src/Game/playerprogress.cpp
@@ -1271,6 +1276,11 @@ add_executable(redstone_matrix_test
     # t1078 染料获取链补全探针附加：Game 层配方表直查 + 源码钉（recipe/hotbar/playercontroller 系已列，
     #   零新 include 面——QDirIterator/QFile helpers 枢纽已含）。
     tools/matrix/section52_dye_mixing.cpp
+    # t1080 漏斗机制探针段（置尾先例沿用：4 腿 r2052a-d，filter 词 r2052；随段直编
+    #   src/Game/hopperstore.h + furnacestore.h——HopperStore 机制面 + 熔炉挂接容器族断言源，
+    #   Q_OBJECT → AUTOMOC 经本清单入册；各腿自建 fresh 小世界，无新增 world/chunk .cpp）。
+    tools/matrix/section53_hopper.cpp
+    src/Game/hopperstore.h
     src/Game/entityshadowfield.cpp
     src/Game/entityshadowfield.h
     src/Renderer/blobshadowgeometry.cpp
@@ -1324,6 +1334,12 @@ add_executable(redstone_matrix_test
     #   依赖面 —— 只向下依赖 Core/Qt，不引入 World/QML）。
     src/Game/cheststore.cpp
     src/Game/cheststore.h
+    # t1080 漏斗机制探针附加：HopperStore（5 槽容腔 + 引擎原语直调）+ FurnaceStore（漏斗挂接熔炉容器面
+    #   的读写断言源；playercontroller.cpp scanHoppers 引用其符号——此前矩阵未编 furnacestore 故需补列）。
+    src/Game/hopperstore.cpp
+    src/Game/hopperstore.h
+    src/Game/furnacestore.cpp
+    src/Game/furnacestore.h
     src/Game/loottable.cpp
     src/Game/raycast.cpp
     src/Entities/xporbmanager.cpp

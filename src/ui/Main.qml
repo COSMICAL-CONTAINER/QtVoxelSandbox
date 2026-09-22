@@ -1033,6 +1033,9 @@ Window {
         //   杜绝上一世界发射器残留串入新世界。存档 dispensers 由 saveAndExitToWorldList 经 saveAll(name, ...,
         //   dispenserStore.allDispensers()) 落盘。
         dispenserStore.loadAll(worldStore.loadDispensers())
+        // t1080 漏斗按世界持久化 + 修跨世界泄漏：hopperStore 跨世界长驻（同 chestStore / dispenserStore 族），
+        //   进世界前 loadAll 整体替换内存（先清后填）。存档 hoppers 由 runExitSave 第 5 参落 hoppers 表。
+        hopperStore.loadAll(worldStore.loadHoppers())
         // progress 按世界持久化：进世界前 loadVariant 整体替换内存（清旧世界残留 + 填本世界进度）。无存档
         //   progress 表 → 空 map → 重置默认（全 0 统计 + 全未解锁成就）。存档由 saveAndExit saveProgress 落盘。
         progress.loadVariant(worldStore.loadProgress())
@@ -1227,6 +1230,7 @@ Window {
         // t188：箱子内容随地形 / meta 同事务落盘（第 3 参 = ChestStore::allChests() 产物）。
         // t177 二轮复盘：熔炉内容同事务落盘（第 4 参 = FurnaceStore::allFurnaces() 产物）。
         // t542：发射器内容同事务落盘（第 5 参 = DispenserStore::allDispensers() 产物）。
+        // t1080：漏斗内容同事务落盘（第 5 参 = HopperStore::allHoppers() 产物；hoppers 表纯加表）。
         // t1016：世界时钟快照同事务落盘（第 6 参 = {phase, day, weather, weatherTimerMs}，
         //        WorldClock / World 的裸原语打包；World 层不能向上依赖 Game 层时钟，经 QML 编排
         //        传入；t1046 补 weatherTimerMs = 当前态剩余毫秒，weather_rain/thunder 双计数器的
@@ -1243,7 +1247,8 @@ Window {
                                              player.bedSpawnValid
                                                  ? { valid: true, x: player.spawnPoint.x, y: player.spawnPoint.y, z: player.spawnPoint.z }
                                                  : { valid: false },
-                                             gatherPlayerState(), progress.toVariant())
+                                             gatherPlayerState(), progress.toVariant(),
+                                             hopperStore.allHoppers())
     }
     // t1064 退出存档失败退避重试（review0901 登记清偿，出处见 saveAndExitToWorldList 重试段注释）：
     //   「保存并退出」按钮与 onClosing 关窗两路径**共用唯一实现**（禁第二份退避逻辑散写；两处
@@ -2808,6 +2813,9 @@ Window {
     //   孤儿 + 掉内容）。纯 Game/ViewModel 层，不依赖 World/Renderer；物品栈语义同 Hotbar（id=0=空）。
     //   修旧 bug（t517 遗留）：DispenserUI 旧把 9 槽存 QML 本地数组 → 全世界发射器共享一个物品栏、打掉不掉。
     DispenserStore { id: dispenserStore }
+    // t1080 漏斗内容存储 VM（按方块世界坐标键控的 5 槽容腔；机制面 = PlayerController::scanHoppers，
+    //   破漏斗清孤儿掉内容；无开盖 UI——本单如实降级，revision/读族留作未来 HopperUI 复用）。
+    HopperStore { id: hopperStore }
     // progress 玩家进度系统 VM（统计 + 成就；跨世界持久化存 worldstore progress 表）。各事件源经 QML 桥接
     //   调埋点（onBlockMined/onCraft/onMobKilled 等）；成就解锁弹 toast（achievementUnlocked 信号）。
     PlayerProgress { id: progress }
@@ -3328,6 +3336,9 @@ Window {
         dispenserStore: dispenserStore
         // t1013：注入箱子矿车内容键存储（进世界 convertMineshaftChests 转正 / 回生链用；同 peer VM 注入模式）。
         chestStore: chestStore
+        // t1080：注入漏斗内容存储 + 熔炉内容存储（scanHoppers 机制面的容器族读写；同 peer VM 注入模式）。
+        hopperStore: hopperStore
+        furnaceStore: furnaceStore
         // t1022：注入键位映射表（setKey 入口 canonicalKey 规范化 —— 运动键重映射全局生效的引擎侧权威）。
         keybinds: keybindsMgr
         // t889：世界模拟总闸绑 window.worldRunning —— 硬档 tickImpl 早退（实体桶 / step 全停）+ 复跑顺延

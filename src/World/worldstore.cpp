@@ -194,6 +194,19 @@ bool WorldStore::initSchema()
         qCCritical(lcSave) << "create dispensers failed:" << q.lastError().text();
         return false;
     }
+    // t1080 漏斗内容表：同 chests / furnaces / dispensers 模式 —— 每只漏斗（按方块世界坐标键控）一行，
+    //   data 列存整个 {slots} 的 JSON 文本（自描述）。纯加表 —— 旧库 IF NOT EXISTS 幂等补建，无迁移负担；
+    //   schema 版本不 bump（纯加表对老库向前兼容）。
+    if (!q.exec(QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS hoppers ("
+            "  x INTEGER NOT NULL,"
+            "  y INTEGER NOT NULL,"
+            "  z INTEGER NOT NULL,"
+            "  data TEXT NOT NULL,"
+            "  PRIMARY KEY (x, y, z))"))) {
+        qCCritical(lcSave) << "create hoppers failed:" << q.lastError().text();
+        return false;
+    }
     // progress 表（progress 新系统）：玩家进度（统计 + 成就）单行表，key 固定 'main'，data 存 PlayerProgress::toVariant()
     //   的 JSON。IF NOT EXISTS 幂等补建（schema 版本不 bump，同 chests/furnaces，纯加表对老库向前兼容）。
     if (!q.exec(QStringLiteral(
@@ -443,7 +456,7 @@ void WorldStore::closeWorld()
 }
 
 bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const QVariantList &furnaces, const QVariantList &dispensers,
-                         const QVariantMap &worldTime, const QVariantMap &bedSpawn)
+                         const QVariantMap &worldTime, const QVariantMap &bedSpawn, const QVariantList &hoppers)
 {
     if (!m_open || !m_world) {
         qCWarning(lcSave) << "saveAll: no open db or world";
@@ -552,6 +565,11 @@ bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const 
     }
     // t542 发射器内容同事务落盘（dispensers 表 DELETE 全量 + INSERT；与 chunks / meta / chests / furnaces 原子提交）。
     if (!writeDispensers(dispensers)) {
+        db.rollback();
+        return false;
+    }
+    // t1080 漏斗内容同事务落盘（hoppers 表 DELETE 全量 + INSERT；与 chunks / meta / 前述容器表原子提交）。
+    if (!writeHoppers(hoppers)) {
         db.rollback();
         return false;
     }
@@ -792,6 +810,63 @@ QVariantList WorldStore::loadChests() const
         const QJsonDocument doc = QJsonDocument::fromJson(q.value(3).toString().toUtf8());
         cm.insert(QStringLiteral("slots"), doc.toVariant());
         out.append(cm);
+    }
+    return out;
+}
+
+// t1080 漏斗落盘：DELETE 全量 + INSERT 每只漏斗（坐标列 + slots JSON 文本）。调用方（saveAll）已开事务，
+//   本方法不 BEGIN/COMMIT（同事务原子）。hoppers 形状 = HopperStore::allHoppers() 产物：每项
+//   {x,y,z,slots:[{id,count}×5]}。坐标缺 / 非法 → 跳过该漏斗（不写残条目）。
+bool WorldStore::writeHoppers(const QVariantList &hoppers)
+{
+    QSqlDatabase db = QSqlDatabase::database(kConn);
+    QSqlQuery del(db);
+    if (!del.exec(QStringLiteral("DELETE FROM hoppers"))) {
+        qCCritical(lcSave) << "saveAll: hoppers delete failed:" << del.lastError().text();
+        return false;
+    }
+    QSqlQuery iq(db);
+    iq.prepare(QStringLiteral("INSERT INTO hoppers (x, y, z, data) VALUES (?, ?, ?, ?)"));
+    for (const QVariant &v : hoppers) {
+        const QVariantMap hm = v.toMap();
+        bool okx = false, oky = false, okz = false;
+        const int x = hm.value(QStringLiteral("x")).toInt(&okx);
+        const int y = hm.value(QStringLiteral("y")).toInt(&oky);
+        const int z = hm.value(QStringLiteral("z")).toInt(&okz);
+        if (!okx || !oky || !okz) continue; // 缺坐标 → 跳过（不写残条目）
+        const QJsonDocument doc = QJsonDocument::fromVariant(hm.value(QStringLiteral("slots")));
+        iq.addBindValue(x);
+        iq.addBindValue(y);
+        iq.addBindValue(z);
+        iq.addBindValue(QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
+        if (!iq.exec()) {
+            qCCritical(lcSave) << "saveAll: hopper insert failed at" << x << y << z
+                               << ":" << iq.lastError().text();
+            return false;
+        }
+    }
+    return true;
+}
+
+// t1080 读 hoppers 表为 QVariantList（形状同 writeHoppers 入参）。未打开 → 空列表。caller
+//   （Main.qml.enterWorld）转交 hopperStore.loadAll 整体替换内存（清旧世界残留 + 填本世界漏斗）。
+QVariantList WorldStore::loadHoppers() const
+{
+    QVariantList out;
+    if (!m_open) return out;
+    QSqlQuery q(QSqlDatabase::database(kConn));
+    if (!q.exec(QStringLiteral("SELECT x, y, z, data FROM hoppers"))) {
+        qCWarning(lcSave) << "loadHoppers: select failed:" << q.lastError().text();
+        return out;
+    }
+    while (q.next()) {
+        QVariantMap hm;
+        hm.insert(QStringLiteral("x"), q.value(0).toInt());
+        hm.insert(QStringLiteral("y"), q.value(1).toInt());
+        hm.insert(QStringLiteral("z"), q.value(2).toInt());
+        const QJsonDocument doc = QJsonDocument::fromJson(q.value(3).toString().toUtf8());
+        hm.insert(QStringLiteral("slots"), doc.toVariant());
+        out.append(hm);
     }
     return out;
 }
