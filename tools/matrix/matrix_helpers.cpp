@@ -165,8 +165,10 @@ void MatrixRun::runAll()
 
     section49_entity_blob_shadow(); // t1075 blob 软阴影（置尾先例沿用：r2048a 平地贴地承重墙[贴地 Y/alpha/半径 + 指纹差分 + 几何可数通道] / r2048b 悬崖边缘+腾空衰减[单调淡出链+超窗缺席] / r2048c 未物化缺席+两模式贴地逐位一致[sparse radius-0 同 seed 孪生] / r2048d 结构钉[采样权威门+几何契约+QML 接线/材质契约+注册族+零对地采样反探+EntityStore 零触碰反探]，fixed 48×48×96 s82 + sparse radius-0 孪生，rig 零接触）
 
+
     section50_streaming_negative_walk(); // t1076 大核流式世界负向走查零收敛（置尾先例沿用：r2049 负向走查收敛断言[生产尺寸真链逐 chunk 负向走查 (4,5)→(-3,5) 每站有界泵拍 → 终站静置 ±2 方窗 25 键 deadline 150000ms 收敛 + 六态直方/F3 流式行差分/驻留键样本/loadChunkAt 兜底探针四域失败签名 diag]，fixed 48×48×96 s82 + sparse 核心 160×160×96 s82 + 真临时库，rig 零接触）
 
+    section51_bonemeal_flora_boneblock(); // t1077 骨粉催生草丛/花 + 骨块（置尾先例沿用：r2050a 草方块催生承重墙[世界直调：有效目标真值 + 5×5 邻域 id 带守卫 + 既有方块零覆盖 + 全图唯一 patch + 同 seed 孪生逐位 + 错峰行为差分 + 全围死仍中心长 + 上方被占/泥土负例]，r2050b 骨块承重墙[纯表：配方双向/负例/往返恒等 + def 行逐字段 + 采掘面三查询 + 世界写读回 + kMcBlockId 尾行行为级对齐]，r2050c 催生分布/边界墙[13×13 大田统计一致性 + patch 截断边缘安全 + 2×2 组合配方负例]，r2050d 结构钉[单一权威 + 交互入口单点 + id/tile/配方/图标/资源表注册族 + 派生链工具表 + 对齐补行钉 + QML 零触碰反探]，rig 世界零接触，接 section50）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";

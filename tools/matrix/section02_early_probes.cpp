@@ -3734,20 +3734,20 @@ void MatrixRun::section02_early_probes()
     //        t870/t889 源码钉先例）+ mesher trapdoor case 木/铁 sideTile 分流（planks/iron_block）。
     runLegMulti({ "t879 trapdoor pair fix: wood trapdoor def swaps large faces to tile 180 (four-hole plank board, "
         "alpha cutout - the old all-planks solid plate read as a wooden pressure plate) with plank thin e"
-        "dges, atlas regenerated (185 tiles since t1028 appended 184; t998 appended 181..183 before; stal"
+        "dges, atlas regenerated (186 tiles since t1077 appended 185; t1028 appended 184 before; t998 appended 181..183 before; stal"
         "e pre-t879 atlas width still fails) with real alpha holes in tiles 178/180, and both trapdoors r"
         "oute to the cutout pass (source pin - holes need alphaCutoff to see through); iron side tiles us"
         "e iron_block / wood planks per family (mesher + runtime icon spec + offline icon)" }, [&]() {
         const BR::BlockDef &wtd = BR::def(BR::WoodTrapdoor);
         const bool okDef = wtd.topTile == 180 && wtd.bottomTile == 180
                            && wtd.sideTile == 8 && wtd.frontTile == 8;
-        bool okAtlas = BR::AtlasTileCount == 185; // t1028 起图集随音符盒 tile 184 追加到 185（追加不插中间——存档契约）
+        bool okAtlas = BR::AtlasTileCount == 186; // t1077 起图集随骨块 tile 185 追加到 186（追加不插中间——存档契约；t1028 先例 184→185）
         // 测试二进制无 qrc（t815/t838 探针同因：图集资源不在测试 target）→ 直读源树 textures/atlas.png
         //   （构建机源树布局，与源码钉同根路径解析）。
         const QString exeDirA = QCoreApplication::applicationDirPath();
         const QString rootA = QDir(exeDirA + QStringLiteral("/..")).absolutePath();
         QImage atlas(QDir(rootA).absoluteFilePath(QStringLiteral("textures/atlas.png")));
-        if (atlas.isNull() || atlas.width() != 185 * 64) {
+        if (atlas.isNull() || atlas.width() != 186 * 64) { // t1077：186 瓦片 × 64px
             okAtlas = false;
             qInfo().noquote() << "  t879 diag: atlas w =" << (atlas.isNull() ? -1 : atlas.width());
         } else {
@@ -3795,7 +3795,7 @@ void MatrixRun::section02_early_probes()
         qInfo().noquote() << (okT879 ? "PASS" : "FAIL")
                           << "| t879 trapdoor pair fix: wood trapdoor def swaps large faces to tile 180 "
                              "(four-hole plank board, alpha cutout - the old all-planks solid plate read as "
-                             "a wooden pressure plate) with plank thin edges, atlas regenerated (185 tiles "
+                             "a wooden pressure plate) with plank thin edges, atlas regenerated (186 tiles "
                              "since t1028 appended 184; t998 appended 181..183 before; stale pre-t879 atlas "
                              "width still fails) with "
                              "real alpha holes in tiles 178/180, and both trapdoors route to the cutout "

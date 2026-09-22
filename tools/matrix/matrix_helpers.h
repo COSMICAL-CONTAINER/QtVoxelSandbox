@@ -464,4 +464,7 @@ private:
                                   //   本/loadChunkAt 兜底探针四域失败签名 diag]——fixed 48×48×96
                                   //   s82 + sparse 核心 160×160×96 s82 + 真临时库，rig 世界
                                   //   w 零接触，接 section49）
+    void section51_bonemeal_flora_boneblock(); // t1077 骨粉催生草丛/花 + 骨块段（置尾先例沿用：
+                                  //   r2050a 催生承重墙 + r2050b 骨块承重墙 + r2050c 分布/边界墙 +
+                                  //   r2050d 结构钉腿，World 直调 + 纯表腿 + 源码钉，rig 世界零接触，接 section50）
 };
