@@ -3741,13 +3741,13 @@ void MatrixRun::section02_early_probes()
         const BR::BlockDef &wtd = BR::def(BR::WoodTrapdoor);
         const bool okDef = wtd.topTile == 180 && wtd.bottomTile == 180
                            && wtd.sideTile == 8 && wtd.frontTile == 8;
-        bool okAtlas = BR::AtlasTileCount == 186; // t1077 起图集随骨块 tile 185 追加到 186（追加不插中间——存档契约；t1028 先例 184→185）
+        bool okAtlas = BR::AtlasTileCount == 189; // t1080 起图集随漏斗 tile 186..188 追加到 189（t1077 曾 185→186、t1028 184→185——追加不插中间存档契约，钉值随追加 lawful 前移）
         // 测试二进制无 qrc（t815/t838 探针同因：图集资源不在测试 target）→ 直读源树 textures/atlas.png
         //   （构建机源树布局，与源码钉同根路径解析）。
         const QString exeDirA = QCoreApplication::applicationDirPath();
         const QString rootA = QDir(exeDirA + QStringLiteral("/..")).absolutePath();
         QImage atlas(QDir(rootA).absoluteFilePath(QStringLiteral("textures/atlas.png")));
-        if (atlas.isNull() || atlas.width() != 186 * 64) { // t1077：186 瓦片 × 64px
+        if (atlas.isNull() || atlas.width() != 189 * 64) { // t1080：189 瓦片 × 64px（t1077 曾 186，钉值随追加 lawful 前移）
             okAtlas = false;
             qInfo().noquote() << "  t879 diag: atlas w =" << (atlas.isNull() ? -1 : atlas.width());
         } else {
