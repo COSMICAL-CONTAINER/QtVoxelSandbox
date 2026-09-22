@@ -657,7 +657,8 @@ QVariantList Hotbar::creativeMaterials() const
         //   走发射分支。MaterialIcon 自绘烈焰弹（drawFireCharge，§9 原创）。
         int(RecipeRegistry::FireChargeId),    // 烈焰弹：燃烬粉+煤/炭+火药合成 3 发；右键发射火球撞击生火（t891②）
         // t788 染料段 16 色（材料段 0x24B..0x25A；机制等价 MC 1.0 dye 16 色）：生存获得 = 破坏对应花（红/黄/
-        //   蓝/白四色，blockregistry dropId）+ 熔炉烧仙人掌（绿）；染色链原料（染白羊毛/白床 → 对应色）。
+        //   蓝/白四色，blockregistry dropId）+ 熔炉烧仙人掌（绿）+ 墨囊 1:1 转黑（t1078）；二级混色 9 色见
+        //   recipe.cpp t1078 段（染料染色链原料：染白羊毛/白床 → 对应色）。
         //   创造调色板补全便于测试染色链；可堆叠 64（走材料段默认）；非方块 → 右键不放置。
         //   MaterialIcon 自绘彩色粉末堆（drawDye，配色取 tools/build_wool.py 羊毛色板）。行序 = 羊毛 16 色
         //   标准序（与 DyeIdBase 起连续段一致，矩阵测试 t788 探针核连续同列）。
@@ -1201,7 +1202,7 @@ QString Hotbar::nameForBlock(int blockId) const
         //   撞击生火。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::FireChargeId) return QStringLiteral("烈焰弹"); // 右键发射火球撞击生火（t891②）
         // t788 染料段 16 色（材料段 0x24B..0x25A；机制等价 MC 1.0 dye 16 色）：四花破坏掉落（红/黄/蓝/白）
-        //   + 熔炉烧仙人掌得绿；染白羊毛 / 白床成对应色。行序 = 羊毛 16 色标准序（与 DyeIdBase 起连续段一致）。
+        //   + 熔炉烧仙人掌得绿 + 墨囊 1:1 转黑（t1078）；染白羊毛 / 白床成对应色。行序 = 羊毛 16 色标准序（与 DyeIdBase 起连续段一致）。
         //   零 MC 专名（§9；「仙人掌绿」以通用词「绿色染料」表达）。
         if (blockId == RecipeRegistry::DyeWhiteId)      return QStringLiteral("白色染料");   // 白花破坏掉落
         if (blockId == RecipeRegistry::DyeOrangeId)     return QStringLiteral("橙色染料");
