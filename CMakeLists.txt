@@ -1265,6 +1265,9 @@ add_executable(redstone_matrix_test
     # t1076 大核流式世界负向走查零收敛复现定界探针附加：Game/World 层直编（真链负向走查收敛
     #   断言 + 四域失败签名 diag——streamingbridge/world/chunklifecycle/frameprofiler 系已列）。
     tools/matrix/section50_streaming_negative_walk.cpp
+    # t1077 骨粉催生草丛/花 + 骨块探针附加：Core/Game/World 层直编（applyBonemeal 直调 + 配方表直查
+    #   + 源码钉——blockregistry/recipe/hotbar/world 系已列，零新 include 面）。
+    tools/matrix/section51_bonemeal_flora_boneblock.cpp
     src/Game/entityshadowfield.cpp
     src/Game/entityshadowfield.h
     src/Renderer/blobshadowgeometry.cpp
