@@ -33,7 +33,9 @@
 //   阴性日志：build/ 下四件 matrix_r2024_neg{1,2}_{red,restore}.log 直接落终名（证据面铁律）。
 // 时长控制：腿内 sparse 世界 spawnPreGenerateRadius=0（零预生成，全量走流式链）+ 半径压小
 //   （r2024b/c 主走查 (1,1,2)=3×3；r2024c 背压相短暂 (4,4,6)=9×9 后立即收半径）；收敛轮询
-//   deadline 有界（防 flake 不挂死）+ 真线程腿三连跑（r2012 防 flake 先例）。
+//   deadline 有界（防 flake 不挂死）+ 真线程腿三连跑（r2012 防 flake 先例）。t1079 时序加固：
+//   r2024b 取消窗前置排干拍（相 1 收敛后强制收割对账——「全部 Loaded」≠「别名账全清」的
+//   同拍竞速窗，见腿内注释；恰 9 断言零放宽，失败 diag 携四差分自定位）。
 void MatrixRun::section27_streaming_wiring()
 {
     constexpr int kWS = 80, kDS = 80, kH = 96, kSeed = 42; // sparse 核心域（5×5 chunk，与 r2023 同族）
@@ -233,6 +235,13 @@ void MatrixRun::section27_streaming_wiring()
         ok = ok && c1;
         if (!c1)
             diag += d1;
+        // t1079 结构钉（取消窗前置排干拍，r2024c/r2033b 同门）：「全部 Loaded」检查通过 ≠ 末批
+        // 完成记录已收割——worker 线程可在同拍收割步（②）之后、数据面采纳（④）之前推入完成对
+        // （chunk 已 Loaded 而别名账未清，generationjob.h 收割步是别名账唯一清理点）；不排干时
+        // 该活别名会被走离拍（玩家 (6,2) 沿）的半径取消步误计（恰 9 → +17 偶发红面）。此拍
+        // 强制收割对账：取消窗入口的在途集与驻留态对齐 → 取消计数与线程节奏解耦（恰 9 的
+        // 确定性钉，断言本体零放宽）。
+        gs.stepTick(0.11);
 
         // OOB 门翻真：界内 heightmap 自洽非空柱 / 界外（未加载域）恒 OOB 同值。
         bool gateOk = ws.heightmapAt(40, 40) >= 0 && ws.heightmapAt(200, 200) == -1
@@ -324,18 +333,26 @@ void MatrixRun::section27_streaming_wiring()
         //    (2,2)：驱动器半径取消步对新窗在途别名逐个 cancel（取消判据 = 半径几何）。取消计数
         //    == 9（拍间 worker 仅毫秒级推进、收割发生在本拍泵内且晚于取消步 → 9 条请求全部仍
         //    pending 可取消）。
-        const int canceledBefore = gs.streamDriver()->stats().canceled;
+        const ChunkStreamDriver::Stats stWalk0 = gs.streamDriver()->stats();
+        const int resWalk0 = ws.residentChunkCount();
         pc.loadSavedState(104.5f, 70.0f, 40.5f, 0.0f, 0.0f, 0); // chunk (6,2) 核心域外延展区
         pc.tick();
         gs.stepTick(0.11); // 泵 1 拍：提交 + 交接 (5..7)×(1..3) 窗
         pc.loadSavedState(40.5f, 70.0f, 40.5f, 0.0f, 0.0f, 0); // 跳回 (2,2)
         pc.tick();
         gs.stepTick(0.11); // 泵 1 拍：半径取消步执行（先于本拍收割）
-        const int canceledAfter = gs.streamDriver()->stats().canceled;
-        const bool cancelOk = canceledAfter - canceledBefore == 9;
+        const ChunkStreamDriver::Stats stWalk1 = gs.streamDriver()->stats();
+        // 恰 9 的确定性论证：9 条走离窗别名在跳回拍取消步时必仍活（别名账只在收割步清，
+        // 走离拍交接与跳回拍取消步之间无收割步）；前置排干拍保证相 1 遗留别名在窗口前全清
+        //（t1079 钉）。失败 diag 携提交/拒绝/取消三计数差分 + 驻留增量 = 单红即可定位漂移面。
+        const bool cancelOk = stWalk1.canceled - stWalk0.canceled == 9;
         ok = ok && cancelOk;
         if (!cancelOk)
-            diag += QStringLiteral("[cancel +%1] ").arg(canceledAfter - canceledBefore);
+            diag += QStringLiteral("[cancel +%1 sub+%2 rej+%3 res+%4] ")
+                        .arg(stWalk1.canceled - stWalk0.canceled)
+                        .arg(stWalk1.submitted - stWalk0.submitted)
+                        .arg(stWalk1.rejected - stWalk0.rejected)
+                        .arg(ws.residentChunkCount() - resWalk0);
 
         // ③ 收敛相：被取消窗口的已完成/在途产物经数据面照常落位（W2 语义：内容已算出即采纳；
         //   离场驻留的回收 = W3 驱逐面）→ (5..7)×(1..3) 窗全 Loaded，驻留恰 res0 + 8 + 9。
