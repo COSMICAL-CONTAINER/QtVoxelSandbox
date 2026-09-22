@@ -113,8 +113,11 @@ public:
     //   非空且 !valid → 写 bed_valid=0（显式失效，挖床后退出 = 下次进世界不回填床位）；空 map → 不写
     //   不删（同 worldTime 老调用兼容）。四键与 chunks / meta 同事务原子。
     //   返回是否成功（无 world / 未打开 / SQL 失败 → false + qWarning）。
+    //   t1080 第 7 参 hoppers（HopperStore::allHoppers() 产物）同 chests 模式落 hoppers 表（旧 caller
+    //   缺省 {} → 不写不删，向前兼容）。
     Q_INVOKABLE bool saveAll(const QString &name, const QVariantList &chests = {}, const QVariantList &furnaces = {}, const QVariantList &dispensers = {},
-                             const QVariantMap &worldTime = {}, const QVariantMap &bedSpawn = {});
+                             const QVariantMap &worldTime = {}, const QVariantMap &bedSpawn = {},
+                             const QVariantList &hoppers = {});
     // t1016 读世界时钟快照（与 saveAll 第 5 参同形）：{phase: double, day: qlonglong, weather: int,
     //   hasWeather: bool, hasWeatherTimer: bool, weatherTimerMs: qlonglong}。旧存档缺键 → 逐键缺省
     //   （phase 0.0 = 新世界默认相位 / day 0 / weather 0 = Clear 晴天 / weatherTimerMs 0）——「新增字段
@@ -140,6 +143,9 @@ public:
     // t542 读当前库的 dispensers 表为 QVariantList（同 saveAll 的 dispensers 形状）。未打开 → 空列表。
     //   caller（Main.qml.enterWorld）转交 dispenserStore.loadAll 整体替换内存（清旧世界残留 + 填本世界发射器）。
     Q_INVOKABLE QVariantList loadDispensers() const;
+    // t1080 读当前库的 hoppers 表为 QVariantList（同 saveAll 的 hoppers 形状）。未打开 → 空列表。
+    //   caller（Main.qml.enterWorld）转交 hopperStore.loadAll 整体替换内存（清旧世界残留 + 填本世界漏斗）。
+    Q_INVOKABLE QVariantList loadHoppers() const;
     // progress 新系统 写玩家进度（统计 + 成就）单行表 key='main'。progress = PlayerProgress::toVariant() 产物。
     //   独立 upsert（INSERT OR REPLACE）。未打开 → false。caller（Main.qml.saveAndExitToWorldList）调。
     Q_INVOKABLE bool saveProgress(const QVariantMap &progress);
@@ -210,6 +216,8 @@ private:
     //   dispensers 形状 = DispenserStore::allDispensers() 产物：每项 {x,y,z,slots:[{id,count}×9]}。
     //   data 列存整个 QVariantMap（含 slots）的 JSON 文本（同 chests / furnaces 自描述、跨版本可读）。
     bool writeDispensers(const QVariantList &dispensers);
+    // t1080 漏斗落盘（同 writeChests 模式：坐标列 + slots JSON 文本；caller 已开事务）。
+    bool writeHoppers(const QVariantList &hoppers);
 
     // ── t382 迁移注册表（world_version → kWorldVersion 的数据迁移；详见类头注释 + migrations()）──
     // 单条迁移：把存档数据从 (targetVersion-1) 推进到 targetVersion。apply 对一个 chunk 的三段 blob

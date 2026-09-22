@@ -884,6 +884,10 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::Dispenser),                                  // 发射器（踩压力板触发的射箭机关；丛林神殿陷阱；可放置 / 自建机关）
              // t609 投掷器（机制等价 MC 1.0 dropper——全部物品弹出掉落物的机关盒；7 圆石合成；DispenserStore 9 槽共用）。
              int(BlockRegistry::Dropper),                                    // 投掷器（踩压力板触发弹出全部物品；可放置 / 自建机关）
+             // t1080 漏斗（机制等价 MC 1.5+ hopper 的搬运机关——收集/抽取/输出/红石锁停；scanHoppers 机制面）。
+             //   红石机关件归红石 tab（Inventory.qml redstoneIds 含 145 → 方块 tab 自动隐藏，与发射器/投掷器同页）。
+             //   配方 5 铁锭 + 1 箱子（工作台）。
+             int(BlockRegistry::Hopper),                                     // 漏斗（收集掉落物 + 容器抽取/输出 + 红石锁停）
              // t628 手动点火机关三件（t490 已建方块但漏进调色板——blockregistry.h 注释承诺「进创造调色板」未兑现；
              //   本任务补齐 + 接图标 + 配方）。右键激活：拉杆扳开沿/按钮按下沿 fire 邻接 TNT + 发射器/投掷器一次
              //   （按钮 ~1s 自动弹回；拉杆保持扳开直到再右键）。机关件紧随发射器 / 投掷器排列。

@@ -19,6 +19,8 @@
 #include "minecartmanager.h"    // t565 矿车实体管理器（轨上骑乘 / WASD 前后推 / 拐角自动转弯）
 #include "dispenserstore.h"     // t579 发射器 per-block 9 槽内容（压力板触发取物发射 / 扣库存）
 #include "cheststore.h"         // t1013 箱子矿车内容键存储（进世界转正登记 / 回生扫描 / 挖毁清键）
+#include "hopperstore.h"        // t1080 漏斗 per-block 5 槽容腔（机制 tick 读写 + 破块清孤儿掉内容）
+#include "furnacestore.h"       // t1080 漏斗挂接容器族（熔炉抽取只认 out / 推入按面定向 in/fuel）
 #include "entitymanager.h"      // 统一实体管理器（t95 测试生物 / 玩家推动）
 #include "hotbar.h"             // Hotbar VM（t36 拾取 addStack / 丢弃 takeStack）
 #include "itementitymanager.h"  // 掉落实体管理器（t36 拾取扫描 / removeAt）
@@ -93,6 +95,13 @@ class PlayerController : public QQuickItem
     //   回生面，worldgen 标记箱保持方块形态 = t1013 前行为）。分层：ChestStore 属 Game/ViewModel 纯存储，
     //   PlayerController 同层直调（同 DispenserStore / Hotbar），无向上依赖。
     Q_PROPERTY(ChestStore *chestStore READ chestStore WRITE setChestStore NOTIFY chestStoreChanged)
+    // t1080 漏斗内容存储（同 dispenserStore / chestStore 注入模式）：scanHoppers 机制面读写漏斗 5 槽容腔
+    //   + finishMiningAt 破漏斗清孤儿掉内容。null 防御：漏斗机制整体跳过（方块仍在、机关静默——同
+    //   dispenserStore null 的「无内容不发射」降级口径）。分层：HopperStore 属 Game/ViewModel 纯存储，
+    //   PlayerController 同层直调，无向上依赖。
+    Q_PROPERTY(HopperStore *hopperStore READ hopperStore WRITE setHopperStore NOTIFY hopperStoreChanged)
+    // t1080 熔炉内容存储（同族注入）：漏斗挂接熔炉容器面（抽取只认 out 产物槽 / 推入按面定向）。
+    Q_PROPERTY(FurnaceStore *furnaceStore READ furnaceStore WRITE setFurnaceStore NOTIFY furnaceStoreChanged)
     Q_PROPERTY(QVector3D position READ position NOTIFY positionChanged) // 眼睛位置（相机绑它）
     Q_PROPERTY(float yaw READ yaw NOTIFY yawChanged)
     Q_PROPERTY(float pitch READ pitch NOTIFY pitchChanged)
@@ -347,6 +356,15 @@ public:
     void setDispenserStore(DispenserStore *s);
     ChestStore *chestStore() const { return m_chestStore; }
     void setChestStore(ChestStore *s);
+    // t1080 漏斗存储注入面（同 dispenserStore 模式）：getter / setter + hopperStoreChanged 信号。
+    HopperStore *hopperStore() const { return m_hopperStore; }
+    void setHopperStore(HopperStore *s);
+    FurnaceStore *furnaceStore() const { return m_furnaceStore; }
+    void setFurnaceStore(FurnaceStore *s);
+    // t1080 漏斗机制 tick（scanDispenserTraps 机关扫描族同门；C++ 直调）：每帧按 dt 推进每漏斗冷却，
+    //   冷却到点跑一轮「输出 → 抽取 → 收集」；红石锁停（isReceivingPower）本轮全停。public 暴露 =
+    //   scanDispenserTraps review24 #9 先例（矩阵探针直调等价递减驱动——探针无 16ms 定时器，须直调推进）。
+    void scanHoppers(float dt);
     // t1013 矿井箱 → 箱子矿车转正（进世界一次性；Main.qml enterWorld 在 chestStore.loadAll + carts.clearAll
     //   之后调）。Q_INVOKABLE 无参（全靠注入面：m_world / m_minecartManager / m_chestStore）。两路：
     //   (a) 全图扫 Chest+ChestStateMineshaftFlag（collectBlocksOfId 复用 t691 扫描面）→ clearMineshaftChest
@@ -703,6 +721,8 @@ signals:
     void minecartManagerChanged(); // t565 矿车管理器注入变更
     void dispenserStoreChanged();  // t579 发射器内容存储注入变更
     void chestStoreChanged();      // t1013 箱子矿车内容键存储注入变更
+    void hopperStoreChanged();     // t1080 漏斗内容存储注入变更
+    void furnaceStoreChanged();    // t1080 熔炉内容存储注入变更
     void positionChanged();
     // t567 出生点 / 重生点变更（睡床设床位后 emit；初值 kSpawn 常量 → 启动不发）。HUD 指南针据此重算指针。
     void spawnPointChanged();
@@ -1396,6 +1416,8 @@ private:
     MinecartManager *m_minecartManager = nullptr; // t565 矿车：轨上骑乘操控 / 放车 / 下车（Q_PROPERTY 绑定）
     DispenserStore *m_dispenserStore = nullptr;   // t579 发射器 per-block 9 槽内容（压力板触发取物发射，Q_PROPERTY 绑定）
     ChestStore *m_chestStore = nullptr;           // t1013 箱子矿车内容键存储（转正 / 回生 / 挖毁清键，Q_PROPERTY 绑定）
+    HopperStore *m_hopperStore = nullptr;         // t1080 漏斗 per-block 5 槽容腔（机制 tick 读写 + 破块清孤儿，Q_PROPERTY 绑定）
+    FurnaceStore *m_furnaceStore = nullptr;       // t1080 漏斗挂接容器族（熔炉抽取/推入，Q_PROPERTY 绑定）
     // t950 mob 装备拾取（tickMobEquipmentPickup）状态：扫描窗 dt 累积器 + 拾取概率（setEquipmentPickupChance
     //   缝写；初值 = 缺省常量）。非世界态（跨世界 reset 族）无需清——纯节流/标量，无跨世界语义。
     qreal m_equipPickupAccum = 0.0;               // 距下次扫描窗的 dt 累积（秒；到窗长即清零跑扫描）

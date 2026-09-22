@@ -1138,7 +1138,29 @@ public:
         //   1 块（有序 3×3，仅工作台）；1 块任意格单放 → 9 骨粉（无序 Inventory2x2 / 3×3 均可——单原料
         //   shapeless，机制等价 MC「9↔1」无损拆装；同 coal_block 家族模式）。
         BoneBlock         = 144, // 骨块：9 骨粉 ↔ 1 块（骨粉压缩存储/装饰；镐采掘；机制等价 MC 骨块 1.10+）
-        Count           = 145, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t1080 漏斗（Hopper）：自动物品搬运机关方块（机制等价 MC 1.5+ hopper 的机制四语义——收集 /
+        //   抽取 / 输出 / 红石锁停；MC 1.0 无此方块 → kMcBlockId 行取 0）。**§9 区隔**：「漏斗」「Hopper」
+        //   为通用描述词（工业/农用给料漏斗是先于 MC 的通用机械词），零 MC 专有名词 / 资产；贴图程序生成
+        //   原创自绘 §9a（tools/build_hopper.py：顶箅 186 / 锅体 187 / 排料嘴 188）。
+        //   **整立方 opaque**（solid=true / ShapeFull，同发射器 / 投掷器机关盒家族体量——MC 漏斗本是异形
+        //   漏斗体，本工程 v1 如实降级为整立方，异形漏斗体几何登记候选池）。hardness=3.0（机制等价 MC
+        //   hopper hardness 3）/ Pickaxe 加速 / minTier=1 + requiresTool=true（机制等价 MC「需镐采掘才掉落」
+        //   ——空手 / 非镐破块不掉）。dropId=自身、dropCount=1、maxStack=64。音色归 GroupStone（金属质同
+        //   铁栏杆族）。进创造调色板（红石 tab，机关件组——hotbar creativeBlocks + Inventory.qml redstoneIds）。
+        //   配方（recipe.cpp）：5 铁锭 + 1 箱子（顶行 3 锭 + 中行 锭-箱-锭）→ 1 漏斗（有序 3×3，仅工作台；
+        //   机制等价 MC hopper 配方 5 iron ingot + chest）。
+        //   **state 编码**（复用 chunk m_states，存档 round-trip 保真；同箱子 / 熔炉 / 发射器 chestFrontFace
+        //   同源低 2 位 + 新增朝下标志位）：
+        //     bit2（HopperFacingDownFlag）= 排料口朝下（放置点在所点方块顶 / 底面时写定）；
+        //     bit[1:0]                    = 水平排料口朝向（chestFrontFace 同源编码 0=+X 1=-X 2=+Z 3=-Z），
+        //                                   仅 bit2=0（水平朝向）时消费。
+        //   **机制 tick 载体**（Game 层 PlayerController::scanHoppers，同 scanDispenserTraps 机关扫描族）：
+        //   每 0.4s（kHopperTransferIntervalSec，机制等价 MC 8 game tick 传输周期）一轮「输出 → 抽取 →
+        //   收集」；被红石信号激活（World::isReceivingPower）→ 本轮全停（收集 / 抽取 / 输出三语义一并停，
+        //   机制等价 MC hopper 被供电锁停）。内容面 = HopperStore（Game 层 per-block 5 槽，同 ChestStore /
+        //   DispenserStore 族模式）。UI 面：无开盖界面（禁为此单新开 QML 玩法路径——UI 登记候选池）。
+        Hopper           = 145, // 漏斗：收集掉落物 + 容器抽取/输出 + 红石锁停的搬运机关（机制等价 MC 1.5+ hopper）
+        Count           = 146, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -1863,7 +1885,10 @@ public:
     //       六面同贴图——骨块无 per-face 语义）。tools/build_bone_block.py 程序生成（§9 override (a)）。
     //       pack 无对应文件（bone block 是 MC 1.10+ 方块，1.8.2.2 demo 包无此 PNG）→ 映射慷慨登记
     //       （t627 先例）缺则安全跳过保程序瓦片。
-    static constexpr int AtlasTileCount = 186;
+    // t1080：186..188=漏斗三张（186=hopper_top 顶箅 / 187=hopper_side 锅体 / 188=hopper_front 排料嘴；
+    //   Hopper per-face——顶箅恒顶面、锅体侧 / 底、排料嘴贴排料口所朝面（mesher 据 state 选，同发射器
+    //   tileFor 分支）；tools/build_hopper.py 程序生成原创像素图 §9a）。
+    static constexpr int AtlasTileCount = 189;
 
     // t668 图集瓦片像素边长（HD 图集：16→64）。**单一权威**：tools/build_atlas.py TILE（打包像素大小）/
     //   ResourcePackManager::kTile（运行期包内贴图缩放目标）与 mesher 半纹素内缩（chunkgeometry hx/hy、
@@ -2254,6 +2279,23 @@ public:
     static constexpr quint8 NoteBlockStatePoweredFlag = 0x20;
     // 读 state 的音高段（0..24）。
     static constexpr int noteBlockPitch(quint8 state) { return int(state & NoteBlockStatePitchMask); }
+    // ── t1080 漏斗（Hopper）state 常量 + 排料口解码（语义见 Id 枚举 Hopper 行注释）──
+    // 排料口朝下标志（bit2）：放置点在所点方块顶 / 底面时写定；置位时 bit[1:0] 不消费（inert）。
+    static constexpr quint8 HopperFacingDownFlag = 0x04;
+    // 排料口位移解码单一权威（placement 写入 / scanHoppers 输出目标 / mesher 前贴图面三方同源——
+    //   禁各处自写解码，同 chestFrontFace 模式）：朝下 → (0,-1,0)；水平 → chestFrontFace 同源低 2 位。
+    //   state 越界位忽略（同 chestFrontFace 兜底口径——bit2 未置位时低 2 位越界值 chestFrontFace 已兜 NegZ）。
+    static void hopperOutDelta(quint8 state, int &dx, int &dy, int &dz)
+    {
+        if (state & HopperFacingDownFlag) { dx = 0; dy = -1; dz = 0; return; }
+        switch (chestFrontFace(state)) { // 0=+X 1=-X 2=+Z 3=-Z（低 2 位同源编码）
+        case Face::PosX: dx = 1; dy = 0; dz = 0; break;
+        case Face::NegX: dx = -1; dy = 0; dz = 0; break;
+        case Face::PosZ: dx = 0; dy = 0; dz = 1; break;
+        default:         dx = 0; dy = 0; dz = -1; break; // NegZ
+        }
+    }
+
     // 右键调音单一权威：音高段 +1 回绕（(p+1) % 25），bit5 通电记忆位原样保留。
     static quint8 noteBlockTunedState(quint8 state)
     {

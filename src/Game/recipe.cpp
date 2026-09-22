@@ -811,6 +811,15 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         RecipeRegistry::IronIngotId, RecipeRegistry::StickId,     RecipeRegistry::IronIngotId,
         0,                           0,                           0 },
       int(BlockRegistry::Rail), 16, 1, "rail" },
+    // t1080 漏斗：5 铁锭 + 1 箱子（顶行 3 锭 + 中行 锭-箱-锭）→ 1 漏斗（有序 3×3，仅工作台）。机制等价
+    //   MC hopper 配方（5 iron ingot + chest，布局同「III / ICI」）。多重集 {Iron:5, Chest:1} 与铁轨
+    //   {Iron:6, Stick:1} / 铁活板门 {Iron:6} / 铁门 {Iron:6 竖摆} 均不同形不冲突（最小包围盒 3×2 逐格比，
+    //   中格箱 vs 棒/锭可分）。产物 = Hopper（收集/抽取/输出/红石锁停搬运机关；scanHoppers 机制面）。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId, RecipeRegistry::IronIngotId,
+        RecipeRegistry::IronIngotId, int(BlockRegistry::Chest),   RecipeRegistry::IronIngotId,
+        0,                           0,                           0 },
+      int(BlockRegistry::Hopper), 1, 1, "hopper" },
     // t723 铁活板门（iron trapdoor）：6 铁锭横摆（顶行 + 中行两行满）→ 1 铁活板门（有序 3×3，仅工作台）。
     //   机制等价 MC 1.0 iron trapdoor 配方（6 iron ingot 3×2 横排 → 1；MC 1.0 产出即 1）。最小包围盒
     //   3×2（横）——铁门是 2×3（竖）、铁轨 t723 起含木棒（多重集异）→ 三者互不冲突。

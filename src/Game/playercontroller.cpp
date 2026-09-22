@@ -415,6 +415,24 @@ void PlayerController::setChestStore(ChestStore *s)
     emit chestStoreChanged();
 }
 
+// t1080 漏斗内容存储注入（同 setDispenserStore / setChestStore 模式）。scanHoppers 机制面读写 5 槽容腔 +
+//   finishMiningAt 破漏斗清孤儿掉内容；null 时漏斗机制整体跳过（方块仍在、机关静默——防御路径）。
+void PlayerController::setHopperStore(HopperStore *s)
+{
+    if (m_hopperStore == s) return;
+    m_hopperStore = s;
+    emit hopperStoreChanged();
+}
+
+// t1080 熔炉内容存储注入（同 setHopperStore 模式）：漏斗挂接熔炉容器面；null 时熔炉族容器对漏斗不可见
+//   （抽取 / 推入熔炉方向静默挂起——防御路径，同 hopperStore null 口径）。
+void PlayerController::setFurnaceStore(FurnaceStore *s)
+{
+    if (m_furnaceStore == s) return;
+    m_furnaceStore = s;
+    emit furnaceStoreChanged();
+}
+
 // t1013 矿井箱 → 箱子矿车转正（Q_INVOKABLE；Main.qml enterWorld 在 chestStore.loadAll（存档键条目就位）+
 //   carts.clearAll（槽表清空）之后调，两路合一）。实现面（头注释见 .h）：
 //   路 (a) worldgen 标记箱转正：collectBlocksOfId(Chest) 全图扫（~19ms 一次性，t691 同族）→ 标记位过滤 →
@@ -1237,6 +1255,9 @@ void PlayerController::tickImpl()
     // t486 发射器陷阱触发（踩压力板沿 → 邻接发射器/投掷器 fire 一次）：与 TNT 陷阱同级常开；只处理本
     //   tick 踩下沿；per-dispenser 冷却防抖。dt 用于冷却递减。
     scanDispenserTraps(dt);
+    // t1080 漏斗机制 tick（机关扫描族同门——常开、内自检、独立 0.4s 相位；硬暂停不达此行 = 暂停期
+    //   漏斗冻结，机制等价 MC 暂停一切）。dt 推进每漏斗冷却；到期跑「输出 -> 抽取 -> 收集」一轮。
+    scanHoppers(dt);
     // t569 红石矿石点亮触发（玩家走近红石矿即微弱红光，机制等价 MC 触发发光）：与拾取同级常开（玩家走过
     //   红石矿旁即触发，独立于捕获态）。内自检 + 死亡门控；点亮表到期自熄。dt 用于倒计时递减。
     scanRedstoneOre(dt);
@@ -1716,6 +1737,24 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     //   分层（PLAN §2）：生成属 Game/Physics（调 EntityManager），不写栅格（setBlock 已破）。
     if (m_entityManager && brokenId == BlockRegistry::MonsterEgg)
         m_entityManager->spawnMobTyped(x, y, z, EntityManager::MobSilverfish, QStringLiteral("#c8c2b8"), 0);
+    // t1080 破漏斗掉容腔内容（机制等价 MC 破漏斗掉落内容）：先掉内容再清条目（同 DispenserStore 注释口径
+    //   ——那条链走 QML onBlockBroken，本单零 QML 玩法路径触碰 → 收口在 C++ 破块路径）。drop=false（创造）
+    //   纯清不掉（items null 防御跳掉落只清条目）。条目清理防「破后重放同格旧容腔复活」（条目存在即身份，
+    //   不清则新漏斗继承旧容腔——同跨世界泄漏教训的格级变体）。
+    if (m_hopperStore && brokenId == BlockRegistry::Hopper) {
+        if (drop && m_itemEntities) {
+            for (int i = 0; i < HopperStore::kSlotsPerHopper; ++i) {
+                const int sid = m_hopperStore->slotIdAt(x, y, z, i);
+                const int scnt = m_hopperStore->slotCountAt(x, y, z, i);
+                if (sid <= 0 || scnt <= 0) continue;
+                m_itemEntities->spawnItem(x, y, z, sid, scnt,
+                                          m_hopperStore->slotEnchantsAt(x, y, z, i),
+                                          m_hopperStore->slotNameAt(x, y, z, i),
+                                          m_hopperStore->slotDurabilityAt(x, y, z, i));
+            }
+        }
+        m_hopperStore->clearHopper(x, y, z);
+    }
     // t721 画作移除（机制等价 MC 1.0 破画：整张画消失 + 只掉 1 个 painting 物品，非逐格掉）：
     //   破坏任一画格 → removePaintingAt 按 brokenState 的 face 圈定本张画的格子（本格已被上方 setBlock
     //   清 Air；域内锚格反解矩形界定画身份，同面邻画不并入 —— 终审修 M1，余格 setWaterSilent 静默清
@@ -5094,6 +5133,17 @@ void PlayerController::placeBlock()
         //   编码；机制等价 MC 1.0 投掷器放置排出口朝玩家）。mesher 据 state 把 dropper_front 贴到对应面；
         //   scanDispenserTraps 触发时据 state 解出弹出口外向（同发射器 t608 方向语义，单一方向源）。
         placeState = quint8((horizontalFacing() & 3) ^ 1);
+    } else if (m_selectedBlock == BlockRegistry::Hopper) {
+        // t1080 漏斗排料口朝向：机制等价 MC「漏斗排料口指向所贴面外向」——点顶 / 底面放置 → 排料口朝下
+        //   （bit2 HopperFacingDownFlag，低 2 位 inert）；点侧面放置 → 排料口沿命中面外法线（低 2 位 =
+        //   chestFrontFace 同源编码，由命中法线分量直译）。点底面（天花板下放置）MC 也朝下 → 同 bit2。
+        //   输出目标 / mesher 前贴图 / 探针三方同源 BlockRegistry::hopperOutDelta 解码（单一权威）。
+        if (m_hitNy == 0) {
+            // 侧面：法线指向 ±X/±Z → 低 2 位编码（0=+X 1=-X 2=+Z 3=-Z）。
+            placeState = quint8(m_hitNx > 0 ? 0 : m_hitNx < 0 ? 1 : m_hitNz > 0 ? 2 : 3);
+        } else {
+            placeState = BlockRegistry::HopperFacingDownFlag; // 顶 / 底面 → 排料口朝下
+        }
     } else if (m_selectedBlock == BlockRegistry::Pumpkin) {
         // t638 ② 南瓜前面（刻面 pumpkin_face）朝玩家侧：state = horizontalFacing ^ 1（同箱子 / 熔炉 / 发射器
         //   编码；机制等价 MC 1.0 刻面南瓜放置时脸朝玩家——此前南瓜 placeBlock 未写 state → 恒 state=0
@@ -5547,6 +5597,11 @@ void PlayerController::placeBlock()
         // t669 放置消耗收口：常规方块放置（泥土 / 木板 / 火把 / 南瓜…）的 survival 消耗由 C++ 统一处理
         //   （原 QML onBlockPlaced blanket takeStack 承担——但那会误扣锄地/踩踏等非放置类 setBlock）。
         if (m_mode == Survival) m_hotbar->takeStack(m_hotbar->selectedSlot(), 1);
+        // t1080 漏斗放置登记引擎条目（cd=0 → 下一 scanHoppers 即跑首轮；条目存在即引擎可见——写入时
+        //   自动建条目只覆盖「被喂入」路径，空漏斗的收集 / 输出仍需条目在场才被引擎迭代）。null 防御：
+        //   条目不登记 → 该漏斗 inert（同 hopperStore 未注入的降级口径）。
+        if (idByte == BlockRegistry::Hopper && m_hopperStore)
+            m_hopperStore->setHopperCooldown(tx, ty, tz, 0.0);
     }
     // t482/t483 防御造物生成（机制等价 MC 1.0 雪傀儡 / 铁傀儡搭建）：玩家放置**南瓜**后检测下方排列，
     //   命中 → 生成对应防御造物（spawnMobTyped 计入实体槽 kCap）+ 静默移除结构方块（setWaterSilent —— 非玩家
@@ -6344,6 +6399,215 @@ void PlayerController::scanDispenserTraps(float dt)
     }
 }
 
+// t1080 漏斗传输周期（秒）：机制等价 MC 8 game tick 传输周期（0.4s）。每漏斗独立冷却相位（放舱错峰；
+//   探针直调 scanHoppers(dt) 以 dt 累积驱动——改值即改节律，负向轮敏感面）。
+static constexpr qreal kHopperTransferIntervalSec = 0.4;
+// ── t1080 漏斗机制引擎（scanDispenserTraps 机关扫描族同门）────────────────────────────
+// 机制等价 MC 1.5+ hopper 的机制四语义，每 0.4s（kHopperTransferIntervalSec ≈ MC 8 game tick 传输周期）
+// 一轮，顺序 =「输出 → 抽取 → 收集」（MC 口径 push→pull 同轮；实体收集同轮节流近似）：
+//   (1) 输出：自身首非空槽取 1 件，推入排料口所朝邻格容器（方向 = BlockRegistry::hopperOutDelta 单一源）；
+//       无目标容器 / 目标拒收 → 挂起不销毁（机制等价 MC「无目标容器输出挂起」）。
+//   (2) 抽取：上方格容器首个非空槽（0 起扫）取 1 件入自身；熔炉特例只认 out 产物槽（MC 口径不偷吃炉料）。
+//   (3) 收集：收集域 = 上方格 + 自身格（MC 规则：收上方格与自身格内掉落物；无斜上口径）的掉落物实体——
+//       EntityStore 单一权威（读栈 -> insertStack 入腔 -> 全收 removeAt / 部分收 setCountAt）。
+//   红石锁停：任一语义执行前查 World::isReceivingPower（既有红石信号查询面接钩，不建第二套信号系统），
+//   激活则本轮全停（冷却照常推进，下一轮复判——机制等价 MC hopper 被供电锁停）。
+//   边界：条目缺失 = 空漏斗（写入时自动建条目）；格上 blockAt 复核非 Hopper 则跳过（爆炸/岩浆破坏的
+//   孤儿条目 inert 至切世界 clearAll——降级登记）。分层：读 World + 容器 store（同层直调）+ ItemEntityManager
+//   （EntityStore 单一权威面）；不写栅格（零 setBlock）。
+void PlayerController::scanHoppers(float dt)
+{
+    if (!m_hopperStore || !m_world) return;
+    if (m_hopperStore->entryCount() == 0) return; // 无漏斗场景零开销早退
+
+    // 槽快照（值拷贝；写回经各 store setSlot 单一入口，半途无悬引用）。kind：0=箱 1=发射器/投掷器
+    //   2=熔炉 3=漏斗（四 store 同形 Q_INVOKABLE 面按 kind 分派——不建第二份容器抽象）。
+    struct Snap {
+        int id = 0;
+        int count = 0;
+        QVariantList ench;
+        QString name;
+        int dur = -1;
+    };
+    const auto readSlot = [this](int kind, int x, int y, int z, int idx) {
+        Snap s;
+        switch (kind) {
+        case 0:
+            s.id = m_chestStore->slotIdAt(x, y, z, idx);
+            s.count = m_chestStore->slotCountAt(x, y, z, idx);
+            s.ench = m_chestStore->slotEnchantsAt(x, y, z, idx);
+            s.name = m_chestStore->slotNameAt(x, y, z, idx);
+            s.dur = m_chestStore->slotDurabilityAt(x, y, z, idx);
+            break;
+        case 1:
+            s.id = m_dispenserStore->slotIdAt(x, y, z, idx);
+            s.count = m_dispenserStore->slotCountAt(x, y, z, idx);
+            s.ench = m_dispenserStore->slotEnchantsAt(x, y, z, idx);
+            s.name = m_dispenserStore->slotNameAt(x, y, z, idx);
+            s.dur = m_dispenserStore->slotDurabilityAt(x, y, z, idx);
+            break;
+        case 2:
+            s.id = m_furnaceStore->slotIdAt(x, y, z, idx);
+            s.count = m_furnaceStore->slotCountAt(x, y, z, idx);
+            s.ench = m_furnaceStore->slotEnchantsAt(x, y, z, idx);
+            s.name = m_furnaceStore->slotNameAt(x, y, z, idx);
+            s.dur = m_furnaceStore->slotDurabilityAt(x, y, z, idx);
+            break;
+        default: // 3 = 漏斗自身
+            s.id = m_hopperStore->slotIdAt(x, y, z, idx);
+            s.count = m_hopperStore->slotCountAt(x, y, z, idx);
+            s.ench = m_hopperStore->slotEnchantsAt(x, y, z, idx);
+            s.name = m_hopperStore->slotNameAt(x, y, z, idx);
+            s.dur = m_hopperStore->slotDurabilityAt(x, y, z, idx);
+            break;
+        }
+        return s;
+    };
+    const auto writeSlot = [this](int kind, int x, int y, int z, int idx, const Snap &s) {
+        switch (kind) {
+        case 0: m_chestStore->setSlot(x, y, z, idx, s.id, s.count, s.ench, s.name, s.dur); break;
+        case 1: m_dispenserStore->setSlot(x, y, z, idx, s.id, s.count, s.ench, s.name, s.dur); break;
+        case 2: m_furnaceStore->setSlot(x, y, z, idx, s.id, s.count, s.ench, s.name, s.dur); break;
+        default: m_hopperStore->setSlot(x, y, z, idx, s.id, s.count, s.ench, s.name, s.dur); break;
+        }
+    };
+    const auto contSlots = [](int kind) {
+        switch (kind) {
+        case 0: return ChestStore::kSlotsPerChest;
+        case 1: return DispenserStore::kSlotsPerDispenser;
+        case 2: return FurnaceStore::kSlotsPerFurnace;
+        default: return HopperStore::kSlotsPerHopper;
+        }
+    };
+    const auto kindOf = [](quint8 b) {
+        if (b == BlockRegistry::Chest) return 0;
+        if (b == BlockRegistry::Dispenser || b == BlockRegistry::Dropper) return 1;
+        if (b == BlockRegistry::Furnace) return 2;
+        if (b == BlockRegistry::Hopper) return 3;
+        return -1;
+    };
+    // 目标容器收 1 件（本轮转移粒度 = 1 件，MC 口径）：
+    //   箱 / 发射器·投掷器：同 id 未满槽合并（低序优先）→ 首个空槽 → 均无则拒；
+    //   熔炉：单槽特例（faceDy<0 朝下进炉 -> in(0) / 侧推 -> fuel(1)），空或同 id 可入、异 id 拒；
+    //   漏斗：insertStack 引擎原语（同 id 合并 / 空槽分槽，元数据全空才堆叠）。
+    //   null store 防御：对应成员缺失时该族容器视同无容器（kindOf 命中但读写被跳过）。
+    const auto insertOne = [&](int tkind, int ox, int oy, int oz, int faceDy, const Snap &s) -> bool {
+        if (s.id <= 0 || s.count <= 0) return false;
+        if (tkind == 0 && !m_chestStore) return false;
+        if (tkind == 1 && !m_dispenserStore) return false;
+        if (tkind == 2 && !m_furnaceStore) return false;
+        if (tkind == 3) return m_hopperStore->insertStack(ox, oy, oz, s.id, 1, s.ench, s.name, s.dur) > 0;
+        const int fslot = (tkind == 2) ? (faceDy < 0 ? FurnaceStore::kSlotIn : FurnaceStore::kSlotFuel) : 0;
+        const int total = contSlots(tkind);
+        const int cap = BlockRegistry::maxStackSize(s.id);
+        int merge = -1, empty = -1;
+        for (int i = 0; i < total; ++i) {
+            if (tkind == 2 && i != fslot) continue; // 熔炉只看定向单槽
+            const Snap t = readSlot(tkind, ox, oy, oz, i);
+            if (t.id == 0 || t.count <= 0) {
+                if (empty < 0) empty = i;
+            } else if (t.id == s.id && t.count < cap && merge < 0) {
+                merge = i;
+            }
+            if (merge >= 0) break;
+        }
+        if (merge >= 0) {
+            Snap t = readSlot(tkind, ox, oy, oz, merge);
+            t.count += 1;
+            writeSlot(tkind, ox, oy, oz, merge, t);
+            return true;
+        }
+        if (empty >= 0) {
+            Snap t;
+            t.id = s.id;
+            t.count = 1;
+            t.ench = s.ench;
+            t.name = s.name;
+            t.dur = s.dur;
+            writeSlot(tkind, ox, oy, oz, empty, t);
+            return true;
+        }
+        return false; // 满仓 / 无空位 / 熔炉槽被异 id 占 -> 挂起
+    };
+    // 从源槽取 1 件（余量写回同 id + count-1，元数据随余量保留；取完清槽——writeSlot 空栈即清）。
+    const auto takeOne = [&](int kind, int x, int y, int z, int idx) {
+        const Snap s = readSlot(kind, x, y, z, idx);
+        if (s.id <= 0 || s.count <= 0) return false;
+        if (s.count == 1) {
+            writeSlot(kind, x, y, z, idx, Snap {}); // 清槽（id=0/count=0 -> 清槽契约）
+        } else {
+            Snap w = s;
+            w.count = s.count - 1;
+            writeSlot(kind, x, y, z, idx, w);
+        }
+        return true;
+    };
+
+    for (const QString &k : m_hopperStore->hopperKeys()) {
+        int hx = 0, hy = 0, hz = 0;
+        if (!HopperStore::parseKey(k, hx, hy, hz)) continue;
+        if (m_world->blockAt(hx, hy, hz) != BlockRegistry::Hopper) continue; // 孤儿条目 inert 跳过
+        // 冷却推进（每漏斗独立相位——漏斗链上下游自然错峰，机制近似 MC per-hopper 计数器）。
+        qreal cd = m_hopperStore->hopperCooldown(hx, hy, hz) - dt;
+        if (cd > 0.0) {
+            m_hopperStore->setHopperCooldown(hx, hy, hz, cd);
+            continue;
+        }
+        m_hopperStore->setHopperCooldown(hx, hy, hz, kHopperTransferIntervalSec);
+        // 红石锁停（收集 / 抽取 / 输出三语义一并停；冷却已推进 = 解除供电后下一轮恢复）。
+        if (m_world->isReceivingPower(hx, hy, hz)) continue;
+
+        // (1) 输出：自身首非空槽 1 件 -> 排料口邻格容器（方向单一源 = hopperOutDelta）。
+        int odx = 0, ody = 0, odz = 0;
+        BlockRegistry::hopperOutDelta(m_world->stateAt(hx, hy, hz), odx, ody, odz);
+        const int ox = hx + odx, oy = hy + ody, oz = hz + odz;
+        const int tkind = kindOf(m_world->blockAt(ox, oy, oz));
+        if (tkind >= 0) {
+            for (int i = 0; i < HopperStore::kSlotsPerHopper; ++i) {
+                const Snap s = readSlot(3, hx, hy, hz, i);
+                if (s.id <= 0 || s.count <= 0) continue;
+                if (insertOne(tkind, ox, oy, oz, ody, s)) takeOne(3, hx, hy, hz, i);
+                break; // 首非空槽即本轮输出候选（成功或拒收都终止本轮输出）
+            }
+        }
+
+        // (2) 抽取：上方格容器首非空槽（0 起扫）1 件入自身；熔炉只认 out 产物槽。
+        const int skind = kindOf(m_world->blockAt(hx, hy + 1, hz));
+        if (skind >= 0 && !(skind == 2 && !m_furnaceStore)) {
+            for (int i = 0; i < contSlots(skind); ++i) {
+                if (skind == 2 && i != FurnaceStore::kSlotOut) continue; // 熔炉只认产物槽
+                const Snap t = readSlot(skind, hx, hy + 1, hz, i);
+                if (t.id <= 0 || t.count <= 0) continue;
+                if (insertOne(3, hx, hy, hz, 0, t)) takeOne(skind, hx, hy + 1, hz, i);
+                break; // 首非空槽即候选（不可收也终止——挂起语义，MC 扫描序同）
+            }
+        }
+
+        // (3) 收集：上方格 + 自身格内的掉落物实体（EntityStore 单一权威；全收 removeAt / 部分收 setCountAt）。
+        if (m_itemEntities) {
+            const int n = m_itemEntities->count();
+            for (int i = 0; i < n; ++i) {
+                if (!m_itemEntities->aliveAt(i)) continue;
+                const QVector3D p = m_itemEntities->posAt(i);
+                const int ex = int(std::floor(double(p.x())));
+                const int ey = int(std::floor(double(p.y())));
+                const int ez = int(std::floor(double(p.z())));
+                const bool inOwn = (ex == hx && ez == hz && ey == hy);
+                const bool inAbove = (ex == hx && ez == hz && ey == hy + 1);
+                if (!inOwn && !inAbove) continue;
+                const int eid = m_itemEntities->itemIdAt(i);
+                const int ecnt = m_itemEntities->countAt(i);
+                if (eid <= 0 || ecnt <= 0) continue;
+                const int accepted = m_hopperStore->insertStack(hx, hy, hz, eid, ecnt,
+                    m_itemEntities->enchantsAt(i), m_itemEntities->nameAt(i),
+                    m_itemEntities->durabilityAt(i));
+                if (accepted <= 0) continue; // 满仓 -> 实体原地保留（挂起不销毁）
+                if (accepted >= ecnt) m_itemEntities->removeAt(i);
+                else m_itemEntities->setCountAt(i, ecnt - accepted);
+            }
+        }
+    }
+}
 // t628 按钮自动复位（见 m_buttonRecoverCells / updateButtonRecovery 头注释）：每 tick 递减按下倒计时；
 //   到期该格仍是按钮（isWoodButton/isStoneButton）且 bit0 置位 → 清 bit0（5 参数 setBlock，id 不变只 state 变
 //   → 仅 worldChanged 重建 mesh，按钮弹回视觉）+ 移除表项；该格已非按钮 / bit0 已清（被破 / 被替换）→ 仅移除

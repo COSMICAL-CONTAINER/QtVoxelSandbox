@@ -149,6 +149,8 @@ Item {
         107,  // 发射器（Dispenser，t868① 从方块 tab 挪入 —— 红石机关盒，机关件组紧随拉杆/按钮；
               //   方块 tab 的 filteredPalette 按 redstoneIds 排除自动隐藏，无残留双显）
         117,  // 投掷器（Dropper，t868① 从方块 tab 挪入 —— 与发射器同族机关盒）
+        145,  // 漏斗（Hopper，t1080 —— 收集/抽取/输出/红石锁停的搬运机关盒，与发射器/投掷器同页；
+              //   机制面 C++ scanHoppers，无开盖 UI——红石锁停语义归机关件组）
         0x224,// 红石粉物品（RedstoneId，t701 从方块形态 130 换成材料物品 —— 与材料 tab 同一贴图；材料 tab 不再重复列）
         129,  // 红石火把（RedstoneTorch，t638；t657 起反相器电源）
         122,  // 红石块（RedstoneBlock，t620；t657 起恒电源）
