@@ -86,6 +86,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::DiamondBlock: return "icon_diamond_block.png";  // 钻石块（pack 浅青底+钻石菱面镶格）
     case BlockRegistry::GoldBlock:    return "icon_gold_block.png";     // 金块（pack 金黄底+高光）
     case BlockRegistry::RedstoneBlock: return "icon_redstone_block.png"; // 红石块（pack 鲜红底+矿粒）
+    case BlockRegistry::BoneBlock:    return "icon_bone_block.png";     // t1077 骨块立方体图标（default_bone_block 程序贴图 3D 渲染——pack 1.8.2.2 无 bone_block.png，恒走程序原生路径）
     case BlockRegistry::RedstoneLamp: return "icon_redstone_lamp.png";  // 红石灯（pack off 态贴图，与放置态默认一致）
     // t628 手动点火机关图标（t490 已生成 icon PNG 并注册 qrc，但 iconFileForBlock 漏接 case → 调色板图标空白；
     //   本任务接通 + 补进创造调色板）。t662 几何重做：button / lever shape 3D 立体图标（凸钮单盒 / 底座+摆棍，
@@ -897,6 +898,9 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::DiamondBlock),                               // 钻石块（9 钻石↔1 块；铁镐采掘）
              int(BlockRegistry::GoldBlock),                                  // 金块（9 金锭↔1 块；铁镐采掘）
              int(BlockRegistry::RedstoneBlock),                              // 红石块（9 红石粉↔1 块；铁镐采掘）
+             // t1077 骨块（机制等价 MC 骨块 1.10+；9 骨粉↔1 块 双向配方——骨粉的压缩存储/装饰形态）。归矿物
+             //   存储块组尾（9↔1 压缩存储同族）；镐采掘（装饰石质族口径）。
+             int(BlockRegistry::BoneBlock),                                  // 骨块（9 骨粉↔1 块；镐采掘）
              // t620 红石灯（机制等价 MC 1.0 redstone lamp；右键开关的可放置光源方块——on 态光 15 + 亮贴图）。
              int(BlockRegistry::RedstoneLamp),                               // 红石灯（右键开关光源；配方 4 红石+1 玻璃）
              // t722 铁门（机制等价 MC 1.0 iron door；仅红石驱动开合——右键无效应）。两格高薄板同木门

@@ -773,6 +773,21 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
     { int(RecipeRegistry::Inventory2x2), true,
       { int(BlockRegistry::IronBlock), 0, 0, 0, 0, 0, 0, 0, 0 },
       RecipeRegistry::IronIngotId, 9, 1, "iron_ingot" },
+    // t1077 骨块双向（机制等价 MC 骨块 9↔1 无损拆装，同 coal_block 家族模式；骨粉 BonemealId 材料段 0x232）。
+    //   正向：9 骨粉 3×3 满铺 → 1 骨块（有序 3×3，仅工作台）。多重集 {BonemealId:9} 唯一：与红石灯
+    //   {Redstone:4, Glass:1} / 音符盒 {Planks:8, Redstone:1} / 铁砧 {IronBlock:3, IronIngot:4} 等既有 3×3
+    //   有序配方互不冲突；「9 同料满铺」形态与五件存储块（coal/lapis/diamond/gold/redstone）同型但材料互异。
+    //   反向：1 骨块任意格单放 → 9 骨粉（无序 Inventory2x2 / 3×3 均可——单原料 shapeless 在任意合成格可拆）。
+    //   冲突检：{BoneBlock:1} 单原料唯一（同六件存储块反向同构，match 按「满格位置无关 + 多重集」命中）。
+    //   骨来源链：骷髅（Bones）死掉骨（loottable t299 挂点）→ 1 骨→3 骨粉（t447）→ 9 骨粉→1 骨块（本配方）。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::BonemealId, RecipeRegistry::BonemealId, RecipeRegistry::BonemealId,
+        RecipeRegistry::BonemealId, RecipeRegistry::BonemealId, RecipeRegistry::BonemealId,
+        RecipeRegistry::BonemealId, RecipeRegistry::BonemealId, RecipeRegistry::BonemealId },
+      int(BlockRegistry::BoneBlock), 1, 1, "bone_block" },
+    { int(RecipeRegistry::Inventory2x2), true,
+      { int(BlockRegistry::BoneBlock), 0, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::BonemealId, 9, 1, "bone_meal_x9" }, // 名带 _x9：与 t447 骨→3 骨粉 "bone_meal" 区分（本表名无唯一性强制，去重为先）
     // t620 红石灯：4 红石粉十字 + 中心 1 玻璃 → 1 红石灯（有序 3×3，仅工作台）。机制对标 MC 1.0 redstone
     //   lamp（glowstone + 4 redstone）—— 本工程无荧石，用玻璃作壳（「透光壳内藏红石」语义）。review #8：
     //   玻璃原料改**方块段 Glass=54**（旧材料段 GlassId 0x204 已退出创造调色板 → 纯创造流程合成红石灯需绕

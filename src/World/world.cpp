@@ -5787,9 +5787,9 @@ void World::tickSweetBerryBushGrowth()
     ++m_berryBushIntervalIndex; // 窗口序号 +1（喂入下次散布哈希 → 不同窗口不同丛错峰）
 }
 
-// t791 骨粉催熟统一入口（见 world.h 头注释）。三类目标 MC 1.0 语义：作物 +2..3 阶段 / 树苗 45% 即时成树 /
-//   浆果丛 +1 阶段；骰子确定性（hashVoxel(seed ⊕ 使用序号) → 可复现、同株连续使用错峰，PLAN §2-K）。
-//   分层（PLAN §2）：World 层，读写 m_chunks + 发 worldChanged；不依赖 Renderer/Game/UI。
+// t791 骨粉催熟统一入口（见 world.h 头注释）。四类目标 MC 1.0 语义：作物 +2..3 阶段 / 树苗 45% 即时成树 /
+//   浆果丛 +1 阶段 / 草方块催生草丛·花（t1077）；骰子确定性（hashVoxel(seed ⊕ 使用序号) → 可复现、同株连续
+//   使用错峰，PLAN §2-K）。分层（PLAN §2）：World 层，读写 m_chunks + 发 worldChanged；不依赖 Renderer/Game/UI。
 bool World::applyBonemeal(int x, int y, int z)
 {
     const quint8 id = m_chunks.blockAt(x, y, z);
@@ -5858,7 +5858,44 @@ bool World::applyBonemeal(int x, int y, int z)
         return true;
     }
 
-    return false; // 非三类目标 → 无效应不消耗（机制等价 MC 骨粉对非生长目标无效应）
+    // ④ 草方块（t1077）：催生草丛/花（机制等价 MC 骨粉对草方块催生草丛/花的一片散布；本工程 5×5 邻域
+    //    逐列确定性哈希，非 MC 后版 128 次随机游走——观感等价：中心一片 + 少量花）。守卫：上方格须空气
+    //    （被占 / 世界顶 → 无效应不消耗，同 ①③「无效应不消耗」口径；有别于 ② 树苗「使用即耗」）。
+    //    命中即耗（中心列守卫已保证可生 → 消耗确定有效果）。逐列可生条件：列基 = Grass 且地上 = 空气
+    //    （不覆盖既有方块 / 植物）。中心列强制 TallGrass；邻列 50% 生成，其中 1/8 为花（4 色，色序
+    //    FlowerRed/Yellow/Blue/White 连续段）。写入走 m_chunks.setBlock 直写 + 批口单次 worldChanged
+    //    （系统事件非玩家放置 → 不发 broken/placed，同 ② 树苗成树先例）；flora 全 solid=false /
+    //    ShapeNone（不进 heightmap / 不遮光）→ 无需光照重算。骰子 = hashVoxel(seed⊕使用序号 ⊕ 催生盐，
+    //    nx, y, nz)，盐与作物/树苗解耦（PLAN §2-K：全哈希确定性，无随机源）。
+    if (id == BlockRegistry::Grass) {
+        if (y + 1 >= m_height) return false; // 世界顶无生长空间 → 无效应不消耗
+        if (m_chunks.blockAt(x, y + 1, z) != BlockRegistry::Air) return false; // 上方被占 → 无效应不消耗
+        ++m_bonemealUseIndex; // 有效使用 → 序号 +1（喂下次骰子）
+        for (int nz = z - kBonemealFloraRadius; nz <= z + kBonemealFloraRadius; ++nz) {
+            for (int nx = x - kBonemealFloraRadius; nx <= x + kBonemealFloraRadius; ++nx) {
+                // 逐列守卫：基座须 Grass、地上须空气（不覆盖既有方块 / 植物；越界列 blockAt 兜底拒）。
+                if (m_chunks.blockAt(nx, y, nz) != BlockRegistry::Grass) continue;
+                if (m_chunks.blockAt(nx, y + 1, nz) != BlockRegistry::Air) continue;
+                const bool center = (nx == x && nz == z);
+                const quint32 rollF = hashVoxel(mixedSeed ^ int(kBonemealFloraSalt), nx, y, nz);
+                if (!center && (rollF & 1u) == 0u) continue; // 邻列 1/2 生成（中心强制）
+                const quint8 floraBase = quint8(BlockRegistry::TallGrass);
+                quint8 flora = floraBase;
+                if (!center && (rollF >> 8) % quint32(kBonemealFloraFlowerDenom) == 0u) {
+                    // 花 4 色连续段（blockregistry.h [FlowerRed, FlowerWhite]）静态钳位。
+                    static_assert(int(BlockRegistry::FlowerWhite) - int(BlockRegistry::FlowerRed) == 3,
+                                  "花 4 色须连续段 [FlowerRed, FlowerWhite]（催生色序依赖）");
+                    flora = quint8(int(BlockRegistry::FlowerRed) + int((rollF >> 12) % 4u));
+                }
+                m_chunks.setBlock(nx, y + 1, nz, flora);
+            }
+        }
+        emit worldChanged();      // 批口单次重建（仅含催生格的 chunk 真正重网）
+        m_chunks.clearAllDirty(); // 重建完统一清脏（同浆果丛 tick emit→clear 顺序）
+        return true;
+    }
+
+    return false; // 非四类目标 → 无效应不消耗（机制等价 MC 骨粉对非生长目标无效应）
 }
 
 // ── R20.12：Perlin 噪声族与置换表已迁 TerrainGen 单一权威（terraingen.h——同步路径与后台

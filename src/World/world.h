@@ -806,7 +806,7 @@ public:
     Q_INVOKABLE void tickSweetBerryBushGrowth();
     // t791 骨粉催熟统一入口（spec R19.12 🅵「3-4 个骨粉应催熟一株」）：手持骨粉右键命中格的机制判定 + 应用。
     //   playercontroller 只管命中分流 / 消耗 / 挥手（Game 层），机制数值全收口在此 → 矩阵探针（redstone_
-    //   matrix_test）可直调 World 层锁数值分布。三类目标各对齐 MC 1.0 骨粉语义：
+    //   matrix_test）可直调 World 层锁数值分布。四类目标各对齐 MC 1.0 骨粉语义：
     //   ① 未成熟作物（WheatCrop/CarrotCrop/PotatoCrop，state<WheatCropStageMax）→ **+2..3 阶段**（哈希二值，
     //     上界钳到 max）。t447 原为每骨粉 +1 阶段 → 0..7 共 8 阶段要 7 骨粉（用户实测「多个骨粉催不熟」）；
     //     t791 对齐 MC 骨粉「+2~5 阶段」的推进语义但压缩上界为 +2..3 → 从阶段 0 **恰 3-4 骨粉催熟**
@@ -821,8 +821,17 @@ public:
     //     MC 1.0 骨粉对树苗使用即耗）。树苗无阶段故不走 ① 的阶段推进。
     //   ③ 未成熟浆果丛（SweetBerryBush，state<SweetBerryBushStageMax）→ **+1 阶段**（丛仅 3 阶段
     //     0/1/2，一骨粉推一阶段，机制等价 MC sweet berry bush bone meal 单阶段推进；从 0 两骨粉催满）。
-    //   已成熟作物 / 已成熟丛 / 非三类目标 → 返 **false**（无效应不消耗，机制等价 MC 骨粉对成熟作物 /
-    //   非生长目标无效应；caller 据返值决定是否扣骨粉 + 挥手）。
+    //   ④ 草方块（Grass，t1077）→ **催生草丛/花**（机制等价 MC 骨粉对草方块催生草丛/花的 flora 族散布；
+    //     本工程简化为 5×5 邻域逐列确定性哈希散布，非 MC 后版的 128 次随机游走——观感等价：以目标格为中心
+    //     一片、含少量花）。守卫：上方格须空气（被占 / 世界顶 → 无效应不消耗，同 ①③ 口径；有别于 ② 树苗
+    //     「使用即耗」）。命中即耗（中心列必生一株草丛 → 消耗确定有效果）。逐列可生条件：列基 = Grass 且
+    //     地上 = 空气（不覆盖既有方块 / 植物）；中心列强制 TallGrass；邻列 50% 生成，其中 1/8 为花（4 色，
+    //     色序 FlowerRed/Yellow/Blue/White 连续段）。写入走 m_chunks.setBlock 直写 + 单次 worldChanged
+    //     （批量写系统事件非玩家放置 → 不发 broken/placed，同 ② 树苗成树先例）；flora 全 solid=false /
+    //     ShapeNone（不进 heightmap / 不遮光）→ 无需光照重算。骰子 = hashVoxel(seed⊕使用序号 ⊕ 催生盐，
+    //     nx, y, nz)，与作物/树苗骰子盐解耦（kBonemealFloraSalt）。
+    //   已成熟作物 / 已成熟丛 / 上方被占的草方块 / 非四类目标 → 返 **false**（无效应不消耗，机制等价 MC
+    //   骨粉对成熟作物 / 非生长目标无效应；caller 据返值决定是否扣骨粉 + 挥手）。
     //   确定性（PLAN §2-K）：骰子 = hashVoxel(seed ⊕ 使用序号, x, y, z)，使用序号 m_bonemealUseIndex 每次
     //   有效使用 +1 → 同株连续骨粉推进值错峰（非每次同值）、同 seed 同使用序列可复现，无 Math.random / 时间源。
     //   分层（PLAN §2）：World 层，读写 m_chunks + 发 worldChanged；不依赖 Renderer/Game/UI。非 Q_INVOKABLE
@@ -2137,6 +2146,15 @@ private:
     static constexpr int kBonemealCropAdvanceMin = 2; // 作物每骨粉最少推进阶段数（+2..3 哈希二值的下界）
     static constexpr int kBonemealCropAdvanceMax = 3; // 作物每骨粉最多推进阶段数（总和钳 WheatCropStageMax=7）
     static constexpr int kBonemealSaplingPct    = 45; // 树苗每骨粉即时成树概率（%；MC 1.0 sapling bone meal 45%）
+    // t1077 草方块催生参数（applyBonemeal ④，见公有段头注释）：5×5 邻域逐列确定性哈希散布草丛/花。
+    //   kBonemealFloraRadius=2（切比雪夫半径 2 → 5×5 邻域，MC 观感「以目标格为中心一片」）；邻列生成判定
+    //   rollF & 1（50%）、花判定 (rollF>>8)%8==0（1/8，MC 骨粉花占比观感）、花色 (rollF>>12)%4（色序
+    //   FlowerRed/Yellow/Blue/White 连续段）。kBonemealFloraSalt 与作物/树苗骰子解耦（同 kBobberWaitHashSalt
+    //   多消费者异盐先例——防同格不同机制的哈希值相关漂移）。
+    static constexpr int kBonemealFloraRadius = 2;                    // 催生邻域切比雪夫半径（5×5）
+    static constexpr quint32 kBonemealFloraSalt = 0x51EDB10Cu;        // 催生骰子盐（与作物/树苗骰子解耦）
+    static constexpr int kBonemealFloraNeighborDenom = 2;             // 邻列生成判定分母（roll&1 → 1/2 生成）
+    static constexpr int kBonemealFloraFlowerDenom  = 8;              // 花判定分母（(roll>>8)%8==0 → 1/8 为花）
     // t325 树叶渐进衰减队列 + 节流计数 + 常量：tickLeafDecay() 每 100ms 被 WorldClock.ticked 调一次；
     //   累积到 kLeafDecayTickInterval 才开一个判定窗口（~每 kLeafDecayTickInterval×0.1s 一窗）。窗口序号
     //   m_leafDecayIntervalIndex 每窗 +1，喂入 hashVoxel 散布概率 → 不同叶错峰渐退（非全部同步消失）。

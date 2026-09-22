@@ -610,6 +610,10 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         {149, QStringLiteral("diamond_block.png")},             // diamond_block（钻石块；六面同；t620）
         {150, QStringLiteral("gold_block.png")},                // gold_block（金块；六面同；t620）
         {151, QStringLiteral("redstone_block.png")},            // redstone_block（红石块；六面同；t620）
+        // t1077 骨块（BoneBlock，tile 185）：六面同贴图存储/装饰方块（机制等价 MC 骨块 1.10+）。慷慨映射
+        //   （t627 先例：缺则安全跳过保程序生成瓦片）——1.8.2.2 demo 包实测无 bone_block.png（骨块是 1.10+
+        //   方块）→ 现网恒走 default_bone_block.png 程序瓦片；未来含 1.10+ 贴图的包自动接管。
+        {185, QStringLiteral("bone_block.png")},                // bone_block（骨块；六面同；t1077；包内缺安全跳过）
         // t620 红石灯两态贴图（机制等价 MC 1.0 redstone lamp off/on 两张）：152=off（灰暗壳）/ 153=on（暖黄
         //   亮芯）。mesher tileFor 据 RedstoneLamp state bit0（右键开关）选 152/153 全六面换。非 pack 回落
         //   default_redstone_lamp_off/on.png（tools/build_mineral_blocks.py 原创自绘）。

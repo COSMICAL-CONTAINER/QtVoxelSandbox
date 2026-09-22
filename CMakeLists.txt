@@ -546,6 +546,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_door_iron_lower.png      # t717 铁门下半贴图（build_doors_iron.py；门板+锁孔板+底部横带；tile 177；t722 IronDoor 接入）
         textures/default_iron_trapdoor.png        # t717 铁活板门贴图（build_doors_iron.py；格子板+栅格孔；tile 178；t723 IronTrapdoor 接入）
         textures/default_note_block.png           # t1028 音符盒贴图（build_note_block.py；深木框+盆膜+原创音符标记；tile 184；NoteBlock 接入）
+        textures/default_bone_block.png           # t1077 骨块贴图（build_bone_block.py；米骨白+骨节环带+骨纹+骨孔；tile 185；BoneBlock 接入）
         textures/default_lily_pad.png             # t396 睡莲浮叶贴图（build_lily_pad.py；透明底+绿圆叶+V缺口；alphaCutoff cutout）
         textures/default_mushroom.png             # t396 蘑菇 cross 贴图（build_mushroom.py；透明底+米色菌柄+红底白斑菌盖；alphaCutoff cutout）
         textures/default_brown_mushroom.png       # t507 白蘑菇 / 棕蘑菇 cross 贴图（build_brown_mushroom.py；透明底+米色菌柄+棕色菌盖浅黄褐斑；alphaCutoff cutout；蘑菇汤原料）
@@ -660,6 +661,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_diamond_block.png          # t620/t644 钻石块立方体图标（--from-pack：pack 贴图 3D 渲染）
         textures/icon_gold_block.png             # t620/t644 金块立方体图标（--from-pack：pack 贴图 3D 渲染）
         textures/icon_redstone_block.png         # t620/t644 红石块立方体图标（--from-pack：pack 贴图 3D 渲染）
+        textures/icon_bone_block.png             # t1077 骨块立方体图标（build_cube_icons.py；default_bone_block 程序贴图 3D 渲染，与放置态一致）
         textures/icon_redstone_lamp.png          # t620/t644 红石灯立方体图标（--from-pack：off 态贴图 3D 渲染，与放置态默认一致）
         textures/icon_anvil.png                  # t477 铁砧立方体图标（build_cube_icons.py；顶=砧台+砧面+尖角 / 侧=深铁砧身+横向分层）
         textures/icon_anvil_chipped.png          # t477 微损铁砧立方体图标（build_cube_icons.py；顶=砧台+细裂纹 / 侧=深铁砧身）
