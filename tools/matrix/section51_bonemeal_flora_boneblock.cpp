@@ -296,8 +296,10 @@ void MatrixRun::section51_bonemeal_flora_boneblock()
         // 注册族钉（枚举 / Count / 图集总数）。
         const QStringList missBrH = pinSet(brH, {
             SrcPin("BoneBlock enum entry", "BoneBlock         = 144", 1),
-            SrcPin("Count sentinel", "Count           = 145", 1),
-            SrcPin("atlas tile count", "AtlasTileCount = 186", 1)});
+            // t1080 钉面同变更修订（追加不插中间先例——现值随新方块/新瓦片尾部追加 lawful 前移：
+            //   145→146 / 186→189；钉语义 = 「哨兵存在」而非冻结数值，历史值见 git 与 blockregistry 注）：
+            SrcPin("Count sentinel", "Count           = 146", 1),
+            SrcPin("atlas tile count", "AtlasTileCount = 189", 1)});
         ok = ok && missBrH.isEmpty();
         if (!missBrH.isEmpty()) diag += QStringLiteral("[br.h %1] ").arg(missBrH.join(QLatin1Char(',')));
         // kMcBlockId 双行（音符盒对齐补行 25 + 骨块行 0）——行注释后缀形态 → 裸读文件口径（raw contains）。
