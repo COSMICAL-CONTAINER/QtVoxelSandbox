@@ -1268,6 +1268,9 @@ add_executable(redstone_matrix_test
     # t1077 骨粉催生草丛/花 + 骨块探针附加：Core/Game/World 层直编（applyBonemeal 直调 + 配方表直查
     #   + 源码钉——blockregistry/recipe/hotbar/world 系已列，零新 include 面）。
     tools/matrix/section51_bonemeal_flora_boneblock.cpp
+    # t1078 染料获取链补全探针附加：Game 层配方表直查 + 源码钉（recipe/hotbar/playercontroller 系已列，
+    #   零新 include 面——QDirIterator/QFile helpers 枢纽已含）。
+    tools/matrix/section52_dye_mixing.cpp
     src/Game/entityshadowfield.cpp
     src/Game/entityshadowfield.h
     src/Renderer/blobshadowgeometry.cpp
