@@ -14,16 +14,16 @@
 ```yaml
 project: QtMinecraft
 state: IN_PROGRESS
-current_task: **t1080 IN_PROGRESS（§14 常设授权候选池——漏斗 Hopper）**：收集掉落物 + 容器抽取/输出 + 红石锁停（MC 机制对标，原创名/资产 §9）。**派工前现场核实先行**（候选失真即降级，t1070/t1077/t1078 三先例）；容器接口若已有统一面挂接勿造第二份。串行 voxel-dev，filter 词 r2052 预留；完成 → 候选池下一位（刷怪笼/唱片机/纸书书架…）。
+current_task: **t1082 IN_PROGRESS（观察名单触发——r2040c 真锁时序腿加固）**：t1066 退避腿探锁-释放竞速边界断言 wall ∈ [100,300]ms 负载敏感三连红（HEAD 同刻复现 wall 82-87 = 非回归实证，存证 matrix_t1081_adj_r2040_head.log）。**加固方向**：墙钟毫秒窗 → 退避探测逻辑轮次断言（确定性化非放宽，禁削断言换绿）；验收 = 全矩阵 **746/0**。完成 → 候选池下一位（唱片机/纸书书架/岩浆×水…）。
 current_task_status: IN_PROGRESS
-last_completed_task: t1079 流式时序腿加固合集（2026-09-23 闭环；矩阵 738 腿零增——**两腿机理均翻任务书假设**[逐拍微迹定案]：r2046c 非昼相 = t377 随机甲掷骰 × 盔免烧豁免组合偶发，r2024b = 收割步②与数据采纳④之间同拍竞速窗别名账未清；加固 = r2046c 三钉组合[脱甲+天气双钉+wander 冻结]/r2024b 取消窗前置排干拍，恰 9 与燃烧断言零放宽；×10×2 连跑存证 + NEG-1 恰红 + 全矩阵 738/0 ×2 三方 md5 恒等 + 主控独立复跑 738/0；登记 = r2024b 生产侧「Loaded⟹别名已清」竞速窗候选。详录 = dev-plan t1079 关单条目）
-last_completed_task_prev: t1079 流式时序腿加固合集（2026-09-23 闭环，矩阵 738 零增，两腿确定性化零放宽 + 生产侧竞速窗登记候选；详录 = dev-plan t1079 关单条目）
-last_completed_task_commits: fix(t1080) + test(t1080)（本 docs 提交收口；哈希 25d1a8d / 4be40ef）
-last_verified_commit: test(t1080)（矩阵 **742 PASS / 0 FAIL ×2**：matrix_t1080_{pos,final}.log EXIT=0；738 权威[t1079 final] diff = +4 恰 r2052a-d；腿集合 md5 恒等[配方 `grep -a -oE "^PASS \| [a-z0-9]+ " <log> | sort | md5sum`]三日志全等 b619f86692b891d3e422ff16e61fd0d6；NEG-1 恰红 {b}/NEG-2 恰红 {c}；两处 lawful 钉面修订逐行亲核；主控脱离式全量独立复跑 742/0 完整通过 matrix_orch_t1080_verify.log）
+last_completed_task: t1081 刷怪笼 Spawner（2026-09-23 闭环；filter 词 r2053，矩阵 742→746——**刷怪笼族大半早已在**[t392/t786/t787/t760/t999/t1012]，缺口四件交付：点亮暗门[t280 同门 lawful 翻案]/±4 圆盘采样[49 格编译期完备性钉]/sparse 域无界化[t1073 同族]/破笼掉 XP 15-43；**哨兵教训入册 lessons-learned**[坐标值不可充当哨兵——r2053c 抓出 spawnFound 修复]；t1012 lawful 改造；全矩阵 ×3 各 745/746 唯一红恒 r2040c[三连红定案负载敏感非回归]其余 md5 四方恒等 + 主控复跑同签名。详录 = dev-plan t1081 关单条目）
+last_completed_task_prev: t1080 漏斗 Hopper（2026-09-23 闭环，r2052/矩阵 738→742，四语义 + store 族形状对齐零第二抽象；详录 = dev-plan t1080 关单条目）
+last_completed_task_commits: fix(t1081) + test(t1081)（本 docs 提交收口；哈希 d4cc0f9 / fe02a1e）
+last_verified_commit: test(t1081)（矩阵 **745 PASS / 1 FAIL ×3**[唯一红恒 r2040c 已知负载敏感腿，t1082 加固在飞将补 746/0]：其余 745 腿腿集合 md5 三跑+主控复跑四方恒等 519aed39ba5b139986524b38d7e5648a；NEG-1 恰红 {a}/NEG-2 恰红 {c}；r2040c 非回归实证 = HEAD 同刻复现 matrix_t1081_adj_r2040_head.log）
 last_governance_review: 2026-09-22（audit #17 GREEN 有保留——t1074-t1078 五闭环证据链全实核通过[五单 md5 按配方复跑全等/恰红面吻合/账本三方一致/15 提交零署名/不变量全守]；3 项低级发现 F1-F3 清偿：F1 冒烟证据抢救回填 + 每闭环 tail20 新纪律、F2 控制块重复键清除、F3 429 续作链过程注补记；详见 governance-audit-2026-09-22.md）
 governance_review_due: false
-completed_tasks_since_governance_review: 2（t1079 + t1080 闭环；审计 #17 GREEN 于 2026-09-22）
-next_task: **t1074 外环挖方块全黑（R21.1 P0 第 2 项，在飞）→ t1075 玩家/生物 blob 阴影（第 3 项）→ auto-backlog.md 候选池**；用户侧并行 = P5 实机清单 + §30.6/§31 设计决策 + 择机 push（本地领先远端 30+ 笔）
+completed_tasks_since_governance_review: 3（t1079 + t1080 + t1081 闭环；审计 #17 GREEN 于 2026-09-22）
+next_task: **t1082 r2040c 加固（在飞）→ 候选池（唱片机/纸书书架/岩浆×水/砂轮/甘蔗…）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1081 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -33,7 +33,7 @@ needs_human: false
 
 ## Workspace Guard
 
-- HEAD = t1080 漏斗系统代码终态（fix(t1080) 25d1a8d + test(t1080) 4be40ef 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 742 腿（53 段 TU）。**禁并发构建/并发跑矩阵**（t813 build_stamps 每次构建强制全目标重链——两进程并发构建可产出损坏 exe，2026-09-21 三崩留痕；并发跑共享夹具面同理存疑，验证轮必须独占）。**矩阵运行日志一律显式 build/ 相对路径**（t1075 过程日志曾落仓库根——agent 过程跑 cwd 漂移教训）。**冒烟证据每闭环回填 tail20**（审计 #16-F4/#17-F1 两现——冒烟后立即 cp logs/voxelsandbox.log 为 logs/voxelsandbox_<task>_tail20.log）。**观察名单（加固后状态）**：t897 牧草腿 + r2040c 真锁收敛腿仍在观察；r2046c/r2024b 已由 t1079 确定性加固（×10 连跑绿）转普通腿——若再现抖动即升级正式 flake 名单。
+- HEAD = t1081 刷怪笼代码终态（fix(t1081) d4cc0f9 + test(t1081) fe02a1e 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 746 腿（54 段 TU；r2040c 负载敏感红面由 t1082 加固中）。**禁并发构建/并发跑矩阵**（t813 build_stamps 每次构建强制全目标重链——两进程并发构建可产出损坏 exe，2026-09-21 三崩留痕；并发跑共享夹具面同理存疑，验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075 过程日志落仓库根 + t1081 复跑双进程事故两教训——cwd 相对路径在跨命令持久化下不可靠）。**冒烟证据每闭环回填 tail20**（审计 #16-F4/#17-F1 两现——冒烟后立即 cp logs/voxelsandbox.log 为 logs/voxelsandbox_<task>_tail20.log）。**观察名单（加固后状态）**：t897 牧草腿仍在观察；r2040c 三连红定案负载敏感 → t1082 加固在飞；r2046c/r2024b 已加固转普通腿。
 - 纪律①-⑨全在案；**大 TU 编译一律 -j 1**（09-13 蓝屏教训；分段后单段增量 -j 4 实测安全）。**矩阵测试为 tools/matrix/ 分层结构**：改探针只重编对应段 TU（秒级）+ `--filter <substring>` 只跑本任务腿；新腿落对应段文件，新段置尾 runAll 末执行、须 ≤500KB；section11 起「自建 fresh 小世界」先例（48×48×96 seed 82 + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)）。
 - **R20.06 起值类型纪律**：src/Core/ 新值类型一律 result.h QObjectFree 编译期钉 + 头内 static_assert；命令/事件队列满载拒绝与快照队列覆盖最老是两域容量策略分化，勿「统一」。
 - **R20.07 起编排壳纪律**：GameSession 只做编排（命令 → 整 tick 边界 → World::setBlock 权威），禁复制游戏逻辑；**QML 现行玩法路径零变化是 R20 主线不变量**（Main.qml 含 "GameSession" 即违零迁移阴性钉 r2007b）。
@@ -50,6 +50,7 @@ needs_human: false
 
 ## Recovery Point
 
+- 最近闭环：**t1081 刷怪笼 Spawner**（2026-09-23，fix(t1081) d4cc0f9 + test(t1081) fe02a1e + 本 docs）：矩阵 742→746。**刷怪笼族大半早已在**（t392/t786/t787/t760/t999/t1012），缺口四件交付 = 点亮暗门（设计决策 lawful 翻案，t280 同门）+ ±4 圆盘采样（49 格编译期完备性钉 + 哈希轮转）+ sparse 域无界化（t1073 同族）+ 破笼掉 XP 15-43。**哨兵教训入册 lessons-learned.md**（坐标值不可充当哨兵——r2053c 外环腿抓出 spawnFound 修复）。t1012 lawful 改造（熔岩照明实测迁密封暗笼手 rig）。腿 r2053a-d；NEG-1 {a}/NEG-2 {c} 恰红；全矩阵 ×3 各 745/746 唯一红恒 r2040c（三连红定案负载敏感非回归 + HEAD 同刻复现存证）其余 md5 四方恒等 + 主控复跑同签名。**后续 = t1082 加固 r2040c（墙钟窗改逻辑轮次，验收 746/0）**。**待实机确认**：火把压停/±4 格刷出/破笼 XP（爆炸破恒发口径登记偏差）/位置变奏/外环笼工作。
 - 最近闭环：**t1080 漏斗 Hopper**（2026-09-23，fix(t1080) 25d1a8d + test(t1080) 4be40ef + 本 docs）：矩阵 738→742。四 store 无统一抽象 → HopperStore 逐字对齐 DispenserStore 族 + kind 分派（不造第二份抽象）；红石锁停接钩既有 isReceivingPower；四语义交付（0.4s 周期收集/抽取/输出/锁停 + 熔炉定向 + hoppers 表真 SQLite 往返含负坐标键 + 破坏掉内容）；UI/比较器如实降级候选。图集钉 186→189 + r2050d 现值钉 lawful 修订。腿 r2052a-d；NEG-1 {b}/NEG-2 {c}[首跑全绿暴露 c 腿被注释行吞——修后灵敏]；全矩阵 742/0 ×2 三日志 md5 恒等 + 主控独立复跑 742/0。**待实机确认**：朝向手感/三面贴图/链与熔炉节律/锁停延迟/存档往返。
 - 最近闭环：**t1079 流式时序腿加固合集**（2026-09-23，fix(t1079) 058b3a6 + test(t1079) 9c42aeb + 本 docs）：矩阵 738 腿零增。**两腿机理均翻任务书假设**（逐拍微迹定案）：r2046c 非昼相 = t377 随机甲掷骰 × 盔免烧豁免组合偶发；r2024b = 收割步②与数据采纳④同拍竞速窗别名账未清（生产真实窗口）。加固 = 三钉组合（脱甲/天气双钉/wander 冻结）+ 取消窗前置排干拍，恰 9 与燃烧断言零放宽（禁削断言换绿铁律守住）。验证链：×10×2 连跑存证 + NEG-1 恰红 + 全矩阵 738/0 ×2 三方 md5 恒等 + 主控独立复跑 738/0。**登记**：生产侧「Loaded⟹别名已清」竞速窗候选池。**待实机确认**：无新增（生产行为零改动）。
 - 最近闭环：**t1078 染料系统**（2026-09-22，fix(t1078) f5fac46 + test(t1078) 630081c + 本 docs）：矩阵 734→738。**候选三度部分失真如实降级**：花→染料/染→羊毛早已交付（t788/t832），陶瓦/染色玻璃非 1.0 降级候选池；交付 = 9 条 2→2 二级混色 + 墨囊→黑 1:1 桥（纯配方表 10 行，零方块/零贴图/零 QML——kMcBlockId 与图集钉面不动），15/16 色生存可达（棕色候选）。腿 r2051a-d（获取墙含全表不动点闭包/行为柱两跳链/边界墙全 nullptr/结构钉反探）；NEG-1 {a,b}/NEG-2 {a} 恰红；agent 双跑 738/0 + 主控复跑首轮 737/1（r2024b 首抖存证）→ 复跑清 738/0 三日志 md5 恒等。**后续 = t1079 加固 r2046c（二抖）+ r2024b（首抖）**。**待实机确认**：混色手感/墨囊路径/16 色可达效率（棕色仅创造）。
