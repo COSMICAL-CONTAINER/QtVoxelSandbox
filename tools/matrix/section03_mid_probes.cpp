@@ -1946,8 +1946,8 @@ void MatrixRun::section03_mid_probes()
             for (int y = 85; y <= 86; ++y) wE.setBlock(x, y, 25, BR::Water, 0);
         EntityManager emE;
         const QVector3D nearPlayer(14.5f, 86.0f, 15.5f); // 猪笼旁（两笼均 <16 激活半径：猪笼 1.4 / 鱿鱼笼 ~14.1）
-        emE.tickSpawners(6.5f, &wE, nearPlayer); // ≥ kSpawnerInterval 6 → 完整刷怪周期
-        emE.tickSpawners(6.5f, &wE, nearPlayer); // 第二周期（首个候选位被前轮占用时兜底）
+        emE.tickSpawners(6.5f, &wE, nearPlayer, 0.0f); // ≥ kSpawnerInterval 6 → 完整刷怪周期；t1081 签参亮度=0（夜语义，露天平台光照门恒过）
+        emE.tickSpawners(6.5f, &wE, nearPlayer, 0.0f); // 第二周期（首个候选位被前轮占用时兜底）
         int pigs = 0, squids = 0;
         bool squidInWater = false;
         for (int i = 0; i < emE.count(); ++i) {

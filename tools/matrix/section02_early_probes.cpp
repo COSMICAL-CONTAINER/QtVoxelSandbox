@@ -2056,7 +2056,7 @@ void MatrixRun::section02_early_probes()
             }
         EntityManager emRf30;
         const QVector3D player30(float(sx30) + 0.5f, float(sy30) + 0.5f, float(sz30) + 12.5f); // XZ 12.5 < 16 激活圈
-        emRf30.tickSpawners(6.0, &wRf30, player30); // 单周期（kSpawnerInterval=6s）
+        emRf30.tickSpawners(6.0, &wRf30, player30, 0.0f); // 单周期（kSpawnerInterval=6s）；t1081 签参亮度=0（夜语义，光照门恒过）
         int squids30 = 0;
         bool atWater30 = false;
         for (int i = 0; i < emRf30.count(); ++i) {
@@ -2118,7 +2118,7 @@ void MatrixRun::section02_early_probes()
         for (int i = 0; i < 30; ++i) // 远场敌对种子：打满全局 cap（kHostileMobCap=30）
             emRf31.spawnHostileMob(4 + (i % 6), py31, 4 + (i / 6), EntityManager::MobShambler);
         const QVector3D player31(48.5f, 8.5f, 48.5f);
-        emRf31.tickSpawners(6.0, &wRf31, player31); // 单周期
+        emRf31.tickSpawners(6.0, &wRf31, player31, 0.0f); // 单周期；t1081 签参亮度=0（夜语义，光照门恒过 = 原腿地牢环境）
         const QVector3D pigCage31(float(pigX31) + 0.5f, 8.5f, float(pz31) + 0.5f);
         const QVector3D shamCage31(float(shamX31) + 0.5f, 8.5f, float(pz31) + 0.5f);
         const int pigs31 = emRf31.mobTypeCountNear(pigCage31, 4.0f, EntityManager::MobPig);
