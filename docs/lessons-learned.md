@@ -1032,3 +1032,10 @@
 
 - **无 QML 接线的「真消费端」探针 rig 必须显式补齐呈现层会做的状态绑定——凡引擎成员有「构造默认 ≠ 游戏稳态」的（如 PlayerController::m_selectedBlock 构造默认 Stone，而真实游戏经 Main.qml `selectedBlock: hotbarVM.selectedBlockId` 把材料段/工具段手持映射为 Air），探针里它就恒停在默认值；阳性轮被测分支提前 return 时不可见，阴性轮把分支摘掉后 fall-through 立刻踩进默认值驱动的通用路径**：t1030 阴性轮（恒假化骨粉分流判据）首跑 t1030b edge 腿假红——骨粉（材料段 0x232）被 setSelectedBlock 拒收（越界守卫）→ m_selectedBlock 保持构造默认 Stone → fall-through 走通用放置：向命中面邻格放默认方块 + 从选中栈 takeStack(1) → 「不消耗」断言假红（cnt 4→3、目标格不动、消耗发生在无人断言的邻格——三重错位叠加使诊断面完全失真）。**判别信号**：写 placeBlock/useBlock 族真链探针时，问一句「被测分支提前 return / 被阴性轮摘除后，代码会走到哪个兜底段？那个兜底段读的成员，在 rig 里是谁的值？」——凡兜底段读的成员在真实游戏由 QML 绑定刷新而 rig 没接线的，都是患者；阳性轮全绿不代表 rig 忠实（分支 return 掉了根本没走到兜底）。**通用修法**：rig 构造后显式 `setSelectedBlock(Air)`（对齐 Hotbar::selectedBlockId 的「材料段/工具段→Air」派生语义），并优先复用 Hotbar 的派生口（`pc.setSelectedBlock(hb.selectedBlockId())`）而非手写常量，防双源漂移；阴性轮红面异常（红因 ≠ 摘除目标的行为）时，先对照 diag 三元组「断言值 / 目标格 / 消耗发生格」是否指向同一位置——错位即 fall-through 旁路。**自检**：任何「摘分支」类阴性轮，列出该分支 return 所跳过的全部后续段及其读取的 rig 未接线成员清单（m_selectedBlock / 模式 / 相机挂载），逐个补齐或断言其无害。
   - 证据：t1030（eaef577）——阴性轮首跑 506 基线破裂（t1030a+b 双红，diag `edge=0` cnt 4→3 id 不动），rig 补 setSelectedBlock(Air) 后复跑恰红 506/1=P-t1030a（grow badCnt 0 = 零消耗签名），matrix_t1030_neg.log 两轮对照。
+
+## t1081（2026-09-23）：坐标值不可充当哨兵——域无界化后负坐标全面合法化
+
+- **教训**：用 `int x = -1` 之类「域外值」当「未找到」哨兵的代码，在扫描域从固定盒扩展到无界平面（t1073 sparse 化）后，会被真实负坐标刷出格撞碎（`x < 0` 误判为未找到 → 整笼跳过）。
+- **修法**：显式 `bool found` 标志替代值哨兵（d4cc0f9）。
+- **证据**：r2053c 外环腿抓出——48 核小世界测不出（负坐标采样域不重叠哨兵值），生产尺寸外环一测即红。
+- **同族**：t1073（population 窗钳核心域）/ t1074（光照域门）/ t1081（本条）——「固定网格假设」的清除是持续性工程，每次域扩展都须审计「域外值哨兵/盒钳制/符号假设」三面。
