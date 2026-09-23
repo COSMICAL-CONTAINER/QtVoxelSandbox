@@ -12236,6 +12236,13 @@ Window {
             //   delegate 呈现，此处不删则破笼后残影）。破笼无掉落（dropId=0，C++ 侧）；刷怪停止由
             //   EntityManager::tickSpawners 扫 blockAt != Spawner 自动跳过（C++ 侧，非本层职责）。
             if (id === 40) spawnerHost.removeSpawnerVis(x, y, z)
+            // t1081 破笼掉经验（机制等价 MC 1.0 破坏刷怪笼掉 15-43 XP——本工程经验族在（XpOrbManager
+            //   t402），掉落面如实实现）。仅生存模式（MC 创造破坏无经验；mode 读面同本文件 3216 行先例）。
+            //   经验量随 MC 1.0 随机带 15 + ⌊rand×29⌋ ∈ [15,43]（同 onMobDied 既有 Math.random 掉落模式，
+            //   经验是掉落非节流，无确定性约束）。挂 blockBroken 消费端 = 含爆炸/系统破笼亦掉经验（World
+            //   语义事件无 drop 标志，同 t571 破箱内容掉落恒发口径——降级登记待实机确认）。
+            if (id === 40 && player.mode === PlayerController.Survival)
+                xpOrbs.spawnOrb(x, y, z, 15 + Math.floor(Math.random() * 29))
             // t173/t179/t522：箱子被破 → 先把内部 27 槽内容 spawnItem 掉落世界（机制等价 MC 1.0 破箱掉落
             //   内容，修用户报「箱子装东西后挖掉不掉」），再 chestStore.clearChest 清孤儿条目。id=22=
             //   BlockRegistry::Chest（与 blockregistry.h Id 枚举同源；此处用字面量 + 注释，同 torch=13 /
