@@ -1547,12 +1547,66 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
     }
 }
 
+// t1081 刷怪笼刷出位置采样表：MC 1.0 刷怪笼 ±4 水平邻域 → 欧氏圆盘 dx²+dz²≤kSpawnerSampleRadius²（49 格，
+//   含笼柱 (0,0)——dy=+1 时「笼顶站立」是 MC 合法刷位）。y 偏移 ∈ {-1,0,+1}（MC y±1 口径）在消费处展开，
+//   3D 共 147 候选/笼/周期。确定性：消费处 spawnerScanSeed 轮转扫描起点（PLAN §2-K 禁运行期随机源）。
+struct SpawnerSpawnOffset { int dx, dz; };
+static constexpr SpawnerSpawnOffset kSpawnOffsets[] = {
+    { 0, 0 },
+    { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
+    { 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 },
+    { 2, 0 }, { -2, 0 }, { 0, 2 }, { 0, -2 },
+    { 2, 1 }, { 2, -1 }, { -2, 1 }, { -2, -1 }, { 1, 2 }, { 1, -2 }, { -1, 2 }, { -1, -2 },
+    { 2, 2 }, { 2, -2 }, { -2, 2 }, { -2, -2 },
+    { 3, 0 }, { -3, 0 }, { 0, 3 }, { 0, -3 },
+    { 3, 1 }, { 3, -1 }, { -3, 1 }, { -3, -1 }, { 1, 3 }, { 1, -3 }, { -1, 3 }, { -1, -3 },
+    { 3, 2 }, { 3, -2 }, { -3, 2 }, { -3, -2 }, { 2, 3 }, { 2, -3 }, { -2, 3 }, { -2, -3 },
+    { 4, 0 }, { -4, 0 }, { 0, 4 }, { 0, -4 },
+};
+static constexpr int kSpawnOffsetCount = int(sizeof(kSpawnOffsets) / sizeof(kSpawnOffsets[0]));
+static_assert(kSpawnOffsetCount == 49,
+              "t1081 采样圆盘表须 49 格（dx²+dz²≤16 全枚举；漏格/多格 = 采样域漂移）");
+// 圆盘完备性编译期钉：全枚举 [−R,R]² 中 dx²+dz²≤R² 的格数必须恰等于表长（表漏格/混入越盘格即编译失败）。
+//   R 字面量 4 与 entitymanager.h kSpawnerSampleRadius=4 的唯一性由 r2053d 源钉（该行 minCount=1）锁死。
+constexpr int spawnerDiscCellCount()
+{
+    constexpr int kR = 4; // == EntityManager::kSpawnerSampleRadius（private；常量行由矩阵 r2053d 源钉）
+    int n = 0;
+    for (int dx = -kR; dx <= kR; ++dx)
+        for (int dz = -kR; dz <= kR; ++dz)
+            if (dx * dx + dz * dz <= kR * kR)
+                ++n;
+    return n;
+}
+static_assert(spawnerDiscCellCount() == kSpawnOffsetCount,
+              "t1081 圆盘完备性钉：枚举计数须与 kSpawnOffsets 表长一致");
+// t1081 确定性变奏哈希（PLAN §2-K 禁运行期随机源——MC 1.0 刷怪笼 ±4 随机采样如实映射为「笼坐标 × tick
+//   相位」整数混淆的候选起点轮转：同 tick 序列恒同序 = 矩阵可复现；m_tickPhase 由 EntityManager::tick 每帧
+//   推进 → 生产运行期逐周期换起点 = 变奏面；腿驱动直调不推进 phase → 恒同起点 = 确定性钉）。
+static inline quint32 spawnerScanSeed(int x, int y, int z, quint32 phase)
+{
+    quint32 h = quint32(x) * 0x9E3779B9u ^ quint32(y) * 0x85EBCA6Bu ^ quint32(z) * 0xC2B2AE35u ^ phase;
+    h ^= h >> 16;
+    h *= 0x7FEB352Du;
+    h ^= h >> 15;
+    h *= 0x846CA68Bu;
+    h ^= h >> 16;
+    return h;
+}
+
 // t392 刷怪笼周期刷怪（见头文件方法注释）。机制等价 MC 1.0 刷怪笼：玩家在范围内时周期 spawn 笼型 mob。
 //   实现策略 —— **按需扫描**：每 kSpawnerInterval 秒扫玩家所在格周围 ±kSpawnerScanRange 立方体找 Spawner 方块，
 //   对每个笼按笼型分流闸门（review #31：被动笼 = 同型 local cap + 总 cap；敌对笼 = 全局敌对 cap + 区域
 //   cap + 笼周敌对 local cap）+ 找到合法 spawn 位 → spawn 1 只。不维护 spawner 位置列表 → 破坏即停
 //   （blockAt != Spawner 自然跳过）、存档加载后仍能扫到（无 index 维护负担）。
-void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &playerPos)
+//   t1081 三面：① 点亮暗门（敌对型笼）= 刷出格 max(skyLightAt×skyBrightness, blockLightAt) <
+//   kSpawnLightThreshold（与 t280 黑暗刷怪同门同帧亮度源；火把压停地牢笼 = MC 口径；被动型笼不受门——
+//   生物蛋改型的猪/牛笼白天照刷，同 t787 蛋语义）。② 刷出位置 = ±kSpawnerSampleRadius 水平圆盘（49 格）×
+//   y∈{-1,0,+1}，kSpawnOffsets 表消费 + spawnerScanSeed 哈希轮转起点（MC 1.0 随机采样 → 确定性哈希变奏，
+//   PLAN §2-K 禁运行期随机源）。③ 扫描域 = t1073 可玩域门：fixed 核心盒钳制原样 / sparse 随玩家无界（未物化
+//   chunk 读 Air 天然拒绝）→ 笼机制挂方块本体，与地牢生成路径解耦（方块到哪机制到哪——t392 地牢、t1073
+//   登记的外环、玩家手放同一扫描面，无结构注册表依赖）。
+void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &playerPos, float skyBrightness)
 {
     if (!world) return;
     FrameProfiler::Scope profSpawn("mobSpawn"); // t500 perf：mob 桶子分解（刷怪笼周期扫描）
@@ -1567,6 +1621,10 @@ void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &player
     if (m_liveCount >= kCap)
         return;
 
+    // 刷怪笼扫描盒（t1081 域门，同 columnInPlayableDomain 单一权威口径）：fixed 世界 = 核心盒钳制（旧行为
+    //   逐位原样——固定世界边界即世界端点）；sparse 流式世界 = 随玩家无界（核心 dims 是生成语义参数非域界，
+    //   负坐标 / 出核列不再被钳出扫描；未物化 chunk blockAt 恒 Air → 笼检查天然拒绝，远场零开销语义不变）。
+    //   t1073 病灶同族：旧钳制把外环笼整体钳出扫描盒（x1 < x0 倒置空盒）= 外环笼零刷怪。Y 恒 [0, height)。
     // 扫玩家所在格周围 ±kSpawnerScanRange 立方体（限 Y 到 [0, worldHeight)，防越界）。
     const int pcx = int(std::floor(playerPos.x()));
     const int pcy = int(std::floor(playerPos.y()));
@@ -1574,12 +1632,13 @@ void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &player
     const int worldW = world->width();
     const int worldD = world->depth();
     const int worldH = world->height();
-    const int x0 = std::max(0, pcx - kSpawnerScanRange);
-    const int x1 = std::min(worldW - 1, pcx + kSpawnerScanRange);
+    const int x0 = world->isSparse() ? pcx - kSpawnerScanRange : std::max(0, pcx - kSpawnerScanRange);
+    const int x1 = world->isSparse() ? pcx + kSpawnerScanRange : std::min(worldW - 1, pcx + kSpawnerScanRange);
     const int y0 = std::max(0, pcy - kSpawnerScanRange);
     const int y1 = std::min(worldH - 1, pcy + kSpawnerScanRange);
-    const int z0 = std::max(0, pcz - kSpawnerScanRange);
-    const int z1 = std::min(worldD - 1, pcz + kSpawnerScanRange);
+    const int z0 = world->isSparse() ? pcz - kSpawnerScanRange : std::max(0, pcz - kSpawnerScanRange);
+    const int z1 = world->isSparse() ? pcz + kSpawnerScanRange : std::min(worldD - 1, pcz + kSpawnerScanRange);
+
 
     int hostilesRunning = hostileCount(); // 本周期内已存在的敌对数（敌对笼全局预算；被动笼不挤占、不读它）
     bool hostileAreaCapped = false;       // review #31：玩家周边敌对区域 cap（惰性一次，首个敌对笼时算——原入口
@@ -1636,27 +1695,37 @@ void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &player
                     if (hostileNearby(spawnerCenter, kSpawnerMobCheckRadius)) continue;
                 }
 
-                // 找合法 spawn 位（笼 8 水平邻 + 笼同格上方 / 下方共 10 候选；review #30 起按笼型分流谓词）。
-                //   spawnMobTyped 把 (x,y,z) 当格坐标、mob 中心放 (x+0.5, y+0.5, z+0.5)。机制等价 MC 刷怪笼
-                //   在笼旁刷怪（笼自身不可站立 → 邻格 spawn）。Y 优先笼同高（玩家走入触发高度）。
-                //   鱿鱼（review #30）：水生 mob 复用「空气 + 固体底」陆生谓词 → 全刷陆上慢爬（「搁浅鱿鱼」）。
-                //   改单独水格谓词：本格 + 上格均 Water（身体浸没；水柱即可，无需固体底——MC 鱿鱼笼旁水体
-                //   刷鱿鱼）。其余型保持「air + 上 air + 下 solid + 下非 Water/Lava」原谓词。
-                static const int kSpawnDx[8] = { 1, -1, 0, 0, 1, 1, -1, -1 };
-                static const int kSpawnDz[8] = { 0, 0, 1, -1, 1, -1, 1, -1 };
+                // 找合法 spawn 位（t1081：±kSpawnerSampleRadius 水平圆盘 × y∈{-1,0,+1} 采样，kSpawnOffsets
+                //   表 + spawnerScanSeed 轮转起点；review #30 起按笼型分流谓词）。spawnMobTyped 把 (x,y,z)
+                //   当格坐标、mob 中心放 (x+0.5, y+0.5, z+0.5)。机制等价 MC 1.0 刷怪笼在笼 ±4 格水平邻域
+                //   （含笼柱 dy=+1「笼顶站立」）刷怪；轮转起点 = 确定性变奏（同 rig 同序列恒同格）。
+                //   逐格合法性门（任一格全过即首中）：① 列在可玩域（t1073 单一权威门——fixed 核心盒原样 /
+                //   sparse 平面）；② y 界内须留一格空间在上（mob 占 2 格高 / 水柱同）；③ 笼型谓词（review
+                //   #30）：鱿鱼走「本格 + 上格均 Water」水格谓词（无需固体底——MC 鱿鱼笼旁水体刷鱿鱼）；
+                //   其余型保持「here/above ∈ {Air, Cobweb}」（Cobweb 豁免 = 跨批高危 #1 满网走廊洞穴蛛笼
+                //   唯一自然来源；支撑收口 isCollidable = t865 单一权威，水/岩浆 ShapeNone 无碰撞天然排除，
+                //   花草/轨/火把不再当支撑）；④ 点亮暗门（t1081，敌对型笼）：刷出格有效光
+                //   max(skyLightAt×skyBrightness, blockLightAt) < kSpawnLightThreshold（t280 黑暗刷怪同门同帧
+                //   亮度源——火把照明压停地牢笼 = MC 口径；被动型笼不受门，生物蛋改型猪/牛笼白天照刷同 t787）。
+                const quint32 rotStart = spawnerScanSeed(x, y, z, m_tickPhase) % quint32(kSpawnOffsetCount);
                 const bool wantWater = (mobType == MobSquid);
-                int sx = -1, sy = -1, sz = -1;
-                for (int i = 0; i < 8; ++i) {
-                    const int cx = x + kSpawnDx[i];
-                    const int cz = z + kSpawnDz[i];
-                    if (cx < 0 || cz < 0 || cx >= worldW || cz >= worldD) continue;
-                    // 优先笼同高（y）、次之 y+1（玩家跳上触发高度）；二者均堵 → 跳过本邻位。
-                    for (int cyOff = 0; cyOff <= 1; ++cyOff) {
+                // t1081 修：候选「未找到」哨兵不可用坐标值充当——sparse 域合法刷出格 x 可为负，
+                //   旧 `int sx = -1` + `if (sx < 0)` 把负坐标格当「没找到」整笼跳过（本单 r2053c
+                //   外环腿抓出）。found bool 显式化，坐标值只做坐标。
+                bool spawnFound = false;
+                int sx = 0, sy = 0, sz = 0;
+                for (int i = 0; i < kSpawnOffsetCount; ++i) {
+                    const SpawnerSpawnOffset &off = kSpawnOffsets[(rotStart + i) % kSpawnOffsetCount];
+                    const int cx = x + off.dx;
+                    const int cz = z + off.dz;
+                    if (!columnInPlayableDomain(world, cx, cz)) continue; // t1073 可玩域门（fixed 核心盒原样）
+                    // y ∈ {-1, 0, +1}（MC 1.0 口径 y±1）；须留一格空间在上（mob 占 2 格高/水柱同）。
+                    for (int cyOff = -1; cyOff <= 1; ++cyOff) {
                         const int cy = y + cyOff;
                         if (cy < 0 || cy >= worldH - 1) continue;        // 须留一格空间在上（mob 占 2 格高/水柱同）
                         const quint8 here = world->blockAt(cx, cy, cz);
                         const quint8 above = world->blockAt(cx, cy + 1, cz);
-                        // 跨批高危 #1（09-06 review）：Cobweb 格豁免——t1012② 满网蛛网走廊把笼周 8 邻 +
+                        // 跨批高危 #1（09-06 review）：Cobweb 格豁免——t1012② 满网蛛网走廊把笼周采样域 +
                         //   上格全填 Cobweb（非 Air），陆生谓词「here/above == Air」恒假 → 洞穴蜘蛛笼
                         //   （唯一自然来源）永久零刷。机制等价 MC：cave spider 在网窝里照常刷（蛛网无碰撞，
                         //   不阻生成）。取「豁免」而非「刷出后清网」：清网会破 t786「笼周 ≥8 网 = 矿井蛛笼」
@@ -1670,14 +1739,22 @@ void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &player
                                // review26 #19：支撑收口 isCollidable（t865 单一权威）——水 / 岩浆本就
                                //   ShapeNone 无碰撞（旧显式排除随之免费包含），花草 / 轨 / 火把不再当支撑。
                                && world->isCollidable(cx, cy - 1, cz));
-                        if (okCell) {
-                            sx = cx; sy = cy; sz = cz;
-                            break;
+                        if (!okCell) continue;
+                        // t1081 点亮暗门（敌对型笼）：max(天光×昼夜乘子, 方块光) < 7 才可刷（t280 同门）。
+                        if (!passiveType) {
+                            const quint8 spawnerSkyL = world->skyLightAt(cx, cy, cz);
+                            const quint8 spawnerBlkL = world->blockLightAt(cx, cy, cz);
+                            const float spawnerEffLight = std::max(float(spawnerSkyL) * skyBrightness,
+                                                                   float(spawnerBlkL));
+                            if (spawnerEffLight >= kSpawnLightThreshold) continue; // 点亮格 → 换下个候选
                         }
+                        sx = cx; sy = cy; sz = cz;
+                        spawnFound = true;
+                        break;
                     }
-                    if (sx >= 0) break;
+                    if (spawnFound) break;
                 }
-                if (sx < 0) continue; // 笼周无合法 spawn 位 → 跳过本笼（下周期再试）
+                if (!spawnFound) continue; // 采样域内无合法暗格 → 跳过本笼（下周期换起点再试）
 
                 // spawn 1 只 —— t787 路由：敌对型走 spawnHostileMob（hostile 语义 + 敌对默认血量 + 计入
                 //   hostilesRunning 预算，同旧）；被动型（蛋改型写入）走 spawnPassiveMob —— 上限判据「笼周

@@ -1227,9 +1227,11 @@ void PlayerController::tickImpl()
     if (m_entityManager && m_world && m_worldClock)
         m_entityManager->tickHostileLife(dt, m_world, m_pos, m_worldClock->skyLight());
     // t392 刷怪笼周期刷怪（同 tickHostileLife 同级常开 —— 玩家在范围内时刷怪笼照样刷，世界模拟连续；
-    //   菜单 / 暂停时仍推进，独立于捕获态）。无 m_worldClock 依赖（刷怪笼无视光照 / 昼夜，地牢天然黑暗）。
+    //   菜单 / 暂停时仍推进，独立于捕获态）。t1081 起喂同帧 skyBrightness（与上方 tickHostileLife 同源
+    //   m_worldClock->skyLight()——点亮暗门与黑暗刷怪门读同一乘子，禁两套光照判定）；无 m_worldClock
+    //   → 传 0（= 恒过门，旧「刷怪笼无视光照」口径的自然退化态，rig/测试环境语义）。
     if (m_entityManager && m_world)
-        m_entityManager->tickSpawners(dt, m_world, m_pos);
+        m_entityManager->tickSpawners(dt, m_world, m_pos, m_worldClock ? float(m_worldClock->skyLight()) : 0.0f);
     } // /profMob
     { FrameProfiler::Scope s("pickup");
     // t92：拾取扫描提到 m_captured 早 return **之前**——打开背包（release→m_captured=false）时

@@ -1071,13 +1071,24 @@ public:
     //   谓词 → 鱿鱼全刷陆上慢爬 =「搁浅鱿鱼」）。
     //   **player-near 才扫**：内部 m_spawnAccumSpawner 节流（kSpawnerInterval 秒一次），满 → 扫玩家所在格周围
     //   ±kSpawnerScanRange 的立方体找 Spawner 方块（按需扫描，玩家不在范围 → 不扫 → 远场零开销），对每个找到的
-    //   笼：玩家 XZ 距离 ≤ kSpawnerPlayerRange + 笼型闸门全过 + 找到合法 spawn 位 → spawn 1 只（找邻 8 格
-    //   首个合格格；全堵 → 跳过本笼）。
+    //   笼：玩家 XZ 距离 ≤ kSpawnerPlayerRange + 笼型闸门全过 + 找到合法 spawn 位 → spawn 1 只。
+    //   t1081 条件刷怪（机制等价 MC 1.0 刷怪笼 spawn 条件面）：① **点亮暗条件**（敌对型笼）——刷出格有效光
+    //   = max(skyLightAt×skyBrightness, blockLightAt) < kSpawnLightThreshold(7)，与 tickHostileLife 黑暗刷怪
+    //   同一门同帧亮度源（火把照明可压停地牢刷怪笼 = MC 口径；被动型笼不受此门——生物蛋改型的猪/牛笼白天
+    //   照刷，同 t787 蛋语义）。skyBrightness 由 Game 层同帧传入（与 tickHostileLife 同源 m_worldClock->skyLight()；
+    //   无昼夜源传 0 = 恒过门，旧「刷怪笼无视光照」口径的自然退化态）。② **刷出位置 ±kSpawnerSampleRadius 格
+    //   水平邻域采样**——MC 1.0 的 ±4 随机采样如实映射为「笼坐标 × m_tickPhase 整数混淆哈希的候选起点轮转」
+    //   （PLAN §2-K 禁运行期随机源：同 tick 序列恒同序 = 确定性变奏，节流确定性同族取舍；kSpawnOffsets 圆盘
+    //   表 × y∈{-1,0,+1} 逐格过合法性门首中即刷）。③ **扫描域 = t1073 可玩域门**——fixed 世界核心盒钳制原样；
+    //   sparse 世界扫描盒随玩家无界（未物化 chunk blockAt 恒 Air 天然拒绝）→ **笼机制挂方块本体、与地牢生成
+    //   路径解耦**：方块到哪机制到哪（t392 地牢 / t1073 登记的外环 / 玩家手放，同一 blockAt 扫描面，无任何
+    //   结构注册表依赖）。
     //   **破笼即停**：tickSpawners 每周期读 blockAt 判格 == Spawner，玩家破坏后下次扫描自然跳过（无 setBlock 钩子，
     //   同 spec「spawner ... can be broken to stop」）。
     //   分层（PLAN §2）：Entities 层（同 tickHostileLife）只读 World（blockAt/isSolid）+ 自身实体数据；写
-    //   EntityManager 自身（spawnHostileMob）。playerPos 由 Game 层（PlayerController）传入。无向上依赖。world==null → 早 return。
-    void tickSpawners(qreal dt, World *world, const QVector3D &playerPos);
+    //   EntityManager 自身（spawnHostileMob）。playerPos / skyBrightness 由 Game 层（PlayerController）传入。
+    //   无向上依赖。world==null → 早 return。
+    void tickSpawners(qreal dt, World *world, const QVector3D &playerPos, float skyBrightness);
     // t727 玩家视线状态注入（Game/Physics 层 PlayerController 每 tick 调；Game→Entities 向下依赖，同 listener/
     //   playerPos 先例）。存玩家眼睛位置 + 归一化视线方向，供夜行者瞪视激怒判定（眼对眼 = 视线点积朝它 >0.99）。
     //   lookDir 非归一 → 内部归一（三角精度对点积影响敏感，须归一）。Entities 层不反查玩家模式 / 视线（不反向
@@ -2380,21 +2391,30 @@ private:
     // t392 刷怪笼周期刷怪常量（spec「periodically spawns ONE hostile mob while a player is within range;
     //   spawn capped」；机制等价 MC 1.0 刷怪笼：玩家在 16 格内 + 笼周 6 只上限 + 每 ~5-10s 刷一只）。数值为本工程
     //   小世界量身调，非 MC 精确复刻（PLAN §4「机制对标」非数值 1:1）。独立于 tickHostileLife 的「黑暗刷怪」
-    //   —— 刷怪笼无视光照（地牢天然黑暗）、仅在玩家范围内刷、有局部上限（防刷爆）。
+    //   —— 仅在玩家范围内刷、有局部上限（防刷爆）。t1081 起刷出条件含**点亮暗门**（敌对型笼，同
+    //   tickHostileLife 的 kSpawnLightThreshold；旧「刷怪笼无视光照（地牢天然黑暗）」口径随 t1081 条件刷怪
+    //   面修订——地牢黑暗天然过门，火把照明压停笼 = MC 口径；被动型笼不受门）。
     //   - kSpawnerInterval：刷怪周期（秒；每周期扫一次玩家周围 Spawner、每笼尝试刷 1 只）。MC 1.0 刷怪笼每 ~10-40s
-    //     刷一次；取 6s 平衡「可见可验收」与「不刷爆」（地牢多笼时也按周期节流）。
+    //     **随机**间隔刷一次；如实映射为**固定节流**（PLAN §2-K 禁运行期随机源的机关口径——确定性哈希变奏
+    //     留给刷出位置采样，见 kSpawnOffsets）+ 取 6s 平衡「可见可验收」与「不刷爆」（地牢多笼时也按周期节流）。
     //   - kSpawnerPlayerRange：玩家激活范围（blocks；XZ 距离 ≤ 此才刷，spec「player within range」）。MC 1.0 刷怪笼
-    //     玩家 16 格内激活；取 16 同 MC（同 kDetectRange 量级 → 玩家进地牢即刷、走远即停）。
+    //     玩家 16 格内激活；取 16 同 MC（同 kDetectRange 量级 → 玩家进地牢即刷、走远即停；本工程按 XZ 水平窗
+    //     口径，同 kFarDespawn / 黑暗刷怪的水平距离族）。
     //   - kSpawnerScanRange：玩家周围扫描半径（blocks；±此值立方体内找 Spawner 块）。= kSpawnerPlayerRange + 2 余量
     //     → 笼在激活带边沿时仍在扫描范围（playerPos 中心 + 半径覆盖激活带）。
-    //   - kSpawnerMobCheckRadius：笼周敌对计数半径（blocks；笼为中心球内敌对数 ≥ kSpawnerLocalCap 则不刷）。
-    //     MC 1.0 刷怪笼 6 只上限（球半径 ~8）；本工程取半径 4 + 上限 4（小世界合理密度；防地牢刷出十几只塞满）。
-    //   - kSpawnerLocalCap：单笼周围敌对上限（≥ 此则本笼跳过；机制等价 MC 1.0 刷怪笼 6 mob cap）。
+    //   - kSpawnerSampleRadius：刷出位置**水平采样半径**（blocks；MC 1.0 刷怪笼在笼 ±4 格水平邻域采样 → 圆盘
+    //     dx²+dz²≤16 共 49 格，y ∈ {-1,0,+1}，见 entitymanager.cpp kSpawnOffsets 表；t1081 起取代旧「8 水平邻
+    //     + y/y+1」窄域——旧域是 t392 初版的窄化实现，t1081 按任务口径放宽到 MC 1.0 全域）。
+    //   - kSpawnerMobCheckRadius：笼周计数半径（blocks；笼心为球心，敌对「≥1 只在球内」或同型「≥
+    //     kSpawnerLocalCap 在球内」则不刷）。t1081 由 4.0 调 4.5：采样域 3D 上界 = √(4²+1²)≈4.12（圆盘缘格 ×
+    //     y±1），必须落在计数球内——否则「刷出的怪不计入本笼上限」→ 上限漏计逐周期累积（t787 cap 探针判据）。
+    //   - kSpawnerLocalCap：单笼周围同型上限（≥ 此则本笼跳过；机制等价 MC 1.0 刷怪笼 6 mob cap，本工程取 4）。
     static constexpr float kSpawnerInterval      = 6.0f;  // 刷怪周期（秒；每周期扫一次玩家周围 Spawner）
     static constexpr float kSpawnerPlayerRange   = 16.0f; // 玩家激活范围（blocks；XZ 距离 ≤ 此才刷）
     static constexpr int   kSpawnerScanRange      = 18;    // 玩家周围扫描半径（blocks；±此值立方体内找 Spawner）
-    static constexpr float kSpawnerMobCheckRadius = 4.0f;  // 笼周敌对计数半径（blocks）
-    static constexpr int   kSpawnerLocalCap       = 4;     // 单笼周围敌对上限（机制等价 MC 刷怪笼 6 mob cap，本工程取 4）
+    static constexpr int   kSpawnerSampleRadius   = 4;     // 刷出位置水平采样半径（blocks；±此圆盘，MC 1.0 口径）
+    static constexpr float kSpawnerMobCheckRadius = 4.5f;  // 笼周计数半径（blocks；≥ 采样域 3D 上界 √17≈4.12）
+    static constexpr int   kSpawnerLocalCap       = 4;     // 单笼周围同型上限（机制等价 MC 刷怪笼 6 mob cap，本工程取 4）
     // t374 被动生物群系权重表 kPassiveSpawnWeights[biome][mob]：行 = 群系（同 World::biomeIdAt 编码
     //   0=Plains, 1=Hills, 2=Desert, 3=Forest），列 = mob（0=牛 MobCow, 1=羊 MobSheep, 2=猪 MobPig, 3=鸡 MobChicken）。
     //   Plains 牛羊富集（开阔草原）、Forest 猪富集（机制等价 MC 1.0 平原牛羊 / 森林猪富集）、Hills 均衡、
