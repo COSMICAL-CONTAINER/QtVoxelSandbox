@@ -1280,6 +1280,9 @@ add_executable(redstone_matrix_test
     #   src/Game/hopperstore.h + furnacestore.h——HopperStore 机制面 + 熔炉挂接容器族断言源，
     #   Q_OBJECT → AUTOMOC 经本清单入册；各腿自建 fresh 小世界，无新增 world/chunk .cpp）。
     tools/matrix/section53_hopper.cpp
+    # t1081 刷怪笼条件刷怪 + 破坏语义探针段（置尾先例沿用：4 腿 r2053a-d，filter 词 r2053；
+    #   各腿自建 fresh 小世界 + sparse 构造缝——零新 include 面，helpers 枢纽已含全部依赖）。
+    tools/matrix/section54_spawner.cpp
     src/Game/hopperstore.h
     src/Game/entityshadowfield.cpp
     src/Game/entityshadowfield.h

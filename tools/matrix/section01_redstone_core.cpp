@@ -5031,7 +5031,7 @@ void MatrixRun::section01_redstone_core()
                 }
             EntityManager emT;
             const QVector3D playerPos(float(sx) + 0.5f, float(sy) + 0.5f, float(sz) + 12.5f); // XZ ≤16 激活圈内
-            for (int i = 0; i < 80; ++i) emT.tickSpawners(0.1, &w786, playerPos); // 累计 8s > kSpawnerInterval=6s
+            for (int i = 0; i < 80; ++i) emT.tickSpawners(0.1, &w786, playerPos, 0.0f); // 累计 8s > kSpawnerInterval=6s；t1081 签参亮度=0（夜语义，光照门恒过 = 原腿地牢黑暗环境）
             typedSpawned = false; wrongTyped = false;
             const int want = (cageState == BlockRegistry::SpawnerStateBones) ? int(EntityManager::MobBones)
                                                                              : int(EntityManager::MobShambler);
@@ -5107,7 +5107,7 @@ void MatrixRun::section01_redstone_core()
             }
             EntityManager emS;
             const QVector3D playerPos(float(sx) + 0.5f, float(sy) + 0.5f, float(sz) + 12.5f); // 激活圈内
-            for (int t = 0; t < 80; ++t) emS.tickSpawners(0.1, &wS, playerPos); // 8s > 6s 首周期
+            for (int t = 0; t < 80; ++t) emS.tickSpawners(0.1, &wS, playerPos, 0.0f); // 8s > 6s 首周期；t1081 签参亮度=0（夜语义）
             spawnedCount = 0; spawnX = -1.0f;
             for (int i = 0; i < emS.count(); ++i)
                 if (emS.aliveAt(i)) { ++spawnedCount; spawnX = emS.posAt(i).x(); }
@@ -5327,7 +5327,7 @@ void MatrixRun::section01_redstone_core()
             EntityManager emT;
             const QVector3D playerPos(float(sx) + 0.5f, float(sy) + 0.5f, float(sz) + 12.5f);
             const int ticks = int(seconds * 10.0f);
-            for (int i = 0; i < ticks; ++i) emT.tickSpawners(0.1, &w787, playerPos);
+            for (int i = 0; i < ticks; ++i) emT.tickSpawners(0.1, &w787, playerPos, 0.0f); // t1081 签参亮度=0（夜语义，光照门恒过）
             wantSpawned = 0; wrongSpawned = 0; wantHostile = false;
             for (int i = 0; i < emT.count(); ++i) {
                 if (!emT.aliveAt(i)) continue;

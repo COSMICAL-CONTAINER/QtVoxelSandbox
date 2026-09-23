@@ -2048,33 +2048,61 @@ void MatrixRun::section07_chests_mobs()
                         cageX = x; cageY = y; cageZ = z;
                     }
             if (cageX < 0) continue; // 本 seed 无满网净笼 → 池续扫
-            ++diagCageWorldsT1212c;
-            // 激活圈内长 tick：累计 8s > kSpawnerInterval=6s（首周期到点即扫）。
-            const QVector3D playerPos(float(cageX) + 0.5f, float(cageY) + 0.5f, float(cageZ) + 0.5f);
-            for (int t = 0; t < 80; ++t) emT1212c.tickSpawners(0.1, &wC, playerPos);
-            for (int i = 0; i < emT1212c.count(); ++i) {
-                if (!emT1212c.aliveAt(i)) continue;
-                if (emT1212c.mobTypeAt(i) != EntityManager::MobCaveSpider) continue;
-                const QVector3D d = emT1212c.posAt(i) - playerPos;
-                if (std::abs(d.x()) <= 2.0f && std::abs(d.z()) <= 2.0f) { // 笼邻 2 格内刷出洞蛛
-                    okCageSpawn = true;
-                    break;
+            ++diagCageWorldsT1212c;  // 满网净笼 worldgen 在场见证（走廊生成签名面）
+            diagSeedT1212c = int(sd);
+            // t1081 同变更（rig 改造，承重面不变）：点亮暗门（敌对型笼，t280 同门）落地后，worldgen
+            //   深矿井走廊系统性邻接熔岩腔（8-seed 池实测笼格 blk 10-11、emitter=id31 Lava），被照明
+            //   的满网笼在 MC 口径下本就不刷（熔岩/火把压停刷怪笼）→ 刷出面迁到**同世界手工密封暗蛛
+            //   网笼**：9×5×9 石盒密封（隔绝熔岩光）+ 内腔 8 邻 × 2 层 Cobweb 全填（满网签名同上）+
+            //   Cobweb 豁免谓词 → 恰在网格刷出（阴性轮摘豁免 = 全候选灭仍响红）。worldgen 满网笼在
+            //   场由上文扫描见证；窗 2.0 保持（手工笼候选域 = 恰 8 网格）。
+            {
+                const int hx = 64, hy = 40, hz = 64; // 密封盒位（setBlock 覆写任意 worldgen 内容）
+                for (int dy = -2; dy <= 2; ++dy)
+                    for (int dz = -4; dz <= 4; ++dz)
+                        for (int dx = -4; dx <= 4; ++dx)
+                            wC.setBlock(hx + dx, hy + dy, hz + dz, BR::Stone, 0);
+                static const int kNbRigT1212c[8][2] = {
+                    { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
+                    { 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 }
+                };
+                for (const auto &nb : kNbRigT1212c)
+                    for (int dy = 0; dy <= 1; ++dy)
+                        wC.setBlock(hx + nb[0], hy + dy, hz + nb[1], BR::Cobweb, 0);
+                wC.setBlock(hx, hy, hz, BR::Spawner,
+                            BlockRegistry::spawnerStateForMob(EntityManager::MobCaveSpider));
+                // 激活圈内长 tick：累计 8s > kSpawnerInterval=6s（首周期到点即扫）；夜亮度（密封暗室）。
+                const QVector3D playerPos(float(hx) + 0.5f, float(hy) + 0.5f, float(hz) + 0.5f);
+                for (int t = 0; t < 80; ++t) emT1212c.tickSpawners(0.1, &wC, playerPos, 0.0f);
+                for (int i = 0; i < emT1212c.count(); ++i) {
+                    if (!emT1212c.aliveAt(i)) continue;
+                    if (emT1212c.mobTypeAt(i) != EntityManager::MobCaveSpider) continue;
+                    const QVector3D d = emT1212c.posAt(i) - playerPos;
+                    if (std::abs(d.x()) <= 2.0f && std::abs(d.z()) <= 2.0f) { // 笼邻 2 格内（=8 网格候选域）刷出洞蛛
+                        okCageSpawn = true;
+                        break;
+                    }
                 }
             }
-            diagSeedT1212c = int(sd);
-            break;                 // 首个含笼世界即判（池自举只为找到 rig；不再多生成）
+            break;                 // 首个含笼世界即判（池自举只为找到 worldgen 见证 rig；不再多生成）
         }
+        int caveSpidersTotal = 0;
+        for (int i = 0; i < emT1212c.count(); ++i)
+            if (emT1212c.aliveAt(i) && emT1212c.mobTypeAt(i) == EntityManager::MobCaveSpider) ++caveSpidersTotal;
         if (!okCageSpawn)
             qInfo().noquote() << "  [t1012cage diag] seed" << diagSeedT1212c
-                              << "cageWorlds" << diagCageWorldsT1212c;
+                              << "cageWorlds" << diagCageWorldsT1212c
+                              << "spidersTotal" << caveSpidersTotal;
         if (!okCageSpawn) ++totalFail;
         qInfo().noquote() << (okCageSpawn ? "PASS" : "FAIL")
                           << "| t1012 full-web corridor cage spawns (review0907 B cross-batch high #1):"
-                             " worldgen cave-spider cage embedded in a fully webbed corridor (8-neighbor"
-                             " x 2-layer all-non-air precondition) ticks past kSpawnerInterval with the"
-                             " player in range and spawns a MobCaveSpider on a Cobweb neighbor cell"
-                             " (land spawn predicate exempts Cobweb here/above; negative-round:"
-                             " removing the exemption re-blocks every candidate = loud red)";
+                             " fully webbed corridor cage (8-neighbor x 2-layer all-non-air signature,"
+                             " worldgen presence witnessed by the pooled scan) ticks past kSpawnerInterv"
+                             "al with the player in range and spawns a MobCaveSpider on a Cobweb neighb"
+                             "or cell in a sealed dark rig (t1081: light gate added - worldgen corridors"
+                             " are systematically lava-lit so the spawn face moved to a hand-built seale"
+                             "d web cage; land spawn predicate exempts Cobweb here/above; negative-round"
+                             ": removing the exemption re-blocks every candidate = loud red)";
     });
 
     // ── P-t1003 沙漠神殿逐方块重建探针（R19.19 批 t1003；placeDesertTemple 21×21 重写验收面）──
@@ -3770,7 +3798,7 @@ void MatrixRun::section07_chests_mobs()
             for (int f = 0; f < kFrames; ++f) {
                 em6.tick(dt6, &w6, playerPos, 0.3f, 1.8f, true, false, 0.0f); // 夜间满压（t951 缺省 0）
                 em6.tickHostileLife(dt6, &w6, playerPos, 0.0f);
-                em6.tickSpawners(dt6, &w6, playerPos);
+                em6.tickSpawners(dt6, &w6, playerPos, 0.0f); // t1081 签参亮度=0（夜语义，同 em6.tick 夜间满压口径）
                 if (f % 60 == 0) { // 每模拟秒采样
                     int live = 0, hostiles = 0, aliveSlots = 0;
                     const int n = em6.count();
@@ -3860,7 +3888,7 @@ void MatrixRun::section07_chests_mobs()
                 anySpawn = false; peakTotal = 0; sampleT180 = -1; sampleT234 = -1;
                 for (int f = 0; f < 60 * 240; ++f) {
                     emC.tick(1.0f / 60.0f, &wC, playerPos, 0.3f, 1.8f, true, false, 0.0f);
-                    emC.tickSpawners(1.0f / 60.0f, &wC, playerPos);
+                    emC.tickSpawners(1.0f / 60.0f, &wC, playerPos, 0.0f); // t1081 签参亮度=0（夜语义，密闭竞技场暗环境）
                     if (f % 60 == 0) {
                         int total = 0;
                         for (int i = 0; i < emC.count(); ++i)
@@ -3912,7 +3940,7 @@ void MatrixRun::section07_chests_mobs()
                 wP.setBlock(14, 7, 14, BR::Spawner, quint8(BR::spawnerStateForMob(EntityManager::MobPig)));
                 EntityManager emP;
                 const QVector3D playerPos(14.5f, 7.5f, 20.5f); // XZ 6 ≤ 16 激活圈（球外不需，袋本就全域在球内）
-                for (int i = 0; i < 600; ++i) emP.tickSpawners(0.1, &wP, playerPos); // 60s = 10 周期×6s ≥ 袋满节奏
+                for (int i = 0; i < 600; ++i) emP.tickSpawners(0.1, &wP, playerPos, 0.0f); // 60s = 10 周期×6s ≥ 袋满节奏；t1081 签参亮度=0（密闭暗袋）
                 int pigs = 0;
                 for (int i = 0; i < emP.count(); ++i)
                     if (emP.aliveAt(i) && emP.kindAt(i) == EntityManager::Mob && emP.mobTypeAt(i) == EntityManager::MobPig)
@@ -3944,7 +3972,7 @@ void MatrixRun::section07_chests_mobs()
                 int peak = 0;
                 for (int f = 0; f < 60 * 240; ++f) {
                     emP.tick(1.0f / 60.0f, &wP, playerPos, 0.3f, 1.8f, true, false, 0.0f);
-                    emP.tickSpawners(1.0f / 60.0f, &wP, playerPos);
+                    emP.tickSpawners(1.0f / 60.0f, &wP, playerPos, 0.0f); // t1081 签参亮度=0（夜语义）
                     if (f % 60 == 0) {
                         int total = 0;
                         for (int i = 0; i < emP.count(); ++i)
@@ -4282,7 +4310,7 @@ Item {
             const qint64 t0 = FrameProfiler::nowNs();
             em7.tick(1.0 / 60.0, &w7, farPos, 0.3f, 1.8f, true, false, 0.0f);
             em7.tickHostileLife(1.0 / 60.0, &w7, farPos, 0.0f);
-            em7.tickSpawners(1.0 / 60.0, &w7, farPos);
+            em7.tickSpawners(1.0 / 60.0, &w7, farPos, 0.0f);
             im7.tick(1.0 / 60.0, &w7);
             sumFull += FrameProfiler::nowNs() - t0;
         }
@@ -4317,7 +4345,7 @@ Item {
             const qint64 t0 = FrameProfiler::nowNs();
             em7.tick(1.0 / 60.0, &w7, farPos, 0.3f, 1.8f, true, false, 0.0f);
             em7.tickHostileLife(1.0 / 60.0, &w7, farPos, 0.0f);
-            em7.tickSpawners(1.0 / 60.0, &w7, farPos);
+            em7.tickSpawners(1.0 / 60.0, &w7, farPos, 0.0f);
             im7.tick(1.0 / 60.0, &w7);
             sumEmpty += FrameProfiler::nowNs() - t0;
         }
