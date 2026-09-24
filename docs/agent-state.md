@@ -14,16 +14,16 @@
 ```yaml
 project: QtMinecraft
 state: IN_PROGRESS
-current_task: **t1087 IN_PROGRESS（§14 常设授权候选池——甘蔗自动化纪元裁定单）**：观察者[MC 1.11]/活塞[Beta 1.7]均非 1.0 纪元，候选自带实现路径就纪元不符——t1086 同型裁定单：核实甘蔗生长/收割现状 + 红石家族完成度 → 裁定 1.0 纪元内正当缺口（预期降级登记；若甘蔗生长机制本身有 1.0 口径缺口则单独立单）。零代码预期。完成 → 候选池下一位。
+current_task: **t1088 IN_PROGRESS（parity-bug 修复——甘蔗生长口径归一批）**：t1087 裁定单例外发现两处真实 1.0 口径偏差合并修复，方向 = 收敛 MC 1.0（用户既定准则）：①生长基材门放宽至草/泥土/沙基（与放置门对齐）；②生长上限 5→3（t406 spec lawful 翻案留痕，t418 潜力柱腿同变更修订）。串行 voxel-dev，filter 词 r2058；完成 → 候选池下一位。
 current_task_status: IN_PROGRESS
-last_completed_task: t1086 砂轮纪元裁定单（2026-09-24 docs-only 降级关单，零代码零腿 758 不变——裁定：砂轮系 MC 1.14 机制非 1.0 纪元；修复职能铁砧面[AnvilUI]已完整承担 = 单一收口、去附魔 1.0 无途径非缺口；核实先行第六型产出 = 纪元裁定单。详录 = dev-plan t1086 关单条目）
-last_completed_task_prev: t1085 岩浆×水接触规则（2026-09-24 闭环，矩阵 754→758 语义纠偏型；详录 = dev-plan t1085 关单条目）
-last_completed_task_commits: 零代码（t1086 docs-only 裁定单，仅本 docs 提交；最近代码提交 = fix(t1085) 021eb7b + test(t1085) 356527b）
+last_completed_task: t1087 甘蔗自动化纪元裁定单（2026-09-24 docs-only 降级关单，零代码 758 不变——裁定成立但降级理由修正：观察者[MC 1.11]纪元不符；活塞 Beta 1.7 其实在 1.0.0 基线内[候选前提史实有误]，真依据 = 活塞家族已在案裁定计划外[偏差 4/t1004]——parity-ledger 已补录活塞缺席行[台账单源规则清偿]；甘蔗本体四面完整；例外发现两处真实口径偏差转 t1088；核实副产品 = 主控派工令「中继器」表述纠偏[中继器 Beta 1.3 零存在]。详录 = dev-plan t1087 关单条目）
+last_completed_task_prev: t1086 砂轮纪元裁定单（2026-09-24 docs-only 降级关单——MC 1.14 机制非 1.0 纪元，修复职能铁砧面已完整承担。详录 = dev-plan t1086 关单条目）
+last_completed_task_commits: 零代码（t1087 docs-only 裁定单，仅本 docs 提交；最近代码提交 = fix(t1085) 021eb7b + test(t1085) 356527b）
 last_verified_commit: test(t1085)（矩阵 **758 PASS / 0 FAIL ×2**：matrix_t1085_{pos,final}.log；新基线腿集合 md5[配方 grep -a -oE "^PASS \| [a-z0-9]+ " | sort | md5sum]三日志全等 3b232c04018150f6b2457fb45388eded；NEG-1 恰红 {r2056b} / NEG-2 红 {r2056a,b,c}[据实修订宣告] 双还原全绿；冒烟 tail20 回填 logs/voxelsandbox_t1085_tail20.log[132,044 B]；主控独立脱离式复跑 758/0 同 md5 三方恒等 matrix_orch_t1085_verify.log）
 last_governance_review: 2026-09-24（audit #18 GREEN——窗口 9cd700b..9d5ee4e 15 提交/t1079-t1083 五闭环证据链全实核[五单 md5 三方复跑全等 + t1081 子集恒等式独立复算成立 + NEG 八份恰红面零多余 + tail20 五份全实文]；账本三方一致/腿数链 738→742→746→746→750 无断；15 提交零署名；2 项低级发现 F1[t1080 证据措辞精确化]F2[probe 残骸 void 标注]批内清偿；详见 governance-audit-2026-09-24.md）
 governance_review_due: false
-completed_tasks_since_governance_review: 3（t1084 + t1085 + t1086[docs-only]；审计 #18 GREEN 于 2026-09-24）
-next_task: **t1087 甘蔗自动化裁定单（候选池，在飞，预期降级）→ 之后候选池顺延（写门家族批[真实代码批]/棕色染料生存源/漏斗降级四件/removeDatabase 卫生单…）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1086 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
+completed_tasks_since_governance_review: 5（t1084 + t1085 + t1086[docs-only] + t1087[docs-only] + t1088 计 5[含在飞 t1088 计数口径 = 闭单后触发审计 #19]；审计 #18 GREEN 于 2026-09-24）
+next_task: **t1088 甘蔗生长口径归一批（parity-bug，在飞）→ 之后候选池顺延（写门家族批[真实代码批]/棕色染料生存源/漏斗降级四件/红石家族纪元标注审计[新增低优先]/removeDatabase 卫生单…）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1088 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -50,6 +50,7 @@ needs_human: false
 
 ## Recovery Point
 
+- 最近闭环：**t1087 甘蔗自动化纪元裁定单**（2026-09-24，docs-only 零代码 758 不变 + 本 docs）：裁定成立但**降级理由修正**——观察者[MC 1.11]纪元不符成立；**活塞 Beta 1.7 其实在 1.0.0 基线内（候选前提史实有误）**，真依据 = 活塞家族已由结构考据批在案裁定计划外（偏差 4/丛林神殿三拉杆门/t1004）→ **parity-ledger 补录活塞缺席行**（台账单源规则清偿）。甘蔗本体 worldgen/生长/收割/掉落四面完整。**例外发现两处真实 1.0 口径偏差转 t1088 parity-bug**（基材门内战 + 上限 5 vs 3 两面分裂）；旁证登记红石家族纪元标注审计（红石灯 1.2.1/红石块·投掷器 1.5 混入）入候选池低优先。**待实机确认**：无新增。**下一任务 = t1088 甘蔗生长口径归一批**。
 - 最近闭环：**t1086 砂轮纪元裁定单**（2026-09-24，docs-only 零代码零腿，矩阵 758 不变 + 本 docs）：裁定 = 砂轮系 MC 1.14（Village & Pillage）机制，1.0 基准无此方块 → 按非 1.0 机制如实降级登记（t1078 陶瓦/染色玻璃同款先例）。两职能均无实现正当性：修复已由铁砧面完整承担（AnvilUI 材料修复+双件合并+附魔并集+XP，单一收口）、去附魔系 1.14 机制（1.0 无途径）。核实 = grindstone/砂轮全仓零命中（纯新增面非失真）+ 配套面三度在位（铁砧三阶段/EnchantRegistry/ToolRegistry 耐久）。**核实先行第六型产出 = 纪元裁定单**。顺带修正：t1084/t1085 闭单漏摘的两条候选池条目本批补摘。**待实机确认**：无新增。**下一任务 = t1087 甘蔗自动化裁定单**。
 - 最近闭环：**t1085 岩浆×水接触规则**（2026-09-24，fix(t1085) 021eb7b + test(t1085) 356527b + 本 docs）：矩阵 754→758。**候选池七度失真但属语义纠偏型**：两条黑曜石面早已在（t411 pass A/t472 pass B）零改动钉现状；唯一缺口 = t438 旧口径把圆石化落在水格——**MC 1.0 引证裁定 pre-flattening BlockFluid::checkForMixing 恒落岩浆格**（源→黑曜石/流→圆石/水格永不转化=圆石机永续前提；台账自证 t411 行与 t438 行矛盾）。交付 = pass B 重写（不问水方 state + break 单登记）+ solidifyKeys 四守卫（蒸发/扩散/下落/re-leveling 防应用序覆写）+ level 互斥论证 + 增量索引收敛注（凝固只减不增——lava-never-settles 教训对齐）。腿 r2056a-d；NEG-1 {r2056b} 恰红 / NEG-2 {r2056a,b,c}（据实修订宣告）；全矩阵 pos/final 758/0 md5 恒等 3b232c04 + 主控复跑三方恒等。429 一次（16:59/17:16）同 agent 续作零重做。**待实机确认**：岩浆入水观感[水面保留 vs 旧版烧石]/圆石机续产/既有存档一次性结算差异[worldgen 岩浆全源预期零差]/黑曜石路径回归。**下一任务 = t1086 砂轮**。
 - 最近闭环：**t1084 纸/书/书架**（2026-09-24，fix(t1084) 0380736 + test(t1084) 774d543 + 本 docs）：矩阵 750→754。**候选池六度失真如实降级**：纸/书/甘蔗/皮革/书架/附魔联动全在位（t473/t474/t795 族），唯缺口 = 破书架掉自身非掉书——交付 def 行 dropId 0x238 + dropCount 3（0x208 字面先例 + 雪块 dropCount=4 先例；3 书与配方对称 = 回收闭环零净损）+ 陈旧注释两处顺带修正；零改号零图集变更（钉面锁现状）；kMcMaterialId 补行如实降级登记（表界单一权威 + pack 映射直挂无实际缺口）。腿 r2055a-d（NEG-1 靶行不入 d 腿防恰红面误伤先例）；NEG-1 {r2055b}/NEG-2 {r2055a} 恰红；全矩阵 pos/final 754/0 md5 恒等 29d2fbe4 + 主控独立复跑三方恒等。**待实机确认**：破书架掉 3 书观感/回收闭环手感/附魔联动照旧/资源包纸书面。**下一任务 = t1085 岩浆×水接触规则**。
