@@ -14,16 +14,16 @@
 ```yaml
 project: QtMinecraft
 state: IN_PROGRESS
-current_task: **t1085 IN_PROGRESS（§14 常设授权候选池——岩浆×水接触规则）**：黑曜石/圆石生成，水源触岩浆源/流动分别结算（MC 1.0 同款）。**派工前现场核实先行**（降级六先例——候选池失真六度，核实面加价）：流体系统现状盘点（水/岩浆流动结算 + c282bc0 增量流体格位索引 + 熔岩收敛状态机在位性）+ 接触结算现状。串行 voxel-dev，filter 词 r2056 预留；完成 → 候选池下一位。
+current_task: **t1086 IN_PROGRESS（§14 常设授权候选池——砂轮）**：修复+去附魔（与铁砧分工）。**派工前现场核实先行**（降级七先例——候选池失真七度）：砂轮 1.0 不存在属 MC 1.14 机制，可能整体降级登记；铁砧面[t477]/附魔系统[EnchantRegistry]/工具耐久修复机制盘点按实况裁定。串行 voxel-dev，filter 词 r2057 预留；完成 → 候选池下一位。
 current_task_status: IN_PROGRESS
-last_completed_task: t1084 纸/书/书架（2026-09-24 闭环；矩阵 750→754——**候选池六度失真如实降级**：纸 0x237/书 0x238/甘蔗/皮革链/书架 95/附魔联动全在位[t473/t474/t795 族]，唯缺口「破书架掉书」已交付 = def 行 dropId 0x238 + dropCount 3；零改号零图集变更；kMcMaterialId 补行如实降级登记。详录 = dev-plan t1084 关单条目）
-last_completed_task_prev: t1083 唱片机+音乐盘（2026-09-24 闭环，矩阵 746→750 全量交付零降级；详录 = dev-plan t1083 关单条目）
-last_completed_task_commits: fix(t1084)（0380736：书架 def 行 dropId 0x238/dropCount 3 + 注释口径修正两处）+ test(t1084)（774d543：section56 r2055a-d 四腿 + helpers/CMake 入册）
-last_verified_commit: test(t1084)（矩阵 **754 PASS / 0 FAIL ×2**：matrix_t1084_{pos,final}.log；新基线腿集合 md5[配方 grep -a -oE "^PASS \| [a-z0-9]+ " | sort | md5sum]三日志全等 29d2fbe4640d8e6c237f6b65a158d8a3；NEG-1 恰红 {r2055b} / NEG-2 恰红 {r2055a} 双还原全绿；冒烟 tail20 回填 logs/voxelsandbox_t1084_tail20.log[132,828 B root objects 1]；主控独立脱离式复跑 754/0 同 md5 三方恒等 matrix_orch_t1084_verify.log）
+last_completed_task: t1085 岩浆×水接触规则（2026-09-24 闭环；矩阵 754→758——**候选池七度失真但属语义纠偏型**：两条黑曜石面早已在[t411/t472]零改动钉现状，唯一缺口 = t438 旧口径圆石化落水格纠回 MC 1.0 pre-flattening「恒落岩浆格」[源→黑曜石/流→圆石/水格永不转化=圆石机前提] + solidifyKeys 四守卫防应用序覆写 + 增量索引收敛注[lava-never-settles 教训面显式对齐]。详录 = dev-plan t1085 关单条目）
+last_completed_task_prev: t1084 纸/书/书架（2026-09-24 闭环，矩阵 750→754 六度失真唯破书架掉书缺口；详录 = dev-plan t1084 关单条目）
+last_completed_task_commits: fix(t1085)（021eb7b：pass B 重写 + solidifyKeys 四守卫 + 陈旧注释三处退役）+ test(t1085)（356527b：section57 r2056a-d 四腿 + helpers/CMake 入册）
+last_verified_commit: test(t1085)（矩阵 **758 PASS / 0 FAIL ×2**：matrix_t1085_{pos,final}.log；新基线腿集合 md5[配方 grep -a -oE "^PASS \| [a-z0-9]+ " | sort | md5sum]三日志全等 3b232c04018150f6b2457fb45388eded；NEG-1 恰红 {r2056b} / NEG-2 红 {r2056a,b,c}[据实修订宣告] 双还原全绿；冒烟 tail20 回填 logs/voxelsandbox_t1085_tail20.log[132,044 B]；主控独立脱离式复跑 758/0 同 md5 三方恒等 matrix_orch_t1085_verify.log）
 last_governance_review: 2026-09-24（audit #18 GREEN——窗口 9cd700b..9d5ee4e 15 提交/t1079-t1083 五闭环证据链全实核[五单 md5 三方复跑全等 + t1081 子集恒等式独立复算成立 + NEG 八份恰红面零多余 + tail20 五份全实文]；账本三方一致/腿数链 738→742→746→746→750 无断；15 提交零署名；2 项低级发现 F1[t1080 证据措辞精确化]F2[probe 残骸 void 标注]批内清偿；详见 governance-audit-2026-09-24.md）
 governance_review_due: false
 completed_tasks_since_governance_review: 0（审计 #18 GREEN 于 2026-09-24）
-next_task: **t1085 岩浆×水（候选池，在飞）→ 之后候选池顺延（砂轮/甘蔗自动化/写门家族批/染色玻璃族…）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1084 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
+next_task: **t1086 砂轮（候选池，在飞，1.0 无此方块可能整体降级）→ 之后候选池顺延（甘蔗自动化/写门家族批/染色玻璃族/陶瓦族/漏斗降级四件…）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1085 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -33,7 +33,7 @@ needs_human: false
 
 ## Workspace Guard
 
-- HEAD = t1084 纸/书/书架代码终态（fix(t1084) 0380736 + test(t1084) 774d543 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 754 腿满绿（56 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**禁并发构建/并发跑矩阵**（t813 build_stamps 每次构建强制全目标重链——两进程并发构建可产出损坏 exe，2026-09-21 三崩留痕；并发跑共享夹具面同理存疑，验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075 过程日志落仓库根 + t1081 复跑双进程事故两教训——cwd 相对路径在跨命令持久化下不可靠）。**冒烟证据每闭环回填 tail20**（审计 #16-F4/#17-F1 两现——冒烟后立即 cp logs/voxelsandbox.log 为 logs/voxelsandbox_<task>_tail20.log）。
+- HEAD = t1085 岩浆×水代码终态（fix(t1085) 021eb7b + test(t1085) 356527b 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 758 腿满绿（57 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**禁并发构建/并发跑矩阵**（t813 build_stamps 每次构建强制全目标重链——两进程并发构建可产出损坏 exe，2026-09-21 三崩留痕；并发跑共享夹具面同理存疑，验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075 过程日志落仓库根 + t1081 复跑双进程事故两教训——cwd 相对路径在跨命令持久化下不可靠）。**冒烟证据每闭环回填 tail20**（审计 #16-F4/#17-F1 两现——冒烟后立即 cp logs/voxelsandbox.log 为 logs/voxelsandbox_<task>_tail20.log）。
 - 纪律①-⑨全在案；**大 TU 编译一律 -j 1**（09-13 蓝屏教训；分段后单段增量 -j 4 实测安全）。**矩阵测试为 tools/matrix/ 分层结构**：改探针只重编对应段 TU（秒级）+ `--filter <substring>` 只跑本任务腿；新腿落对应段文件，新段置尾 runAll 末执行、须 ≤500KB；section11 起「自建 fresh 小世界」先例（48×48×96 seed 82 + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)）。
 - **R20.06 起值类型纪律**：src/Core/ 新值类型一律 result.h QObjectFree 编译期钉 + 头内 static_assert；命令/事件队列满载拒绝与快照队列覆盖最老是两域容量策略分化，勿「统一」。
 - **R20.07 起编排壳纪律**：GameSession 只做编排（命令 → 整 tick 边界 → World::setBlock 权威），禁复制游戏逻辑；**QML 现行玩法路径零变化是 R20 主线不变量**（Main.qml 含 "GameSession" 即违零迁移阴性钉 r2007b）。
@@ -50,6 +50,7 @@ needs_human: false
 
 ## Recovery Point
 
+- 最近闭环：**t1085 岩浆×水接触规则**（2026-09-24，fix(t1085) 021eb7b + test(t1085) 356527b + 本 docs）：矩阵 754→758。**候选池七度失真但属语义纠偏型**：两条黑曜石面早已在（t411 pass A/t472 pass B）零改动钉现状；唯一缺口 = t438 旧口径把圆石化落在水格——**MC 1.0 引证裁定 pre-flattening BlockFluid::checkForMixing 恒落岩浆格**（源→黑曜石/流→圆石/水格永不转化=圆石机永续前提；台账自证 t411 行与 t438 行矛盾）。交付 = pass B 重写（不问水方 state + break 单登记）+ solidifyKeys 四守卫（蒸发/扩散/下落/re-leveling 防应用序覆写）+ level 互斥论证 + 增量索引收敛注（凝固只减不增——lava-never-settles 教训对齐）。腿 r2056a-d；NEG-1 {r2056b} 恰红 / NEG-2 {r2056a,b,c}（据实修订宣告）；全矩阵 pos/final 758/0 md5 恒等 3b232c04 + 主控复跑三方恒等。429 一次（16:59/17:16）同 agent 续作零重做。**待实机确认**：岩浆入水观感[水面保留 vs 旧版烧石]/圆石机续产/既有存档一次性结算差异[worldgen 岩浆全源预期零差]/黑曜石路径回归。**下一任务 = t1086 砂轮**。
 - 最近闭环：**t1084 纸/书/书架**（2026-09-24，fix(t1084) 0380736 + test(t1084) 774d543 + 本 docs）：矩阵 750→754。**候选池六度失真如实降级**：纸/书/甘蔗/皮革/书架/附魔联动全在位（t473/t474/t795 族），唯缺口 = 破书架掉自身非掉书——交付 def 行 dropId 0x238 + dropCount 3（0x208 字面先例 + 雪块 dropCount=4 先例；3 书与配方对称 = 回收闭环零净损）+ 陈旧注释两处顺带修正；零改号零图集变更（钉面锁现状）；kMcMaterialId 补行如实降级登记（表界单一权威 + pack 映射直挂无实际缺口）。腿 r2055a-d（NEG-1 靶行不入 d 腿防恰红面误伤先例）；NEG-1 {r2055b}/NEG-2 {r2055a} 恰红；全矩阵 pos/final 754/0 md5 恒等 29d2fbe4 + 主控独立复跑三方恒等。**待实机确认**：破书架掉 3 书观感/回收闭环手感/附魔联动照旧/资源包纸书面。**下一任务 = t1085 岩浆×水接触规则**。
 - 最近闭环：**t1083 唱片机+音乐盘**（2026-09-24，fix(t1083) 97962ac + test(t1083) 815544d + 本 docs）：矩阵 746→750。**核实：音频管线全在 → 全量交付零降级**（禁硬造条款不触发）：三程序合成原创旋律（30/36/42s 两处同步契约）+ 播放状态机（Game 层 tickJukeboxes 运行期表 + chunk state 只存盘位 bit0/盘号 bit[7:2]——播放不进存档 = MC 1.0 record-only 同口径登记简化）+ 三路吐盘单一收口（useBlock/到期/破坏——破坏走 t134 快照纪律）+ 战利品两池各 +1 weight-2 + 配方 8 板环+钻石；红石触发面如实登记 1.0 非缺口。Jukebox=146 尾追加/kMcBlockId 行 84/图集 191 追加不插中间。腿 r2054a-d；NEG-1 {r2054c}/NEG-2 {r2054a} 恰红；全矩阵 pos/final 750/0 md5 恒等 620d1b26 + 主控独立复跑三方恒等。429 一次中断（00:03/02:02 重置）同 agent git-diff-first 续作零重做。**待实机确认**：旋律实听/贴图观感/放入吐盘手感/暂停期音频面/退世界停曲即时性。**下一任务 = 审计 #18 + t1084 纸/书/书架**。
 - 最近闭环：**t1082 r2040c 真锁时序腿加固**（2026-09-23，test(t1082) 009f8c7 单提交纯腿文 + 本 docs）：矩阵 **746/0 满绿达成**（r2040c 转绿）。**机理定案又翻任务书一层**（逐拍证据）：满矩阵负载下探针被调度晚于 60ms 锁窗 → 退避整段跳过 → 立即重试收敛 → 唯旧 wall≥100 下限红。**加固 = 事件驱动替代双侧竞速零放宽**：退避打卡 qInstallMessageHandler 恰一次捕获 + 持锁者不见打卡绝不放手（单向余量，与调度延迟解耦）+ 墙钟只剩 2000ms 上界；落选四面对照留痕（削下限/固定毫秒/改生产/仅留计数）。**NEG-3 新增**恰红 {r2040c}；r2040 ×10 连跑存证；全矩阵 pos/final 746/0 md5 恒等 b5f3e8cf 新基线 + 主控独立复跑补齐提交后重验环。**待实机确认**：无新增（纯测试加固单）。
