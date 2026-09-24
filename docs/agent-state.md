@@ -20,10 +20,10 @@ last_completed_task: t1083 唱片机+音乐盘（2026-09-24 闭环；矩阵 746�
 last_completed_task_prev: t1082 r2040c 真锁时序腿加固（2026-09-23 闭环，事件驱动零放宽 746/0 满绿；详录 = dev-plan t1082 关单条目）
 last_completed_task_commits: fix(t1083)（97962ac：实现全量 Core/Game/Audio/QML/CMake/资产四工具 + 图集/图标/三轨 WAV）+ test(t1083)（815544d：r2054a-d 四腿 + 三处钉面 lawful 修订）
 last_verified_commit: test(t1083)（矩阵 **750 PASS / 0 FAIL ×2**：matrix_t1083_{pos,final}.log；新基线腿集合 md5[配方 grep -a -oE "^PASS \| [a-z0-9]+ " | sort | md5sum]三日志全等 620d1b26d2f69a54057bf21ad750f82e；NEG-1 恰红 {r2054c} / NEG-2 恰红 {r2054a} 双还原全绿；冒烟 tail20 回填 logs/voxelsandbox_t1083_tail20.log；主控独立脱离式复跑 750/0 同 md5 三方恒等 matrix_orch_t1083_verify.log）
-last_governance_review: 2026-09-22（audit #17 GREEN 有保留——t1074-t1078 五闭环证据链全实核通过[五单 md5 按配方复跑全等/恰红面吻合/账本三方一致/15 提交零署名/不变量全守]；3 项低级发现 F1-F3 清偿：F1 冒烟证据抢救回填 + 每闭环 tail20 新纪律、F2 控制块重复键清除、F3 429 续作链过程注补记；详见 governance-audit-2026-09-22.md）
-governance_review_due: true
-completed_tasks_since_governance_review: 5（t1079 + t1080 + t1081 + t1082 + t1083 闭环；审计 #17 GREEN 于 2026-09-22——**审计 #18 到期**）
-next_task: **审计 #18（5/5 到期，只读独立 agent，窗口 = 9cd700b..docs 闭单 HEAD）→ t1084 纸/书/书架（候选池）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1083 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
+last_governance_review: 2026-09-24（audit #18 GREEN——窗口 9cd700b..9d5ee4e 15 提交/t1079-t1083 五闭环证据链全实核[五单 md5 三方复跑全等 + t1081 子集恒等式独立复算成立 + NEG 八份恰红面零多余 + tail20 五份全实文]；账本三方一致/腿数链 738→742→746→746→750 无断；15 提交零署名；2 项低级发现 F1[t1080 证据措辞精确化]F2[probe 残骸 void 标注]批内清偿；详见 governance-audit-2026-09-24.md）
+governance_review_due: false
+completed_tasks_since_governance_review: 0（审计 #18 GREEN 于 2026-09-24）
+next_task: **t1084 纸/书/书架（候选池，在飞）→ 之后候选池顺延（岩浆×水/砂轮/甘蔗自动化…）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1083 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
