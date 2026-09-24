@@ -523,4 +523,15 @@ private:
                               //   翻案/退役锚注 + worldgen 1..3 公式钉 + 残留禁出]。生长窗口直调
                               //   tickSugarcaneGrowth（50 调 = 1 窗），fresh 48×48×96 s82，rig 世界零
                               //   接触，接 section57）
+    void section59_write_gate_outer(); // t1089 写门五员同族清偿探针段（置尾先例沿用：r2059a
+                              //   setBlockSilent 外环承重墙[负坐标踩踏回土 + 对照 + 未物化拒 + 无变化
+                              //   早退]，r2059b setBlockFromEntity 外环承重墙[出核远 chunk 行为级沙落
+                              //   + 远/负直调 + 未物化拒 + occ 保持]，r2059c setSnowLayerMerge 外环
+                              //   承重墙[出核远 chunk 行为级雪层塌落合并 + 负直调 + 防御/未物化拒]，
+                              //   r2059d clearBlockSilent 外环承重墙[负坐标点火清原块 + 对照 + 未物化
+                              //   拒 + y 域门]，r2059e setWaterSilent 外环承重墙[负坐标舀水/非流体写
+                              //   + 无变化早退 + 未物化/y 拒 + 对照]，r2059f fixed 世界零变化墙[五员
+                              //   域内真/域外恒拒行为级]，r2059g 结构钉[五员锚注 + 物化门行计数 7
+                              //   + 批头锚注族 + world.h 声明注族]。sparse 构造缝 + loadChunkAt 物化
+                              //   （r2053c/r2047c 同门），rig 世界零接触，接 section58）
 };

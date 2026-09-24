@@ -1305,6 +1305,10 @@ add_executable(redstone_matrix_test
     #   生长窗口直调 tickSugarcaneGrowth（50 调 = 1 窗，节流常量同源）——零新 include 面，
     #   helpers 枢纽已含全部依赖）。
     tools/matrix/section58_sugarcane_growth.cpp
+    # t1089 写门五员同族清偿探针段（置尾先例沿用：7 腿 r2059a-g，filter 词 r2059；
+    #   sparse 构造缝 + loadChunkAt 物化（r2053c/r2047c 同门）——零新 include 面，
+    #   helpers 枢纽已含全部依赖）。
+    tools/matrix/section59_write_gate_outer.cpp
     src/Game/hopperstore.h
     src/Game/entityshadowfield.cpp
     src/Game/entityshadowfield.h
