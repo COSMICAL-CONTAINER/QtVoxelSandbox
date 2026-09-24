@@ -406,9 +406,11 @@ public:
                                   //   剔除，同草丛 / 花）、shape=ShapeNone（**无碰撞** → 玩家穿过）、hardness=0（瞬破）、NoTool
                                   //   （空手可采且掉落）、dropId=自身（破甘蔗掉甘蔗方块，可放回 / 可重种）、dropCount=1、maxStack=64。
                                   //   各面贴图=sugarcane(67)（透明底 + 绿色节段细茎 + 顶部尖叶，alphaCutoff cutout）。音色归
-                                  //   GroupGrass（软植物音）。**放置预检**（placeBlock）：目标格下方须为 Grass / Dirt / Sand /
-                                  //   Sugarcane（机制等价 MC 甘蔗须草地 / 沙地 / 甘蔗支撑，且须邻水 —— 邻水判定留 worldgen，玩家
-                                  //   放置仅守支撑，机制等价 MC 创造放置不强制邻水）。进创造调色板（玩家可取用 / 放置）。
+                                  //   GroupGrass（软植物音）。**基材面**（t1088 单一权威 sugarcaneBaseBlock）：目标格下方须为
+                                  //   Grass / Dirt / Sand / Sugarcane（机制等价 MC 1.0 sugar cane 可栽于 grass block / dirt /
+                                  //   sand 且直接邻水——**放置门与生长门两面共读同一谓词**：旧生长门「仅沙基」与放置门
+                                  //   「草 / 泥土 / 沙基」分裂 = t1088 修复面，收敛后改基材集只改谓词一处；玩家放置另守
+                                  //   t423 邻水门 + t547① 高度上限 3，生长门另守邻水门 + 同上限 3）。进创造调色板（玩家可取用 / 放置）。
         // ── t405 玻璃方块（机制等价 MC 1.0 玻璃 glass）：沙子熔炉冶炼产物（SmeltingRegistry 沙子→玻璃物品 0x204；
         //   玩家持玻璃物品右键放置 → 玻璃方块）。**透明整立方**——本任务核心：玻璃须真正**透视**（透过玻璃可见背后
         //   的方块 / 实体），机制等价 MC 1.0 玻璃。
@@ -1263,6 +1265,16 @@ public:
     //   防「放置面收进新族、失撑面漏跟」的对称破洞——t847 只把草丛收进放置预检而失撑族没跟，挖掉下方
     //   泥土后草丛悬空永存，正是该病首例。加新着地植物时：改本谓词 + plantGroundBlock 两处即两面齐动。
     static bool isGroundPlant(quint8 blockId);
+
+    // t1088 甘蔗基材单一权威（放置面 / 生长面共用；isGroundPlant 两面单一权威同门）：id ∈
+    //   {Grass, Dirt, Sand, Sugarcane}。机制等价 MC 1.0 sugar cane 可栽于 grass block / dirt / sand
+    //   （且基材直接邻水——邻水门留两面各自判定，本谓词只收基材集；Minecraft.wiki Sugar Cane 页
+    //   「can be planted on … grass block, dirt … and sand that is directly adjacent to water」类原文，
+    //   2026 实读）。Sugarcane 入集 = 叠柱支撑（放置面可叠高；生长面柱基定位循环保证柱基下首格恒非
+    //   甘蔗，谓词含甘蔗对生长面语义无影响）。**t1088 口径归一**：旧生长门「仅沙基」（t446 修法）与
+    //   放置门「草 / 泥土 / 沙基」两面分裂 → 草 / 土基可种但永不长高（t1087 裁定单例外发现）——收敛
+    //   MC 1.0（草 / 土基邻水可长）后两面共读本谓词，改基材集只改此处一处。
+    static bool sugarcaneBaseBlock(quint8 groundId);
 
     // t413 垂直爬梯统一谓词（单一权威）：blockId == Ladder 即梯。供 PlayerController 爬升物理判定
     //   「玩家 AABB 覆盖的格是否梯」（入梯格 + 按前 → 向上爬）+ mesher cross 路由分流，避免各处自写 id 判定漂移

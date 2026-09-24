@@ -3366,25 +3366,25 @@ void World::tickSugarcaneGrowth()
     // 2) 逐柱顶判定：找柱基（向下走到非甘蔗）+ 算柱高 + 柱基邻水 → 散布概率升一格。
     std::vector<SCell> grows;
     for (const SCell &t : tops) {
-        // 找柱基（向下走到下方非甘蔗格；世界底兜底）。柱基 = 这株甘蔗的「根」格（其下为沙地支撑）。
+        // 找柱基（向下走到下方非甘蔗格；世界底兜底）。柱基 = 这株甘蔗的「根」格（其下为沙 / 草 / 土基）。
         int by = t.y;
         while (by - 1 >= 0 && m_chunks.blockAt(t.x, by - 1, t.z) == BlockRegistry::Sugarcane) --by;
-        // t446：仅沙基甘蔗可长（spec「必须沙地支撑」，与 worldgen placeSugarcane 沙顶-only 一致）。柱基支撑格
-        //   by-1 须为 Sand —— 排除玩家误放 / 旧世界残留于草地 / 泥土 / 水中的甘蔗柱，关闭「草上长高」残留路径。
-        if (by - 1 < 0 || m_chunks.blockAt(t.x, by - 1, t.z) != BlockRegistry::Sand) continue;
+        // t1088：基材门放宽至草 / 泥土 / 沙基——与放置门共读 BlockRegistry::sugarcaneBaseBlock 单一权威
+        //   （旧 t446「仅沙基」与放置面「草 / 泥土 / 沙基」两面分裂 → 草 / 土基可种但永不长高，t1087 裁定单
+        //   例外发现）。MC 1.0 口径草 / 土基邻水可长（Minecraft.wiki Sugar Cane「can be planted on …
+        //   grass block, dirt … and sand that is directly adjacent to water」类原文，2026 实读）→ 收敛后
+        //   两面对齐。by-1 经柱定位循环恒非 Sugarcane → 谓词含甘蔗对生长面语义无影响。
+        if (by - 1 < 0 || !BlockRegistry::sugarcaneBaseBlock(m_chunks.blockAt(t.x, by - 1, t.z))) continue;
         const int height = t.y - by + 1; // 柱高（含柱顶）
-        if (height >= kSugarcaneMaxHeight) continue; // 已达 5 格上限 → 停长（spec「max5」）
-        // t418 拔高潜力门（列位 + seed 一次性哈希，与窗口无关 → 稳态确定）。worldgen 初生 1..3 高；多数柱止于 3，
-        //   仅 kSugarcaneTallPct 潜力柱可超 3 长到 4..5（spec「1..3 common、5 rare」）。修旧「每柱不停长直至封顶
-        //   → 稳态全 5 高」bug：高度 ≥3 且无拔高潜力 → 本柱不再升格。用列哈希（同 worldgen 源）非体素哈希，
-        //   使「潜力」是柱的固有属性（同柱每窗判定一致），不随窗口抖动。
-        if (height >= 3) {
-            const quint32 baseHash = hashColumn(m_seed, t.x, t.z);
-            if (int(baseHash % 100u) >= kSugarcaneTallPct) continue; // 无拔高潜力 → 止于 3（5 高罕见）
-        }
+        if (height >= kSugarcaneMaxHeight) continue; // 已达 3 格上限 → 停长（t1088 归一 3；t406「max5」翻案见 world.h）
+        // t418 拔高潜力门退役（t1088 同批 lawful 修订）：kSugarcaneMaxHeight 归一 3 后「长到 4..5」的
+        //   潜力面不复存在（height≥3 已被上限门拦全），kSugarcaneTallPct 潜力哈希门成死码 → 摘除。
+        //   worldgen 初生 1..3 高 + 生长门同上限 3 → 柱高全域 [1,3]（机制等价 MC 1.0 sugar cane 自然
+        //   生长上限 3；t406 spec「max5」翻案论证留痕 world.h 常量段）。
 
         // 柱基邻水判定（4 水平邻于基 y / 基下一层 y-1）：与 worldgen placeSugarcane 同语义（沙顶邻水）。
-        //   基下一层 = 沙地格（worldgen 在 surfaceY 查水）；基层查水兼容海岸浅水。
+        //   基下一层 = 基材格（worldgen 在 surfaceY 查水）；基层查水兼容海岸浅水；t1088 后基材可为
+        //   草 / 泥土 / 沙任一（邻水门本身不变——1.0 口径无水不长）。
         //   不邻水 → 永不长（spec「仅邻水处长高」）。
         auto wateredAt = [&](int yy) -> bool {
             if (yy < 0 || yy >= H) return false;

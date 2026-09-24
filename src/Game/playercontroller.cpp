@@ -5589,6 +5589,8 @@ void PlayerController::placeBlock()
     //     水面时射线穿水命中水底实块 → 目标格 ty 落**水格**本身，旧判定漏查目标格类型 → 甘蔗种进水；修 = 目标非
     //     空气即拒，机制等价 MC 甘蔗不可生于水中）。
     //   （2）仅可放在草地 / 泥土 / 沙地 / 甘蔗正上方（机制等价 MC 1.0 sugar cane 须草地 / 沙地 / 甘蔗支撑）。
+    //     t1088：基材集收口 BlockRegistry::sugarcaneBaseBlock 单一权威——与生长门（World::tickSugarcaneGrowth）
+    //     共读同一谓词，改基材集只改谓词一处、两面永不漂移（旧两面各写一份并判 = t1088 病根形态）。
     //   （3）t423 须邻水：**柱基**（叠甘蔗时沿柱下走到首个非甘蔗支撑格 = 沙/草/土基）或其下一层的水平 4 邻任一为
     //     Water 才可放（t547①「放不下第三格」根因：旧判定只查 ty-1/ty-2，叠到第 3 格时两层都是甘蔗、远离水面 →
     //     邻水恒假 → 第 3 格永远放不下。修 = 沿柱下走到柱基再查邻水，与 worldgen placeSugarcane 的 surfaceY /
@@ -5599,8 +5601,7 @@ void PlayerController::placeBlock()
         const quint8 tid = m_world->blockAt(tx, ty, tz);
         if (tid != BlockRegistry::Air) return; // ① 目标须空气（不能种进水 / 岩浆 / 实体）
         const quint8 below = m_world->blockAt(tx, ty - 1, tz);
-        if (below != BlockRegistry::Grass && below != BlockRegistry::Dirt
-            && below != BlockRegistry::Sand && below != BlockRegistry::Sugarcane) return;
+        if (!BlockRegistry::sugarcaneBaseBlock(below)) return; // ② 基材（t1088 单一权威，与生长门共读）
         // ② 柱基定位 + 高度统计：自 ty-1 沿甘蔗柱向下走到首个非甘蔗格（= 沙/草/土基）。
         //   columnHeight = 现有甘蔗格数（含 ty-1）；放置后总量 = columnHeight+1，≤3 才允（最高 3 格）。
         int baseY = ty - 1;

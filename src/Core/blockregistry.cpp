@@ -1286,6 +1286,15 @@ bool BlockRegistry::isGroundPlant(quint8 blockId)
     return isFlower(blockId) || isMushroom(blockId) || blockId == TallGrass;
 }
 
+// t1088 甘蔗基材单一权威（见 blockregistry.h 声明处头注释；放置预检 PlayerController::placeBlock 与
+//   生长门 World::tickSugarcaneGrowth 两面共读）。旧两面各写一份基材并判 = t1088 病根：生长门漏跟
+//   放置门的草 / 土基（t446「仅沙基」修法与放置面「草 / 泥土 / 沙基」分裂），草 / 土基可种永不长。
+bool BlockRegistry::sugarcaneBaseBlock(quint8 groundId)
+{
+    return groundId == Grass || groundId == Dirt || groundId == Sand
+        || groundId == Sugarcane;
+}
+
 // t413 垂直爬梯统一谓词（单一权威）：blockId == Ladder 即梯。供 PlayerController 爬升物理 + mesher cross 路由分流
 //   （已并入 isCrossBillboard；本谓词专供爬升逻辑读「是否梯」，避免把「cross 渲染」与「可爬」语义耦合——
 //   未来若有不可爬的 cross 方块，爬升仍只读本谓词不误判）。单 id 故裸相等判定。
