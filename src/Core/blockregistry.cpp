@@ -435,14 +435,16 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   书架（Bookshelf）：纯装饰合成产物（机制等价 MC 1.0 bookshelf —— 仅作为附魔台加成来源；本工程无
     //   「书架可放书」物品栏，纯合成 / 放置方块）。整立方 opaque（solid=true / ShapeFull —— 走 mesher 整
     //   立方面路径，**非**异形，与 chest / wool 同族）、hardness=1.5（同 MC 1.0 书架量级，木质偏软）、
-    //   toolType=Axe（木制；requiresTool=false → 空手也掉落，仅斧给速度加成）、dropId=自身（破书架掉书架
-    //   方块，可放回 —— MC 1.0 破书架掉**书**物品，本工程掉书架方块以便玩家回收重放，区别于 MC 留记录）、
-    //   dropCount=1、maxStack=64。**t620 per-face**：顶·底=planks(8)（机制等价 MC bookshelf 顶底木板，
+    //   toolType=Axe（木制；requiresTool=false → 空手也掉落，仅斧给速度加成）、**t1084 破坏掉书**：
+    //   dropId=0x238（书物品，RecipeRegistry::BookId 同源字面量；Core 不依赖 Game 故用字面量，同
+    //   Farmland 0x208 模式 —— 机制等价 MC 1.0 破书架掉**书**：书可 3 纸+1 皮重合、6 木板+3 书重合
+    //   书架，回收闭环零净损）、dropCount=3（多件掉落同雪块 dropCount=4 先例；3 书与配方 3 书对称）、
+    //   maxStack=64。**t620 per-face**：顶·底=planks(8)（机制等价 MC bookshelf 顶底木板，
     //   pack 侧经既存 {8→oak_planks.png} 自动覆盖）/ 侧·前=bookshelf(111)（木板边框 + 中央书脊彩色书列
     //   —— pack {111→bookshelf.png}，此前六面同贴图简化）。音色归 GroupWood（木质）。配方：6 木板 + 3 书
     //   → 1 书架（工作台 3×3 有序：上 / 下两行木板、中间一行 3 书）。进创造调色板（玩家可取用 / 放置；
     //   附魔台加成测试用）。
-    /* bookshelf    */ {int(BlockRegistry::Bookshelf),       8, 8, 111, 111, true,  BlockRegistry::ShapeFull,     1.5f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::Bookshelf),      1, 64, "bookshelf",    "书架"},
+    /* bookshelf    */ {int(BlockRegistry::Bookshelf),       8, 8, 111, 111, true,  BlockRegistry::ShapeFull,     1.5f, int(BlockRegistry::Axe),     0, false, 0x238,       3, 64, "bookshelf",    "书架"},
     // ── t477 铁块（IronBlock）：9 铁锭合成的金属存储方块（铁砧配方前置）。整立方 opaque（solid=true /
     //   ShapeFull，与 obsidian/wool 同族走整立方面路径）、hardness=5.0（金属偏硬）、Pickaxe、requiresTool=true、
     //   minTier1（木镐可破且掉落）、dropId=自身、dropCount=1、maxStack=64。各面=iron_block(112)（金属灰底+

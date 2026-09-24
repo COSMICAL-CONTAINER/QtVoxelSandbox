@@ -1911,7 +1911,8 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
     // （原直接 addStack）。掉落物落到该格地面、玩家走近 ≤kPickupDist 时经 pickupScan 拾取 → addStack
     // （先选中槽、再空槽，智能堆叠至 maxStack）。满栈不进背包则实体留地面（spec：全满→不拾取）。
     // drop 由 caller 算（生存走 ToolRegistry::canHarvest；创造瞬破 drop=false 不发）。
-    // t64：spawnItem 带 count（= BlockRegistry::dropCount；当前表内全 1，留扩展位对齐方块表）。
+    // t64：spawnItem 带 count（= BlockRegistry::dropCount；表内多件特例：雪块 4 / t1084 书架 3，雪层
+    //   / 小麦等按 state 在下方分支精确覆盖，留扩展位对齐方块表）。
     // ── t571 掉落语义标注【主动破坏掉落：仅生存】：本 if (drop) 块内全部路径（通用 dropId / 作物 / 叶 /
     //    雪层 / 雪块 / 双半砖 / silk / fortune）都是「被玩家点击破坏的那一格本体」的掉落 → 一律受 drop 标志
     //    门控（创造 drop=false 全部跳过，零掉落）。与之相对的「自然失撑掉落」（下方方法族 + 末尾甘蔗/仙人掌

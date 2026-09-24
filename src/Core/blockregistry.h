@@ -594,10 +594,13 @@ public:
         //   书架（Bookshelf）：纯装饰合成产物（机制等价 MC 1.0 bookshelf —— 仅作为附魔台加成来源；本工程无
         //   「书架可放书」物品栏，纯合成 / 放置方块）。整立方 opaque（solid=true / ShapeFull —— 走 mesher 整立面
         //   面路径，**非**异形，与 chest / wool 同族）、hardness=1.5（同 MC 1.0 书架量级，木质偏软）、toolType=Axe
-        //   （木制；requiresTool=false → 空手也掉落，仅斧给速度加成）、dropId=自身（破书架掉书架方块，可放回 ——
-        //   机制简化：MC 1.0 破书架掉**书**物品，本工程掉书架方块以便玩家回收重放，区别于 MC 留记录）、
-        //   dropCount=1、maxStack=64。各面贴图：顶·底=bookshelf(111)（木板边框 + 中央书脊彩色书列）/ 侧·前=
-        //   bookshelf(111)（同顶；机制等价 MC 书架各面书脊纹，本工程六面同贴图简化）。音色归 GroupWood（木质）。
+        //   （木制；requiresTool=false → 空手也掉落，仅斧给速度加成）、**t1084 破坏掉书**：dropId=0x238
+        //   （书物品，RecipeRegistry::BookId 同源字面量；Core 不依赖 Game 故用字面量，同 SeedId 0x208 模式
+        //   —— 机制等价 MC 1.0 破书架掉**书**：书可 3 纸+1 皮重合、6 木板+3 书重合书架，回收闭环零净损）、
+        //   dropCount=3（多件掉落同雪块 dropCount=4 先例；3 书与配方 3 书对称）、maxStack=64。各面贴图
+        //   **t620 per-face**：顶·底=planks(8)（机制等价 MC bookshelf 顶底木板；pack 侧经既存
+        //   {8→oak_planks.png} 自动覆盖）/ 侧·前=bookshelf(111)（木板边框 + 中央书脊彩色书列；pack
+        //   {111→bookshelf.png}）。音色归 GroupWood（木质）。
         //   配方：6 木板 + 3 书 → 1 书架（工作台 3×3 有序：上 / 下两行木板、中间一行 3 书，recipe.cpp）。
         //   进创造调色板（玩家可取用 / 放置；附魔台加成测试用）。isBookshelf 单一权威谓词供 World::countBookshelvesAround
         //   （附魔台加成）判定「是否书架」，避免各处硬编码 Bookshelf id 判定漂移（同 isBed / isLadder 模式）。
