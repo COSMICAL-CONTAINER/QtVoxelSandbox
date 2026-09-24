@@ -174,6 +174,7 @@ void MatrixRun::runAll()
     section53_hopper(); // t1080 漏斗机制四语义（置尾先例沿用：r2052a 收集承重墙[上方格+自身格收集/整栈入腔逐位/元数据/满仓拒绝/部分接受余量回写/异列不收]，r2052b 输出+抽取承重墙[前推一轮恰1件/无目标挂起/漏斗链传递/上抽首非空槽/熔炉 out 抽取与 in·fuel 定向推入/元数据随栈]，r2052c 红石锁停+边界墙[powered 三语义全停+无效应不消耗+解锁恢复+满仓挂起+孤儿条目 inert]，r2052d 结构钉+持久化往返[def 行逐字段/排料口解码权威/配方命中负例/注册族源钉/QML 装配钉+零触碰反探/hoppers 表真 SQLite 往返]，fresh 48×48×96 s82 小世界族 + 真临时库，rig 世界零接触，接 section52）
 
     section54_spawner(); // t1081 刷怪笼条件刷怪 + 破坏语义（置尾先例沿用：r2053a 条件刷怪承重墙[节流 5+1s/距离窗 17.5>16/昼夜光照门同 rig 双亮度/火把压停+撤火把恢复/双 rig 采样确定性]，r2053b 刷出合法性+破坏承重墙[盘缘采样承重·旧窄域判别位/盘外格拒采/支撑门保留/破笼即停/def 行破坏面逐字段]，r2053c 与地牢族解耦墙[fixed 核心域手放笼 + sparse 负坐标外环笼·loadChunkAt 物化 + 零地牢路径反探]，r2053d 结构钉[常量族逐位/state 编码/签名+接线+采样表哈希源钉/QML XP 接线钉/单一权威恰一处与 QML 装配零触碰反探]，fixed 48×48×96 s82 小世界族 + sparse 构造缝 ×1，rig 世界零接触，接 section53）
+    section55_jukebox(); // t1083 唱片机 + 音乐盘（置尾先例沿用：r2054a 放入/吐出承重墙[真链放入 state 逐位+生存消耗+started 沿；吐出盘物品还原 id 逐位+state 清位+stopped 沿；创造放入不消耗]，r2054b 音乐盘+战利品承重墙[三盘 id/名/调色板连续同列/不可堆叠 Game+Core 双面/映射 round-trip 唯一/配方命中+中心料负例/dungeon+mineshaft 两池挂接逐位/确定性 seed roll 命中]，r2054c 播放语义+边界墙[到期前不吐/到期自动吐盘=时长单一权威驱动+双吐守卫/载入态空手续播/生存破坏吐盘+非播放零 stopped/创造破坏不吐/非盘拒收无效应不消耗 4→4]，r2054d 结构钉[def 行逐字段/kMcBlockId 84/state 编解码 0..63 可逆+越界 clamp/音色族 GroupWood/图集 191/配方注册·tick 接线·时长契约两处同步源钉/QML 路由钉+状态机零 QML 反探]，真链 rig = t945 同门，fresh 48×48×96 s82，rig 世界零接触，接 section54）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";
