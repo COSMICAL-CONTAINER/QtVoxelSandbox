@@ -1810,9 +1810,27 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     return true;
 }
 
+// ── t1089 写门五员同族清偿（fixed 静默写门批·第一分批）─────────────────────────────────
+// 病灶：t1074 同族「核心域假设」泄漏进静默写门家族——五员（setBlockFromEntity / setSnowLayerMerge /
+//   clearBlockSilent / setWaterSilent / setBlockSilent）域门用六比较固定盒（x<0 || … || x>=m_width）
+//   早退；sparse 世界核心 dims 是生成语义参数非域界 → 已物化外环 chunk（负坐标/出核）的静默写整体
+//   被吞（外环踩踏回土失效 / 沙落着地方块凭空消失 / 雪层塌落合并不落 / TNT 点火清不掉原块 / 外环
+//   舀水舀不动）。修法 = 5 参数 setBlock 写门既定模板逐字同式：Fixed 分支现行语句原样（零变化墙），
+//   sparse 分支 y 域两模式同构（有限高）+ x/z 无界（统一物化门 chunkContentPresent 拒未物化，拒写
+//   零副作用）。
+// 现场核实（逐员）：五员外环消费场景全部真实可达（玩家位 / 实体位 / 索引 tick 驱动）→ **五员全
+//   确认零降级**。留池登记（禁顺手修，后续批另立单）：destroySphereSilent 核心盒扫描门与 reflood
+//   盒钳制（外环爆炸）/ tickLeafDecay 盒钳制 / 重力级联邻域门 / fireRainExposedAt·igniteFlammableAt·
+//   isBurningAt·recheckAttachmentsAfterClear·recomputeRailConnections 五处辅助固定盒门 / FallingBlock
+//   tick 负坐标列跳过（entitymanager cx<0||cz<0 continue——符号假设面，本批 b/c 员的负侧生产行为
+//   由该面闸住，远侧（正出核）行为已达）/ packGrowthCell quint16 截断符号假设面（负坐标键回读幻
+//   影坐标——索引成员一致性不受影响，tick 回读面留池）。
+// ────────────────────────────────────────────────────────────────────────────────────────
+
 // t117/t220 FallingBlock 着地专用：m_chunks.setBlock 直写 + emit worldChanged，不发 blockPlaced（与玩家放置
 //   语义分离，沿用 worldgen 直写不触发 blockPlaced 的既有约定）。t220：仅在目标为**空气或水**时写入（着地格
-//   由 FallingBlock 列扫保证为 air/水 —— 沙落水穿透后填堵水格；防御：其余已占用方块不覆盖）。越界 / 非空非水 → false。
+//   由 FallingBlock 列扫保证为 air/水 —— 沙落水穿透后填堵水格；防御：其余已占用方块不覆盖）。越界 /
+//   非空非水 → false（t1089 起域门两模式分流，见实现处）。非 Q_INVOKABLE（仅 EntityManager C++ 调）。
 bool World::setBlockFromEntity(int x, int y, int z, quint8 id)
 {
     return setBlockFromEntity(x, y, z, id, quint8(0)); // 委托 5 参数版（state=0；沙/圆石着地不带 state）
@@ -1822,8 +1840,19 @@ bool World::setBlockFromEntity(int x, int y, int z, quint8 id)
 //   state=layers-1 保留层数（state 0..7 = 1..8 层）。occ 守卫同（仅 air/水可被着地覆盖）。越界 / 非空非水 → false。
 bool World::setBlockFromEntity(int x, int y, int z, quint8 id, quint8 state)
 {
-    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
-        return false; // 越界拒绝
+    // t1089 域门（setBlockFromEntity）两模式分流（Fixed 分支现行语句原样——零变化墙，同 5 参数
+    //   setBlock 写门）：sparse = y 域两模式同构（有限高）+ x/z 无界——核心 dims 是生成语义参数非
+    //   域界，旧码六比较固定盒早退把已物化外环 chunk 的沙/砾/雪层着地写整体吞掉（实体照常移除 =
+    //   方块凭空消失）；未物化经统一物化门拒（拒写零副作用）。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+            return false; // 越界拒绝
+    } else {
+        if (y < 0 || y >= m_height)
+            return false; // §29.5-W1：y 域两模式同构（有限高）
+        if (!m_chunks.chunkContentPresent(floorDiv(x, Chunk::kSize), floorDiv(z, Chunk::kSize)))
+            return false; // x/z 无界——写门（统一谓词单点；拒写零副作用）
+    }
     const quint8 occ = m_chunks.blockAt(x, y, z);
     if (occ != BlockRegistry::Air && occ != BlockRegistry::Water) return false; // 仅空气 / 水可被实体着地覆盖
     m_chunks.setBlock(x, y, z, id, state); // 跨 chunk 写 id+state + 标目标脏 + 边界格标邻接脏
@@ -1847,8 +1876,18 @@ bool World::setBlockFromEntity(int x, int y, int z, quint8 id, quint8 state)
 //   合并层数覆盖写回（state=total-1）。仅 EntityManager FallingBlock(SnowLayer) 着地合并调。
 bool World::setSnowLayerMerge(int x, int y, int z, quint8 state)
 {
-    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
-        return false; // 越界拒绝
+    // t1089 域门（setSnowLayerMerge）两模式分流（Fixed 分支现行语句原样——零变化墙，同 5 参数
+    //   setBlock 写门）：sparse = y 域两模式同构 + x/z 无界——旧码固定盒早退把外环塌落雪层的叠层
+    //   合并写整体吞掉（下落体照常移除 = 合并层数丢失）；未物化经统一物化门拒（拒写零副作用）。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+            return false; // 越界拒绝
+    } else {
+        if (y < 0 || y >= m_height)
+            return false; // §29.5-W1：y 域两模式同构（有限高）
+        if (!m_chunks.chunkContentPresent(floorDiv(x, Chunk::kSize), floorDiv(z, Chunk::kSize)))
+            return false; // x/z 无界——写门（统一谓词单点；拒写零副作用）
+    }
     if (m_chunks.blockAt(x, y, z) != BlockRegistry::SnowLayer) return false; // 防御：仅既有雪层可被合并
     const quint8 occ = BlockRegistry::SnowLayer;
     m_chunks.setBlock(x, y, z, BlockRegistry::SnowLayer, state); // 覆盖写 id+state + 标脏 + 边界邻接
@@ -1869,8 +1908,19 @@ bool World::setSnowLayerMerge(int x, int y, int z, quint8 state)
 //   仅 playercontroller 3 处点火路径用（右键机关四邻 / 右键 TNT 本体 / 压力板四邻）。
 bool World::clearBlockSilent(int x, int y, int z)
 {
-    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
-        return false; // 越界拒绝
+    // t1089 域门（clearBlockSilent）两模式分流（Fixed 分支现行语句原样——零变化墙，同 5 参数
+    //   setBlock 写门）：sparse = y 域两模式同构 + x/z 无界——旧码固定盒早退把外环 TNT 点火清
+    //   原块 / 采掘摘矿井箱写整体吞掉（点火后原块仍在 = 引燃态实体与原块叠加）；未物化经统一
+    //   物化门拒（拒写零副作用）。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+            return false; // 越界拒绝
+    } else {
+        if (y < 0 || y >= m_height)
+            return false; // §29.5-W1：y 域两模式同构（有限高）
+        if (!m_chunks.chunkContentPresent(floorDiv(x, Chunk::kSize), floorDiv(z, Chunk::kSize)))
+            return false; // x/z 无界——写门（统一谓词单点；拒写零副作用）
+    }
     const quint8 occ = m_chunks.blockAt(x, y, z); // 旧方块（作 oldId 传给 note / 光重算；不再守卫拒非空）
     const quint8 id = BlockRegistry::Air;
     m_chunks.setBlock(x, y, z, id); // 跨 chunk 写入 + 标目标脏 + 边界格标邻接脏（无条件覆盖为 Air）
@@ -1910,8 +1960,20 @@ bool World::clearMineshaftChest(int x, int y, int z)
 //   → false（防无谓 worldChanged 重建）。越界 → false。caller（tickWaterFlow）保证 id 合法（Water/Air）。
 bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
 {
-    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
-        return false; // 越界拒绝
+    // t1089 域门（setWaterSilent）两模式分流（Fixed 分支现行语句原样——零变化墙，同 5 参数
+    //   setBlock 写门）：sparse = y 域两模式同构 + x/z 无界——旧码固定盒早退把外环静默写（舀水 /
+    //   羊吃草 / 雪傀儡铺雪 / 生长应用 / 流体 tick 写）整体吞掉；未物化经统一物化门拒（拒写零副
+    //   作用）。t1085 契约面（solidifyKeys 四守卫在 caller 侧 tickLavaFlow、noteFluidWrite 增量索引
+    //   收敛语义、无变化早退）全部原样不在本门。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+            return false; // 越界拒绝
+    } else {
+        if (y < 0 || y >= m_height)
+            return false; // §29.5-W1：y 域两模式同构（有限高）
+        if (!m_chunks.chunkContentPresent(floorDiv(x, Chunk::kSize), floorDiv(z, Chunk::kSize)))
+            return false; // x/z 无界——写门（统一谓词单点；拒写零副作用）
+    }
     const quint8 oldId = m_chunks.blockAt(x, y, z);
     const quint8 oldState = m_chunks.stateAt(x, y, z);
     if (oldId == id && oldState == state) return false; // 无变化（含 id 同 state 同）
@@ -2004,8 +2066,19 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
 //   同一根因），故这些系统事件改走本入口（同 setBlockFromEntity/setWaterSilent 既有「系统写不发放置事件」约定）。
 bool World::setBlockSilent(int x, int y, int z, quint8 id, quint8 state)
 {
-    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
-        return false; // 越界拒绝
+    // t1089 域门（setBlockSilent）两模式分流（Fixed 分支现行语句原样——零变化墙，同 5 参数
+    //   setBlock 写门）：sparse = y 域两模式同构 + x/z 无界——旧码固定盒早退把外环系统回土写
+    //   （玩家/mob 踩踏耕地回土、耕地顶放置回土）整体吞掉（耕地永不回土）；未物化经统一物化
+    //   门拒（拒写零副作用）。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth)
+            return false; // 越界拒绝
+    } else {
+        if (y < 0 || y >= m_height)
+            return false; // §29.5-W1：y 域两模式同构（有限高）
+        if (!m_chunks.chunkContentPresent(floorDiv(x, Chunk::kSize), floorDiv(z, Chunk::kSize)))
+            return false; // x/z 无界——写门（统一谓词单点；拒写零副作用）
+    }
     const quint8 oldId = m_chunks.blockAt(x, y, z);
     const quint8 oldState = m_chunks.stateAt(x, y, z);
     if (oldId == id && oldState == state) return false; // 无变化（含 id 同 state 同）
