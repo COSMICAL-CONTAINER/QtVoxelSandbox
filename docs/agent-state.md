@@ -14,16 +14,16 @@
 ```yaml
 project: QtMinecraft
 state: IN_PROGRESS
-current_task: **t1089 IN_PROGRESS（§14 常设授权候选池——写门家族批·第一分批：固定盒静默写门五员）**：setBlockSilent/setBlockFromEntity/setSnowLayerMerge/clearBlockSilent/setWaterSilent 的「核心域假设」固定盒写门（t1074 登记同族病灶）；逐员调用面盘点（无外环消费场景者如实降级非缺口）+ t1074 五处两模式分流修法同门复用；逐员专属复现腿禁一刀切；destroySphereSilent/tickLeafDecay/重力级联留后续批。串行 voxel-dev，filter 词 r2059；完成 → 候选池下一位。
+current_task: **t1090 IN_PROGRESS（§14 常设授权候选池——写门家族后续批：destroySphereSilent 扫描门与 reflood 盒钳制[外环爆炸] + tickLeafDecay 盒钳制 + 重力级联邻域门）**：t1089 第一分批五员已清，原登记三员续清；逐员核实先行（扫描门与写门形态差异须单独裁定——扫描域无界化 vs 物化门过滤选型留痕）；t1089 现场新发现三项留池另立单。串行 voxel-dev，filter 词 r2060；完成 → 候选池下一位。
 current_task_status: IN_PROGRESS
-last_completed_task: t1088 甘蔗生长口径归一批（2026-09-25 闭环；矩阵 758→762——parity-bug 修复收敛 MC 1.0：基材门放宽草/泥土/沙基[sugarcaneBaseBlock 单一权威谓词两面共读] + 上限 5→3[t406「max5」lawful 翻案双锚留痕，t418 潜力门死码同批退役]；盘点纠正任务书 = t418 潜力柱矩阵腿为零[钉面全在源码]；parity-ledger 两 ✅ 行清偿。详录 = dev-plan t1088 关单条目）
-last_completed_task_prev: t1087 甘蔗自动化纪元裁定单（2026-09-24 docs-only 降级关单，降级理由修正[活塞在 1.0 基线内]+台账补录活塞行+例外发现转 t1088。详录 = dev-plan t1087 关单条目）
-last_completed_task_commits: fix(t1088)（8eac8db：谓词收口+生长门放宽+上限归一+t418 退役，src 五文件 60+/37-）+ test(t1088)（d923625：section58 r2058a-d 四腿+helpers/CMake 入册）
-last_verified_commit: test(t1088)（矩阵 **762 PASS / 0 FAIL ×2**：matrix_t1088_{pos,final}.log；新基线腿集合 md5[配方 grep -a -oE "^PASS \| [a-z0-9]+ " | sort | md5sum]三日志全等 3d672867d2f47e63c89b0da93544ad23；NEG-1 恰红 {r2058a,d 基材子面} / NEG-2 恰红 {r2058c,d 上限子面} 双还原全绿；冒烟 tail20 主控补强回填[agent 件 2.4KB 缺横幅/root objects——主控亲跑 15s 覆写 132KB 实文]；主控独立脱离式复跑 762/0 同 md5 三方恒等 matrix_orch_t1088_verify.log）
+last_completed_task: t1089 写门家族第一分批（2026-09-25 闭环；矩阵 762→769——**五员全确认零降级**：setBlockSilent/setBlockFromEntity/setSnowLayerMerge/clearBlockSilent/setWaterSilent 固定盒域门两模式分流[5 参数 setBlock 写门模板逐字同式]，旧门红载荷 = 外环踩踏回土失效/沙落着地方块凭空消失/雪层合并层数丢失/TNT 点火清不掉/舀水舀不动；setWaterSilent 仅动域门 t1085 契约面原样；留池 = 任务书三员转 t1090 + 现场新发现三项[辅助门五处/FallingBlock 符号面/packGrowthCell 截断]；md5 配方勘误 = agent 变体配方字面失效得空串，规范配方 f0c7de88 准入账。详录 = dev-plan t1089 关单条目）
+last_completed_task_prev: t1088 甘蔗生长口径归一批（2026-09-25 闭环，矩阵 758→762 parity-bug 收敛 MC 1.0；详录 = dev-plan t1088 关单条目）
+last_completed_task_commits: fix(t1089)（32c8c13：五员域门两模式分流 + 批头锚注，src/World 两文件）+ test(t1089)（0e0b993：section59 r2059a-g 七腿 + helpers/CMake 入册）
+last_verified_commit: test(t1089)（矩阵 **769 PASS / 0 FAIL ×2**：matrix_t1089_{pos,final}.log FINAL_EXIT=0；新基线腿集合 md5[规范配方 grep -a -oE "^PASS \| [a-z0-9]+ " | sort | md5sum]pos/final 双等 f0c7de88f3617336a463d8388e769599——agent 回报变体配方字面失效得空串如实勘误[其权威值不可复现，规范配方承载三方恒等零缺口]；NEG-1 恰红 {r2059b,c,g} / NEG-2 恰红 {r2059e,g} 双还原 7/7 绿；冒烟 tail20 实文含横幅+root objects；主控独立脱离式复跑 769/0 同 md5 三方恒等 matrix_orch_t1089_verify.log）
 last_governance_review: 2026-09-25（audit #19 GREEN——窗口 429bf73..6d9fa83 11 提交/t1084-t1088 五闭环证据链全实核[三代码单三方 md5 全等 29d2fbe4/3b232c04/3d672867 + NEG 六份恰红面+六份还原逐日志吻合 + 相邻族十二份 reg 零污染 + 两裁定单零代码核实（grindstone 全仓 0 命中/observer 唯一命中 miniaudio 第三方头）]；账本三方一致/腿数链 750→762 无断；11 提交零署名；1 LOW 发现 F1[t1088 中断链过程注缺档——dev-plan 已补录同体例过程注]批内清偿 + 3 INFO 无需动作；详见 governance-audit-2026-09-25.md）
 governance_review_due: false
 completed_tasks_since_governance_review: 0（审计 #19 GREEN 于 2026-09-25）
-next_task: **t1089 写门家族第一分批（候选池，在飞）→ 之后候选池顺延（写门后续批[destroySphereSilent/tickLeafDecay/重力级联]/棕色染料生存源/漏斗降级四件/红石家族纪元标注审计/removeDatabase 卫生单…）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1088 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
+next_task: **t1090 写门家族后续批（候选池，在飞）→ 之后顺延（写门新发现三项批/棕色染料生存源/漏斗降级四件/红石家族纪元标注审计/removeDatabase 卫生单…）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1089 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -50,6 +50,7 @@ needs_human: false
 
 ## Recovery Point
 
+- 最近闭环：**t1089 写门家族第一分批**（2026-09-25，fix(t1089) 32c8c13 + test(t1089) 0e0b993 + 本 docs）：矩阵 762→769。**五员全确认零降级**（t1074 同族病灶收尾第一步）：setBlockSilent/setBlockFromEntity/setSnowLayerMerge/clearBlockSilent/setWaterSilent 固定盒域门 → 两模式分流（5 参数 setBlock 写门模板逐字同式：Fixed 原句零变化墙/sparse y 同构 + x/z 无界 + chunkContentPresent 物化门）；旧门红载荷 = 外环踩踏回土失效/沙落着地方块凭空消失/雪层合并层数丢失/TNT 点火清不掉/舀水舀不动；setWaterSilent 仅动域门（t1085 solidifyKeys 四守卫 caller 侧 + noteFluidWrite 收敛语义原样）。腿 r2059a-g（含 fixed 零变化墙 + 结构钉 count 面）；NEG-1 {b,c,g}/NEG-2 {e,g} 恰红；全矩阵 pos/final 769/0 + 主控复跑三方恒等（规范配方 f0c7de88；agent 变体配方字面失效得空串如实勘误留痕）。**留池**：原登记三员转 t1090 + 现场新发现三项（辅助门五处/FallingBlock 负坐标符号面/packGrowthCell quint16 截断）。**待实机确认**：出核后踩踏回土/塌落着地/TNT 点火/舀水行为面 + setWaterSilent 二级消费面观感。**下一任务 = t1090 写门家族后续批**。
 - 最近闭环：**t1088 甘蔗生长口径归一批**（2026-09-25，fix(t1088) 8eac8db + test(t1088) d923625 + 本 docs）：矩阵 758→762。**parity-bug 修复收敛 MC 1.0**（t1087 裁定单例外发现两处）：①基材门放宽草/泥土/沙基——sugarcaneBaseBlock 单一权威谓词两面共读（生长门 t446「仅沙基」退役 + 放置门手写 4-way 字面退役）；②上限 5→3——t406「max5」lawful 翻案双锚留痕 + t418 拔高潜力门死码同批退役（盘点发现 t418 矩阵腿为零，钉面全在源码）；worldgen 列高 1..3 公式零改动。腿 r2058a-d（NEG 红模式 {a,d 基材}/{c,d 上限} 分域可归因）；全矩阵 pos/final 762/0 md5 恒等 3d672867 + 主控复跑三方恒等；**tail20 补强**（agent 回填件缺横幅/root objects——主控亲跑冒烟覆写，纪律三现：回填件须核对实文）。台账 parity-ledger 两 ✅ 行。**待实机确认**：草/土基甘蔗长高至 3/存量 4..5 柱保留观感/生长节奏/放置面回归。**下一任务 = 审计 #19 + t1089 写门家族第一分批**。
 - 最近闭环：**t1087 甘蔗自动化纪元裁定单**（2026-09-24，docs-only 零代码 758 不变 + 本 docs）：裁定成立但**降级理由修正**——观察者[MC 1.11]纪元不符成立；**活塞 Beta 1.7 其实在 1.0.0 基线内（候选前提史实有误）**，真依据 = 活塞家族已由结构考据批在案裁定计划外（偏差 4/丛林神殿三拉杆门/t1004）→ **parity-ledger 补录活塞缺席行**（台账单源规则清偿）。甘蔗本体 worldgen/生长/收割/掉落四面完整。**例外发现两处真实 1.0 口径偏差转 t1088 parity-bug**（基材门内战 + 上限 5 vs 3 两面分裂）；旁证登记红石家族纪元标注审计（红石灯 1.2.1/红石块·投掷器 1.5 混入）入候选池低优先。**待实机确认**：无新增。**下一任务 = t1088 甘蔗生长口径归一批**。
 - 最近闭环：**t1086 砂轮纪元裁定单**（2026-09-24，docs-only 零代码零腿，矩阵 758 不变 + 本 docs）：裁定 = 砂轮系 MC 1.14（Village & Pillage）机制，1.0 基准无此方块 → 按非 1.0 机制如实降级登记（t1078 陶瓦/染色玻璃同款先例）。两职能均无实现正当性：修复已由铁砧面完整承担（AnvilUI 材料修复+双件合并+附魔并集+XP，单一收口）、去附魔系 1.14 机制（1.0 无途径）。核实 = grindstone/砂轮全仓零命中（纯新增面非失真）+ 配套面三度在位（铁砧三阶段/EnchantRegistry/ToolRegistry 耐久）。**核实先行第六型产出 = 纪元裁定单**。顺带修正：t1084/t1085 闭单漏摘的两条候选池条目本批补摘。**待实机确认**：无新增。**下一任务 = t1087 甘蔗自动化裁定单**。
