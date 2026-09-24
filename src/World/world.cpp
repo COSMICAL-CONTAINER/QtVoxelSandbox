@@ -1825,6 +1825,8 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
 //   tick 负坐标列跳过（entitymanager cx<0||cz<0 continue——符号假设面，本批 b/c 员的负侧生产行为
 //   由该面闸住，远侧（正出核）行为已达）/ packGrowthCell quint16 截断符号假设面（负坐标键回读幻
 //   影坐标——索引成员一致性不受影响，tick 回读面留池）。
+//   t1090 清偿注（后续批落地回填）：前三项 + FallingBlock tick 面已由 t1090 后续批清偿（扫描门与
+//   盒域批，批头锚注见 packLeafCell 上方）；packGrowthCell 截断面与五处辅助固定盒门**仍留池**。
 // ────────────────────────────────────────────────────────────────────────────────────────
 
 // t117/t220 FallingBlock 着地专用：m_chunks.setBlock 直写 + emit worldChanged，不发 blockPlaced（与玩家放置
@@ -3543,17 +3545,52 @@ void World::tickFarmlandHydration()
     }
 }
 
-// t325 树叶渐进衰减队列的坐标打包 / 解包（文件内工具）。世界 ≤ 256³（实际 80×80×64），三轴各取低 16 位
-//   打包成 quint64 键供 std::unordered_set 去重。入队的坐标恒非负（decayLeavesAround 已钳到 [0,W/H/D)）。
+// ── t1090 写门家族「核心域假设」同族清偿·后续批（扫描门与盒域批）─────────────────────────
+// 病灶：t1074/t1089 同族「核心域假设」第二分批——**扫描门与盒域钳制**（非静默写门）泄漏。四员：
+//   ①destroySphereSilent 核心盒扫描门（球心在已物化外环时六比较固定盒把外环弹坑整体漏扫——该毁
+//   不毁）+ 其末尾 reflood 回灌盒钳制（外环弹坑回灌盒被钳进核心 = 弹坑全在负侧时盒倒置 → refloodBox
+//   退化盒防御静默 no-op，光照不回灌）；②decayLeavesAround 扫描门 + tickLeafDecay 回灌盒钳制（外环
+//   树叶腐朽不跑：拒入队 + 回灌 no-op 双面）+ packLeafCell quint16 截断（负坐标键回读幻影坐标——
+//   队列键在成员路径上，与扫描门同批合并清偿）；③checkGravityBlockOnEdit / dropGravityColumn /
+//   cascadeGravityAround 种子·邻域门 + 两处回灌盒钳制（外环级联失撑检被钳——支撑破坏后外环沙柱悬空
+//   残留）+ entitymanager FallingBlock tick 负坐标列跳过（**链面合并清偿**：级联与落体是同一条生产链
+//   ——只开门 world.cpp 半边会把「方块悬空」变成「方块清了、落体冻在半空永不着地」的负侧回归，故
+//   t1089 留池的 FallingBlock tick 符号面与级联门同批一并开）。修法纪律：Fixed 分支现行语句原样
+//   （零变化墙）；sparse 分支按语义裁定——**扫描门选型（本单第一裁定面，留痕）= 扫描域无界化**（非
+//   逐格物化门过滤）：扫描循环体的读（blockAt/stateAt）与写（m_chunks.setBlock）已由 ChunkManager
+//   统一物化门自带过滤（未物化读 0 = air 天然跳过 / 拒写零副作用），逐格再查 chunkContentPresent 是
+//   对单一权威的重复（每爆炸 ≤729 格哈希查零行为增益）；**盒域选型 = y 同构钳有限高 + x/z 无界**
+//   （t1074 recomputeLightAround 盒公式先例逐字同式）；refloodBox 退化盒防御（t1074 NEG-2 真崩兑出
+//   面）原样保持——它是崩溃防线非域假设病灶。
+// 现场核实（逐员，核实先行——t1089 五员全真缺口先例，辅助门族也可能非缺口）：四员外环消费场景全
+//   部真实可达（玩家位 / 实体位 / 索引 tick 驱动）→ **四员全确认零降级**（降级七先例不适用）。
+// 留池登记（本批现场新发现，禁顺手修，后续批另立单）：entitymanager primed TNT tick 负坐标列跳过
+//   （cx<0||cz<0 continue，同 FallingBlock 形面）与 Mob/Item tick 负坐标列跳过（同形——外环掉落物/
+//   mob 冻结面）；t1089 已登记未清的 packGrowthCell quint16 截断与五处辅助固定盒门（fireRainExposedAt
+//   ·igniteFlammableAt·isBurningAt·recheckAttachmentsAfterClear·recomputeRailConnections）原样留池。
+// ────────────────────────────────────────────────────────────────────────────────────────
+
+// t325 树叶渐进衰减队列的坐标打包 / 解包（文件内工具）。64 位键 = x:26 | y:12 | z:26。
+//   t1090 键域（packLeafCell）符号假设收口：旧「三轴各取低 16 位」在 sparse 无界域把负坐标包成幻影
+//   正坐标（quint16(-3)=65533 → tick 回读他格即「已被他途清除」误出队）——decayLeavesAround 扫描门
+//   无界化后负侧叶合法入队，键必须保符号往返（键在成员核心路径上，与扫描门同批合并清偿；t1089
+//   packGrowthCell 留池口径不适用于此——那处键只在索引内部自洽，本处键直喂栅格读写）。
+//   域注（截断面如实登记）：x/z 取低 26 位带符号扩展 → |坐标| < 33,554,432 内无损（覆盖 MC Java
+//   世界边界 ±30M）；y 取低 12 位 → [0,4096) 内无损（两模式有限高 fixed 96 / sparse 96..128，32×
+//   裕量；非负性由唯一入队面 decayLeavesAround 的 y 域门保证）。
 static inline quint64 packLeafCell(int x, int y, int z)
 {
-    return (quint64(quint16(x)) << 32) | (quint64(quint16(y)) << 16) | quint64(quint16(z));
+    return (quint64(quint32(x) & 0x3FFFFFFu) << 38)
+         | (quint64(quint32(y) & 0xFFFu) << 26)
+         | quint64(quint32(z) & 0x3FFFFFFu);
 }
 static inline void unpackLeafCell(quint64 k, int &x, int &y, int &z)
 {
-    x = int(quint16(k >> 32));
-    y = int(quint16(k >> 16));
-    z = int(quint16(k));
+    const quint32 xf = quint32(k >> 38) & 0x3FFFFFFu;
+    const quint32 zf = quint32(k) & 0x3FFFFFFu;
+    x = int((xf ^ 0x2000000u) - 0x2000000u); // 26 位带符号扩展（位型还原负坐标）
+    z = int((zf ^ 0x2000000u) - 0x2000000u);
+    y = int(quint32(k >> 26) & 0xFFFu);
 }
 
 // t305 树叶失撑检测（t325 改造：见 world.h 头注释）。机制等价 MC 1.0 叶衰：叶子距最近原木 >4 格（切比雪夫）即失撑。
@@ -3573,7 +3610,16 @@ void World::decayLeavesAround(int x, int y, int z)
         for (int dy = -kScanRadius; dy <= kScanRadius; ++dy)
             for (int dz = -kScanRadius; dz <= kScanRadius; ++dz) {
                 const int lx = x + dx, ly = y + dy, lz = z + dz;
-                if (lx < 0 || ly < 0 || lz < 0 || lx >= W || ly >= H || lz >= D) continue;
+                // t1090 域门（decayLeavesAround 扫描门）两模式分流（Fixed 分支现行语句原样——零变化墙）：
+                //   sparse = y 域两模式同构（有限高）+ x/z 扫描域无界化——旧码六比较固定盒把已物化外环
+                //   chunk 的叶整体拒入渐进衰减队列（「外环树叶腐朽不跑」的根因面）。扫描门选型同
+                //   destroySphereSilent（扫描域无界化）：本函数零写副作用，读经 blockAt 物化门（未物化
+                //   读 0 = 非叶天然跳过），逐格物化门过滤是重复权威。
+                if (m_chunks.mode() == WorldMode::Fixed) {
+                    if (lx < 0 || ly < 0 || lz < 0 || lx >= W || ly >= H || lz >= D) continue;
+                } else if (ly < 0 || ly >= H) {
+                    continue; // y 域两模式同构（有限高）；x/z 无界
+                }
                 // t714：云杉叶（SpruceLeaves）与橡树叶同入衰减候选（同族叶机制；持久位 state bit0 同语义）。
                 const quint8 leafId = m_chunks.blockAt(lx, ly, lz);
                 if (leafId != BlockRegistry::Leaves && leafId != BlockRegistry::SpruceLeaves) continue;
@@ -3659,9 +3705,20 @@ void World::tickLeafDecay()
         m_chunks.setBlock(lx, ly, lz, BlockRegistry::Air);
     }
     // 对受影响区做一次有界盒光场重 flood（叶 solid=true → air 改变遮光，天光从原叶位漏下，需重算）。
-    //   盒扩 1 格余量（光传播到邻格）；钳到世界界内。doSky=true 两通道都重算（叶遮挡影响天光，叶本身非火把）。
-    const int bx0 = std::max(0, minX - 1), by0 = std::max(0, minY - 1), bz0 = std::max(0, minZ - 1);
-    const int bx1 = std::min(W - 1, maxX + 1), by1 = std::min(H - 1, maxY + 1), bz1 = std::min(D - 1, maxZ + 1);
+    //   盒扩 1 格余量（光传播到邻格）。doSky=true 两通道都重算（叶遮挡影响天光，叶本身非火把）。
+    //   t1090 盒域（tickLeafDecay 回灌盒）两模式分流（Fixed 分支现行语句原样——零变化墙，t1074
+    //   recomputeLightAround 盒公式先例）：sparse x/z 不钳核心域——旧码 min(W-1,·)/max(0,·) 把外环
+    //   叶衰回灌盒钳进核心（受影响区全在负侧时盒倒置 → refloodBox 退化盒防御静默 no-op）；y 域两模
+    //   式同构仍钳有限高。退化盒防御（t1074 NEG-2 真崩兑出面）原样保持。
+    int bx0, by0, bz0, bx1, by1, bz1;
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        bx0 = std::max(0, minX - 1); bz0 = std::max(0, minZ - 1);
+        bx1 = std::min(W - 1, maxX + 1); bz1 = std::min(D - 1, maxZ + 1);
+    } else {
+        bx0 = minX - 1; bz0 = minZ - 1; // x/z 无界（核心 dims 不钳）
+        bx1 = maxX + 1; bz1 = maxZ + 1;
+    }
+    by0 = std::max(0, minY - 1); by1 = std::min(H - 1, maxY + 1);
     refloodBox(bx0, by0, bz0, bx1, by1, bz1, /*doSky=*/true);
     emit worldChanged();
     m_chunks.clearAllDirty();
@@ -3687,7 +3744,20 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
                 const float fdx = float(dx), fdy = float(dy), fdz = float(dz);
                 if (fdx * fdx + fdy * fdy + fdz * fdz > r2) continue; // 球外跳过
                 const int bx = cx + dx, by = cy + dy, bz = cz + dz;
-                if (bx < 0 || bz < 0 || bx >= m_width || bz >= m_depth || by < 0 || by >= m_height) continue;
+                // t1090 域门（destroySphereSilent 扫描门）两模式分流（Fixed 分支现行语句原样——零变化
+                //   墙）：sparse = y 域两模式同构（有限高）+ x/z 扫描域无界化——球心在已物化外环（负
+                //   坐标/出核）时旧码六比较固定盒把外环弹坑整体漏扫（该毁不毁）。扫描门选型（t1090 第一
+                //   裁定面，留痕）：**扫描域无界化**，不逐格加物化门过滤——循环体内的读（blockAt/stateAt）
+                //   与写（m_chunks.setBlock）已由 ChunkManager 统一物化门自带过滤（未物化读 0 = air 天然
+                //   走「不破坏」跳过 / 拒写零副作用），逐格再查 chunkContentPresent 是对单一权威的重复
+                //   （每爆炸 ≤729 格哈希查零行为增益）；与写门家族（t1089 模板）的形态差异正当：扫描门
+                //   本体无直接写副作用面。
+                if (m_chunks.mode() == WorldMode::Fixed) {
+                    if (bx < 0 || bz < 0 || bx >= m_width || bz >= m_depth || by < 0 || by >= m_height)
+                        continue;
+                } else if (by < 0 || by >= m_height) {
+                    continue; // y 域两模式同构（有限高）；x/z 无界（物化过滤由读/写原语统一门承载）
+                }
                 const quint8 b = m_chunks.blockAt(bx, by, bz);
                 if (b == BlockRegistry::Air || b == BlockRegistry::Bedrock || b == BlockRegistry::Water
                     || b == BlockRegistry::Obsidian)
@@ -3710,8 +3780,19 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
     if (destroyed.empty()) return destroyed;
     // 末尾统一：1 次 refloodBox 重算光场（球外接盒扩 1 格余量，doSky=true 两通道都算 —— 破坏的多为
     //   solid 遮光块，天光列随之变化）+ 1 次 emit worldChanged + 1 次 clearAllDirty（机制同 decayLeavesAround）。
-    const int bx0 = std::max(0, minX - 1), by0 = std::max(0, minY - 1), bz0 = std::max(0, minZ - 1);
-    const int bx1 = std::min(m_width - 1, maxX + 1), by1 = std::min(m_height - 1, maxY + 1), bz1 = std::min(m_depth - 1, maxZ + 1);
+    //   t1090 盒域（destroySphereSilent 回灌盒）两模式分流（Fixed 分支现行语句原样——零变化墙，t1074
+    //   recomputeLightAround 盒公式先例）：sparse x/z 不钳核心域——旧码 min(W-1,·)/max(0,·) 把外环弹
+    //   坑回灌盒钳进核心（弹坑全在负侧时盒倒置 → refloodBox 退化盒防御静默 no-op，与域门早退同病同
+    //   收口）；y 域两模式同构仍钳有限高。退化盒防御（t1074 NEG-2 真崩兑出面）原样保持。
+    int bx0, by0, bz0, bx1, by1, bz1;
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        bx0 = std::max(0, minX - 1); bz0 = std::max(0, minZ - 1);
+        bx1 = std::min(m_width - 1, maxX + 1); bz1 = std::min(m_depth - 1, maxZ + 1);
+    } else {
+        bx0 = minX - 1; bz0 = minZ - 1; // x/z 无界（核心 dims 不钳）
+        bx1 = maxX + 1; bz1 = maxZ + 1;
+    }
+    by0 = std::max(0, minY - 1); by1 = std::min(m_height - 1, maxY + 1);
     refloodBox(bx0, by0, bz0, bx1, by1, bz1, /*doSky=*/true);
     // t380：爆炸破坏球外接盒内的实体块 → 邻接水 / 岩浆可能失支撑流动。球内 Water/Lava 已跳过不破坏，
     //   但球边缘外的流体邻接关系变了（如炸开含水柱旁的石头 → 水流入新坑）。盒内必有流体邻接则标脏，
@@ -4139,8 +4220,16 @@ void World::checkSnowLayerOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 //   末尾 1 次 worldChanged + clearAllDirty（N 写 1 emit，同 dropCactusColumn 批量收口）。空首格 → no-op。
 void World::dropGravityColumn(int x, int y, int z)
 {
-    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
-    if (y < 0 || y >= m_height) return;
+    // t1090 域门（dropGravityColumn）两模式分流（Fixed 分支现行语句原样——零变化墙）：sparse = y 域
+    //   两模式同构（有限高）+ x/z 无界——旧码固定盒把已物化外环的重力柱坍落整体吞掉（爆炸弹坑上缘 /
+    //   支撑破坏后外环沙柱悬空残留）。读面 blockAt 物化门（未物化读 0 = 非重力块零迭代零副作用）；
+    //   写面 m_chunks.setBlock 统一物化门拒未物化（拒写零副作用）。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+        if (y < 0 || y >= m_height) return;
+    } else if (y < 0 || y >= m_height) {
+        return; // y 域两模式同构（有限高）；x/z 无界
+    }
     int cy = y;
     int firstY = y; // t933：本柱首坍落格 y（列末单次重光照的联合盒底）
     bool any = false;
@@ -4182,8 +4271,16 @@ void World::dropGravityColumn(int x, int y, int z)
     //   方块均遮光 → doSky=true）。终态与逐格重 flood 等价：每格影响 ⊆ 其 ±15 盒 ⊆ 并盒，盒外格不受影响。
     {
         constexpr int R = 15;
-        const int lx0 = std::max(0, x - R), lx1 = std::min(m_width - 1, x + R);
-        const int lz0 = std::max(0, z - R), lz1 = std::min(m_depth - 1, z + R);
+        // t1090 盒域（dropGravityColumn 回灌盒）两模式分流（Fixed 分支现行语句原样——零变化墙）：
+        //   sparse x/z 不钳核心域（外环坍落柱的光照回灌盒旧码被钳进核心 = 柱位无重 flood 光洞）。
+        int lx0, lz0, lx1, lz1;
+        if (m_chunks.mode() == WorldMode::Fixed) {
+            lx0 = std::max(0, x - R); lx1 = std::min(m_width - 1, x + R);
+            lz0 = std::max(0, z - R); lz1 = std::min(m_depth - 1, z + R);
+        } else {
+            lx0 = x - R; lx1 = x + R; // x/z 无界（核心 dims 不钳）
+            lz0 = z - R; lz1 = z + R;
+        }
         const int ly0 = std::max(0, firstY - R), ly1 = m_height - 1;
         if (ly0 <= ly1)
             refloodBox(lx0, ly0, lz0, lx1, ly1, lz1, /*doSky=*/true);
@@ -4266,8 +4363,16 @@ void World::recheckAttachmentsAfterClear(int x, int y, int z, quint8 oldId)
 void World::checkGravityBlockOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 {
     Q_UNUSED(oldId); // 各分支都只看编辑后状态（id + 邻格现值）；参数保留供 checkXxxOnEdit 族签名一致
-    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
-    if (y < 0 || y >= m_height) return;
+    // t1090 域门（checkGravityBlockOnEdit）两模式分流（Fixed 分支现行语句原样——零变化墙）：sparse =
+    //   y 域两模式同构（有限高）+ x/z 无界——旧码固定盒把外环编辑的重力复检整体吞掉（① 放置自检 /
+    //   ② 直接上方支线 / ③ 26 邻域级联三面全失 = 外环沙柱悬空残留）。本函数只编辑格可达（写入口
+    //   setBlock 家族的物化门先行），门后读经 blockAt 物化门、写经 dropGravityColumn 域门。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+        if (y < 0 || y >= m_height) return;
+    } else if (y < 0 || y >= m_height) {
+        return; // y 域两模式同构（有限高）；x/z 无界
+    }
     // ① 放置自检：本格刚写入重力方块且下方非完整立方支撑（火把 / 睡莲 / 草丛 / 半砖 / 空气 / 水…）→ 坍落。
     //   y==0（世界底）无下格 → 视为失撑（实体落出世界由 EntityManager tick 移除，同旧 QML 版 y>0 守卫语义）。
     //   t930：不再提前 return —— 放置重力方块同属「一格内的编辑」，其 26 邻域既有悬空重力方块亦须复检
@@ -4292,8 +4397,16 @@ void World::checkGravityBlockOnEdit(int x, int y, int z, quint8 oldId, quint8 id
 //   blockAt（失撑判定）+ dropGravityColumn（静默清 + 信号），无 check*OnEdit 重入。
 void World::cascadeGravityAround(int x, int y, int z)
 {
-    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
-    if (y < 0 || y >= m_height) return;
+    // t1090 域门（cascadeGravityAround 种子门）两模式分流（Fixed 分支现行语句原样——零变化墙）：
+    //   sparse = y 域两模式同构 + x/z 无界——旧码固定盒把外环种子的级联整体拒扫。种子恒为编辑格
+    //   （checkGravityBlockOnEdit 域门已两模式分流），BFS 展开由重力方块链驱动（未物化读 0 = 非重力
+    //   块天然终止）→ 无界安全。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+        if (y < 0 || y >= m_height) return;
+    } else if (y < 0 || y >= m_height) {
+        return; // y 域两模式同构（有限高）；x/z 无界
+    }
     // t933 perf：级联批收口（见 world.h m_gravLight* 头注释）—— 全程置 m_batchGravity，dropGravityColumn
     //   批内并入联合盒（不逐格重光照、不逐柱 emit worldChanged）；级联末对联合盒 ±15 一次 refloodBox +
     //   一次 worldChanged + clearAllDirty。沙坑爆炸场景从「数十柱 × 每柱 ~10 格 × 全盒重 flood + 每柱 1 次
@@ -4312,8 +4425,16 @@ void World::cascadeGravityAround(int x, int y, int z)
                 for (int dz = -1; dz <= 1; ++dz) {
                     if (dx == 0 && dy == 0 && dz == 0) continue;
                     const int nx = qx + dx, ny = qy + dy, nz = qz + dz;
-                    if (nx < 0 || nz < 0 || nx >= m_width || nz >= m_depth) continue;
-                    if (ny < 0 || ny >= m_height) continue;
+                    // t1090 邻域门（cascadeGravityAround 26 邻扫描）两模式分流（Fixed 分支现行语句
+                    //   原样——零变化墙）：sparse y 同构 + x/z 无界——旧码固定盒把外环邻格的失撑检
+                    //   掐断（「级联失撑邻域检被钳」病灶本体面）。邻格读经 blockAt 物化门（未物化
+                    //   读 0 = 非重力块天然跳过）；坍落写经 dropGravityColumn 域门。
+                    if (m_chunks.mode() == WorldMode::Fixed) {
+                        if (nx < 0 || nz < 0 || nx >= m_width || nz >= m_depth) continue;
+                        if (ny < 0 || ny >= m_height) continue;
+                    } else if (ny < 0 || ny >= m_height) {
+                        continue; // y 域两模式同构（有限高）；x/z 无界
+                    }
                     if (!BlockRegistry::isGravityBlock(m_chunks.blockAt(nx, ny, nz))) continue; // 邻格非沙族 → 零成本早退
                     // 失撑判定（同 ① 口径）：世界底无下格视为失撑；下方完整立方 → 有支撑。
                     if (ny > 0 && BlockRegistry::isFullCube(m_chunks.blockAt(nx, ny - 1, nz))) continue;
@@ -4333,12 +4454,19 @@ void World::cascadeGravityAround(int x, int y, int z)
     int bx0 = 0, by0 = 0, bz0 = 0, bx1 = 0, by1 = 0, bz1 = 0;
     if (dropped) {
         constexpr int R = 15;
-        bx0 = std::max(0, m_gravLightX0 - R);
+        // t1090 盒域（cascadeGravityAround 回灌盒）两模式分流（Fixed 分支现行语句原样——零变化墙）：
+        //   sparse x/z 不钳核心域（外环级联的联合回灌盒旧码被钳进核心 = 级联末光照回灌 no-op/错域）。
+        if (m_chunks.mode() == WorldMode::Fixed) {
+            bx0 = std::max(0, m_gravLightX0 - R);
+            bz0 = std::max(0, m_gravLightZ0 - R);
+            bx1 = std::min(m_width - 1, m_gravLightX1 + R);
+            bz1 = std::min(m_depth - 1, m_gravLightZ1 + R);
+        } else {
+            bx0 = m_gravLightX0 - R; bx1 = m_gravLightX1 + R; // x/z 无界（核心 dims 不钳）
+            bz0 = m_gravLightZ0 - R; bz1 = m_gravLightZ1 + R;
+        }
         by0 = std::max(0, m_gravLightY0 - R);
-        bz0 = std::max(0, m_gravLightZ0 - R);
-        bx1 = std::min(m_width - 1, m_gravLightX1 + R);
         by1 = m_height - 1; // 遮光翻转 → 天光列 first-opaque 须重 seed 到顶（同 recomputeLightAround）
-        bz1 = std::min(m_depth - 1, m_gravLightZ1 + R);
     }
     gravLightReset();
     if (!dropped) return;

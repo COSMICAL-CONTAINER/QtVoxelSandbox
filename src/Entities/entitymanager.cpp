@@ -7516,7 +7516,16 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         if (e.kind == FallingBlock) {
             const int cx = qFloor(e.pos.x());
             const int cz = qFloor(e.pos.z());
-            if (cx < 0 || cz < 0) continue; // 列坐标非法（实体飞出世界 XZ 边界）→ 跳过
+            // t1090 域门（FallingBlock tick）两模式分流（Fixed 分支现行语句原样——零变化墙）：sparse
+            //   负坐标列合法（已物化外环）→ 不再以「坐标非负」符号假设拒列——旧码把外环坍落体冻在半
+            //   空永不着地（t1089 留池登记面，与重力级联邻域门是同一条生产链：级联清格发 gravityBlockFell
+            //   → 呈现层 spawnFallingBlock → 本 tick 下落着地；只开 world.cpp 半边会把「方块悬空」换成
+            //   「方块清了、实体永冻」的负侧回归，故两 face 合并清偿如实登记）。列内容读经 world->
+            //   blockAt 物化门（未物化读 0 = air 自然下落，落出世界底由既有 y<=0 移除面收口）；着地写
+            //   经 setBlockFromEntity（t1089 域门）物化拒零副作用。Mob/Item（下方同形 continue）与
+            //   primed TNT（同形 continue）同族符号假设**留池不修**（非级联链承重面，t1090 批头登记）。
+            if (!world->isSparse() && (cx < 0 || cz < 0))
+                continue; // 列坐标非法（fixed 世界 XZ 边界外）→ 跳过
             e.vy -= kGravity * float(dt);
             if (e.vy < -kMaxFall) e.vy = -kMaxFall;
             const float newY = e.pos.y() + e.vy * float(dt);
