@@ -1957,7 +1957,8 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     //   非 fluid 写入（作物升阶 / 羊吃草经此入口）id/oldId 均非 Water/Lava → 不设标志，无副作用。
     if (id == BlockRegistry::Water || lightOldId == BlockRegistry::Water) m_waterDirty = true;
     if (id == BlockRegistry::Lava || lightOldId == BlockRegistry::Lava) m_lavaDirty = true;
-    // t488：流体相关写（Water/Lava 增删 + 凝固 Obsidian/Stone/Cobble 覆盖流体）→ 活动盒扩到该格 ±1
+    // t488：流体相关写（Water/Lava 增删 + 凝固 Obsidian/Cobble 覆盖流体，t1085 后接触凝固不再产 Stone）
+    //   → 活动盒扩到该格 ±1
     //   （相邻流体格下 tick 据它重扫；见 m_fluidAct* 头注释）。非流体写不扩（其不置 dirty → 无扫描）。
     if (id == BlockRegistry::Water || id == BlockRegistry::Lava
         || lightOldId == BlockRegistry::Water || lightOldId == BlockRegistry::Lava)
@@ -2566,34 +2567,44 @@ void World::tickLavaFlow()
         cells.push_back({x, y, z, m_chunks.stateAt(x, y, z)});
     }
 
-    // t438 流体交互 pass B（流岩浆 → 静水源→石头 / 流水→圆石）：遍历快照中的**流岩浆**格（state>0），查 6
-    //   正交邻的水格，按对方 state 凝固：**静水源**（Water state=0）→ **Stone**；**流水**（state>0）→ **Cobblestone**。
-    //   机制等价 MC 1.0「流岩浆触静水→石头」「流岩浆触流水→圆石」（spec t438 三规则之二、三）。
-    //   **t438 修 t411 两处 bug**：(1) 旧实现流岩浆+静水源恒产 Cobblestone，spec 要求 Stone（流岩浆把水源烧成石）；
-    //   (2) 旧实现只查对方 source（state==0），**流水+流岩浆相遇时双方都不是 source → 两侧 pass 互不反应 = 水火共融
-    //   不凝固 bug 的真根因**——现补「流水→圆石」分支，两流相遇即凝固。仅流岩浆触发（岩浆源触水不反应）；6 正交
-    //   邻覆盖「流岩浆自上而下浇到水顶」的瀑布情形。凝固目标延迟到批量应用阶段写入（流场计算 pass 2-3 读旧栅格，
-    //   但岩浆本就无法流入水/stone/cobble 实体 → 无副作用）。setWaterSilent 写入：旧 id=Water → 内部标
-    //   m_waterDirty，驱动下次水 tick 续扫该水格邻居（被凝固的水消失 → 邻水可能失支撑应退场/扩散）。
-    //   交互规则完整矩阵（与 tickWaterFlow pass A 互补、无重叠）：
-    //     流水 + 岩浆源 → 黑曜石（pass A，改岩浆格） / 水源 + 岩浆源 → 黑曜石（本 pass t472 补丁，改岩浆格）
-    //     流岩浆 + 水源 → 石头（本 pass，改水格） / 流岩浆 + 流水 → 圆石（本 pass，改水格）
+    // t1085 流体交互 pass B（流岩浆 × 水 → 流岩浆格自身凝固为圆石；水格不动）：遍历快照中的**流岩浆**格
+    //   （state>0），查 6 正交邻是否为水格（**不问水方 state**——MC 1.0 判据是「流岩浆块自身 update 时检查
+    //   邻接水」，水为源或流水同结算）；命中则把**本流岩浆格**凝固为 Cobblestone。
+    //   **t1085 裁定（MC 1.0 口径，pre-flattening BlockFluid::checkForMixing 语义）**：接触水时转化恒落在
+    //   **岩浆格**——岩浆源（level 0）→ Obsidian、流岩浆（level>0）→ Cobblestone；**水格永不转化**（1.0 无
+    //   「水→石」结算——圆石机（cobblestone generator）永续运转的前提正是水面存活；t411 台账行「流岩浆 +
+    //   静水 → 圆石（非石头）」同口径）。
+    //   **t438 口径退役**：t438 把转化落在水格（静水源→Stone / 流水→Cobble）——目标格、产物（石头）、水面
+    //   存活性三面均偏离 1.0（「水+岩浆产石头」系现代流体重写（post-flattening spreadTo）产物，1.0 Java 无此
+    //   结算）；本支改回岩浆格自身凝固，t438 当初要修的真 bug（流+流相遇双方都非 source → 两 pass 互不反应
+    //   = 水火共融）由「不问水方 state」本支独立完整覆盖。触发面不变：仅流岩浆触发（岩浆源触水归 pass A
+    //   水侧 t411 / pass B 岩浆侧 t472 双源 → Obsidian，与本支按 level 0/>0 无重叠）；6 正交邻覆盖「流岩浆
+    //   自上而下浇到水顶」瀑布情形。凝固目标延迟到批量应用阶段写入（流场 pass 2-3 读旧栅格）。
+    //   **格域交叠新守卫（solidifyKeys）**：t438 旧口径目标为水格、与 evaps/adds 的流岩浆格域天然不相交；
+    //   t1085 目标改为流岩浆格后与蒸发/扩散同域 → 显式互斥两处：
+    //     ① 蒸发 pass 跳过 solidifyKeys（凝固优先于失支撑蒸发——1.0 口径「触水即凝固不干涸」；防应用序
+    //        「先写 Cobble 再被蒸发写 Air」吞产物）；
+    //     ② 扩散 pass 跳过本格（将凝固格不再外扩），下落落点 / re-leveling 拒写 solidifyKeys 格（防 adds
+    //        在应用序末尾把 Cobble 覆写回流岩浆）。
+    //   写入门不变（setWaterSilent）：旧 id=Lava → noteFluidWrite 把该格移出 m_lavaCells（c282bc0 增量索引
+    //   账面一致收敛）+ m_lavaDirty 驱动下窗续扫上游失撑链（多窗自然收敛，无永不收敛面——lava-never-settles
+    //   教训面：凝固只减 cells 不增，稳定态可达）。
     struct SolidifyTarget { int x, y, z; quint8 result; };
     std::vector<SolidifyTarget> solidifyTargets;
+    std::unordered_set<long long> solidifyKeys;
     {
         static const int neigh[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
         for (const LCell &c : cells) {
-            if (c.level == 0) continue; // 仅流岩浆触发交互（岩浆源触水不凝固）
+            if (c.level == 0) continue; // 仅流岩浆触发交互（岩浆源触水归 obsidian 双支）
             for (const auto &n : neigh) {
                 const int nx = c.x + n[0], ny = c.y + n[1], nz = c.z + n[2];
                 if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
                 if (m_chunks.blockAt(nx, ny, nz) != BlockRegistry::Water) continue;
-                const quint8 wState = m_chunks.stateAt(nx, ny, nz);
-                // 静水源 → 石头（spec「流岩浆+静水→石头」）；流水 → 圆石（spec「流岩浆+流水→圆石」）。
-                // 两支均显式转 quint8（BlockRegistry::Id 枚举），避免 -Wextra 枚举/标量混用告警（lessons-learned）。
-                const quint8 result = (wState == 0) ? quint8(BlockRegistry::Stone)
-                                                    : quint8(BlockRegistry::Cobble);
-                solidifyTargets.push_back({nx, ny, nz, result});
+                // 凝固本流岩浆格为圆石（水方 state 不问——源/流水同结算；1.0 水格恒存活不转化）。
+                //   显式转 quint8（BlockRegistry::Id 枚举），避免 -Wextra 枚举/标量混用告警（lessons-learned）。
+                solidifyTargets.push_back({c.x, c.y, c.z, quint8(BlockRegistry::Cobble)});
+                solidifyKeys.insert(keyOf(c.x, c.y, c.z));
+                break; // 任一水邻接即凝固本格（目标为自身格，唯一登记防重复）
             }
         }
     }
@@ -2604,7 +2615,8 @@ void World::tickLavaFlow()
     //   触发改岩浆格，本支由岩浆源视角查水源邻接改岩浆格 —— 二者改的都是岩浆源格、但触发条件不同（流水 vs 水源邻接）；
     //   一旦凝固为 Obsidian 即非岩浆 → 下次 tick 不再命中任一支，无双触发。流岩浆（state>0）由上方 solidify pass 处理
     //   （触水源→石头 / 流水→圆石），故本支只看岩浆源（state==0）。凝固目标延迟到批量应用阶段写入（与 solidifyTargets
-    //   同批；obsidianTargets 是岩浆源格，与 solidifyTargets 水格 / evaps+adds 流岩浆格互不相交 → 写入顺序安全）。
+    //   同批；obsidianTargets 是岩浆源格（level 0），solidifyTargets 是流岩浆格（level>0）——level 互斥
+    //   不相交；evaps/adds 经 solidifyKeys 守卫不触碰将凝固格（t1085）→ 写入顺序安全）。
     std::vector<LCell> obsidianTargets;
     {
         static const int neigh[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
@@ -2640,10 +2652,13 @@ void World::tickLavaFlow()
     static const int hd[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
 
     // 2) 蒸发 pass（流岩浆 state>0 失支撑 → 凝固退场；岩浆源 state=0 永不退场）。无源再生 pass（岩浆不形成无限源）。
+    //    t1085：跳过 solidifyKeys —— 本 tick 将触水凝固为圆石的格不再按「失支撑」蒸发（1.0 口径：触水即凝固
+    //    不干涸；防应用序凝固先写 Cobble 后被本 pass 覆写 Air 吞产物——凝固与蒸发同域互斥的唯一收口）。
     std::vector<LCell> evaps;
     std::unordered_set<long long> evapKeys;
     for (const LCell &c : cells) {
         if (c.level == 0) continue; // 岩浆源永不退场（玩家/铁桶/worldgen 管）
+        if (solidifyKeys.count(keyOf(c.x, c.y, c.z))) continue; // t1085：将凝固格不蒸发（见 pass B 注）
         bool supported = false;
         if (c.y + 1 < H && m_chunks.blockAt(c.x, c.y + 1, c.z) == BlockRegistry::Lava) supported = true; // 上方岩浆灌养
         if (!supported) {
@@ -2671,8 +2686,13 @@ void World::tickLavaFlow()
     //    vs 水 0.3s/格、岩浆 maxLevel 3 vs 水 7）。
     for (const LCell &c : cells) {
         if (evapKeys.count(keyOf(c.x, c.y, c.z))) continue; // 退场中的格不扩散
+        // t1085：本 tick 将触水凝固的格不再外扩（同 evapKeys 跳过口径——将凝固格的流场责任到此为止，
+        //   防 adds 在应用序末尾覆写凝固产物）。
+        if (solidifyKeys.count(keyOf(c.x, c.y, c.z))) continue;
         const int bk = belowKind(c.x, c.y, c.z);
-        if (bk == 0) {
+        if (bk == 0 && !solidifyKeys.count(keyOf(c.x, c.y - 1, c.z))) {
+            // t1085：下落落点若为本 tick 将凝固格（上方岩浆浇在触水流岩浆上）→ 不写 adds——应用序
+            //   凝固先写 Cobble、adds 后写会把它覆写回流岩浆（守卫见 pass B 注②）。
             tryAdd(keyOf(c.x, c.y - 1, c.z), quint8(1)); // 下落为流岩浆 state=1（非源）
         }
         if (bk == 1 && c.level < kMaxLavaFlowLevel) {
@@ -2684,8 +2704,9 @@ void World::tickLavaFlow()
                 const quint8 nbId = m_chunks.blockAt(nx, c.y, nz);
                 if (nbId == BlockRegistry::Air) {
                     tryAdd(nbKey, quint8(c.level + 1)); // 蔓延到 air
-                } else if (nbId == BlockRegistry::Lava) {
+                } else if (nbId == BlockRegistry::Lava && !solidifyKeys.count(nbKey)) {
                     // re-leveling（同水）：既有流岩浆邻居若能被提供更低 level → 下调（平滑两股岩浆融合）。
+                    //   t1085：将凝固格拒入 adds（同上防覆写）。
                     const quint8 nbLvl = m_chunks.stateAt(nx, c.y, nz);
                     const quint8 offered = quint8(c.level + 1);
                     if (nbLvl > 0 && offered < nbLvl) tryAdd(nbKey, offered);
@@ -2703,8 +2724,9 @@ void World::tickLavaFlow()
     //   solidifyTargets 是水格，evaps/adds 操作流岩浆/air 格；故写入顺序安全）。
     for (const LCell &o : obsidianTargets)
         anyChange |= setWaterSilent(o.x, o.y, o.z, BlockRegistry::Obsidian, 0);
-    // t438：先写流岩浆凝固水格（静水源→Stone / 流水→Cobblestone；与 evaps/adds 操作的格互不相交 ——
-    //   solidifyTargets 是 Water 格，evaps/adds 操作 Lava/Air 格；故写入顺序安全）。
+    // t1085：先写流岩浆触水凝固（流岩浆格 → Cobblestone，水格不动；与 obsidianTargets 互斥 —— level>0 vs
+    //   level 0；与 evaps/adds 经 solidifyKeys 守卫互斥 —— 蒸发跳过 + 扩散落点/ re-leveling 拒入；故写入
+    //   顺序安全：凝固先于蒸发 / adds，被守卫隔开的格不会在本 tick 被二次覆写）。
     for (const SolidifyTarget &s : solidifyTargets)
         anyChange |= setWaterSilent(s.x, s.y, s.z, s.result, 0);
     for (const LCell &e : evaps)
