@@ -14,16 +14,16 @@
 ```yaml
 project: QtMinecraft
 state: IN_PROGRESS
-current_task: **t1083 IN_PROGRESS（§14 常设授权候选池——唱片机+音乐盘）**：地牢/矿井战利品 + 播放机制（MC 机制对标，原创名/资产 §9）。**派工前现场核实先行**（降级五先例）；音乐资产面无先例可如实降级为唱片机制+收藏面（禁硬造乐曲资产）。串行 voxel-dev，filter 词 r2054 预留；完成 → 候选池下一位（纸书书架/岩浆×水/砂轮…）。
+current_task: **t1084 IN_PROGRESS（§14 常设授权候选池——纸/书/书架）**：甘蔗→纸、纸+皮革→书、书架方块 + 书架联动面按实况（附魔系统在位性待核实，无则如实降级登记）。**派工前现场核实先行**（降级五先例 t1070/t1077/t1078/t1080/t1083）。串行 voxel-dev，filter 词 r2055 预留；完成 → 候选池下一位。
 current_task_status: IN_PROGRESS
-last_completed_task: t1082 r2040c 真锁时序腿加固（2026-09-23 闭环；矩阵 746/0 满绿达成[r2040c 转绿]——**机理定案又翻任务书一层**：满矩阵负载下探针晚于 60ms 锁窗被调度 → 退避整段跳过 → 立即重试收敛 → 唯旧 wall≥100 下限红；加固 = 事件驱动替代双侧竞速零放宽[退避打卡 qInstallMessageHandler 恰一次捕获 + 持锁者不见打卡绝不放手单向余量 + 墙钟只剩 2000ms 上界]；落选四面对照留痕 + NEG-3 新增恰红；r2040 ×10 连跑存证；全矩阵 pos/final 746/0 md5 恒等 b5f3e8cf 新基线 + 主控独立复跑补齐提交后重验环。详录 = dev-plan t1082 关单条目）
-last_completed_task_prev: t1081 刷怪笼 Spawner（2026-09-23 闭环，r2053/矩阵 742→746，四缺口交付 + 哨兵教训入册；详录 = dev-plan t1081 关单条目）
-last_completed_task_commits: test(t1082)（单提交纯腿文面，符合小单口径；哈希 009f8c7）
-last_verified_commit: test(t1082)（矩阵 **746 PASS / 0 FAIL ×2**：matrix_t1082_{pos,final}.log EXIT=0；738 权威[t1081 时代剔除 r2040c 红面后的 745 腿] + r2040c 转绿 = 新基线腿集合 md5[配方 grep -a -oE "^PASS \| [a-z0-9]+ " | sort | md5sum]三日志全等 b5f3e8cf605b020cb46d06478743763b；r2040 ×10 连跑存证 20 文件；NEG-3 恰红 {r2040c}；主控独立复跑 746/0 完整通过[= 补齐 agent 死前未竟的提交后重验环]matrix_orch_t1082_verify.log）
+last_completed_task: t1083 唱片机+音乐盘（2026-09-24 闭环；矩阵 746→750——音频管线核实全在零降级全量交付：三程序合成原创旋律 30/36/42s + 播放状态机 Game 层运行期表 + 三路吐盘单一收口 + 战利品两池挂接 + kMcBlockId 行 84；红石触发面如实登记 1.0 非缺口；播放态不进存档登记简化 = MC 1.0 record-only 同口径。详录 = dev-plan t1083 关单条目）
+last_completed_task_prev: t1082 r2040c 真锁时序腿加固（2026-09-23 闭环，事件驱动零放宽 746/0 满绿；详录 = dev-plan t1082 关单条目）
+last_completed_task_commits: fix(t1083)（97962ac：实现全量 Core/Game/Audio/QML/CMake/资产四工具 + 图集/图标/三轨 WAV）+ test(t1083)（815544d：r2054a-d 四腿 + 三处钉面 lawful 修订）
+last_verified_commit: test(t1083)（矩阵 **750 PASS / 0 FAIL ×2**：matrix_t1083_{pos,final}.log；新基线腿集合 md5[配方 grep -a -oE "^PASS \| [a-z0-9]+ " | sort | md5sum]三日志全等 620d1b26d2f69a54057bf21ad750f82e；NEG-1 恰红 {r2054c} / NEG-2 恰红 {r2054a} 双还原全绿；冒烟 tail20 回填 logs/voxelsandbox_t1083_tail20.log；主控独立脱离式复跑 750/0 同 md5 三方恒等 matrix_orch_t1083_verify.log）
 last_governance_review: 2026-09-22（audit #17 GREEN 有保留——t1074-t1078 五闭环证据链全实核通过[五单 md5 按配方复跑全等/恰红面吻合/账本三方一致/15 提交零署名/不变量全守]；3 项低级发现 F1-F3 清偿：F1 冒烟证据抢救回填 + 每闭环 tail20 新纪律、F2 控制块重复键清除、F3 429 续作链过程注补记；详见 governance-audit-2026-09-22.md）
-governance_review_due: false
-completed_tasks_since_governance_review: 4（t1079 + t1080 + t1081 + t1082 闭环；审计 #17 GREEN 于 2026-09-22）
-next_task: **t1082 r2040c 加固（在飞）→ 候选池（唱片机/纸书书架/岩浆×水/砂轮/甘蔗…）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1081 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
+governance_review_due: true
+completed_tasks_since_governance_review: 5（t1079 + t1080 + t1081 + t1082 + t1083 闭环；审计 #17 GREEN 于 2026-09-22——**审计 #18 到期**）
+next_task: **审计 #18（5/5 到期，只读独立 agent，窗口 = 9cd700b..docs 闭单 HEAD）→ t1084 纸/书/书架（候选池）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1083 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -33,7 +33,7 @@ needs_human: false
 
 ## Workspace Guard
 
-- HEAD = t1082 r2040c 加固代码终态（test(t1082) 009f8c7 已提交[纯腿文单提交]，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 746 腿满绿（54 段 TU；r2040c 已转绿，观察名单仅余 t897 + r2040c 转普通腿后若无抖动即彻底退役）。**禁并发构建/并发跑矩阵**（t813 build_stamps 每次构建强制全目标重链——两进程并发构建可产出损坏 exe，2026-09-21 三崩留痕；并发跑共享夹具面同理存疑，验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075 过程日志落仓库根 + t1081 复跑双进程事故两教训——cwd 相对路径在跨命令持久化下不可靠）。**冒烟证据每闭环回填 tail20**（审计 #16-F4/#17-F1 两现——冒烟后立即 cp logs/voxelsandbox.log 为 logs/voxelsandbox_<task>_tail20.log）。
+- HEAD = t1083 唱片机+音乐盘代码终态（fix(t1083) 97962ac + test(t1083) 815544d 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 750 腿满绿（55 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**禁并发构建/并发跑矩阵**（t813 build_stamps 每次构建强制全目标重链——两进程并发构建可产出损坏 exe，2026-09-21 三崩留痕；并发跑共享夹具面同理存疑，验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075 过程日志落仓库根 + t1081 复跑双进程事故两教训——cwd 相对路径在跨命令持久化下不可靠）。**冒烟证据每闭环回填 tail20**（审计 #16-F4/#17-F1 两现——冒烟后立即 cp logs/voxelsandbox.log 为 logs/voxelsandbox_<task>_tail20.log）。
 - 纪律①-⑨全在案；**大 TU 编译一律 -j 1**（09-13 蓝屏教训；分段后单段增量 -j 4 实测安全）。**矩阵测试为 tools/matrix/ 分层结构**：改探针只重编对应段 TU（秒级）+ `--filter <substring>` 只跑本任务腿；新腿落对应段文件，新段置尾 runAll 末执行、须 ≤500KB；section11 起「自建 fresh 小世界」先例（48×48×96 seed 82 + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)）。
 - **R20.06 起值类型纪律**：src/Core/ 新值类型一律 result.h QObjectFree 编译期钉 + 头内 static_assert；命令/事件队列满载拒绝与快照队列覆盖最老是两域容量策略分化，勿「统一」。
 - **R20.07 起编排壳纪律**：GameSession 只做编排（命令 → 整 tick 边界 → World::setBlock 权威），禁复制游戏逻辑；**QML 现行玩法路径零变化是 R20 主线不变量**（Main.qml 含 "GameSession" 即违零迁移阴性钉 r2007b）。
@@ -50,6 +50,7 @@ needs_human: false
 
 ## Recovery Point
 
+- 最近闭环：**t1083 唱片机+音乐盘**（2026-09-24，fix(t1083) 97962ac + test(t1083) 815544d + 本 docs）：矩阵 746→750。**核实：音频管线全在 → 全量交付零降级**（禁硬造条款不触发）：三程序合成原创旋律（30/36/42s 两处同步契约）+ 播放状态机（Game 层 tickJukeboxes 运行期表 + chunk state 只存盘位 bit0/盘号 bit[7:2]——播放不进存档 = MC 1.0 record-only 同口径登记简化）+ 三路吐盘单一收口（useBlock/到期/破坏——破坏走 t134 快照纪律）+ 战利品两池各 +1 weight-2 + 配方 8 板环+钻石；红石触发面如实登记 1.0 非缺口。Jukebox=146 尾追加/kMcBlockId 行 84/图集 191 追加不插中间。腿 r2054a-d；NEG-1 {r2054c}/NEG-2 {r2054a} 恰红；全矩阵 pos/final 750/0 md5 恒等 620d1b26 + 主控独立复跑三方恒等。429 一次中断（00:03/02:02 重置）同 agent git-diff-first 续作零重做。**待实机确认**：旋律实听/贴图观感/放入吐盘手感/暂停期音频面/退世界停曲即时性。**下一任务 = 审计 #18 + t1084 纸/书/书架**。
 - 最近闭环：**t1082 r2040c 真锁时序腿加固**（2026-09-23，test(t1082) 009f8c7 单提交纯腿文 + 本 docs）：矩阵 **746/0 满绿达成**（r2040c 转绿）。**机理定案又翻任务书一层**（逐拍证据）：满矩阵负载下探针被调度晚于 60ms 锁窗 → 退避整段跳过 → 立即重试收敛 → 唯旧 wall≥100 下限红。**加固 = 事件驱动替代双侧竞速零放宽**：退避打卡 qInstallMessageHandler 恰一次捕获 + 持锁者不见打卡绝不放手（单向余量，与调度延迟解耦）+ 墙钟只剩 2000ms 上界；落选四面对照留痕（削下限/固定毫秒/改生产/仅留计数）。**NEG-3 新增**恰红 {r2040c}；r2040 ×10 连跑存证；全矩阵 pos/final 746/0 md5 恒等 b5f3e8cf 新基线 + 主控独立复跑补齐提交后重验环。**待实机确认**：无新增（纯测试加固单）。
 - 最近闭环：**t1081 刷怪笼 Spawner**（2026-09-23，fix(t1081) d4cc0f9 + test(t1081) fe02a1e + 本 docs）：矩阵 742→746。**刷怪笼族大半早已在**（t392/t786/t787/t760/t999/t1012），缺口四件交付 = 点亮暗门（设计决策 lawful 翻案，t280 同门）+ ±4 圆盘采样（49 格编译期完备性钉 + 哈希轮转）+ sparse 域无界化（t1073 同族）+ 破笼掉 XP 15-43。**哨兵教训入册 lessons-learned.md**（坐标值不可充当哨兵——r2053c 外环腿抓出 spawnFound 修复）。t1012 lawful 改造（熔岩照明实测迁密封暗笼手 rig）。腿 r2053a-d；NEG-1 {a}/NEG-2 {c} 恰红；全矩阵 ×3 各 745/746 唯一红恒 r2040c（三连红定案负载敏感非回归 + HEAD 同刻复现存证）其余 md5 四方恒等 + 主控复跑同签名。**后续 = t1082 加固 r2040c（墙钟窗改逻辑轮次，验收 746/0）**。**待实机确认**：火把压停/±4 格刷出/破笼 XP（爆炸破恒发口径登记偏差）/位置变奏/外环笼工作。
 - 最近闭环：**t1080 漏斗 Hopper**（2026-09-23，fix(t1080) 25d1a8d + test(t1080) 4be40ef + 本 docs）：矩阵 738→742。四 store 无统一抽象 → HopperStore 逐字对齐 DispenserStore 族 + kind 分派（不造第二份抽象）；红石锁停接钩既有 isReceivingPower；四语义交付（0.4s 周期收集/抽取/输出/锁停 + 熔炉定向 + hoppers 表真 SQLite 往返含负坐标键 + 破坏掉内容）；UI/比较器如实降级候选。图集钉 186→189 + r2050d 现值钉 lawful 修订。腿 r2052a-d；NEG-1 {b}/NEG-2 {c}[首跑全绿暴露 c 腿被注释行吞——修后灵敏]；全矩阵 742/0 ×2 三日志 md5 恒等 + 主控独立复跑 742/0。**待实机确认**：朝向手感/三面贴图/链与熔炉节律/锁停延迟/存档往返。
