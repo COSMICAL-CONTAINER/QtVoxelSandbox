@@ -505,4 +505,14 @@ private:
                               //   图标路径/QML !==95 tripwire/纸书 id 禁入 Main.qml 反探/旧掉自身口径
                               //   禁出反探]。真链 rig = t1083 同门，fresh 48×48×96 s82，rig 世界零
                               //   接触，接 section55）
+    void section57_lava_water_contact(); // t1085 岩浆×水接触规则探针段（置尾先例沿用：r2056a 岩浆源×水
+                              //   黑曜石承重墙[水源/流水双触发漏斗 → 岩浆格 Obsidian + 水面存活 + 幂等
+                              //   + 无水对照]，r2056b 流岩浆×水圆石承重墙[流岩浆格自身凝固 Cobble·不问
+                              //   水方 state + 水面存活 + 无石头产物反探 + 同水源可再生 + 源/流双漏斗
+                              //   level 互斥]，r2056c 账面收敛+确定性墙[水波前 7 级展开精确 states +
+                              //   接触转化不动点 + 双 seed 孪生逐位 + 双 tick 共驱平衡]，r2056d 结构钉
+                              //   [接触漏斗单写点源钉 + solidifyKeys 四守卫 + 增量索引零触碰反探 +
+                              //   tick 接线钉 + 转化 id 逐位 + t1085 头注锚]。流体窗口直调
+                              //   tickWaterFlow/tickLavaFlow（section03 同款），fresh 48×48×96 双 seed
+                              //   小世界族，rig 世界零接触，接 section56）
 };

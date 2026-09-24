@@ -1297,6 +1297,10 @@ add_executable(redstone_matrix_test
     #   真链破坏 rig = t1083 同门（QQuickWindow 载体 + grab/loadSavedState/beginMining 泵墙钟）
     #   ——零新 include 面，helpers 枢纽已含全部依赖）。
     tools/matrix/section56_paper_book_bookshelf.cpp
+    # t1085 岩浆×水接触规则探针段（置尾先例沿用：4 腿 r2056a-d，filter 词 r2056；
+    #   流体窗口直调 tickWaterFlow/tickLavaFlow（section03 同款）——零新 include 面，helpers
+    #   枢纽已含全部依赖）。
+    tools/matrix/section57_lava_water_contact.cpp
     src/Game/hopperstore.h
     src/Game/entityshadowfield.cpp
     src/Game/entityshadowfield.h
