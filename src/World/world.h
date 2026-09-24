@@ -1977,7 +1977,7 @@ private:
     //   每 tick 写入 → setWaterSilent / pokeFluidDirty 持续置 m_*Dirty → tickWaterFlow/tickLavaFlow 每回
     //   全量快照遍历**整个**水/岩浆格集合（大水体数万格 × 每格 ~15-40 blockAt）→ 用户实测 wat 29.7 + lav
     //   110.7 ms/s（lav 单次 ~330ms 每 3s 一次 spike）。修：只扫「最近有流体相关写入/编辑的区域」—— 每次
-    //   setWaterSilent（写 Water/Lava 及凝固 Obsidian/Stone/Cobble，oldId/newId 含流体）与 pokeFluidDirty
+    //   setWaterSilent（写 Water/Lava 及凝固 Obsidian/Cobble，oldId/newId 含流体；t1085 后接触凝固不产 Stone）与 pokeFluidDirty
     //   （块编辑邻接流体）把盒扩展到该格 ±1；tick 扫描前把盒拷到局部 + 清盒（下次 tick 盒 = 本次 tick 的
     //   写入），建快照时跳过盒外格 → 稳态大水体零扫描、交互区只扫波前 + 凝固区。正确性：流体格状态只可能
     //   因写入改变（本 tick apply 或外部编辑），任何会变化的格 ⊆ 最近写入 ±1 = 盒 → 无漏扫；流场波前 / 蒸发 /

@@ -391,7 +391,7 @@ bool ChunkManager::setBlock(int x, int y, int z, quint8 id, quint8 state)
     if (!c) return false;
     // t188 perf：读 oldId 用于「流体专用脏」分类。isFluidLike(oldId) && isFluidLike(id) = 流体类写
     //   （水流/岩浆流扩散/蒸发/re-leveling、桶倒水）→ 不动 fluidOnlyDirty（保留中性 true / 已被固体清则续 false）；
-    //   否则（任一为实体方块：破/放固体、水×岩浆→Stone/Cobble/Obsidian、沙着地）→ clearFluidOnlyDirty
+    //   否则（任一为实体方块：破/放固体、水×岩浆→Cobble/Obsidian（t1085 后凝固不再产 Stone）、沙着地）→ clearFluidOnlyDirty
     //   （固体 dominate → terrain 类段须重建）。classification 对目标 chunk 与边界邻接 chunk 同源（同一次写）。
     const quint8 oldId = c->blockAt(lx, y, lz);
     const bool fluidOnly = BlockRegistry::isFluidLike(oldId) && BlockRegistry::isFluidLike(id);
