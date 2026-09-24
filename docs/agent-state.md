@@ -14,16 +14,16 @@
 ```yaml
 project: QtMinecraft
 state: IN_PROGRESS
-current_task: **t1088 IN_PROGRESS（parity-bug 修复——甘蔗生长口径归一批）**：t1087 裁定单例外发现两处真实 1.0 口径偏差合并修复，方向 = 收敛 MC 1.0（用户既定准则）：①生长基材门放宽至草/泥土/沙基（与放置门对齐）；②生长上限 5→3（t406 spec lawful 翻案留痕，t418 潜力柱腿同变更修订）。串行 voxel-dev，filter 词 r2058；完成 → 候选池下一位。
+current_task: **t1089 IN_PROGRESS（§14 常设授权候选池——写门家族批·第一分批：固定盒静默写门五员）**：setBlockSilent/setBlockFromEntity/setSnowLayerMerge/clearBlockSilent/setWaterSilent 的「核心域假设」固定盒写门（t1074 登记同族病灶）；逐员调用面盘点（无外环消费场景者如实降级非缺口）+ t1074 五处两模式分流修法同门复用；逐员专属复现腿禁一刀切；destroySphereSilent/tickLeafDecay/重力级联留后续批。串行 voxel-dev，filter 词 r2059；完成 → 候选池下一位。
 current_task_status: IN_PROGRESS
-last_completed_task: t1087 甘蔗自动化纪元裁定单（2026-09-24 docs-only 降级关单，零代码 758 不变——裁定成立但降级理由修正：观察者[MC 1.11]纪元不符；活塞 Beta 1.7 其实在 1.0.0 基线内[候选前提史实有误]，真依据 = 活塞家族已在案裁定计划外[偏差 4/t1004]——parity-ledger 已补录活塞缺席行[台账单源规则清偿]；甘蔗本体四面完整；例外发现两处真实口径偏差转 t1088；核实副产品 = 主控派工令「中继器」表述纠偏[中继器 Beta 1.3 零存在]。详录 = dev-plan t1087 关单条目）
-last_completed_task_prev: t1086 砂轮纪元裁定单（2026-09-24 docs-only 降级关单——MC 1.14 机制非 1.0 纪元，修复职能铁砧面已完整承担。详录 = dev-plan t1086 关单条目）
-last_completed_task_commits: 零代码（t1087 docs-only 裁定单，仅本 docs 提交；最近代码提交 = fix(t1085) 021eb7b + test(t1085) 356527b）
-last_verified_commit: test(t1085)（矩阵 **758 PASS / 0 FAIL ×2**：matrix_t1085_{pos,final}.log；新基线腿集合 md5[配方 grep -a -oE "^PASS \| [a-z0-9]+ " | sort | md5sum]三日志全等 3b232c04018150f6b2457fb45388eded；NEG-1 恰红 {r2056b} / NEG-2 红 {r2056a,b,c}[据实修订宣告] 双还原全绿；冒烟 tail20 回填 logs/voxelsandbox_t1085_tail20.log[132,044 B]；主控独立脱离式复跑 758/0 同 md5 三方恒等 matrix_orch_t1085_verify.log）
+last_completed_task: t1088 甘蔗生长口径归一批（2026-09-25 闭环；矩阵 758→762——parity-bug 修复收敛 MC 1.0：基材门放宽草/泥土/沙基[sugarcaneBaseBlock 单一权威谓词两面共读] + 上限 5→3[t406「max5」lawful 翻案双锚留痕，t418 潜力门死码同批退役]；盘点纠正任务书 = t418 潜力柱矩阵腿为零[钉面全在源码]；parity-ledger 两 ✅ 行清偿。详录 = dev-plan t1088 关单条目）
+last_completed_task_prev: t1087 甘蔗自动化纪元裁定单（2026-09-24 docs-only 降级关单，降级理由修正[活塞在 1.0 基线内]+台账补录活塞行+例外发现转 t1088。详录 = dev-plan t1087 关单条目）
+last_completed_task_commits: fix(t1088)（8eac8db：谓词收口+生长门放宽+上限归一+t418 退役，src 五文件 60+/37-）+ test(t1088)（d923625：section58 r2058a-d 四腿+helpers/CMake 入册）
+last_verified_commit: test(t1088)（矩阵 **762 PASS / 0 FAIL ×2**：matrix_t1088_{pos,final}.log；新基线腿集合 md5[配方 grep -a -oE "^PASS \| [a-z0-9]+ " | sort | md5sum]三日志全等 3d672867d2f47e63c89b0da93544ad23；NEG-1 恰红 {r2058a,d 基材子面} / NEG-2 恰红 {r2058c,d 上限子面} 双还原全绿；冒烟 tail20 主控补强回填[agent 件 2.4KB 缺横幅/root objects——主控亲跑 15s 覆写 132KB 实文]；主控独立脱离式复跑 762/0 同 md5 三方恒等 matrix_orch_t1088_verify.log）
 last_governance_review: 2026-09-24（audit #18 GREEN——窗口 9cd700b..9d5ee4e 15 提交/t1079-t1083 五闭环证据链全实核[五单 md5 三方复跑全等 + t1081 子集恒等式独立复算成立 + NEG 八份恰红面零多余 + tail20 五份全实文]；账本三方一致/腿数链 738→742→746→746→750 无断；15 提交零署名；2 项低级发现 F1[t1080 证据措辞精确化]F2[probe 残骸 void 标注]批内清偿；详见 governance-audit-2026-09-24.md）
-governance_review_due: false
-completed_tasks_since_governance_review: 5（t1084 + t1085 + t1086[docs-only] + t1087[docs-only] + t1088 计 5[含在飞 t1088 计数口径 = 闭单后触发审计 #19]；审计 #18 GREEN 于 2026-09-24）
-next_task: **t1088 甘蔗生长口径归一批（parity-bug，在飞）→ 之后候选池顺延（写门家族批[真实代码批]/棕色染料生存源/漏斗降级四件/红石家族纪元标注审计[新增低优先]/removeDatabase 卫生单…）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1088 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
+governance_review_due: true
+completed_tasks_since_governance_review: 5（t1084 + t1085 + t1086[docs-only] + t1087[docs-only] + t1088 闭环；审计 #18 GREEN 于 2026-09-24——**审计 #19 到期**）
+next_task: **审计 #19（5/5 到期，只读独立 agent，窗口 = 429bf73[审计 #18 落档]..t1088 闭单 docs HEAD）→ t1089 写门家族第一分批（候选池，在飞）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1088 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -33,7 +33,7 @@ needs_human: false
 
 ## Workspace Guard
 
-- HEAD = t1085 岩浆×水代码终态（fix(t1085) 021eb7b + test(t1085) 356527b 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 758 腿满绿（57 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**禁并发构建/并发跑矩阵**（t813 build_stamps 每次构建强制全目标重链——两进程并发构建可产出损坏 exe，2026-09-21 三崩留痕；并发跑共享夹具面同理存疑，验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075 过程日志落仓库根 + t1081 复跑双进程事故两教训——cwd 相对路径在跨命令持久化下不可靠）。**冒烟证据每闭环回填 tail20**（审计 #16-F4/#17-F1 两现——冒烟后立即 cp logs/voxelsandbox.log 为 logs/voxelsandbox_<task>_tail20.log）。
+- HEAD = t1088 甘蔗口径归一代码终态（fix(t1088) 8eac8db + test(t1088) d923625 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 762 腿满绿（58 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**禁并发构建/并发跑矩阵**（t813 build_stamps 每次构建强制全目标重链——两进程并发构建可产出损坏 exe，2026-09-21 三崩留痕；并发跑共享夹具面同理存疑，验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075 过程日志落仓库根 + t1081 复跑双进程事故两教训——cwd 相对路径在跨命令持久化下不可靠）。**冒烟证据每闭环回填 tail20**（审计 #16-F4/#17-F1 两现 + t1088 三现——回填件须含启动横幅与 root objects 实文，主控验收时核对）。
 - 纪律①-⑨全在案；**大 TU 编译一律 -j 1**（09-13 蓝屏教训；分段后单段增量 -j 4 实测安全）。**矩阵测试为 tools/matrix/ 分层结构**：改探针只重编对应段 TU（秒级）+ `--filter <substring>` 只跑本任务腿；新腿落对应段文件，新段置尾 runAll 末执行、须 ≤500KB；section11 起「自建 fresh 小世界」先例（48×48×96 seed 82 + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)）。
 - **R20.06 起值类型纪律**：src/Core/ 新值类型一律 result.h QObjectFree 编译期钉 + 头内 static_assert；命令/事件队列满载拒绝与快照队列覆盖最老是两域容量策略分化，勿「统一」。
 - **R20.07 起编排壳纪律**：GameSession 只做编排（命令 → 整 tick 边界 → World::setBlock 权威），禁复制游戏逻辑；**QML 现行玩法路径零变化是 R20 主线不变量**（Main.qml 含 "GameSession" 即违零迁移阴性钉 r2007b）。
@@ -50,6 +50,7 @@ needs_human: false
 
 ## Recovery Point
 
+- 最近闭环：**t1088 甘蔗生长口径归一批**（2026-09-25，fix(t1088) 8eac8db + test(t1088) d923625 + 本 docs）：矩阵 758→762。**parity-bug 修复收敛 MC 1.0**（t1087 裁定单例外发现两处）：①基材门放宽草/泥土/沙基——sugarcaneBaseBlock 单一权威谓词两面共读（生长门 t446「仅沙基」退役 + 放置门手写 4-way 字面退役）；②上限 5→3——t406「max5」lawful 翻案双锚留痕 + t418 拔高潜力门死码同批退役（盘点发现 t418 矩阵腿为零，钉面全在源码）；worldgen 列高 1..3 公式零改动。腿 r2058a-d（NEG 红模式 {a,d 基材}/{c,d 上限} 分域可归因）；全矩阵 pos/final 762/0 md5 恒等 3d672867 + 主控复跑三方恒等；**tail20 补强**（agent 回填件缺横幅/root objects——主控亲跑冒烟覆写，纪律三现：回填件须核对实文）。台账 parity-ledger 两 ✅ 行。**待实机确认**：草/土基甘蔗长高至 3/存量 4..5 柱保留观感/生长节奏/放置面回归。**下一任务 = 审计 #19 + t1089 写门家族第一分批**。
 - 最近闭环：**t1087 甘蔗自动化纪元裁定单**（2026-09-24，docs-only 零代码 758 不变 + 本 docs）：裁定成立但**降级理由修正**——观察者[MC 1.11]纪元不符成立；**活塞 Beta 1.7 其实在 1.0.0 基线内（候选前提史实有误）**，真依据 = 活塞家族已由结构考据批在案裁定计划外（偏差 4/丛林神殿三拉杆门/t1004）→ **parity-ledger 补录活塞缺席行**（台账单源规则清偿）。甘蔗本体 worldgen/生长/收割/掉落四面完整。**例外发现两处真实 1.0 口径偏差转 t1088 parity-bug**（基材门内战 + 上限 5 vs 3 两面分裂）；旁证登记红石家族纪元标注审计（红石灯 1.2.1/红石块·投掷器 1.5 混入）入候选池低优先。**待实机确认**：无新增。**下一任务 = t1088 甘蔗生长口径归一批**。
 - 最近闭环：**t1086 砂轮纪元裁定单**（2026-09-24，docs-only 零代码零腿，矩阵 758 不变 + 本 docs）：裁定 = 砂轮系 MC 1.14（Village & Pillage）机制，1.0 基准无此方块 → 按非 1.0 机制如实降级登记（t1078 陶瓦/染色玻璃同款先例）。两职能均无实现正当性：修复已由铁砧面完整承担（AnvilUI 材料修复+双件合并+附魔并集+XP，单一收口）、去附魔系 1.14 机制（1.0 无途径）。核实 = grindstone/砂轮全仓零命中（纯新增面非失真）+ 配套面三度在位（铁砧三阶段/EnchantRegistry/ToolRegistry 耐久）。**核实先行第六型产出 = 纪元裁定单**。顺带修正：t1084/t1085 闭单漏摘的两条候选池条目本批补摘。**待实机确认**：无新增。**下一任务 = t1087 甘蔗自动化裁定单**。
 - 最近闭环：**t1085 岩浆×水接触规则**（2026-09-24，fix(t1085) 021eb7b + test(t1085) 356527b + 本 docs）：矩阵 754→758。**候选池七度失真但属语义纠偏型**：两条黑曜石面早已在（t411 pass A/t472 pass B）零改动钉现状；唯一缺口 = t438 旧口径把圆石化落在水格——**MC 1.0 引证裁定 pre-flattening BlockFluid::checkForMixing 恒落岩浆格**（源→黑曜石/流→圆石/水格永不转化=圆石机永续前提；台账自证 t411 行与 t438 行矛盾）。交付 = pass B 重写（不问水方 state + break 单登记）+ solidifyKeys 四守卫（蒸发/扩散/下落/re-leveling 防应用序覆写）+ level 互斥论证 + 增量索引收敛注（凝固只减不增——lava-never-settles 教训对齐）。腿 r2056a-d；NEG-1 {r2056b} 恰红 / NEG-2 {r2056a,b,c}（据实修订宣告）；全矩阵 pos/final 758/0 md5 恒等 3b232c04 + 主控复跑三方恒等。429 一次（16:59/17:16）同 agent 续作零重做。**待实机确认**：岩浆入水观感[水面保留 vs 旧版烧石]/圆石机续产/既有存档一次性结算差异[worldgen 岩浆全源预期零差]/黑曜石路径回归。**下一任务 = t1086 砂轮**。

@@ -18,6 +18,8 @@
 | 低-4 | 成熟小麦种子数 | Beta/基岩=0-3（钉死依据）；现代 Java 亦 0-3（review0913 复核） | bounded(1,4) | **✅ 已清偿（t1046）**：按项目基准钉死 0-3（51cc43c）；**引证行勘误（review0913-A/B）**：旧读「Java 现代=1-4」撤回——现代 Java 同为 0-3，与钉死值一致 |
 | 低-5 | 天气剩余时长 | level.dat 存 RainTime/ThunderTime 精确续跑 | 只存态，剩余时长重抽 | **✅ 已清偿（t1046）**：world_meta 追加剩余秒键精确续跑（51cc43c） |
 | 低-6 | 成就集 | MC 无「进入地牢/神殿/按种首杀/箱车取物」等发明项；ride_minecart（On A Rail）=乘矿车到达距起点单方向 ≥500 米 | 约 10 项发明项；骑上即解锁 | **✅ 已清偿（t1046+t1048）**：t1046 首版对「1km 累计」+发明项「（原创）」标注（51cc43c/f9effa4）——**t1048 勘误**：口径两轴皆偏，改距乘车起点单方向 ≥500 格**径向位移**制（起点沿记录 + 逐帧位置采样，review0913-A P2-1 wiki 引证；183782b/a72ca74） |
+| t1088-1 | **甘蔗生长基材门** | MC 1.0：sugar cane 可栽于 grass block / dirt / sand 且须直接邻水（草/土基邻水可长） | 生长门仅沙基（t446 修法）vs 放置门草/土/沙基 → 草/土基可种但永不长（两面分裂） | **✅ 已清偿（t1088，8eac8db）**：两面共读 sugarcaneBaseBlock 单一权威 {Grass,Dirt,Sand,Sugarcane}；三元组 = MC Java 1.0（pre-flattening 栽培面）+ Minecraft.wiki Sugar Cane "can be planted on ... grass block, dirt ... and sand that is directly adjacent to water"（2026 实读）+ 收敛 MC 1.0（放置门反向收窄弃因：worldgen 沙列生成 + 既有玩法面） |
+| t1088-2 | **甘蔗生长上限** | MC 1.0：random-tick 自然生长上限 3（BlockReed 柱高 <3 才升格）；worldgen 初生 1..3 | 生长门上限 5（t406 spec「max5」）vs 放置面上限 3（同方块两面分裂） | **✅ 已清偿（t1088，8eac8db）**：归一 3（**t406 spec lawful 翻案**留痕 world.h，t1081 翻案先例）；t418 拔高潜力门（4..5）随归一死码退役；三元组 = MC Java 1.0 random-tick + Minecraft.wiki Sugar Cane（自然生长至 3 格）+ 翻案成立（同方块两面口径分裂必须收敛、方向按 1.0 基准） |
 | 低-7 | 结构门控环境音 | Java 环境音=黑暗/地下随机，与结构无关 | 按结构区域门控（音源原创合成合规） | 登记「原创呈现层口径」维持（不修码） |
 
 ## 刻意偏离-登记（已定案，用户已知情或在册）
