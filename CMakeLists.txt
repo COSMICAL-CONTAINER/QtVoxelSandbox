@@ -1313,6 +1313,7 @@ add_executable(redstone_matrix_test
     #   r2060；sparse 构造缝 + loadChunkAt 物化（r2053c/r2047c 同门）——零新 include 面，
     #   helpers 枢纽已含全部依赖）。
     tools/matrix/section60_write_gate_scan_box.cpp
+    tools/matrix/section61_write_gate_residual.cpp
     src/Game/hopperstore.h
     src/Game/entityshadowfield.cpp
     src/Game/entityshadowfield.h
