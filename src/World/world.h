@@ -613,17 +613,20 @@ public:
     //   沿用 worldgen 经 m_chunks.setBlock 直写不触发 blockPlaced 的既有约定——避免 onBlockPlaced 的 survival
     //   takeStack 误触、多余粒子 / 音效把链式塌落刷成噪音。仅在目标格当前为**空气或水**时写入（t220：着地格
     //   由 FallingBlock 列扫保证为 air/水 —— 沙落水穿透后填堵水格；防御：其余已占用方块不覆盖）。越界 /
-    //   非空非水 → false。非 Q_INVOKABLE（仅 EntityManager C++ 调）。
+    //   非空非水 → false。t1089：域门两模式分流（Fixed 核心盒原样 / sparse y 域同构 + x/z 无界，
+    //   统一物化门拒未物化）。「越界」自本单起按模式取域。非 Q_INVOKABLE（仅 EntityManager C++ 调）。
     bool setBlockFromEntity(int x, int y, int z, quint8 id);
     // t527 积雪层下落实体着地专用（5 参数带 state）：同 4 参数 setBlockFromEntity 语义（m_chunks.setBlock 直写 +
     //   emit worldChanged，不发 blockPlaced），但写**带 state 的方块**（state=layers-1 保留层数）。仅 SnowLayer 着地
     //   调本重载（其余 FallingBlock 着地仍走 4 参数 state=0）。同 occ 守卫（仅 air/水可被着地覆盖）。越界 / 非空非水 → false。
+    //   t1089：域门两模式分流同 4 参数版。
     bool setBlockFromEntity(int x, int y, int z, quint8 id, quint8 state);
     // rv-low-batch1 塌落雪层叠层合并专用：塌落 FallingBlock(SnowLayer) 着地遇**另一 SnowLayer**（非完整
     //   立方 → 普通着地分支不接）→ 合并层数（下方层数 + 携带层数，clamp 8；溢出部分由 caller 发
     //   snowLayerCollapseDropped 掉雪球）。本方法覆盖写该格 SnowLayer 的 state（setBlockFromEntity 的 occ
     //   守卫会拒非空格，故独立入口）。复用全部写后钩子（note/光/worldChanged），不发 placed/broken（系统事件）。
-    //   防御：目标格非 SnowLayer → false。越界 → false。非 Q_INVOKABLE（仅 EntityManager C++ 调）。
+    //   防御：目标格非 SnowLayer → false。越界 → false。t1089：域门两模式分流（同 setBlockFromEntity）。
+    //   非 Q_INVOKABLE（仅 EntityManager C++ 调）。
     bool setSnowLayerMerge(int x, int y, int z, quint8 state);
     // t490fix 点火专用静默清方块（绕过 setBlockFromEntity 的 occ 守卫——TNT 是实体方块，occ 守卫会拒）。
     //   背景：playercontroller 右键机关 / 右键 TNT 本体 / 压力板四邻点燃 TNT 时，原写
@@ -634,7 +637,8 @@ public:
     //   语义：跨 chunk 直写 Air（无条件覆盖，**无 occ 守卫**）+ 复用 setBlockFromEntity 的全部写后钩子
     //   （noteGrowthWrite / noteFluidWrite / recomputeLightAround / pokeFluidDirty）+ emit worldChanged +
     //   clearAllDirty，**不发** broken/placed（免粒子音 spam，点火是系统事件非玩家破块）。occ 仍读出作
-    //   oldId 传给 note / 光重算（保持生长 / 流体索引正确）。越界 → false。
+    //   oldId 传给 note / 光重算（保持生长 / 流体索引正确）。越界 → false。t1089：域门两模式分流
+    //   （Fixed 核心盒原样 / sparse y 域同构 + x/z 无界，统一物化门拒未物化）。
     //   ⚠️ **仅供点火路径用**（playercontroller 3 处点燃 TNT 的清原方块）。不要用于破坏 / 沙着地 / 玩家
     //   放置——那些路径需要 occ 守卫或破块事件。非 Q_INVOKABLE（仅 Game/Physics C++ 调）。
     bool clearBlockSilent(int x, int y, int z);
@@ -642,6 +646,8 @@ public:
     //   重建 mesh，但**不**发 broken/placed —— 水流蔓延是系统模拟非玩家动作，避免触发粒子/音效/拾取噪音）。
     //   与 setBlockFromEntity 的差异：支持 state（水流 state 1..7 编码蔓延距离）；无条件覆盖（水流可改既有
     //   水格的 state，或把蒸发的水格写回 air）。id==Air 且 state==0 表示蒸发（清格）。越界 / 无变化 → false。
+    //   t1089：域门两模式分流（Fixed 核心盒原样 / sparse y 域同构 + x/z 无界，统一物化门拒未物化）；
+    //   t1085 契约面（solidifyKeys 四守卫 / noteFluidWrite 增量索引收敛 / 无变化早退）原样不在本门。
     //   id 合法性由 caller 保证（tickWaterFlow 仅传 Water/Air）。复用 recomputeLightAround 增量光照（水
     //   isSolid=false → 非遮光，光场通常无变化，内部早退）。
     //   t174 舀水（playercontroller 空桶）亦走本方法 —— 舀走水格是水流系统操作（非玩家破块），避免 setBlock
@@ -655,6 +661,7 @@ public:
     //   takeStack）。语义：系统事件非玩家破/放（同 setBlockFromEntity/setWaterSilent 既有约定）。
     //   无条件覆盖（无 occ 守卫；caller 保证覆盖合法——锄把 Dirt/Grass 转 Farmland、踩踏把 Farmland 回
     //   Dirt，均属玩家对命中/落点格的合法改写）。越界 / 无变化（id+state 均同）→ false。
+    //   t1089：域门两模式分流（Fixed 核心盒原样 / sparse y 域同构 + x/z 无界，统一物化门拒未物化）。
     //   非 Q_INVOKABLE（仅 Game/Physics C++ 调）。
     bool setBlockSilent(int x, int y, int z, quint8 id, quint8 state);
     // t185 水流重做（增量波前扩散；修 t174 全量 BFS 的「瞬间填平 + 闪烁」bug）。由呈现层 Main.qml 经
