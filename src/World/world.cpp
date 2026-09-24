@@ -23,17 +23,27 @@
 //   10×10 chunk）上成持续掉帧主因（suspect c/d：新扫描 + 甘蔗/耕地 tick 扫全图）。改维护一份「生长方格」位置
 //   集合（m_growthCells），写入路径（setBlock/setBlockFromEntity/setWaterSilent/setVoxelIfAir）经 noteGrowthWrite
 //   增量维护，生长 tick 改遍历该集合（O(生长格数) 而非 O(全图)）；集合空 → 各 tick 零开销早退。
-//   打包布局同 packLeafCell（三轴各 16 位；世界 ≤160³ 远小于 16 位范围），定义在文件顶部供生长 tick（早于
+//   打包布局同 packLeafCell（三轴位型见 packLeafCell 处域注），定义在文件顶部供生长 tick（早于
 //   packLeafCell 第 891 行）使用。
+// t1091 键域（packGrowthCell）符号假设收口（t1090 packLeafCell 同型——键位单一权威别名）：旧
+//   「三轴各取低 16 位」把 sparse 已物化外环（负坐标/出核）的生长 / 流体 / 冰 / 火 / 燃烧 / 电力
+//   格键包成幻影正坐标（quint16(-8)=65528 → tick 回读他格：生长 tick 按「非生长块」误剔除索引项、
+//   流体快照按「非流体」漏扫、燃烧格被「越界防御」整键摘除）。population 增量面（rebuildPopulationCellIndexes
+//   对已物化外环 chunk 的 worldgen 直写回填）把真实负坐标内容灌进这些索引 → 回读面真有幻影行为
+//   后果（t1089「索引内部自洽」留池口径经本单复核**不成立**，勘误如实登记——t1090 packLeafCell
+//   锚注的辨析文本系彼时口径，历史留痕不改）。修法 = 前置声明 + 直调 packLeafCell/unpackLeafCell
+//   （x:26 带符号 | y:12 | z:26 保符号往返，域注见 packLeafCell 处；位型/掩码字面单一权威零重复，
+//   两键空间从此互斥同型——同 (x,y,z) 恒同键）。域注（截断面如实登记）：x/z 26 位带符号 ±33.5M
+//   （覆盖 MC 世界边界）；y 12 位 [0,4096)（两模式有限高，非负性由各写入面 y 域门保证）。
+static inline quint64 packLeafCell(int x, int y, int z);
+static inline void unpackLeafCell(quint64 k, int &x, int &y, int &z);
 static inline quint64 packGrowthCell(int x, int y, int z)
 {
-    return (quint64(quint16(x)) << 32) | (quint64(quint16(y)) << 16) | quint64(quint16(z));
+    return packLeafCell(x, y, z); // t1091：键位单一权威别名（位型 / 域注见 packLeafCell 处）
 }
 static inline void unpackGrowthCell(quint64 k, int &x, int &y, int &z)
 {
-    x = int(quint16(k >> 32));
-    y = int(quint16(k >> 16));
-    z = int(quint16(k));
+    unpackLeafCell(k, x, y, z);
 }
 // 是否「生长方块」（生长 tick 关心的类：作物 / 甘蔗 / 耕地 / 树苗 / t514 浆果丛）。只读 BlockRegistry 枚举。
 static inline bool isGrowthBlock(quint8 id)
@@ -1826,7 +1836,36 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
 //   由该面闸住，远侧（正出核）行为已达）/ packGrowthCell quint16 截断符号假设面（负坐标键回读幻
 //   影坐标——索引成员一致性不受影响，tick 回读面留池）。
 //   t1090 清偿注（后续批落地回填）：前三项 + FallingBlock tick 面已由 t1090 后续批清偿（扫描门与
-//   盒域批，批头锚注见 packLeafCell 上方）；packGrowthCell 截断面与五处辅助固定盒门**仍留池**。
+//   盒域批，批头锚注见 packLeafCell 上方）；packGrowthCell 截断面与五处辅助固定盒门已由 t1091
+//   第三批残项清偿（批头锚注见 packGrowthCell 上方与下方 t1091 批头）——本批现场新发现的
+//   tickRedstone inBounds / goldenRailChainStep 核心盒与 recheckAttachments 子钩子盒面**仍留池**。
+// ── t1091 写门家族「核心域假设」同族清偿·第三批残项（实体 tick 列门 + 键域 + 辅助固定盒门）────
+// 病灶：t1074/t1089/t1090 同族收官批。三组九员 + 键域 + 链面：①entitymanager primed TNT tick 与
+//   Mob tick 的同形 cx<0||cz<0 列跳过（t1090 留池）+ entitystore ItemEntity tick 同形门（任务书
+//   「entitymanager 三处」的第三员经现场核实定位在 EntityStore——EntityManager Item kind 仅遗留
+//   视觉中性化，现役掉落物物理在 EntityStore::tick）；②packGrowthCell quint16 截断（t1089 留池
+//   ——复核裁定**真缺口**：population 增量面把已物化外环的真实负坐标生长 / 流体 / 冰 / 火 / 燃烧 /
+//   电力格灌进索引，tick 回读幻影坐标 = 外环作物不长 / 流体不流 / 燃烧键每窗被整键摘除；「索引
+//   内部自洽」旧口径勘误如实登记）+ 其回读链上的 tickFire 四门（快照 / 燃料 / 蔓延 / 燃烧——键保
+//   符号后这些是负侧火 tick 的承重收口；燃烧门旧码是**整键摘除**破坏面）与 fireSupportedAt /
+//   fireWaterNeighborAt 邻域门（tickFire/ignite 消费链承重面，只开成员门会把「外环火冻在快照外」
+//   换成「误判失撑误灭 / 湿燃料误燃」的负侧回归，合并清偿如实登记）+ tickWaterFlow/tickLavaFlow
+//   十处邻扫/盒门（触岩浆/触水接触扫描、源计数、蒸发支撑、水平蔓延、冲刷/冲耕——外环流体回读链
+//   的收口面：键保符号后这些门是「外环流体不流」的病灶本体）；③五处辅助固定盒门
+//   （fireRainExposedAt / igniteFlammableAt / isBurningAt / recheckAttachmentsAfterClear 含火把
+//   邻扫门 / recomputeRailConnections——雨露判 / 点燃 / 燃烧查询 / 附着复检 / 铁轨重连的外环可达
+//   性逐员核实全真）。修法纪律同 t1089/t1090：Fixed 分支现行语句原样（零变化墙）；sparse 分支 y
+//   域两模式同构（有限高）+ x/z 无界；读经 blockAt/stateAt/skyLightAt 物化门、写经 setBlock 家族 /
+//   侧表键（t1091 键域）——扫描域无界化（t1090 裁定先例），未加 chunkContentPresent（对单一权威
+//   的重复，r2059g 物化门行计数钉维持 7 不动）。键 = t1090 packLeafCell 模板（保符号别名，位型
+//   单一权威零重复；掩码字面不在注释复写——r2060f 全文件计数钉 ==4）。实体门 = t1090 FallingBlock
+//   两模式分流同式（!world->isSparse() 守卫，Fixed 原句零变化墙）。
+// 现场核实（逐员）：九员外环消费场景全部真实可达（玩家位 / 实体位 / 索引 tick / population 驱动）
+//   → **全确认零降级**（含 packGrowthCell 复核翻案——t1089 留池口径勘误）。
+// 留池登记（本批现场新发现，禁顺手修，后续批另立单）：tickRedstone inBounds（Phase A seedDust /
+//   Phase B addReceiver 核心盒——m_powerDirty 回读链的负侧收口仍在）+ goldenRailChainStep px/pz 盒
+//   + recheckAttachments ① 族子钩子 / 柱坍盒门（清单见 recheckAttachmentsAfterClear 内留池注）+
+//   entitymanager mob 火/岩浆接触足印扫描 worldW/worldD 盒（中心列快速路径不受影响）。
 // ────────────────────────────────────────────────────────────────────────────────────────
 
 // t117/t220 FallingBlock 着地专用：m_chunks.setBlock 直写 + emit worldChanged，不发 blockPlaced（与玩家放置
@@ -2293,10 +2332,14 @@ void World::tickWaterFlow()
     QElapsedTimer t380t;
     t380t.start(); // t380 perf：可观测活跃扫描耗时（仅非稳态扫描打，稳态早退不打 → 无噪音）
 
-    // 体素线性 key：x + z*W + y*W*D。世界 ≤ 80×80×64 = 409600 < INT_MAX，编码安全。仅用于 adds 去重 / 取 min。
-    auto keyOf = [W, D](int x, int y, int z) -> long long {
-        return static_cast<long long>(x) + static_cast<long long>(z) * W
-             + static_cast<long long>(y) * static_cast<long long>(W) * D;
+    // t1091 键域（tickWaterFlow 体素键）符号假设收口：旧「x + z*W + y*W*D 线性打包 + 应用端模逆解码」
+    //   只在 [0,W)×[0,D) 核心域自洽——sparse 负坐标格编出与正坐标他格**碰撞**的键（例：W=D=48 时
+    //   keyOf(-7,81,-8) == keyOf(41,80,39)），解码更把扩散写往幻影格（负侧波前全数写丢 = 「外环流体
+    //   不流」的深层病灶面，与邻扫门同链）。改用 t1091 键域（packGrowthCell）保符号打包（x:26 带符号
+    //   | y:12 | z:26，单射 + 精确逆解码）；键只在本 tick 内生灭，核心域新旧方案语义等价（去重 / 取
+    //   min / 精确解码逐位同行为），仅编码值不同。
+    const auto keyOf = [](int x, int y, int z) -> quint64 {
+        return packGrowthCell(x, y, z);
     };
 
     // 1) 快照当前水格（tick 内栅格不变 —— 新增/蒸发在 pass 末统一应用）。
@@ -2331,7 +2374,14 @@ void World::tickWaterFlow()
             if (c.level == 0) continue; // 仅流水触发交互（水源触岩浆不凝固）
             for (const auto &n : neigh) {
                 const int nx = c.x + n[0], ny = c.y + n[1], nz = c.z + n[2];
-                if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+                // t1091 邻域门（tickWaterFlow 触岩浆邻扫）两模式分流（Fixed 分支现行语句原样——
+                //   零变化墙）：sparse y 同构 + x/z 无界——旧码核心盒把外环流水×岩浆源的黑曜石凝固
+                //   漏判。邻读经 blockAt/stateAt 物化门。
+                if (m_chunks.mode() == WorldMode::Fixed) {
+                    if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+                } else if (ny < 0 || ny >= H) {
+                    continue; // y 域两模式同构（有限高）；x/z 无界
+                }
                 if (m_chunks.blockAt(nx, ny, nz) == BlockRegistry::Lava
                     && m_chunks.stateAt(nx, ny, nz) == 0) {
                     obsidianTargets.push_back({nx, ny, nz, 0});
@@ -2341,8 +2391,8 @@ void World::tickWaterFlow()
     }
 
     // 新增表：key → 新 level（多源指向同一格取 min = 最短源距，机制对齐 MC）。
-    std::unordered_map<long long, quint8> adds;
-    auto tryAdd = [&](long long k, quint8 lvl) {
+    std::unordered_map<quint64, quint8> adds;
+    auto tryAdd = [&](quint64 k, quint8 lvl) {
         auto it = adds.find(k);
         if (it == adds.end()) adds.emplace(k, lvl);
         else if (it->second > lvl) it->second = lvl;
@@ -2355,12 +2405,18 @@ void World::tickWaterFlow()
     //   蛛网掉线 0x219）。石头等非附着块不 wash（阴性对照腿）。washKeys 去重（多源指向同一格只毁一次）。
     struct WashedCell { int x, y, z; quint8 id; }; // 被毁格 + 原方块 id（dropId 掉落用）
     std::vector<WashedCell> washed;
-    std::unordered_set<long long> washKeys;
+    std::unordered_set<quint64> washKeys;
     auto tryWashCell = [&](int x, int y, int z) -> bool {
-        if (x < 0 || y < 0 || z < 0 || x >= W || y >= H || z >= D) return false;
+        // t1091 域门（tickWaterFlow 冲刷邻格）两模式分流（Fixed 分支现行语句原样——零变化墙）：
+        //   sparse y 同构 + x/z 无界——旧码核心盒把外环流水冲毁附着物漏判。读经 blockAt 物化门。
+        if (m_chunks.mode() == WorldMode::Fixed) {
+            if (x < 0 || y < 0 || z < 0 || x >= W || y >= H || z >= D) return false;
+        } else {
+            if (y < 0 || y >= H) return false; // y 域两模式同构（有限高）；x/z 无界
+        }
         const quint8 id = m_chunks.blockAt(x, y, z);
         if (!BlockRegistry::isAttachableBlock(id)) return false;
-        const long long k = keyOf(x, y, z);
+        const quint64 k = keyOf(x, y, z);
         if (!washKeys.count(k)) {
             washKeys.insert(k);
             washed.push_back({x, y, z, id});
@@ -2377,12 +2433,18 @@ void World::tickWaterFlow()
     //   注记）。farmlandWashKeys 去重（多源指向同一格只转一次）。下游应用段见 washed 应用之后。
     struct FarmlandWashedCell { int x, y, z; };
     std::vector<FarmlandWashedCell> farmlandWashed;
-    std::unordered_set<long long> farmlandWashKeys;
+    std::unordered_set<quint64> farmlandWashKeys;
     auto tryWashFarmland = [&](int x, int y, int z, quint8 srcLevel) -> bool {
         if (srcLevel == 0) return false; // 静水源接触不冲（hydration 基建面；流水 srcLevel>0 才冲）
-        if (x < 0 || y < 0 || z < 0 || x >= W || y >= H || z >= D) return false;
+        // t1091 域门（tickWaterFlow 冲耕邻格）两模式分流（Fixed 分支现行语句原样——零变化墙）：
+        //   sparse y 同构 + x/z 无界——旧码核心盒把外环流水冲耕漏判。读经 blockAt 物化门。
+        if (m_chunks.mode() == WorldMode::Fixed) {
+            if (x < 0 || y < 0 || z < 0 || x >= W || y >= H || z >= D) return false;
+        } else {
+            if (y < 0 || y >= H) return false; // y 域两模式同构（有限高）；x/z 无界
+        }
         if (m_chunks.blockAt(x, y, z) != BlockRegistry::Farmland) return false;
-        const long long k = keyOf(x, y, z);
+        const quint64 k = keyOf(x, y, z);
         if (!farmlandWashKeys.count(k)) {
             farmlandWashKeys.insert(k);
             farmlandWashed.push_back({x, y, z});
@@ -2409,14 +2471,19 @@ void World::tickWaterFlow()
     //    出的流水仅 1 源邻居 → 不升源（与 MC 单桶不形成无限源一致）。两玩家倒水点距 ≤2 → 中间格被两源夹
     //    → 升源 → 两滩融合为连续水源体（用户诉求「两股流水相遇应融合，现明显边界 / 各为固方块」之修复）。
     std::vector<WCell> srcRegs;
-    std::unordered_set<long long> srcRegKeys;
+    std::unordered_set<quint64> srcRegKeys;
     for (const WCell &c : cells) {
         if (c.level == 0) continue; // 已是水源
         // a) 水平 4 向水源邻居计数（MC：至少 2 个水源夹住本格）。
         int srcNeighbors = 0;
         for (const auto &d : hd) {
             const int nx = c.x + d[0], nz = c.z + d[1];
-            if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
+            // t1091 邻域门（tickWaterFlow 源计数邻扫）两模式分流（Fixed 分支现行语句原样——零
+            //   变化墙）：sparse x/z 无界——旧码核心盒把负向水源邻居漏计（外环无限水升源永不达成）。
+            //   邻读经 blockAt/stateAt 物化门。
+            if (m_chunks.mode() == WorldMode::Fixed) {
+                if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
+            }
             if (m_chunks.blockAt(nx, c.y, nz) == BlockRegistry::Water
                 && m_chunks.stateAt(nx, c.y, nz) == 0) {
                 ++srcNeighbors;
@@ -2447,7 +2514,7 @@ void World::tickWaterFlow()
     //    （其本就 2 源邻居 → 必有更低 level 邻居 → supported，本不会进 evaps，此处显式跳过为防御 / 可读）。
     //    结果同时入 evapKeys（key 集合）—— 扩散 pass 据此跳过退场格，断「向内回填」震荡（t221）。
     std::vector<WCell> evaps;
-    std::unordered_set<long long> evapKeys;
+    std::unordered_set<quint64> evapKeys;
     for (const WCell &c : cells) {
         if (c.level == 0) continue;
         if (srcRegKeys.count(keyOf(c.x, c.y, c.z))) continue; // t224：即将升源，不蒸发
@@ -2459,7 +2526,12 @@ void World::tickWaterFlow()
         if (!supported) {
             for (const auto &d : hd) {
                 const int nx = c.x + d[0], nz = c.z + d[1];
-                if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
+                // t1091 邻域门（tickWaterFlow 蒸发支撑邻扫）两模式分流（Fixed 分支现行语句原样
+                //   ——零变化墙）：sparse x/z 无界——旧码核心盒把负向更低 level 支撑漏判（外环
+                //   流水被误蒸发）。邻读经 blockAt/stateAt 物化门。
+                if (m_chunks.mode() == WorldMode::Fixed) {
+                    if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
+                }
                 if (m_chunks.blockAt(nx, c.y, nz) != BlockRegistry::Water) continue;
                 if (m_chunks.stateAt(nx, c.y, nz) < c.level) { supported = true; break; }
             }
@@ -2505,8 +2577,14 @@ void World::tickWaterFlow()
         if (bk == 1 && c.level < kMaxFlowLevel) {
             for (const auto &d : hd) {
                 const int nx = c.x + d[0], nz = c.z + d[1];
-                if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
-                const long long nbKey = keyOf(nx, c.y, nz);
+                // t1091 邻域门（tickWaterFlow 水平蔓延邻扫）两模式分流（Fixed 分支现行语句原样
+                //   ——零变化墙）：sparse x/z 无界——旧码核心盒把负向蔓延截断（「外环流体不流」
+                //   的病灶本体面：波前永不越出核心盒）。邻读经 blockAt/stateAt 物化门；扩散写经
+                //   setWaterSilent（t1089 域门）物化拒零副作用。
+                if (m_chunks.mode() == WorldMode::Fixed) {
+                    if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
+                }
+                const quint64 nbKey = keyOf(nx, c.y, nz);
                 // 不动本 tick 退场 / 升源的邻居（前者将变 air、后者将变源；写它们会被 apply 后续覆盖 = 错）。
                 if (evapKeys.count(nbKey) || srcRegKeys.count(nbKey)) continue;
                 const quint8 nbId = m_chunks.blockAt(nx, c.y, nz);
@@ -2572,11 +2650,8 @@ void World::tickWaterFlow()
     for (const FarmlandWashedCell &fw : farmlandWashed)
         anyChange |= setWaterSilent(fw.x, fw.y, fw.z, BlockRegistry::Dirt, 0);
     for (const auto &kv : adds) {
-        const long long k = kv.first;
-        const int x = static_cast<int>(k % W);
-        const long long kz = k / W;
-        const int z = static_cast<int>(kz % D);
-        const int y = static_cast<int>(kz / D);
+        int x, y, z;
+        unpackGrowthCell(kv.first, x, y, z); // t1091 键域：保符号精确逆解码（旧模逆只在核心域自洽）
         anyChange |= setWaterSilent(x, y, z, BlockRegistry::Water, kv.second);
     }
     m_batchFluid = false;
@@ -2624,9 +2699,11 @@ void World::tickLavaFlow()
     QElapsedTimer t380t;
     t380t.start(); // t380 perf：活跃岩浆扫描耗时（仅非稳态打）
 
-    auto keyOf = [W, D](int x, int y, int z) -> long long {
-        return static_cast<long long>(x) + static_cast<long long>(z) * W
-             + static_cast<long long>(y) * static_cast<long long>(W) * D;
+    // t1091 键域（tickLavaFlow 体素键）符号假设收口：同 tickWaterFlow——线性打包在 sparse 负坐标域
+    //   碰撞 + 幻影解码，改用 t1091 键域（packGrowthCell）保符号打包（单射 + 精确逆解码，核心域语义
+    //   等价仅编码值不同）。
+    const auto keyOf = [](int x, int y, int z) -> quint64 {
+        return packGrowthCell(x, y, z);
     };
 
     // 1) 快照当前岩浆格（perf：遍历 m_lavaCells O(岩浆格数) 替代全图扫描 O(3.28M)；同 tickWaterFlow）。
@@ -2666,14 +2743,21 @@ void World::tickLavaFlow()
     //   教训面：凝固只减 cells 不增，稳定态可达）。
     struct SolidifyTarget { int x, y, z; quint8 result; };
     std::vector<SolidifyTarget> solidifyTargets;
-    std::unordered_set<long long> solidifyKeys;
+    std::unordered_set<quint64> solidifyKeys;
     {
         static const int neigh[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
         for (const LCell &c : cells) {
             if (c.level == 0) continue; // 仅流岩浆触发交互（岩浆源触水归 obsidian 双支）
             for (const auto &n : neigh) {
                 const int nx = c.x + n[0], ny = c.y + n[1], nz = c.z + n[2];
-                if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+                // t1091 邻域门（tickLavaFlow 触水邻扫A）两模式分流（Fixed 分支现行语句原样——
+                //   零变化墙）：sparse y 同构 + x/z 无界——旧码核心盒把外环流岩浆×水的圆石凝固
+                //   漏判（t1085 链负侧半边）。邻读经 blockAt/stateAt 物化门。
+                if (m_chunks.mode() == WorldMode::Fixed) {
+                    if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+                } else if (ny < 0 || ny >= H) {
+                    continue; // y 域两模式同构（有限高）；x/z 无界
+                }
                 if (m_chunks.blockAt(nx, ny, nz) != BlockRegistry::Water) continue;
                 // 凝固本流岩浆格为圆石（水方 state 不问——源/流水同结算；1.0 水格恒存活不转化）。
                 //   显式转 quint8（BlockRegistry::Id 枚举），避免 -Wextra 枚举/标量混用告警（lessons-learned）。
@@ -2699,7 +2783,14 @@ void World::tickLavaFlow()
             if (c.level != 0) continue; // 仅岩浆源触发本支（流岩浆由上方 solidify pass 处理）
             for (const auto &n : neigh) {
                 const int nx = c.x + n[0], ny = c.y + n[1], nz = c.z + n[2];
-                if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+                // t1091 邻域门（tickLavaFlow 触水邻扫B）两模式分流（Fixed 分支现行语句原样——
+                //   零变化墙）：sparse y 同构 + x/z 无界——旧码核心盒把外环岩浆源×水的黑曜石凝固
+                //   漏判（t1085 链负侧半边）。邻读经 blockAt/stateAt 物化门。
+                if (m_chunks.mode() == WorldMode::Fixed) {
+                    if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+                } else if (ny < 0 || ny >= H) {
+                    continue; // y 域两模式同构（有限高）；x/z 无界
+                }
                 if (m_chunks.blockAt(nx, ny, nz) == BlockRegistry::Water
                     && m_chunks.stateAt(nx, ny, nz) == 0) {
                     obsidianTargets.push_back(c); // 凝固本岩浆源格（机制对齐 MC：岩浆源被水凝固为黑曜石）
@@ -2709,8 +2800,8 @@ void World::tickLavaFlow()
         }
     }
 
-    std::unordered_map<long long, quint8> adds;
-    auto tryAdd = [&](long long k, quint8 lvl) {
+    std::unordered_map<quint64, quint8> adds;
+    auto tryAdd = [&](quint64 k, quint8 lvl) {
         auto it = adds.find(k);
         if (it == adds.end()) adds.emplace(k, lvl);
         else if (it->second > lvl) it->second = lvl;
@@ -2730,7 +2821,7 @@ void World::tickLavaFlow()
     //    t1085：跳过 solidifyKeys —— 本 tick 将触水凝固为圆石的格不再按「失支撑」蒸发（1.0 口径：触水即凝固
     //    不干涸；防应用序凝固先写 Cobble 后被本 pass 覆写 Air 吞产物——凝固与蒸发同域互斥的唯一收口）。
     std::vector<LCell> evaps;
-    std::unordered_set<long long> evapKeys;
+    std::unordered_set<quint64> evapKeys;
     for (const LCell &c : cells) {
         if (c.level == 0) continue; // 岩浆源永不退场（玩家/铁桶/worldgen 管）
         if (solidifyKeys.count(keyOf(c.x, c.y, c.z))) continue; // t1085：将凝固格不蒸发（见 pass B 注）
@@ -2739,7 +2830,12 @@ void World::tickLavaFlow()
         if (!supported) {
             for (const auto &d : hd) {
                 const int nx = c.x + d[0], nz = c.z + d[1];
-                if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
+                // t1091 邻域门（tickLavaFlow 蒸发支撑邻扫）两模式分流（Fixed 分支现行语句原样
+                //   ——零变化墙）：sparse x/z 无界——旧码核心盒把负向更低 level 支撑漏判（外环
+                //   流岩浆被误蒸发）。邻读经 blockAt/stateAt 物化门。
+                if (m_chunks.mode() == WorldMode::Fixed) {
+                    if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
+                }
                 if (m_chunks.blockAt(nx, c.y, nz) != BlockRegistry::Lava) continue;
                 if (m_chunks.stateAt(nx, c.y, nz) < c.level) { supported = true; break; } // 水平更低 level 邻居（近源）支撑
             }
@@ -2773,8 +2869,14 @@ void World::tickLavaFlow()
         if (bk == 1 && c.level < kMaxLavaFlowLevel) {
             for (const auto &d : hd) {
                 const int nx = c.x + d[0], nz = c.z + d[1];
-                if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
-                const long long nbKey = keyOf(nx, c.y, nz);
+                // t1091 邻域门（tickLavaFlow 水平蔓延邻扫）两模式分流（Fixed 分支现行语句原样
+                //   ——零变化墙）：sparse x/z 无界——旧码核心盒把负向蔓延截断（与水 tick 蔓延门
+                //   同病同收口）。邻读经 blockAt/stateAt 物化门；扩散写经 setWaterSilent（t1089
+                //   域门）物化拒零副作用。
+                if (m_chunks.mode() == WorldMode::Fixed) {
+                    if (nx < 0 || nz < 0 || nx >= W || nz >= D) continue;
+                }
+                const quint64 nbKey = keyOf(nx, c.y, nz);
                 if (evapKeys.count(nbKey)) continue;
                 const quint8 nbId = m_chunks.blockAt(nx, c.y, nz);
                 if (nbId == BlockRegistry::Air) {
@@ -2807,11 +2909,8 @@ void World::tickLavaFlow()
     for (const LCell &e : evaps)
         anyChange |= setWaterSilent(e.x, e.y, e.z, BlockRegistry::Air, 0);
     for (const auto &kv : adds) {
-        const long long k = kv.first;
-        const int x = static_cast<int>(k % W);
-        const long long kz = k / W;
-        const int z = static_cast<int>(kz % D);
-        const int y = static_cast<int>(kz / D);
+        int x, y, z;
+        unpackGrowthCell(kv.first, x, y, z); // t1091 键域：保符号精确逆解码（旧模逆只在核心域自洽）
         anyChange |= setWaterSilent(x, y, z, BlockRegistry::Lava, kv.second);
     }
     m_batchFluid = false;
@@ -2935,7 +3034,17 @@ void World::tickFire()
     for (const quint64 k : snapshot) {
         int x, y, z;
         unpackGrowthCell(k, x, y, z);
-        if (x < 0 || y < 0 || z < 0 || x >= W || y >= H || z >= D) continue; // 越界防御
+        // t1091 域门（tickFire 快照门）两模式分流（Fixed 分支现行语句原样——零变化墙）：sparse =
+        //   y 域两模式同构（有限高）+ x/z 无界——旧码「越界防御」六比较盒把已物化外环的火格键整体
+        //   漏扫（负坐标键回读幻影坐标的回读门，与 t1091 键域（packGrowthCell）是同一条链：键保符
+        //   号后本门是负侧火 tick 的承重收口）。火格读经 blockAt 物化门（未物化读 0=非火天然跳过）；
+        //   本 tick 全部栅格写（熄灭 / 蔓延 / 上窜 / 烧毁）经 setBlock/igniteFlammableAt（t1089 /
+        //   t1091 域门）物化拒零副作用。
+        if (m_chunks.mode() == WorldMode::Fixed) {
+            if (x < 0 || y < 0 || z < 0 || x >= W || y >= H || z >= D) continue; // 越界防御
+        } else if (y < 0 || y >= H) {
+            continue; // y 域两模式同构（有限高）；x/z 无界
+        }
         if (m_chunks.blockAt(x, y, z) != BlockRegistry::Fire) continue;     // 陈旧项跳过
 
         // (a0) t843 失撑即灭：自身 6 邻无实体且下方非火柱 → 立即熄灭（非概率、不等窗——「立地火支撑消失
@@ -2957,7 +3066,14 @@ void World::tickFire()
         bool hasFuel = false, waterAdjacent = false;
         for (const auto &n : kNb) {
             const int nx = x + n[0], ny = y + n[1], nz = z + n[2];
-            if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+            // t1091 域门（tickFire 燃料扫描门）两模式分流（Fixed 分支现行语句原样——零变化墙）：
+            //   sparse = ny 域同构 + nx/nz 无界——旧码固定盒把负向燃料 / 负向水邻漏判（外环火被
+            //   误判无燃料加速自熄 / 水邻漏采漏抑制）。邻读经 blockAt 物化门。
+            if (m_chunks.mode() == WorldMode::Fixed) {
+                if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+            } else if (ny < 0 || ny >= H) {
+                continue; // y 域两模式同构（有限高）；x/z 无界
+            }
             const quint8 nbId = m_chunks.blockAt(nx, ny, nz);
             if (BlockRegistry::flammable(nbId)) hasFuel = true;          // 燃料（可燃邻）
             else if (nbId == BlockRegistry::Water) waterAdjacent = true; // #5 邻水（抑制源之一，同扫顺采免二次遍历）
@@ -2991,7 +3107,14 @@ void World::tickFire()
         const int spreadPermille = suppressed ? kFireSpreadDampPermille : kFireSpreadPermille;
         for (const auto &n : kNb) {
             const int nx = x + n[0], ny = y + n[1], nz = z + n[2];
-            if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+            // t1091 域门（tickFire 蔓延扫描门）两模式分流（Fixed 分支现行语句原样——零变化墙）：
+            //   sparse = ny 域同构 + nx/nz 无界——旧码固定盒把火不外传负向可燃邻（外环火蔓延半边
+            //   截断）。邻读经 blockAt 物化门；点燃写经 igniteFlammableAt（t1091 域门）。
+            if (m_chunks.mode() == WorldMode::Fixed) {
+                if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+            } else if (ny < 0 || ny >= H) {
+                continue; // y 域两模式同构（有限高）；x/z 无界
+            }
             if (!BlockRegistry::flammable(m_chunks.blockAt(nx, ny, nz))) continue;
             const quint32 hv = hashVoxel(m_seed ^ 0xF179, x * 3 + nx, y * 3 + ny, z * 3 + nz)
                                ^ (quint32(m_fireIntervalIndex) * 2654435761u);
@@ -3017,9 +3140,19 @@ void World::tickFire()
     for (auto it = burnSnapshot.cbegin(), burnEnd = burnSnapshot.cend(); it != burnEnd; ++it) {
         int x, y, z;
         unpackGrowthCell(it.key(), x, y, z);
-        if (x < 0 || y < 0 || z < 0 || x >= W || y >= H || z >= D) { // 越界防御
+        // t1091 域门（tickFire 燃烧门）两模式分流（Fixed 分支现行语句原样——零变化墙）：sparse =
+        //   y 域两模式同构（有限高）+ x/z 无界——旧码「越界防御」把外环燃烧键**整键摘除**（负坐标
+        //   键回读幻影坐标 → 六比较盒判越界 → 每窗 remove：刚点燃即静默灭火，外环燃烧态永不存在）。
+        //   键读经 blockAt 复核（未物化读 0=非可燃走陈旧项摘除，语义自洽）；计时写走侧表键（t1091
+        //   键域保符号往返）；烧毁写经 setBlock（t1089 域门）物化拒零副作用。
+        if (m_chunks.mode() == WorldMode::Fixed) {
+            if (x < 0 || y < 0 || z < 0 || x >= W || y >= H || z >= D) { // 越界防御
+                m_burningCells.remove(it.key());
+                continue;
+            }
+        } else if (y < 0 || y >= H) {
             m_burningCells.remove(it.key());
-            continue;
+            continue; // y 域两模式同构（有限高）；x/z 无界
         }
         const quint8 id = m_chunks.blockAt(x, y, z);
         if (!BlockRegistry::flammable(id)) { // 陈旧项（被挖 / 被静默直写替换——setBlock 主入口写时已清）
@@ -3085,7 +3218,14 @@ void World::tickFire()
         if (int(m_fireCells.size()) + int(m_burningCells.size()) > kFireCellCap) continue;
         for (const auto &n : kNb) {
             const int nx = x + n[0], ny = y + n[1], nz = z + n[2];
-            if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+            // t1091 邻域门（tickFire 同态蔓延邻扫）两模式分流（Fixed 分支现行语句原样——零变化墙）：
+            //   sparse = ny 域同构 + nx/nz 无界——旧码固定盒把燃烧态不外传负向可燃邻（与 (b) 蔓延
+            //   扫描门同病同收口）。邻读经 blockAt 物化门；点燃写经 igniteFlammableAt（t1091 域门）。
+            if (m_chunks.mode() == WorldMode::Fixed) {
+                if (nx < 0 || ny < 0 || nz < 0 || nx >= W || ny >= H || nz >= D) continue;
+            } else if (ny < 0 || ny >= H) {
+                continue; // y 域两模式同构（有限高）；x/z 无界
+            }
             if (!BlockRegistry::flammable(m_chunks.blockAt(nx, ny, nz))) continue;
             const quint32 hv = hashVoxel(m_seed ^ 0xF17E, x * 3 + nx, y * 3 + ny, z * 3 + nz)
                                ^ (quint32(m_fireIntervalIndex) * 2654435761u);
@@ -3103,7 +3243,14 @@ void World::tickFire()
 bool World::fireRainExposedAt(int x, int y, int z) const
 {
     if (m_weather == Weather::Clear) return false; // 晴天全局早退（绝大多数窗零噪声开销）
-    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth) return false;
+    // t1091 域门（fireRainExposedAt）两模式分流（Fixed 分支现行语句原样——零变化墙）：sparse =
+    //   y 域两模式同构（有限高）+ x/z 无界——旧码六比较盒把外环火格 / 燃烧格的雨露判恒 false
+    //   （降雨不浇外环火；门后 skyLightAt / isPrecipitatingAt 分别经物化门 / 纯函数，无界安全）。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth) return false;
+    } else {
+        if (y < 0 || y >= m_height) return false; // y 域两模式同构（有限高）；x/z 无界
+    }
     if (m_chunks.skyLightAt(x, y, z) < 15) return false; // 头顶有遮挡 → 淋不到（露天判定，同作物 / mob 口径）
     return isPrecipitatingAt(x, z); // 该列正降水（雨 / 雪 / 雷皆降水皆灭火；沙漠列恒 Clear 天然豁免）
 }
@@ -3116,7 +3263,14 @@ bool World::fireWaterNeighborAt(int x, int y, int z) const
     constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
     for (const auto &n : kNb) {
         const int nx = x + n[0], ny = y + n[1], nz = z + n[2];
-        if (nx < 0 || ny < 0 || nz < 0 || nx >= m_width || ny >= m_height || nz >= m_depth) continue;
+        // t1091 邻域门（fireWaterNeighborAt）两模式分流（Fixed 分支现行语句原样——零变化墙）：
+        //   sparse = ny 域同构 + nx/nz 无界——旧码固定盒把负向水邻漏判（湿燃料防火带三入口统一
+        //   口径的负侧半边：外环可燃物邻水不判湿 → 该燃反被点燃，负侧回归面）。邻读经 blockAt。
+        if (m_chunks.mode() == WorldMode::Fixed) {
+            if (nx < 0 || ny < 0 || nz < 0 || nx >= m_width || ny >= m_height || nz >= m_depth) continue;
+        } else if (ny < 0 || ny >= m_height) {
+            continue; // y 域两模式同构（有限高）；x/z 无界
+        }
         if (m_chunks.blockAt(nx, ny, nz) == BlockRegistry::Water) return true;
     }
     return false;
@@ -3143,7 +3297,16 @@ int World::burnWindowsFor(quint8 blockId)
 //   false 不重置计时。emit blockIgnited 每点燃格一信号（呈现层 burningHost 挂面火 overlay）。
 bool World::igniteFlammableAt(int x, int y, int z)
 {
-    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth) return false;
+    // t1091 域门（igniteFlammableAt）两模式分流（Fixed 分支现行语句原样——零变化墙）：sparse =
+    //   y 域两模式同构（有限高）+ x/z 无界——旧码六比较盒把外环可燃物整体拒燃（打火石右键 / 火
+    //   格蔓延 / 同态蔓延三入口统一收口在内部，负侧全被门吞）。本员栅格只读（blockAt/stateAt 物化
+    //   门）；写面 = 燃烧侧表键（t1091 键域保符号往返）+ blockIgnited 信号，未物化目标经 flammable
+    //   (blockAt=0) 天然拒 → 扫描域无界化（t1090 选型先例），逐格物化门是重复权威。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth) return false;
+    } else {
+        if (y < 0 || y >= m_height) return false; // y 域两模式同构（有限高）；x/z 无界
+    }
     const quint8 id = m_chunks.blockAt(x, y, z);
     if (!BlockRegistry::flammable(id)) return false; // 非可燃（含 Air / Fire / 石类）→ 拒（打火石回退立地火路径）
     if (fireWaterNeighborAt(x, y, z)) return false;  // #5 湿燃料防火带（**三入口统一口径**收口在此：直燃 / 火格
@@ -3189,7 +3352,14 @@ bool World::igniteFlammableAt(int x, int y, int z)
 //   替换块后 ≤1 窗内 (d) 自愈摘除，期间查询不给假阳性）。
 bool World::isBurningAt(int x, int y, int z) const
 {
-    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth) return false;
+    // t1091 域门（isBurningAt）两模式分流（Fixed 分支现行语句原样——零变化墙）：sparse = y 域两
+    //   模式同构（有限高）+ x/z 无界——旧码六比较盒把外环燃烧态查询恒 false（玩家 / mob 接触点燃、
+    //   蔓延跳过、烧毁收尾对偶守卫的负侧全盲）。侧表键经 t1091 键域保符号往返；blockAt 物化门。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth) return false;
+    } else {
+        if (y < 0 || y >= m_height) return false; // y 域两模式同构（有限高）；x/z 无界
+    }
     if (!m_burningCells.contains(packGrowthCell(x, y, z))) return false;
     return BlockRegistry::flammable(m_chunks.blockAt(x, y, z));
 }
@@ -3204,7 +3374,14 @@ bool World::fireSupportedAt(int x, int y, int z) const
     if (y > 0 && m_chunks.blockAt(x, y - 1, z) == BlockRegistry::Fire) return true; // 火柱链
     for (const auto &n : kNb) {
         const int nx = x + n[0], ny = y + n[1], nz = z + n[2];
-        if (nx < 0 || ny < 0 || nz < 0 || nx >= m_width || ny >= m_height || nz >= m_depth) continue;
+        // t1091 邻域门（fireSupportedAt）两模式分流（Fixed 分支现行语句原样——零变化墙）：sparse =
+        //   ny 域同构 + nx/nz 无界——旧码固定盒把负向支撑漏判（tickFire (a0) 失撑即灭消费面：外环
+        //   火支撑在负向 → 误判失撑立即熄灭；支撑在正向 → 误保活）。邻读经 blockAt/stateAt 物化门。
+        if (m_chunks.mode() == WorldMode::Fixed) {
+            if (nx < 0 || ny < 0 || nz < 0 || nx >= m_width || ny >= m_height || nz >= m_depth) continue;
+        } else if (ny < 0 || ny >= m_height) {
+            continue; // y 域两模式同构（有限高）；x/z 无界
+        }
         const quint8 nid = m_chunks.blockAt(nx, ny, nz);
         if (BlockRegistry::isSolid(nid) || BlockRegistry::isCollidable(nid, m_chunks.stateAt(nx, ny, nz)))
             return true;
@@ -4303,7 +4480,16 @@ void World::dropGravityColumn(int x, int y, int z)
 //   dropGravityColumn 自身循环 / caller 显式补调负责）。
 void World::recheckAttachmentsAfterClear(int x, int y, int z, quint8 oldId)
 {
-    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth) return;
+    // t1091 域门（recheckAttachmentsAfterClear）两模式分流（Fixed 分支现行语句原样——零变化墙）：
+    //   sparse = y 域两模式同构（有限高）+ x/z 无界——旧码六比较盒把外环静默清格的附着复检整体
+    //   吞掉（爆炸 / 点火清格 / 重力坍落在外环清理后，火把等附着物悬空残留）。本员调度面：① 族
+    //   check* 子钩子各有自身域面（见下方子钩子留池注）；② 火把 6 邻扫门（t1091 邻域门）随本批
+    //   开启；写面 = m_chunks.setBlock 物化拒 + 各 note 索引（t1089 键域），无重入。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth) return;
+    } else {
+        if (y < 0 || y >= m_height) return; // y 域两模式同构（有限高）；x/z 无界
+    }
     const quint8 id = BlockRegistry::Air; // 清格复检恒按「本格现内容 = Air」口径（check 族签名第 5 参）
     // ① 正上方附着族（各自内部守卫 id==Air + oldId 非本族 → 玩家直破路径不双掉，与 setBlock 主入口零差异）：
     checkCactusOnEdit(x, y, z, oldId, id);         // t445：仙人掌失撑整柱掉落
@@ -4315,12 +4501,25 @@ void World::recheckAttachmentsAfterClear(int x, int y, int z, quint8 oldId)
     checkRailOnEdit(x, y, z, oldId, id);           // t565/t733：铁轨失撑掉落 + 邻轨连接重算
     checkTrapdoorDoorSupportOnEdit(x, y, z, oldId, id); // t851：活板门 / 门失撑级联掉落（静默清格公共复检收口）
     checkPaintingSupportOnEdit(x, y, z, oldId, id); // t837①：画作支撑墙失撑 → 整画掉落（静默清格公共复检收口）
+    // t1091 子钩子留池登记（禁顺手修，后续批另立单）：① 族各 check* 子钩子 / 柱坍函数的自身核心盒
+    //   门（checkDeadBushOnEdit / checkFlowerMushroomOnEdit / checkPressurePlateOnEdit /
+    //   checkSnowLayerOnEdit / checkTrapdoorDoorSupportOnEdit / checkPaintingSupportOnEdit /
+    //   checkRailOnEdit 失撑分支 / dropCactusColumn / dropSugarcaneColumn / checkFireOnEdit 6 邻扫
+    //   门）——本员门开后这些子面在外环仍被各自盒钳（外环花 / 板 / 雪层 / 活板门 / 画 / 轨失撑 /
+    //   仙人掌 / 甘蔗柱坍 / 失撑火即时熄残留旧态），需逐员核实后按 t1091 模板另批清偿。
     // ② 6 邻火把 / 红石火把（火把非 solid 不撑他火把 → 单趟扫即足够，无级联）：
     bool torchDropped = false; // review24 #2：本扫是否实际掉落 ≥1 火把（决定收口 emit 是否发——无掉落零 emit）
     constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
     for (const auto &d : kNb) {
         const int tx = x + d[0], ty = y + d[1], tz = z + d[2];
-        if (tx < 0 || ty < 0 || tz < 0 || tx >= m_width || ty >= m_height || tz >= m_depth) continue;
+        // t1091 邻域门（recheckAttachmentsAfterClear 火把邻扫）两模式分流（Fixed 分支现行语句
+        //   原样——零变化墙）：sparse = ty 域同构 + tx/tz 无界——旧码固定盒把外环清格的负向火把
+        //   漏复检（支撑清了火把悬空残留）。格读经 blockAt/stateAt 物化门。
+        if (m_chunks.mode() == WorldMode::Fixed) {
+            if (tx < 0 || ty < 0 || tz < 0 || tx >= m_width || ty >= m_height || tz >= m_depth) continue;
+        } else if (ty < 0 || ty >= m_height) {
+            continue; // y 域两模式同构（有限高）；x/z 无界
+        }
         const quint8 tb = m_chunks.blockAt(tx, ty, tz);
         // t638 ⑥：红石火把同火把附着编码（torchAttachOffset 掩熄灭位），一并扫。
         if (tb != BlockRegistry::Torch && tb != BlockRegistry::RedstoneTorch) continue;
@@ -4485,7 +4684,15 @@ void World::cascadeGravityAround(int x, int y, int z)
 //   有连接时镜像当前轴 —— 见 railConnections 头注释规则）。
 void World::recomputeRailConnections(int x, int y, int z, bool &outChanged)
 {
-    if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth) return;
+    // t1091 域门（recomputeRailConnections）两模式分流（Fixed 分支现行语句原样——零变化墙）：
+    //   sparse = y 域两模式同构（有限高）+ x/z 无界——旧码六比较盒把外环铁轨连接重算整体吞掉
+    //   （外环铺轨 / 挖轨的连接位 / 轴偏好位永不更新 = 轨永久断连形态）。探针读经 blockAt/stateAt
+    //   物化门（未物化邻读 0=无轨不连）；连接写 m_chunks.setBlock 物化拒零副作用。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || y < 0 || z < 0 || x >= m_width || y >= m_height || z >= m_depth) return;
+    } else {
+        if (y < 0 || y >= m_height) return; // y 域两模式同构（有限高）；x/z 无界
+    }
     const quint8 rb = m_chunks.blockAt(x, y, z);
     if (!BlockRegistry::isRail(rb)) return;
     const auto probe = [&](int dx, int dz) -> BlockRegistry::RailProbe {

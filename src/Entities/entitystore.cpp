@@ -436,7 +436,14 @@ void EntityStore::tick(qreal dt, World *world)
         if (!e.alive) continue;
         const int cx = qFloor(e.pos.x());
         const int cz = qFloor(e.pos.z());
-        if (cx < 0 || cz < 0) continue;
+        // t1091 域门（ItemEntity tick）两模式分流（Fixed 分支现行语句原样——零变化墙，t1090
+        //   FallingBlock 同形先例）：sparse 负坐标列合法（已物化外环；外环挖块 / 爆炸 / mob 死亡的
+        //   掉落物生产面）→ 不再以「坐标非负」符号假设拒列——旧码把外环掉落物的重力 / 浮水随流 /
+        //   岩浆火焚 / 支撑停靠整段跳过（掉落物冻结在生成高度半空）。门后读全经 world->blockAt /
+        //   stateAt / supportTopYAt 物化门（未物化读 0=air 自然下落）；无 void-loss 移除面 → 未物化
+        //   域坠落由既有寿命驱逐（despawnExpired）兜底，零永久泄漏。
+        if (!world->isSparse() && (cx < 0 || cz < 0))
+            continue; // Fixed 域外（实体飞出世界 XZ 边界）→ 跳过
 
         const int cy = qFloor(e.pos.y());
         // t343 岩浆焚毁（中心格 == Lava → 瞬灭释放槽位）。
