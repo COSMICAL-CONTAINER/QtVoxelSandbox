@@ -20,10 +20,10 @@ last_completed_task: t1088 甘蔗生长口径归一批（2026-09-25 闭环；矩
 last_completed_task_prev: t1087 甘蔗自动化纪元裁定单（2026-09-24 docs-only 降级关单，降级理由修正[活塞在 1.0 基线内]+台账补录活塞行+例外发现转 t1088。详录 = dev-plan t1087 关单条目）
 last_completed_task_commits: fix(t1088)（8eac8db：谓词收口+生长门放宽+上限归一+t418 退役，src 五文件 60+/37-）+ test(t1088)（d923625：section58 r2058a-d 四腿+helpers/CMake 入册）
 last_verified_commit: test(t1088)（矩阵 **762 PASS / 0 FAIL ×2**：matrix_t1088_{pos,final}.log；新基线腿集合 md5[配方 grep -a -oE "^PASS \| [a-z0-9]+ " | sort | md5sum]三日志全等 3d672867d2f47e63c89b0da93544ad23；NEG-1 恰红 {r2058a,d 基材子面} / NEG-2 恰红 {r2058c,d 上限子面} 双还原全绿；冒烟 tail20 主控补强回填[agent 件 2.4KB 缺横幅/root objects——主控亲跑 15s 覆写 132KB 实文]；主控独立脱离式复跑 762/0 同 md5 三方恒等 matrix_orch_t1088_verify.log）
-last_governance_review: 2026-09-24（audit #18 GREEN——窗口 9cd700b..9d5ee4e 15 提交/t1079-t1083 五闭环证据链全实核[五单 md5 三方复跑全等 + t1081 子集恒等式独立复算成立 + NEG 八份恰红面零多余 + tail20 五份全实文]；账本三方一致/腿数链 738→742→746→746→750 无断；15 提交零署名；2 项低级发现 F1[t1080 证据措辞精确化]F2[probe 残骸 void 标注]批内清偿；详见 governance-audit-2026-09-24.md）
-governance_review_due: true
-completed_tasks_since_governance_review: 5（t1084 + t1085 + t1086[docs-only] + t1087[docs-only] + t1088 闭环；审计 #18 GREEN 于 2026-09-24——**审计 #19 到期**）
-next_task: **审计 #19（5/5 到期，只读独立 agent，窗口 = 429bf73[审计 #18 落档]..t1088 闭单 docs HEAD）→ t1089 写门家族第一分批（候选池，在飞）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1088 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
+last_governance_review: 2026-09-25（audit #19 GREEN——窗口 429bf73..6d9fa83 11 提交/t1084-t1088 五闭环证据链全实核[三代码单三方 md5 全等 29d2fbe4/3b232c04/3d672867 + NEG 六份恰红面+六份还原逐日志吻合 + 相邻族十二份 reg 零污染 + 两裁定单零代码核实（grindstone 全仓 0 命中/observer 唯一命中 miniaudio 第三方头）]；账本三方一致/腿数链 750→762 无断；11 提交零署名；1 LOW 发现 F1[t1088 中断链过程注缺档——dev-plan 已补录同体例过程注]批内清偿 + 3 INFO 无需动作；详见 governance-audit-2026-09-25.md）
+governance_review_due: false
+completed_tasks_since_governance_review: 0（审计 #19 GREEN 于 2026-09-25）
+next_task: **t1089 写门家族第一分批（候选池，在飞）→ 之后候选池顺延（写门后续批[destroySphereSilent/tickLeafDecay/重力级联]/棕色染料生存源/漏斗降级四件/红石家族纪元标注审计/removeDatabase 卫生单…）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1088 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
