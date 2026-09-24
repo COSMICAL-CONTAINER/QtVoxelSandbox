@@ -365,6 +365,18 @@ public:
     //   冷却到点跑一轮「输出 → 抽取 → 收集」；红石锁停（isReceivingPower）本轮全停。public 暴露 =
     //   scanDispenserTraps review24 #9 先例（矩阵探针直调等价递减驱动——探针无 16ms 定时器，须直调推进）。
     void scanHoppers(float dt);
+    // t1083 唱片机播放状态机 tick（scanHoppers / updateButtonRecovery 机关扫描族同门；C++ 直调）：
+    //   每帧按 dt 推进每台播放中唱片机的剩余音轨时长（kJukeboxTrackDurationSec 单一权威表），到期
+    //   「音轨结束自动吐盘」（spawn 盘物品 + 清 state 盘位 + 发 jukeboxStopped）；格上已非唱片机
+    //   （被破 / 被替换）→ 仅移除表项（防陈旧键误写，同 updateButtonRecovery 守卫模式；吐盘语义由
+    //   finishMiningAt 破坏分支承担）。public 暴露 = scanHoppers 同门（矩阵探针直调等价递减驱动）。
+    void tickJukeboxes(float dt);
+    // t1083 曲目号 ↔ 音乐盘物品 id 映射单一权威 + 音轨时长单一权威表（静态纯函数；放入写盘号 /
+    //   吐盘还原物品 / tick 自动吐盘节律 / 探针钉面四方同源，禁第二份映射 / 禁第二份时长表）。
+    //   track 越界 → disc 返 0（无物品）、duration 返 0（调用方到期立即吐盘兜底）。
+    static int jukeboxDiscForTrack(int track);
+    static int jukeboxTrackForDisc(int itemId);
+    static float jukeboxTrackDurationSec(int track);
     // t1013 矿井箱 → 箱子矿车转正（进世界一次性；Main.qml enterWorld 在 chestStore.loadAll + carts.clearAll
     //   之后调）。Q_INVOKABLE 无参（全靠注入面：m_world / m_minecartManager / m_chestStore）。两路：
     //   (a) 全图扫 Chest+ChestStateMineshaftFlag（collectBlocksOfId 复用 t691 扫描面）→ clearMineshaftChest
@@ -491,6 +503,14 @@ public:
     //   附近有怪物）。分层（PLAN §2）：Game/Physics 层判定（读 worldClock.isNight + entityManager.hostileNearby，
     //   均向下依赖）。
     void trySleepAt(int bx, int by, int bz);
+
+    // t1083 唱片机吐盘单一收口（useBlock 再右键吐盘 / tickJukeboxes 音轨到期自动吐盘两路共用；
+    //   public 段 = trySleepAt 同门访问平移，矩阵探针可直调钉吐盘语义；格坐标 + **setBlock 前的
+    //   盘态快照**——破坏路径的快照纪律见 finishMiningAt brokenState 注）：
+    //   spawn 盘物品（jukeboxDiscForTrack 单一权威还原）+ state 清盘位（5 参数 setBlock，id 不变
+    //   → 仅 worldChanged）+ 播放表移除；播放中 → 发 jukeboxStopped（音频停）。非播放中的吐出
+    //   （载入态破坏吐盘）不发 stopped（无音频可停）。
+    void ejectJukeboxDiscAt(int x, int y, int z, quint8 state);
 
     // t715 施加状态效果（/effect 命令入口；后续中毒来源 / 药水等复用）。effect = PlayerState::StatusEffect
     //   枚举值（QML 传 PlayerState.EffectPoison 等）；seconds<=0 → 清除该效果；level 恒 ≥1（v1 中毒/缓慢均
@@ -952,6 +972,14 @@ signals:
     //   （不播报文案——攻击是纯发声交互）。同 mobAttacked 单向事件流模式（PLAN §2 分层：Game 层发语义
     //   事件，呈现 / 音频层只消费）。
     void noteBlockAttackPlayed(int x, int y, int z, int pitch, int family);
+    // t1083 唱片机播放状态语义信号（音符盒 noteBlockTuned/Played 单向事件流同门）：呈现层 Connections
+    //   路由 audio.playDisc(track) / audio.stopDisc()——音频层只消费、绝不反向写栅格 / 播放表
+    //   （PLAN §2 分层；播放状态机单一权威在 Game 层 tickJukeboxes + useBlock）。
+    //   jukeboxStarted(x,y,z,track)：放入沿 / 停播后续播沿发（播放表新增 + 剩余时长重置同帧）。
+    //   jukeboxStopped(x,y,z,track)：吐出沿发（再右键吐盘 / 音轨到期自动吐盘 / 被破坏吐盘三路共用；
+    //   非播放中的吐出——盘在机未播（载入态）破坏吐盘——不发（无音频可停））。
+    void jukeboxStarted(int x, int y, int z, int track);
+    void jukeboxStopped(int x, int y, int z, int track);
     // t242 玩家攻击 mob（spec「玩家左键攻击生物→受伤音效」）：beginMining 在通过模式门控后、破块前
     //   先做 findMobHit；命中活体 mob 且（无方块命中 OR mob 比方块更近）→ 走攻击路径（damageEntity +
     //   swingArm）替代破块，并发本信号。呈现层 Connections 路由到 AudioManager.playMobHurt（t248 专属 mob
@@ -1418,6 +1446,11 @@ private:
     ChestStore *m_chestStore = nullptr;           // t1013 箱子矿车内容键存储（转正 / 回生 / 挖毁清键，Q_PROPERTY 绑定）
     HopperStore *m_hopperStore = nullptr;         // t1080 漏斗 per-block 5 槽容腔（机制 tick 读写 + 破块清孤儿，Q_PROPERTY 绑定）
     FurnaceStore *m_furnaceStore = nullptr;       // t1080 漏斗挂接容器族（熔炉抽取/推入，Q_PROPERTY 绑定）
+    // t1083 唱片机播放状态机表（运行期，不进存档——存档只保「盘在机+盘号」state 位）：坐标键
+    //   （x/z 21 位偏移打包 + y 10 位，同 m_dispenserCooldowns 编码）→ 剩余音轨秒数。写入点 =
+    //   useBlock 放入 / 续播沿；消亡点 = tickJukeboxes 到期吐盘 / useBlock 吐盘 / finishMiningAt
+    //   破坏吐盘 / setWorld + finishWorldLoad 换世界清（setWorld 两处加 .clear()）。
+    QHash<quint64, float> m_jukeboxPlaying;
     // t950 mob 装备拾取（tickMobEquipmentPickup）状态：扫描窗 dt 累积器 + 拾取概率（setEquipmentPickupChance
     //   缝写；初值 = 缺省常量）。非世界态（跨世界 reset 族）无需清——纯节流/标量，无跨世界语义。
     qreal m_equipPickupAccum = 0.0;               // 距下次扫描窗的 dt 累积（秒；到窗长即清零跑扫描）

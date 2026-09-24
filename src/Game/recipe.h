@@ -435,6 +435,18 @@ public:
     //   0x25E → cave_spider_spawn_egg.png（缺则安全跳过回退自绘，同 t785 蛋补全模式）。创造调色板补全
     //   （hotbar creativeMaterials 蛋区尾）。
     static constexpr int SpawnEggCaveSpiderId = 0x25E; // 生物蛋（洞穴蜘蛛）：右键 → 生成洞穴蜘蛛（t1012③）
+    // t1083 音乐盘段（材料段 0x25F 起，洞穴蜘蛛蛋之上首个空闲号；机制等价 MC 1.0 music disc——
+    //   地牢 / 矿井战利品箱稀有获物 + 唱片机播放媒介）。三张盘 = 三条**确定性程序合成旋律**
+    //   （tools/build_sounds.py gen_disc_track，§9 原创乐曲生成——非 MC 资产 / 非现实乐曲拷贝）；
+    //   色带区分（MaterialIcon 自绘彩色盘面，drawDisc）。**不可堆叠**（maxStack=1，MC 唱片同口径；
+    //   Hotbar::maxStackSize + Core BlockRegistry::maxStackSize 两处同步特判）。非方块 → 右键
+    //   命中唱片机 = 放入（useBlock 消费 1 件），命中其他 = 无效应不消耗（非放置类材料段通用口径）。
+    //   曲目号 ↔ 物品 id 映射单一权威 = PlayerController::jukeboxTrackForDisc / jukeboxDiscForTrack
+    //   （放入写盘号 / 吐盘还原物品同一张表，禁第二份映射）。战利品：挂 LootTable::dungeonChestPool
+    //   / mineshaftChestPool 既有池（低权重稀有件，单件）。无合成配方（MC 唱片不可合成，仅战利品/创造）。
+    static constexpr int MusicDiscAmberId = 0x25F; // 音乐盘（琥珀旋律）：唱片机曲目 0；地牢/矿井战利品（t1083）
+    static constexpr int MusicDiscEchoId  = 0x260; // 音乐盘（深巷回声）：唱片机曲目 1；地牢/矿井战利品（t1083）
+    static constexpr int MusicDiscNightId = 0x261; // 音乐盘（夜航曲）：唱片机曲目 2；地牢/矿井战利品（t1083）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

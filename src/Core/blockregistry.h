@@ -1160,7 +1160,27 @@ public:
         //   机制等价 MC hopper 被供电锁停）。内容面 = HopperStore（Game 层 per-block 5 槽，同 ChestStore /
         //   DispenserStore 族模式）。UI 面：无开盖界面（禁为此单新开 QML 玩法路径——UI 登记候选池）。
         Hopper           = 145, // 漏斗：收集掉落物 + 容器抽取/输出 + 红石锁停的搬运机关（机制等价 MC 1.5+ hopper）
-        Count           = 146, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t1083 唱片机（Jukebox）：木制发声匣方块——右键放入音乐盘 → 播放（音轨结束 / 再右键 /
+        //   被破坏 → 吐出盘）。机制等价 MC 1.0 jukebox（id 84）的放入 / 取出 / 播放三语义；红石触发面
+        //   **1.0 无此机制**（唱片机红石输出是 1.5+ 比较器面，红石驱动播放从未存在于原版任何版本）
+        //   → 如实登记「非缺口」。§9 区隔：「唱片机」「Jukebox」为通用描述词（唱盘机是先于 MC 的
+        //   通用电声机械词），零 MC 专有名词 / 资产；贴图程序生成原创自绘 §9a（tools/build_jukebox.py：
+        //   顶面盘槽 189 / 侧面匣体 190）。
+        //   **整立方 opaque**（solid=true / ShapeFull，同音符盒 / 漏斗机关匣家族体量）。hardness=2.0
+        //   （机制等价 MC jukebox hardness 2）/ Axe 加速 / requiresTool=false（空手可采且掉落，机制
+        //   等价 MC wood SoundType 采集口径）。dropId=自身、dropCount=1、maxStack=64。音色归
+        //   GroupWood（木匣质，同音符盒 / 工作台木容器族）。
+        //   **state 编码**（复用 chunk m_states，存档 round-trip 保真——**播放态是运行期量不进 state**，
+        //   机制等价 MC 1.0 JukeboxTileEntity 只持久化 record id、playing 是运行期概念的存档口径）：
+        //     bit0（JukeboxStateHasDiscFlag）= 盘在机（放入置位 / 吐出清位）。
+        //     bit[7:2]（JukeboxStateTrackMask << JukeboxStateTrackShift）= 曲目号 0..63
+        //       （kDiscTrackCount=3 上界内；位宽余裕容未来盘族扩容不改编码）。
+        //     播放中 / 已停 = 运行期（Game 层 PlayerController m_jukeboxPlaying 表），载入即停
+        //       （盘仍在机；再右键续播）——**登记简化**（MC 1.0 载入续播，本工程音频引擎一次性
+        //       解码常驻 + 无播放游标持久化面，如实登记）。
+        //   配方：8 木板环 + 1 钻石 → 1 唱片机（工作台 3×3，MC 1.0 同料）。进创造调色板（方块 tab）。
+        Jukebox          = 146, // 唱片机：右键放入音乐盘播放（音轨结束/再右键/被破坏吐盘）；木制发声匣
+        Count           = 147, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -1888,7 +1908,11 @@ public:
     // t1080：186..188=漏斗三张（186=hopper_top 顶箅 / 187=hopper_side 锅体 / 188=hopper_front 排料嘴；
     //   Hopper per-face——顶箅恒顶面、锅体侧 / 底、排料嘴贴排料口所朝面（mesher 据 state 选，同发射器
     //   tileFor 分支）；tools/build_hopper.py 程序生成原创像素图 §9a）。
-    static constexpr int AtlasTileCount = 189;
+    // t1083：189..190=唱片机两张（189=jukebox_top 顶面盘槽 / 190=jukebox_side 侧面匣体木纹；Jukebox
+    //   per-face——盘槽恒顶面、匣体侧 / 底（无排料嘴类朝向语义 → 无 mesher tileFor state 分支）；
+    //   tools/build_jukebox.py 程序生成原创像素图 §9a）。**追加不插中间**（tile 索引是资源包映射
+    //   契约的一部分，插入中间即整段错位——t1077/t1080 先例）。
+    static constexpr int AtlasTileCount = 191;
 
     // t668 图集瓦片像素边长（HD 图集：16→64）。**单一权威**：tools/build_atlas.py TILE（打包像素大小）/
     //   ResourcePackManager::kTile（运行期包内贴图缩放目标）与 mesher 半纹素内缩（chunkgeometry hx/hy、
@@ -2294,6 +2318,33 @@ public:
         case Face::PosZ: dx = 0; dy = 0; dz = 1; break;
         default:         dx = 0; dy = 0; dz = -1; break; // NegZ
         }
+    }
+
+    // ── t1083 唱片机（Jukebox）state 常量 + 盘态编解码（语义见 Id 枚举 Jukebox 行注释）──
+    //   盘在机标志（bit0）+ 曲目号（bit[7:2]，0..63；kDiscTrackCount=3 上界内）。播放态是运行期量
+    //   （Game 层 PlayerController m_jukeboxPlaying 表）**不进 state**——存档只保「盘在机 + 盘号」，
+    //   载入即停（MC 1.0 JukeboxTileEntity 只持久化 record 的同口径）。
+    static constexpr quint8 JukeboxStateHasDiscFlag = 0x01;
+    static constexpr int JukeboxStateTrackShift     = 2;
+    static constexpr quint8 JukeboxStateTrackMask   = 0xFC;
+    // t1083 唱片机统一谓词（单一权威）：blockId == Jukebox 即唱片机。供 PlayerController useBlock
+    //   放入/吐出分支 + finishMiningAt 破坏吐盘分支判定（避免各处硬编码 id 判定漂移，同 isLadder
+    //   单 id 模式）。单 id 故裸相等判定即可，仍提供谓词作单一权威（未来变体时一处同步）。
+    static bool isJukebox(quint8 blockId);
+    // 盘态解码单一权威（放入写入 / useBlock 吐出 / 破坏吐盘 / 探针四方同源，禁各处自写位运算）：
+    //   jukeboxHasDisc(state) = bit0；jukeboxTrack(state) = bit[7:2]（无盘态返 0 兜底）。
+    //   jukeboxInsertState(track) = 组装放入态（bit0 置位 + track 写入段；track 越界 clamp 到 0..63，
+    //   防 caller 传脏值越段污染——track ∈ [0,63] 域外值按 0 兜底）。
+    static bool jukeboxHasDisc(quint8 state) { return (state & JukeboxStateHasDiscFlag) != 0; }
+    static int jukeboxTrack(quint8 state)
+    {
+        return int((state & JukeboxStateTrackMask) >> JukeboxStateTrackShift);
+    }
+    static quint8 jukeboxInsertState(int track)
+    {
+        const quint8 t = (track >= 0 && track <= 63)
+                             ? quint8(track << JukeboxStateTrackShift) : quint8(0);
+        return quint8(t | JukeboxStateHasDiscFlag);
     }
 
     // 右键调音单一权威：音高段 +1 回绕（(p+1) % 25），bit5 通电记忆位原样保留。

@@ -7,11 +7,12 @@
 
 // 战利品表（t393）实现。纯静态数据 + 纯函数 —— 无 Q_OBJECT / 无实例 / 无 World 依赖（PLAN §2 分层）。
 
-// 地牢箱子战利品池（8 条）。权重总和 = 30+30+25+20+18+8+6+4 = 141。
-//   分布（每 roll 命中概率）：煤 / 面包 ~21% 各、线 ~18%、红石 ~14%、铁锭 ~13%（常见材料 ~87%）；
-//   马鞍 ~5.7%、命名牌 ~4.3%（稀有 ~10%）；附魔书占位 ~2.8%（极稀有）。机制对齐 MC 1.0 dungeon chest
-//   「常见材料多 / 稀有件少」分布。数量区间：常见材料 1..N（一堆），稀有件恒 1（单件，避免一堆马鞍）。
-//   static 局部 + 函数返回 const 引用 —— 首次调用构造、后续零开销；调用方不持副本（单一权威）。
+// 地牢箱子战利品池（9 条）。权重总和 = 30+30+25+20+18+8+6+4+2 = 143。
+//   分布（每 roll 命中概率）：煤 / 面包 ~21% 各、线 ~17%、红石 ~14%、铁锭 ~13%（常见材料 ~85%）；
+//   马鞍 ~5.6%、命名牌 ~4.2%（稀有 ~10%）；附魔书占位 ~2.8%（极稀有）；音乐盘（琥珀旋律）~1.4%
+//   （t1083 极稀有收藏件——机制对齐 MC 1.0 dungeon chest 的音乐盘稀有掉落位）。数量区间：常见材料
+//   1..N（一堆），稀有件恒 1（单件，避免一堆马鞍 / 盘）。static 局部 + 函数返回 const 引用 ——
+//   首次调用构造、后续零开销；调用方不持副本（单一权威）。
 const std::vector<LootTable::Entry> &LootTable::dungeonChestPool()
 {
     static const std::vector<Entry> pool = {
@@ -23,6 +24,7 @@ const std::vector<LootTable::Entry> &LootTable::dungeonChestPool()
         { RecipeRegistry::SaddleId,       8, 1, 1 }, // 马鞍：稀有，单件
         { RecipeRegistry::NameTagId,       6, 1, 1 }, // 命名牌：稀有，单件
         { RecipeRegistry::EnchantedBookId, 4, 1, 1 }, // 附魔书占位：极稀有，单件
+        { RecipeRegistry::MusicDiscAmberId, 2, 1, 1 }, // t1083 音乐盘（琥珀旋律）：极稀有收藏件，单件
     };
     return pool;
 }
@@ -52,11 +54,13 @@ const std::vector<LootTable::Entry> &LootTable::fishingPool()
     return pool;
 }
 
-// t484 废弃矿井箱子战利品池（见 loottable.h 头注释）。权重总和 = 30+25+20+12+10+5+3 = 105。
-//   分布（每 roll 命中概率）：煤 ~29% / 红石 ~24% / 铁锭 ~19%（常见矿物 ~71%）；
-//   金锭 ~11% / 青金石 ~10%（次常见 ~21%）；钻石 ~5%（稀有）；附魔书占位 ~3%（极稀有）。
-//   机制对齐 MC 1.0 mineshaft chest「矿物多 / 附魔书铁锭常见 / 钻石稀有」分布。数量区间：常见矿物 1..N（一堆），
-//   稀有件恒 1（单件，避免一堆钻石）。static 局部 + 返回 const 引用（单一权威；调用方不持副本）。
+// t484 废弃矿井箱子战利品池（见 loottable.h 头注释）。权重总和 = 30+25+20+12+10+5+3+2 = 107。
+//   分布（每 roll 命中概率）：煤 ~28% / 红石 ~23% / 铁锭 ~19%（常见矿物 ~70%）；
+//   金锭 ~11% / 青金石 ~9%（次常见 ~20%）；钻石 ~4.7%（稀有）；附魔书占位 ~2.8%（极稀有）；
+//   音乐盘（深巷回声）~1.9%（t1083 极稀有收藏件——机制对齐 MC 1.0 矿井箱的音乐盘稀有掉落位）。
+//   机制对齐 MC 1.0 mineshaft chest「矿物多 / 附魔书铁锭常见 / 钻石稀有」分布。数量区间：常见矿物
+//   1..N（一堆），稀有件恒 1（单件，避免一堆钻石）。static 局部 + 返回 const 引用（单一权威；
+//   调用方不持副本）。
 const std::vector<LootTable::Entry> &LootTable::mineshaftChestPool()
 {
     static const std::vector<Entry> pool = {
@@ -67,6 +71,7 @@ const std::vector<LootTable::Entry> &LootTable::mineshaftChestPool()
         { RecipeRegistry::LapisId,        10, 1, 3 }, // 青金石：次常见矿物（附魔前置材料），1..3
         { RecipeRegistry::DiamondId,       5, 1, 1 }, // 钻石：稀有矿物，单件
         { RecipeRegistry::EnchantedBookId, 3, 1, 1 }, // 附魔书占位：极稀有（spec「附魔书」），单件
+        { RecipeRegistry::MusicDiscEchoId, 2, 1, 1 }, // t1083 音乐盘（深巷回声）：极稀有收藏件，单件
     };
     return pool;
 }

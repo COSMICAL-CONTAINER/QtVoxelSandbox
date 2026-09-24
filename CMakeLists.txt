@@ -552,6 +552,8 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/default_iron_trapdoor.png        # t717 铁活板门贴图（build_doors_iron.py；格子板+栅格孔；tile 178；t723 IronTrapdoor 接入）
         textures/default_note_block.png           # t1028 音符盒贴图（build_note_block.py；深木框+盆膜+原创音符标记；tile 184；NoteBlock 接入）
         textures/default_bone_block.png           # t1077 骨块贴图（build_bone_block.py；米骨白+骨节环带+骨纹+骨孔；tile 185；BoneBlock 接入）
+        textures/default_jukebox_top.png          # t1083 唱片机顶面贴图（build_jukebox.py；木拼板面+居中圆盘槽+槽缘亮线；tile 189；Jukebox 接入）
+        textures/default_jukebox_side.png         # t1083 唱片机侧面贴图（build_jukebox.py；竖板木纹+板缝+搁架暗带；tile 190；Jukebox 接入）
         textures/default_lily_pad.png             # t396 睡莲浮叶贴图（build_lily_pad.py；透明底+绿圆叶+V缺口；alphaCutoff cutout）
         textures/default_mushroom.png             # t396 蘑菇 cross 贴图（build_mushroom.py；透明底+米色菌柄+红底白斑菌盖；alphaCutoff cutout）
         textures/default_brown_mushroom.png       # t507 白蘑菇 / 棕蘑菇 cross 贴图（build_brown_mushroom.py；透明底+米色菌柄+棕色菌盖浅黄褐斑；alphaCutoff cutout；蘑菇汤原料）
@@ -667,6 +669,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_gold_block.png             # t620/t644 金块立方体图标（--from-pack：pack 贴图 3D 渲染）
         textures/icon_redstone_block.png         # t620/t644 红石块立方体图标（--from-pack：pack 贴图 3D 渲染）
         textures/icon_bone_block.png             # t1077 骨块立方体图标（build_cube_icons.py；default_bone_block 程序贴图 3D 渲染，与放置态一致）
+        textures/icon_jukebox.png                # t1083 唱片机立方体图标（build_cube_icons.py；顶=盘槽/侧=匣体，与放置态一致）
         textures/icon_redstone_lamp.png          # t620/t644 红石灯立方体图标（--from-pack：off 态贴图 3D 渲染，与放置态默认一致）
         textures/icon_anvil.png                  # t477 铁砧立方体图标（build_cube_icons.py；顶=砧台+砧面+尖角 / 侧=深铁砧身+横向分层）
         textures/icon_anvil_chipped.png          # t477 微损铁砧立方体图标（build_cube_icons.py；顶=砧台+细裂纹 / 侧=深铁砧身）
@@ -866,6 +869,9 @@ qt_add_resources(voxelsandbox "voxel_sounds"
         sounds/note_pitch_22.wav
         sounds/note_pitch_23.wav
         sounds/note_pitch_24.wav
+        sounds/disc_track_00.wav                   # t1083 唱片机盘曲三轨（build_sounds.py gen_disc_track
+        sounds/disc_track_01.wav                   #   程序合成 §9 原创乐曲；30/36/42s；AudioManager.discClips
+        sounds/disc_track_02.wav                   #   按曲目号选播；音色与音符盒钢琴族同源（登记取舍）。
 )
 
 # miniaudio 是 vendored 第三方单头库（src/Audio/miniaudio.h）。
@@ -1283,6 +1289,10 @@ add_executable(redstone_matrix_test
     # t1081 刷怪笼条件刷怪 + 破坏语义探针段（置尾先例沿用：4 腿 r2053a-d，filter 词 r2053；
     #   各腿自建 fresh 小世界 + sparse 构造缝——零新 include 面，helpers 枢纽已含全部依赖）。
     tools/matrix/section54_spawner.cpp
+    # t1083 唱片机 + 音乐盘探针段（置尾先例沿用：4 腿 r2054a-d，filter 词 r2054；
+    #   真链交互 rig = t945 同门（QQuickWindow 载体 + grab/loadSavedState/placeBlock）——零新
+    #   include 面，helpers 枢纽已含全部依赖）。
+    tools/matrix/section55_jukebox.cpp
     src/Game/hopperstore.h
     src/Game/entityshadowfield.cpp
     src/Game/entityshadowfield.h

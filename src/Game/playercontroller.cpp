@@ -63,6 +63,15 @@ bool isWolfMeatItem(int itemId)
 //   （isCollidable ∨ isFullCube，语义详注见 blockregistry.h）—— 放置预检 / 玩家挖掘失撑 / EntityManager
 //   爆炸与水下链式失撑三方同源，防「放得上却立刻掉」口径漂移。本地 helper 删除（原 L12 版）。
 
+// t1083 唱片机播放表坐标键（同 fireDispenserAtQml 键编码：x/z 各 21 位有符号偏移 + y 10 位——
+//   含 Y 防同柱串扰；消费面 = placeBlock 唱片机分支 / finishMiningAt 破坏吐盘 / tickJukeboxes）。
+static inline quint64 jukeboxKey(int x, int y, int z)
+{
+    return (quint64(quint32(x + 0x100000) & 0x1FFFFFu))
+         | (quint64(quint32(z + 0x100000) & 0x1FFFFFu) << 21)
+         | (quint64(quint32(y) & 0x3FFu) << 42);
+}
+
 // t1025 繁殖食物匹配（单一权威）：该物种是否吃该物品（机制等价 MC 1.0 繁殖食物映射：牛/羊=小麦、
 //   猪=胡萝卜·马铃薯、鸡=种子）。物品 id 属 RecipeRegistry（Game 层）；Entities 层的 enterLoveMode /
 //   setFoodLure 不向上依赖物品 id（PLAN §2）。useBlock 喂食分流与 updateFoodLure 引诱门控同源消费，
@@ -153,6 +162,8 @@ void PlayerController::setWorld(World *w)
     m_plateJustPressed.clear();   // t627：同上（沿表生命周期一帧，但换世界须一并清防陈旧沿触发）
     m_buttonRecoverCells.clear(); // t628：换世界清按钮自动复位表（防跨世界同坐标串扰；键按世界坐标打包，同 m_dispenserCooldowns）
     m_dispenserPoweredCells.clear(); // t689：换世界清机器电力基线集（防跨世界同坐标串扰；键同冷却编码）
+    m_jukeboxPlaying.clear();     // t1083：换世界清唱片机播放表（运行期态不跨世界；音频由 Main.qml
+                                  //   退世界路由 stopDisc 静音——本表清空后 tick 不再驱动任何播放）
     m_insideStronghold = false;   // t1000：换世界清要塞进入沿守卫（同坐标瞬态表清理先例——新世界重新判沿）
     for (int k = 0; k < World::StructureKindCount; ++k)
         m_insideStructure[k] = false; // t1020：换世界同清四结构进入沿守卫（读档重进同清，见 finishWorldLoad）
@@ -740,6 +751,7 @@ void PlayerController::finishWorldLoad()
     m_platePressedCells.clear();
     m_plateJustPressed.clear();
     m_buttonRecoverCells.clear();
+    m_jukeboxPlaying.clear(); // t1083：读档重进同清播放表（setWorld 因指针未变不触发；运行期态不跨会话）
     m_plateBaselineSkipNext = true; // 首 tick 建基线不产沿（防读档踩板误触发陷阱）
     // t1000：读档重进同清进入沿守卫（本路径 setWorld 因指针未变不触发）——存档若停在要塞内，载入后
     //   首 tick 重产一次进入沿（进度 loadVariant 已恢复解锁 → unlock 幂等早退，不重发 toast）。
@@ -1260,6 +1272,10 @@ void PlayerController::tickImpl()
     // t1080 漏斗机制 tick（机关扫描族同门——常开、内自检、独立 0.4s 相位；硬暂停不达此行 = 暂停期
     //   漏斗冻结，机制等价 MC 暂停一切）。dt 推进每漏斗冷却；到期跑「输出 -> 抽取 -> 收集」一轮。
     scanHoppers(dt);
+    // t1083 唱片机播放状态机 tick（机关扫描族同门——常开、内自检；硬暂停不达此行 = 暂停期音轨
+    //   计时冻结，机制等价 MC 暂停一切 / 暂停时唱片不推进）。dt 推进每台播放中唱片机剩余时长；
+    //   到期自动吐盘。
+    tickJukeboxes(dt);
     // t569 红石矿石点亮触发（玩家走近红石矿即微弱红光，机制等价 MC 触发发光）：与拾取同级常开（玩家走过
     //   红石矿旁即触发，独立于捕获态）。内自检 + 死亡门控；点亮表到期自熄。dt 用于倒计时递减。
     scanRedstoneOre(dt);
@@ -1719,7 +1735,9 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
                                 || brokenId == BlockRegistry::PotatoCrop
                                 || brokenId == BlockRegistry::SnowLayer // t505 雪层按 state 掉 (state+1) 雪球
                                 || brokenId == BlockRegistry::Painting // t721 画：state 带 face/index（连通域移除用）
-                                || brokenId == BlockRegistry::EmberGate) // t725 门：state 带 axis（连通域熄灭用）
+                                || brokenId == BlockRegistry::EmberGate // t725 门：state 带 axis（连通域熄灭用）
+                                || brokenId == BlockRegistry::Jukebox) // t1083：state 带盘位（破坏吐盘用——
+                                                                       //   setBlock 会清 state，必须先快照，t134 lessons）
         ? m_world->stateAt(x, y, z) : quint8(0);
     // t506 冰（Ice）生存挖掘 → 生成水方块（机制等价 MC 1.0 冰破成水）：精准采集（SilkTouch）→ 走通用 silk 分支
     //   掉 Ice 自身（line ~1007），不在此处理；非精准采集 → 破冰格置水源（Water state=0）而非 Air。PackIce /
@@ -1756,6 +1774,23 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
             }
         }
         m_hopperStore->clearHopper(x, y, z);
+    }
+    // t1083 破唱片机吐盘（机制等价 MC 破坏含盘唱片机 → 唱片机 + 盘都掉）：盘态已在上方 brokenState
+    //   快照（setBlock(Air) 前捕——state 随破块清零，后读恒 0，t134 lessons 同门）。播放中 → 一并停播
+    //   （jukeboxStopped 信号链停音频）；随后通用掉落链照常掉唱片机本体（dropId=自身）。盘掉落走
+    //   drop 门控（生存才掉，同破漏斗掉容腔内容 / 全方块掉落口径；再右键吐盘才恒吐——MC 创造取出
+    //   也得盘，故 useBlock 路径不经本门）。爆炸 / 岩浆破坏不走本分支（盘随块毁不吐，同箱子
+    //   「内容不退回」登记口径——非采集破坏面一致）。
+    if (brokenId == BlockRegistry::Jukebox) {
+        const bool wasPlaying = m_jukeboxPlaying.contains(jukeboxKey(x, y, z));
+        m_jukeboxPlaying.remove(jukeboxKey(x, y, z)); // 播放表必摘（防陈旧键）
+        if (drop && m_itemEntities && BlockRegistry::jukeboxHasDisc(brokenState)) {
+            const int disc = jukeboxDiscForTrack(BlockRegistry::jukeboxTrack(brokenState));
+            if (disc > 0)
+                m_itemEntities->spawnItem(x, y, z, disc, 1); // 盘物品落机位（同破漏斗掉内容模式）
+        }
+        if (wasPlaying)
+            emit jukeboxStopped(x, y, z, BlockRegistry::jukeboxTrack(brokenState)); // 停音频
     }
     // t721 画作移除（机制等价 MC 1.0 破画：整张画消失 + 只掉 1 个 painting 物品，非逐格掉）：
     //   破坏任一画格 → removePaintingAt 按 brokenState 的 face 圈定本张画的格子（本格已被上方 setBlock
@@ -3780,6 +3815,57 @@ void PlayerController::placeBlock()
                                 BlockRegistry::noteBlockNoteName(pitch));
             emit swingArm(); // 调音也是一次「使用」动作 → 挥手（t29）
             return;
+        }
+        // t1083 右键唱片机 → 放入 / 吐盘 / 续播状态机（useBlock 语义；MC 1.0 jukebox 同款三语义）。
+        //   review0909 #2 口径：补 !sneakPlaceBlock 门（潜行持方块右键 = 旁路走下方放置路径，放置语义
+        //   不被吞）。分支序 =「播放中 → 吐盘；盘在机未播（载入态）→ 续播；空机持盘 → 放入；空机
+        //   无盘 → 无效应不消耗」（MC 口径：播放中右键 = 取出，无论手持；空机右键持盘 = 放入并播放）。
+        //   放入 = 消费 1 件盘（takeStack，同暗渊之眼激活消耗面；创造不耗——创造资源免扣同全物品）
+        //   + state 写盘位（jukeboxInsertState 单一权威组装）+ 播放表登记；吐盘 = spawnItem 盘物品
+        //   （ eject 中心位，同甜浆果采摘散布前主位）+ state 清盘位 + 播放表移除。id 不变只 state 变
+        //   → 5 参数 setBlock 走重网格化路径（发 worldChanged 不发 broken/placed，同门/音符盒口径）。
+        //   发声走信号链（音频层只消费，PLAN §2 分层）：started 携曲目号 → Main.qml 路由
+        //   audio.playDisc(track)；stopped → audio.stopDisc()。
+        if (!sneakPlaceBlock && BlockRegistry::isJukebox(hitId)) {
+            const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
+            const quint64 key = jukeboxKey(m_hitBx, m_hitBy, m_hitBz);
+            if (m_jukeboxPlaying.contains(key)) {
+                // ① 播放中 → 吐盘（音轨作废：MC 1.0 取出不续播，剩余时长丢弃）。
+                ejectJukeboxDiscAt(m_hitBx, m_hitBy, m_hitBz, st);
+                m_lastPlaceMs = now;
+                emit swingArm();
+                return;
+            }
+            if (BlockRegistry::jukeboxHasDisc(st)) {
+                // ② 盘在机未播（载入 / 上局停播态）→ 续播（不消耗物品——盘已在机内）。
+                const int track = BlockRegistry::jukeboxTrack(st);
+                m_jukeboxPlaying.insert(key, jukeboxTrackDurationSec(track));
+                m_lastPlaceMs = now;
+                emit jukeboxStarted(m_hitBx, m_hitBy, m_hitBz, track);
+                emit swingArm();
+                return;
+            }
+            // ③④ 空机：手持音乐盘 → 放入并播放；空手 / 非盘 → 无效应不消耗（不挥臂，fall-through；
+            //     盘是材料段非方块 → selectedBlockId 已派生 Air，须读**原始物品 id**（selectedItemId，
+            //     同工具感知挖掘的原始 id 面）判「手持是否盘」——selectedBlockId 对非方块恒 Air，用它
+            //     判会把放入面做成死代码（lessons「阻挡谓词排除清单」同门：读归一面判被归一掉的类别）。
+            if (m_hotbar) {
+                const int held = m_hotbar->selectedItemId();
+                const int track = jukeboxTrackForDisc(held);
+                if (track >= 0) {
+                    m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId,
+                                      BlockRegistry::jukeboxInsertState(track));
+                    if (m_mode == Survival)
+                        m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 件盘（创造不耗，同暗渊之眼激活面）
+                    m_jukeboxPlaying.insert(key, jukeboxTrackDurationSec(track));
+                    m_lastPlaceMs = now;
+                    emit jukeboxStarted(m_hitBx, m_hitBy, m_hitBz, track);
+                    emit swingArm();
+                    return;
+                }
+            }
+            // ⑤ 空机无盘：无效应（不挥臂不消耗；MC 空手右键空唱片机无动作）。fall-through 到下方
+            //   通用路径（手持非盘物品无放置语义 → 终态无动作）。
         }
     }
     // t467 雪原浆果灌木丛采摘 useBlock（spec「成熟右键采摘得 2-3 浆果、丛回阶段 0 重新长」；机制等价 MC 1.0
@@ -6634,6 +6720,80 @@ void PlayerController::updateButtonRecovery(float dt)
                 m_world->setBlock(bx, by, bz, b, quint8(st & quint8(~1))); // 清 bit0 弹回（id 不变 → 仅 worldChanged）
         }
         it = m_buttonRecoverCells.erase(it); // 该格已非按钮（被破 / 替换）→ 仅移除表项
+    }
+}
+
+// ── t1083 唱片机播放状态机 ─────────────────────────────────────────────────────────────
+// 曲目号 ↔ 音乐盘物品 id 映射单一权威（recipe.h MusicDisc*Id 段同源；放入写盘号 / 吐盘还原物品
+//   同一张表，禁第二份映射）。track ∈ [0, kDiscTrackCount) 域外 → disc 返 0 / track 返 -1（无映射）。
+static constexpr int kDiscTrackCount = 3;
+int PlayerController::jukeboxDiscForTrack(int track)
+{
+    switch (track) {
+    case 0: return RecipeRegistry::MusicDiscAmberId; // 琥珀旋律（disc_track_0.wav）
+    case 1: return RecipeRegistry::MusicDiscEchoId;  // 深巷回声（disc_track_1.wav）
+    case 2: return RecipeRegistry::MusicDiscNightId; // 夜航曲（disc_track_2.wav）
+    default: return 0;                                // 越界 → 无物品（caller 对 0 守卫不产出）
+    }
+}
+int PlayerController::jukeboxTrackForDisc(int itemId)
+{
+    switch (itemId) {
+    case RecipeRegistry::MusicDiscAmberId: return 0;
+    case RecipeRegistry::MusicDiscEchoId:  return 1;
+    case RecipeRegistry::MusicDiscNightId: return 2;
+    default: return -1;                               // 非盘 → 无映射（useBlock 据此判「无效应」）
+    }
+}
+// 音轨时长单一权威表（秒）：**与 tools/build_sounds.py DISC_TRACK_DUR 两处同步**（30.0/36.0/42.0，
+//   资产侧采样数 = SR×该值逐位生成；漂移即曲目与自动吐盘节律错位——见 build_sounds.py 侧同步注）。
+//   track 越界 → 0（到期立即吐盘兜底，防脏 state 永播）。
+float PlayerController::jukeboxTrackDurationSec(int track)
+{
+    static constexpr float kDurations[kDiscTrackCount] = { 30.0f, 36.0f, 42.0f };
+    return (track >= 0 && track < kDiscTrackCount) ? kDurations[track] : 0.0f;
+}
+// 坐标键打包实现见文件顶部匿名命名空间 jukeboxKey（前段 finishMiningAt / placeBlock 先用，故上移）。
+// 吐盘单一收口（语义见 playercontroller.h ejectJukeboxDiscAt 声明处注释）：state 参数 = 调用方在
+//   **任何 setBlock 之前**的盘态快照（t134 lessons：4 参数 setBlock 会把 state 重置为 0，setBlock
+//   之后读 stateAt 永得 0 → 破坏路径必须先快照）。
+void PlayerController::ejectJukeboxDiscAt(int x, int y, int z, quint8 state)
+{
+    const bool wasPlaying = m_jukeboxPlaying.contains(jukeboxKey(x, y, z));
+    m_jukeboxPlaying.remove(jukeboxKey(x, y, z));
+    if (BlockRegistry::jukeboxHasDisc(state)) {
+        const int disc = jukeboxDiscForTrack(BlockRegistry::jukeboxTrack(state));
+        if (disc > 0 && m_itemEntities)
+            m_itemEntities->spawnItem(x, y, z, disc, 1); // 盘物品落机位（拾取走既有实体链）
+        if (m_world)
+            m_world->setBlock(x, y, z, BlockRegistry::Jukebox, quint8(0)); // 清盘位（id 不变 → 仅 worldChanged）
+    }
+    if (wasPlaying)
+        emit jukeboxStopped(x, y, z, BlockRegistry::jukeboxTrack(state)); // 音频停（呈现层路由）
+}
+// 播放状态机 tick（接线在 tick 管线 scanHoppers 之后，常开 / 内自检；头注释见声明处）：
+//   每 tick 递减播放中唱片机剩余音轨时长；到期 → ejectJukeboxDiscAt 自动吐盘（音轨结束语义）；
+//   格上已非唱片机（被破 / 被替换 / chunk 卸载）→ 仅移除表项（防陈旧键误写，同 updateButtonRecovery
+//   守卫模式——吐盘语义由 finishMiningAt 破坏分支承担；chunk 卸载场景盘位仍在 chunk state 内，
+//   重载后「盘在机未播」再右键续播）。探针直调本方法以 dt 累积驱动（scanHoppers 同门）。
+void PlayerController::tickJukeboxes(float dt)
+{
+    if (!m_world) return;
+    if (m_jukeboxPlaying.isEmpty()) return; // 无播放场景零开销早退（每 tick 仅一次判空）
+    for (auto it = m_jukeboxPlaying.begin(); it != m_jukeboxPlaying.end(); ) {
+        it.value() -= dt;
+        if (it.value() > 0.0f) { ++it; continue; }
+        // 到期（音轨结束）：解包格坐标（编码同 jukeboxKey / updateButtonRecovery 解包模式）。
+        const quint64 key = it.key();
+        const int bx = int(quint32(key & 0x1FFFFFu)) - 0x100000;
+        const int bz = int(quint32((key >> 21) & 0x1FFFFFu)) - 0x100000;
+        const int by = int(quint32(key >> 42)) & 0x3FFu;
+        const quint8 b = m_world->blockAt(bx, by, bz);
+        if (!BlockRegistry::isJukebox(b)) { it = m_jukeboxPlaying.erase(it); continue; } // 陈旧键仅摘除
+        const quint8 st = m_world->stateAt(bx, by, bz);
+        ejectJukeboxDiscAt(bx, by, bz, st); // 自动吐盘（内部 erase 表项 + spawn + stopped 信号）
+        it = m_jukeboxPlaying.begin(); // eject 内 remove 当前键 → 迭代器失效；重头扫（表极小，O(n²) 无感）
+        // 注：ejectJukeboxDiscAt 恒移除恰一个键（本键）→ 重扫必然单调收敛（无死循环面）。
     }
 }
 

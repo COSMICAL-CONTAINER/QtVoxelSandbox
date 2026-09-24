@@ -196,6 +196,16 @@ struct AudioManager::Data
     //   挂矩阵钉（本侧 aud-note-pitchcount / Core 侧 hdr-note-pitchcount），漂移即红非静默失效。
     static constexpr int kNotePitchCount = 25;
     Clip noteClips[kNotePitchCount] = {};
+    // t1083 唱片机 3 轨曲目 clip 池（disc_track_00..02.wav）。同步点登记（kNotePitchCount 同门）：
+    //   kDiscClipCount=3 与 PlayerController::jukeboxTrackDurationSec 表长（playercontroller.cpp
+    //   kDiscTrackCount=3）手抄同口径——Audio 层不 include Game 头的分层选择保留；两侧各挂矩阵钉
+    //   （本侧 aud-disc-count / Game 侧 pc-disc-count），漂移即红非静默失效。
+    static constexpr int kDiscClipCount = 3;
+    Clip discClips[kDiscClipCount] = {};
+    // t1083 曲目音量基础系数（playDisc 乘 m_volume；曲目是前景音乐但不应压过交互 SFX 的空间感）。
+    static constexpr float kDiscBaseVol = 0.55f;
+    // t1083 当前活动曲目号（-1 = 无活动曲；playDisc 记录 / stopDisc 早退守卫面）。
+    int activeDisc = -1;
 
     static constexpr ma_uint32 kChannels = 1;     // mono（合成时即 mono，省一半带宽）
     // t328：合成升到 44100 Hz（更多高频细节 / 更短瞬态分辨 → 音色清晰，详见 build_sounds.py）。
@@ -215,6 +225,15 @@ struct AudioManager::Data
     {
         char buf[40];
         std::snprintf(buf, sizeof(buf), ":/sounds/note_pitch_%02d.wav", pitch);
+        pathStore.emplace_back(buf);
+        return pathStore.back().c_str();
+    }
+
+    // t1083 在 pathStore 内构造一条盘曲路径（:/sounds/disc_track_NN.wav，NN 两位十进制）。
+    const char *makeDiscPath(int track)
+    {
+        char buf[40];
+        std::snprintf(buf, sizeof(buf), ":/sounds/disc_track_%02d.wav", track);
         pathStore.emplace_back(buf);
         return pathStore.back().c_str();
     }
@@ -383,6 +402,13 @@ AudioManager::AudioManager(QObject *parent)
     for (int n = 0; n < Data::kNotePitchCount; ++n) {
         d->noteClips[size_t(n)].qrcPath = d->makeNotePath(n);
         d->loadClip(d->noteClips[size_t(n)]);
+    }
+    // t1083 唱片机 3 轨曲目 clip 池（30/36/42s 长曲——maxFrames 64s 放宽：t177 lessons「解码器长度
+    //   上限按资产类参数化」，短 SFX 的 2s 默认会把长曲截断成 2s 咔哒循环爆音。路径 makeDiscPath
+    //   长寿命化，同 pathStore 纪律）。
+    for (int i = 0; i < Data::kDiscClipCount; ++i) {
+        d->discClips[size_t(i)].qrcPath = d->makeDiscPath(i);
+        d->loadClip(d->discClips[size_t(i)], ma_uint64(Data::kSampleRate) * 64);
     }
     d->initSound(d->placeClip);
     d->initSound(d->pickupClip);
@@ -869,6 +895,32 @@ void AudioManager::playNote(int pitch, int family)
     }
     auto &c = d->noteClips[size_t(p)]; // Clip 是 Data 嵌套类型——AudioManager 作用域裸名不可见（app 目标编译教训：矩阵目标不含 audiomanager.cpp）
     d->replayNote(c, m_volume * 0.9f, rate);
+}
+
+// t1083 唱片机盘曲播放（语义契约见 audiomanager.h playDisc 声明处注释）。
+void AudioManager::playDisc(int track)
+{
+    if (track < 0 || track >= Data::kDiscClipCount) return; // 越界静默早退（§2-E）
+    d->activeDisc = track;
+    if (!d->engineOk) return;                    // 引擎未就绪 → 静默（状态机仍运行，仅无声）
+    auto &c = d->discClips[size_t(track)];       // Clip 是 Data 嵌套类型（playNote 同门裸名教训）
+    if (!c.ok) return;                           // clip 加载失败（缺文件）→ 静默降级
+    ma_sound_stop(&c.sound);                     // 复播语义：截断重发（同曲再放入 = 从头播）
+    ma_sound_seek_to_pcm_frame(&c.sound, 0);
+    ma_sound_set_volume(&c.sound, Data::kDiscBaseVol * m_volume);
+    ma_sound_start(&c.sound);                    // 一次性整曲播放（非循环——吐盘即停是核心语义）
+}
+
+// t1083 唱片机停播（幂等；未在播 no-op）。stop 不 seek——下次 playDisc 会 seek 0 重发。
+void AudioManager::stopDisc()
+{
+    d->activeDisc = -1;
+    if (!d->engineOk) return;
+    for (int i = 0; i < Data::kDiscClipCount; ++i) {
+        auto &c = d->discClips[size_t(i)];
+        if (c.ok)
+            ma_sound_stop(&c.sound);
+    }
 }
 
 void AudioManager::setVolume(float v)
