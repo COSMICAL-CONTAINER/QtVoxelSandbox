@@ -27,7 +27,7 @@
 
 ## 候选池（MC 对标机制差距盘点 —— 派工前逐一核实未实现）
 
-- 写门家族「核心域假设」同族清偿批（t1074 登记未修，2026-09-21）：**第一分批已清偿 = t1089**（2026-09-25，32c8c13/0e0b993——固定盒静默写门五员，矩阵 762→769）；**后续批 t1090 在飞**：destroySphereSilent 核心盒扫描门与 reflood 盒钳制（外环爆炸）+ tickLeafDecay 盒钳制 + 重力级联邻域门；**新发现三项留池**（t1089 现场盘点）：辅助固定盒门五处[fireRainExposedAt/igniteFlammableAt/isBurningAt/recheckAttachmentsAfterClear/recomputeRailConnections]/FallingBlock tick 负坐标列跳过[符号假设面]/packGrowthCell quint16 截断[符号假设面]——逐员核实可降级
+- 写门家族「核心域假设」同族清偿批（t1074 登记未修，2026-09-21）：**第一分批已清偿 = t1089**（2026-09-25，32c8c13/0e0b993——固定盒静默写门五员，矩阵 762→769）；**后续批已清偿 = t1090**（2026-09-25，6802b62/e22978a——destroySphereSilent 扫描门+reflood 盒/tickLeafDecay+packLeafCell 合并清偿/重力级联四站+FallingBlock tick 合并清偿，矩阵 769→775）；**第三批残项 t1091 在飞**：primed TNT/Mob/Item tick 同形负坐标列跳过 + packGrowthCell quint16 截断 + 五处辅助固定盒门——逐员核实可降级
 - ChunkStore removeDatabase "still in use" 慢性告警（t1074 登记，会话拆卸期纯噪音）——低优先级卫生单
 - 陶瓦族（terracotta，MC 1.6 机制）：粘土烧制 + 染色陶瓦 16 色（t1078 降级登记——非 1.0 机制）
 - 染色玻璃族（MC 1.7.2 机制）：玻璃 + 染料 16 色（t1078 降级登记——非 1.0 机制）
