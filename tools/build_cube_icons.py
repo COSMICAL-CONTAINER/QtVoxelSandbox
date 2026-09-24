@@ -63,6 +63,9 @@ BLOCKS = [
     # t1077 骨块立方体图标（各面=default_bone_block 程序贴图 3D 渲染——pack 1.8.2.2 无 bone_block.png，
     #   恒程序原生路径；tools/build_bone_block.py 生成源贴图后本表项驱动 icon 重烘焙）。
     ("bone_block",      "default_bone_block", "default_bone_block"),
+    # t1083 唱片机立方体图标（顶=盘槽面 / 侧=匣体木纹面——per-face 顶+侧，同 chest「顶+侧」混面模式；
+    #   tools/build_jukebox.py 生成源贴图后本表项驱动 icon 重烘焙）。
+    ("jukebox",         "default_jukebox_top", "default_jukebox_side"),
     ("wool",            "default_wool", "default_wool"),  # t300 羊毛方块（各面同贴图=奶白羊毛卷绒纹）
     # t455 16 色 wool 其余 15 色变体立方体图标（各面同贴图=彩色卷绒纹；build_wool.py 程序生成原创像素图）。
     #   15 色顶 + 两侧明暗 → hotbar / 创造调色板肉眼即可辨色（橙 / 品红 / 浅蓝 / 黄 / 柠绿 / 粉 / 灰 / 浅灰 /

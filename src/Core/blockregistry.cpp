@@ -760,6 +760,14 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   锅体) / 排料口面=hopper_front(188 排料嘴)；mesher tileFor 据 state 选（HopperFacingDownFlag 朝下时
     //   排料嘴贴底面，见 meshbuilder.cpp Hopper 分支）。音色归 GroupStone（金属质）。
     /* hopper              */ {int(BlockRegistry::Hopper),             186,187,187,188, true,  BlockRegistry::ShapeFull,     3.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Hopper),            1, 64, "hopper",         "漏斗"},
+    // t1083 唱片机（Jukebox=146）：木制发声匣——放入音乐盘播放 / 音轨结束 / 再右键 / 被破坏吐盘
+    //   （机制语义在 PlayerController useBlock + tickJukeboxes；属性注释见 blockregistry.h Id 枚举
+    //   Jukebox 行）。整立方 opaque（solid=true / ShapeFull，同音符盒 / 漏斗机关匣家族体量）、
+    //   hardness=2.0（MC jukebox 同档）/ Axe 加速 / requiresTool=false（空手可采且掉落）。
+    //   dropId=自身、dropCount=1、maxStack=64。贴图 per-face：顶=jukebox_top(189 盘槽面) /
+    //   侧·底=jukebox_side(190 匣体木纹面)；无朝向语义 → 无 mesher tileFor state 分支（六面状态恒定，
+    //   有无盘不改贴图——MC 1.0 唱片机同口径，播放视觉只有音轨本体无方块态变化）。
+    /* jukebox             */ {int(BlockRegistry::Jukebox),            189,190,190,190, true,  BlockRegistry::ShapeFull,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::Jukebox),           1, 64, "jukebox",        "唱片机"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -953,6 +961,10 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     //   实现不受影响——本表仅迁移文档引用，无运行期消费者）。**t691 教训**：一行一条目 + 行内注释，
     //   防聚合初始化零填充回归（本行是 Count 146 行数的第 145 行，追加后全表行数与 Count 一致）。
     /* hopper                 */ 0,
+    // t1083 唱片机 → MC 1.0 **存在** id 84（jukebox 自 Beta 1.0 即有，1.0.0 沿用；放入盘 / 取出盘 /
+    //   播放机制等价实现——红石面 1.0 无此机制，不映射不登记缺口）。**t691 教训**：一行一条目 +
+    //   行内注释，防聚合初始化零填充回归（本行追加后全表行数与 Count 147 一致）。
+    /* jukebox                */ 84,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -1296,6 +1308,14 @@ bool BlockRegistry::isDispenser(quint8 blockId)
     return blockId == Dispenser;
 }
 
+// t1083 唱片机统一谓词（单一权威）：blockId == Jukebox 即唱片机。供 PlayerController useBlock
+//   放入 / 吐出分支 + finishMiningAt 破坏吐盘分支判定（避免各处硬编码 id 判定漂移，同 isDispenser
+//   单 id 模式）。单 id 故裸相等判定。
+bool BlockRegistry::isJukebox(quint8 blockId)
+{
+    return blockId == Jukebox;
+}
+
 // t609 投掷器统一谓词（单一权威）：blockId == Dropper 即投掷器（机制等价 MC 1.0 dropper——全部物品弹出
 //   掉落物的机关盒）。供 PlayerController 触发判定 / 右键开 UI / 放置朝向 / 破块掉内容（同 isDispenser 模式）。
 bool BlockRegistry::isDropper(quint8 blockId)
@@ -1580,6 +1600,12 @@ int   BlockRegistry::maxStackSize(int itemId)
     //   Hotbar::maxStackSize 对 0x23E 同步特判 maxStack=1，**两处须保持同步**（掉落物合并路径按 1
     //   跳过合并 → 两矿车各为独立实体；拾取按真实 cap 分槽）。
     if (itemId == 0x23E) return 1;
+    // t1083 音乐盘（0x25F/0x260/0x261 = Game 层 RecipeRegistry::MusicDiscAmberId / MusicDiscEchoId /
+    //   MusicDiscNightId；Core 不能依赖 Game 故字面量 + 同步注释）**不可堆叠**（机制等价 MC 1.0
+    //   music disc maxStack 1——收藏媒介单件）。Game 层 Hotbar::maxStackSize 对三 id 同步特判
+    //   maxStack=1，**两处须保持同步**（掉落物合并路径按 1 跳过合并 → 两盘各为独立实体——唱片机
+    //   吐盘 / 战利品拾取各得单件盘；拾取按真实 cap 分槽）。
+    if (itemId == 0x25F || itemId == 0x260 || itemId == 0x261) return 1;
     // 材料段 ≥ 0x200：可堆叠 64（木棒 / 煤 / 铁锭 / 骨头 / 腐肉 / 箭 / 火药 / 羽毛 / 线 / 皮革 / 墨囊 / 蛋 等 mob 掉落物 + 合成材料）。
     //   含护甲段（≥0x300）—— 护甲不会作为 mob / 破块掉落物出现（仅玩家 Q 键丢弃），按 64 合并无害（拾取 Hotbar.addStack 按
     //   真实 maxStack=1 分槽）。桶 / 蘑菇汤（材料段内 maxStack=1 的特例）同理 —— 仅玩家持有 / 丢弃，掉落实体阶段按 64 合并无数据错。
@@ -2850,6 +2876,8 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Painting: // t720 画作 → 木质音色（木质画框）
     case NoteBlock: // t1028 音符盒 → 木质音色（木制乐器盒，MC 1.0 note block wood SoundType 同口径；
                     //   注意：这是「敲击盒体」的材质音色，与发声（playNote 钢琴音）是两条链）
+    case Jukebox: // t1083 唱片机 → 木质音色（木制发声匣，同音符盒木盒族；机制等价 MC jukebox
+                  //   wood SoundType；同样与播放（playDisc 曲目音）是两条链——敲击材质 vs 曲目播放）
         return GroupWood;
     case Grass: case Dirt:
     case Farmland: // t234 耕地 → 软土音色（同 grass/dirt；机制等价 MC 耕地 SoundType = ground）

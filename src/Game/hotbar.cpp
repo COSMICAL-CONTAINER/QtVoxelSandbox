@@ -87,6 +87,7 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::GoldBlock:    return "icon_gold_block.png";     // 金块（pack 金黄底+高光）
     case BlockRegistry::RedstoneBlock: return "icon_redstone_block.png"; // 红石块（pack 鲜红底+矿粒）
     case BlockRegistry::BoneBlock:    return "icon_bone_block.png";     // t1077 骨块立方体图标（default_bone_block 程序贴图 3D 渲染——pack 1.8.2.2 无 bone_block.png，恒走程序原生路径）
+    case BlockRegistry::Jukebox:      return "icon_jukebox.png";      // t1083 唱片机立方体图标（顶=盘槽面/侧=匣体面，build_jukebox.py 程序贴图 3D 渲染）
     case BlockRegistry::RedstoneLamp: return "icon_redstone_lamp.png";  // 红石灯（pack off 态贴图，与放置态默认一致）
     // t628 手动点火机关图标（t490 已生成 icon PNG 并注册 qrc，但 iconFileForBlock 漏接 case → 调色板图标空白；
     //   本任务接通 + 补进创造调色板）。t662 几何重做：button / lever shape 3D 立体图标（凸钮单盒 / 底座+摆棍，
@@ -677,7 +678,15 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::DyeBrownId),      // 棕色染料
         int(RecipeRegistry::DyeGreenId),      // 绿色染料：熔炉烧仙人掌
         int(RecipeRegistry::DyeRedId),        // 红色染料：红花破坏掉落
-        int(RecipeRegistry::DyeBlackId)       // 黑色染料
+        int(RecipeRegistry::DyeBlackId),      // 黑色染料
+        // t1083 音乐盘三张（材料段 0x25F..0x261；机制等价 MC 1.0 music disc）：地牢 / 矿井战利品
+        //   稀有件 + 唱片机播放媒介。创造调色板补全便于测试放入 / 吐盘 / 播放链（战利品权重 2 极稀有，
+        //   创造直取是唯一免肝测试面）。maxStack=1 不可堆叠（同船 / 矿车族，maxStackSize 特判）；非方块
+        //   → 右键命中唱片机 = 放入（useBlock 消费），命中其他 = 无效应不消耗。MaterialIcon 自绘
+        //   彩色盘面（drawDisc 色带区分，§9 原创）。三盘连续同列（同蛋区连续性口径）。
+        int(RecipeRegistry::MusicDiscAmberId), // 音乐盘（琥珀旋律）：唱片机曲目 0；地牢战利品
+        int(RecipeRegistry::MusicDiscEchoId),  // 音乐盘（深巷回声）：唱片机曲目 1；矿井战利品
+        int(RecipeRegistry::MusicDiscNightId)  // 音乐盘（夜航曲）：唱片机曲目 2；战利品/创造
     };
 }
 
@@ -920,6 +929,10 @@ QVariantList Hotbar::creativeBlocks() const
              //   归红石 tab（Inventory.qml redstoneIds 含 143 → 方块 tab 自动隐藏，机关件与红石灯同页——
              //   音符盒是红石触发发声的红石机关件，MC 创造栏同归类）。配方 8 木板环 + 1 红石粉。
              int(BlockRegistry::NoteBlock),                                  // 音符盒（右键调音；攻击/红石发声）
+             // t1083 唱片机（机制等价 MC 1.0 jukebox；右键放入音乐盘播放 / 音轨结束·再右键·被破坏吐盘）。
+             //   归方块 tab（非红石机关件——红石驱动播放 1.0 无此机制，不入 redstoneIds；木制发声匣同
+             //   工作台 / 箱子功能方块页）。配方 8 木板环 + 1 钻石。紧随音符盒（发声方块族相邻）。
+             int(BlockRegistry::Jukebox),                                    // 唱片机（放入音乐盘播放；吐盘）
              // t487 要塞结构方块（机制等价 MC 1.0 要塞 stronghold 的石砖 / 石砖台阶 / 石砖楼梯；worldgen 散布 / 创造取用）。
              int(BlockRegistry::StoneBrick),                                 // 石砖（石质整立方 + 砖纹；要塞墙体主体；可放置）
              int(BlockRegistry::StoneBrickSlab),                             // 石砖台阶（半高；复用 ShapeSlab 几何 + 石砖贴图；可放置）
@@ -1200,6 +1213,11 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::SpawnEggOcelotId) return QStringLiteral("生物蛋（豹猫）"); // 右键 → 生成野生豹猫
         if (blockId == RecipeRegistry::SpawnEggBabyShamblerId) return QStringLiteral("生物蛋（小蹒跚者）"); // 右键 → 生成幼体僵尸（t952）
         if (blockId == RecipeRegistry::SpawnEggCaveSpiderId)   return QStringLiteral("生物蛋（洞穴蜘蛛）"); // 右键 → 生成洞穴蜘蛛（t1012③）
+        // t1083 音乐盘三张（材料段 0x25F..0x261；机制等价 MC 1.0 music disc）：唱片机播放媒介 +
+        //   地牢 / 矿井战利品稀有件。色带区分（MaterialIcon drawDisc 盘面色带）。零 MC 专名（§9）。
+        if (blockId == RecipeRegistry::MusicDiscAmberId) return QStringLiteral("音乐盘（琥珀旋律）"); // 唱片机曲目 0；地牢战利品
+        if (blockId == RecipeRegistry::MusicDiscEchoId)  return QStringLiteral("音乐盘（深巷回声）"); // 唱片机曲目 1；矿井战利品
+        if (blockId == RecipeRegistry::MusicDiscNightId) return QStringLiteral("音乐盘（夜航曲）");   // 唱片机曲目 2；战利品/创造
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落；打火石配方原料。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::FlintId) return QStringLiteral("燧石"); // 挖沙砾概率掉落；打火石配方原料
         // t891② 烈焰弹（材料段 0x25C；机制等价 MC fire charge）：燃烬粉+煤/炭+火药合成 3 发；右键发射火球
@@ -1649,6 +1667,12 @@ int Hotbar::maxStackSize(int id) const
     //   单件，同船 / 桶族）。须在通用材料段判定**之前**特判（否则落 64）。Core 层 BlockRegistry::
     //   maxStackSize（掉落物合并用）已对 0x242 同步特判 1 —— 两处保持同步（见 blockregistry.cpp 注释）。
     if (id == RecipeRegistry::PaintingId) return 1;
+    // t1083 音乐盘（0x25F/0x260/0x261，材料段）：不可堆叠（机制等价 MC 1.0 music disc maxStack 1——
+    //   收藏媒介单件，同船 / 矿车 / 画载具·实体物品族）。须在通用材料段判定**之前**特判（否则落 64
+    //   ——两盘叠一槽）。Core 层 BlockRegistry::maxStackSize（掉落物合并用）已对三 id 同步特判 1 ——
+    //   两处保持同步（见 blockregistry.cpp 注释）。
+    if (id == RecipeRegistry::MusicDiscAmberId || id == RecipeRegistry::MusicDiscEchoId
+        || id == RecipeRegistry::MusicDiscNightId) return 1;
     // t345 护甲段（>= ArmorIdBase）：不可堆叠（每件独立耐久，同工具段语义）。
     if (ArmorRegistry::isArmor(id)) return 1;
     if (id >= kMaterialIdBase) return 64; // 材料段（t50 木棒等）：可堆叠 64（MC 标准）

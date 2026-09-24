@@ -414,6 +414,11 @@ TILES = [
     "default_hopper_side",           # 187 hopper_side（锅体侧面/底面：暗铁底 + 边框暗带 + 两道箍带 + 四角铆钉）
     "default_hopper_front",          # 188 hopper_front（排料口面：锅体 + 中央深孔 + 孔下出料槽；mesher 据
                                      #    state 贴排料口所朝面（同发射器 tileFor 分支），标记输出方向）
+    # t1083 唱片机两张（机制等价 MC 1.0 jukebox 的木制发声匣——放入音乐盘 / 再右键取出 / 播放中吐盘）。
+    #   名称 / 贴图全原创自绘 §9a（深橡木匣体系：顶面盘槽 / 侧面木纹搁架带；「唱片机」「Jukebox」为通用
+    #   描述词，零 MC 专有名词）。tools/build_jukebox.py 程序生成原创像素图（§9 override (a)）。
+    "default_jukebox_top",           # 189 jukebox_top（顶面：木拼板面 + 居中圆盘槽 + 槽缘亮台阶线；Jukebox 顶面）
+    "default_jukebox_side",          # 190 jukebox_side（侧面/底面：竖板木纹 + 上下板缝 + 中段搁架暗带）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

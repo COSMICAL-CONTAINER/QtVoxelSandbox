@@ -1369,6 +1369,7 @@ Window {
         audio.stopAmbient()   // t177 环境音：退出世界停风声床（菜单态无声）
         audio.stopWaterFlow() // t223 水流声：退出世界停（菜单态无声；离开流水范围本会自停，此处显式保干净）
         audio.stopLavaFlow()  // t343 岩浆声：退出世界停（同水流声）
+        audio.stopDisc()      // t1083 唱片机：退出世界停曲（播放表已随 player.setWorld 清，音频面兜底静音）
         audio.stopStrongholdHum()    // t1021 结构环境音四音：退出世界显式全停（zone 静默清 0 不发信号，
         audio.stopMineshaftDrips()   //   重进后首 tick 值变重发 → 对应音恢复；此处先保退出即刻无声）
         audio.stopDesertNightWind()
@@ -1406,6 +1407,7 @@ Window {
         audio.stopAmbient()   // t177 环境音：回主菜单停风声床
         audio.stopWaterFlow() // t223 水流声：回主菜单停（菜单态无声）
         audio.stopLavaFlow()  // t343 岩浆声：回主菜单停（同水流声）
+        audio.stopDisc()      // t1083 唱片机：回主菜单停曲（同退出世界口径）
         audio.stopStrongholdHum()    // t1021 结构环境音四音：回主菜单显式全停（同退出世界口径）
         audio.stopMineshaftDrips()
         audio.stopDesertNightWind()
@@ -3499,6 +3501,10 @@ Window {
         // t1028 攻击音符盒发声（左键按下沿；挖掘照常）→ 路由 audio.playNote（纯发声，无播报——攻击是
         //   演奏交互非配置动作）。同 onDoorToggled 音频层只消费模式。
         function onNoteBlockAttackPlayed(x, y, z, pitch, family) { audio.playNote(pitch, family) }
+        // t1083 唱片机播放语义 → 音频层（单向事件流，音符盒路由同门）：started → playDisc(track)
+        //   （放入 / 续播沿）；stopped → stopDisc()（吐出沿三路共用）。音频层只消费，PLAN §2 分层。
+        function onJukeboxStarted(x, y, z, track) { audio.playDisc(track) }
+        function onJukeboxStopped(x, y, z, track) { audio.stopDisc() }
         // t242/t248/t295 玩家攻击 mob（spec「受伤音效」）→ 据 mobType 播对应受击音：被动（0-3）走通用
         //   mob_hurt.wav（t248 专属 mob 受击声，区别于玩家 hurt.wav；spec「受击音换专属 mob 受伤声」，替代
         //   旧复用 playHurt 路径）；敌对（4-7）走各专属音（t295「骨头敲击/蜘蛛嘶/僵尸哀嚎/苦力怕爆炸声」——

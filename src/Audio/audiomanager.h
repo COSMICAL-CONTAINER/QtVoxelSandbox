@@ -189,6 +189,21 @@ public:
     //   （连击不堆叠，同其他单件模式——音符盒是 per-pitch clip 池，同 pitch 连击截断、异 pitch 天然
     //   并行，MC 多音阶和弦观感）。engine / clip 失败静默早退（§2-E，不崩）。
     Q_INVOKABLE void playNote(int pitch, int family);
+    // t1083 唱片机音乐盘播放（Audio 唯一盘曲出口）：按曲目号 track（0..kDiscTrackCount-1，越界静默
+    //   早退）选播 disc_track_NN.wav 程序合成旋律（build_sounds.py gen_disc_track，§9 原创乐曲生成；
+    //   30/36/42s 三轨——时长契约见 PlayerController::jukeboxTrackDurationSec 同步注）。触发源
+    //   （Main.qml 单一通道路由）：PlayerController::jukeboxStarted（放入 / 续播沿）。播放语义 =
+    //   **一次性整曲播放**（非循环；非 seek 重发单件模式——曲目是长曲，再右键吐盘即中途停播）。
+    //   换曲不换曲面：同机连续放入不同盘时 playDisc 前先 stopDisc 语义（本方法开头对当前活动曲
+    //   ma_sound_stop + seek 0——同 clip 复用截断重发，异 clip 天然并行但同机放入沿必先吐）。
+    //   音量 = kDiscBaseVol（0.55：曲目是前景音乐但不应压过交互 SFX 的空间感；乘 m_volume）。
+    //   engine / clip 失败静默早退（§2-E，不崩——无音频文件时唱片机纯状态机运行）。
+    Q_INVOKABLE void playDisc(int track);
+    // t1083 唱片机停播（音频面）：ma_sound_stop 当前活动曲（幂等；未在播 no-op）。触发源 =
+    //   PlayerController::jukeboxStopped（吐出沿：再右键 / 音轨到期自动吐盘 / 被破坏吐盘三路）+
+    //   退世界清理（Main.qml 退菜单 / 退世界显式调用，同 stopAmbient 族——播放表已随 setWorld 清，
+    //   本调用兜底音频面静音）。engine / clip 失败静默早退（§2-E）。
+    Q_INVOKABLE void stopDisc();
 
     float volume() const { return m_volume; }
     void setVolume(float v);

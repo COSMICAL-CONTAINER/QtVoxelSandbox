@@ -1928,6 +1928,35 @@ Item {
                 R(12, 12, 1, 1, shade)
             }
 
+            // t1083 音乐盘（0x25F..0x261）：唱片机播放媒介 + 地牢/矿井战利品稀有件。MC 唱片 = 圆盘 +
+            //   中心孔 + 色带区分曲目；本工程原创盘面 = 圆盘（黑胶盘体 + 中心金属轴孔 + 高光弧）+ 顶部
+            //   色带（track 参数三元组——琥珀 / 深巷 / 夜航各一色带），一眼区分三张盘。纯原创自绘（§9a）。
+            const drawDisc = (bandMain, bandLite, bandDark) => {
+                const shell = "#1a1a20", shellLite = "#2e2e38", hub = "#8a8a94"
+                // 盘体（rows 7..17，cols 4..19 —— 圆形黑胶盘投影；行式近似圆 + 左上高光弧）
+                R(7, 8, 10, 1, shellLite)        // 盘顶受光缘
+                R(5, 9, 14, 1, shell)
+                R(4, 10, 16, 6, shell)           // 盘体主体 rows 10..15
+                R(5, 16, 14, 1, shell)
+                R(7, 17, 10, 1, shellLite)       // 盘底反光缘
+                // 顶部色带（曲目区分面：横贯盘面上半的亮带 + 内侧暗线——MC 唱片色带区分机制等价，
+                //   色值原创）
+                R(4, 10, 16, 2, bandMain)        // 色带主体（rows 10..11）
+                R(4, 12, 16, 1, bandDark)        // 色带下缘暗线
+                R(6, 10, 4, 1, bandLite)         // 色带受光段（左上）
+                // 中心轴孔（金属 hub 2×2 + 外圈暗环）
+                R(11, 12, 2, 2, hub)
+                R(10, 12, 1, 2, shell) ; R(13, 12, 1, 2, shell)
+                // 高光弧（左上缘受光，黑胶反光质感）
+                R(6, 9, 4, 1, bandLite)          // 色带亮段连盘缘高光连读
+                R(9, 8, 3, 1, shellLite)
+                // 色带下盘体一行暗线（色带不悬浮——盘体反光阶）
+                R(6, 13, 12, 1, shell)
+            }
+            const drawDiscAmber = () => drawDisc("#c87828", "#e8b060", "#8a4f16")
+            const drawDiscEcho  = () => drawDisc("#3f6f8f", "#7fb0c8", "#26485f")
+            const drawDiscNight = () => drawDisc("#5a4f8f", "#9a8fc8", "#382f5f")
+
             switch (root.materialId) {
             case 0x200: drawStick();        break
             case 0x201: drawCoal();         break
@@ -2008,6 +2037,10 @@ Item {
             case 0x24A: drawSpawnEgg("ocelot");  break // t785 生物蛋（豹猫；右键 → 生成野生豹猫）
             case 0x25D: drawSpawnEgg("babyshambler"); break // t952 生物蛋（小蹒跚者；右键 → 生成幼体僵尸）
             case 0x25E: drawSpawnEgg("cavespider"); break // t1012③ 生物蛋（洞穴蜘蛛；右键 → 生成洞穴蜘蛛）
+            // t1083 音乐盘三张（0x25F..0x261）：色带区分（琥珀 / 深巷 / 夜航——drawDisc 色带三元组）。
+            case 0x25F: drawDiscAmber(); break // 音乐盘（琥珀旋律）：唱片机曲目 0；地牢战利品
+            case 0x260: drawDiscEcho();  break // 音乐盘（深巷回声）：唱片机曲目 1；矿井战利品
+            case 0x261: drawDiscNight(); break // 音乐盘（夜航曲）：唱片机曲目 2；战利品/创造
             // t788 染料 16 色（0x24B..0x25A，白→黑羊毛色序；三色参数取 build_wool.py 同源色板）
             case 0x24B: drawDye("#f0f0ee", "#f9f9f8", "#959594"); break // 白色染料（白花破坏掉落；染白羊毛/白床）
             case 0x24C: drawDye("#de781e", "#ee9f69", "#8a4a13"); break // 橙色染料

@@ -921,6 +921,99 @@ def gen_desert_night_wind():
     return finalize(out, target_peak=0.7)
 
 
+# ── t1083 唱片机音乐盘曲目（3 张盘 × 确定性程序合成旋律，§9 原创；零 MC 资产）──────────
+# 时长契约（**两处同步**）：本表与 PlayerController::kJukeboxTrackDurationSec（playercontroller.cpp
+#   「时长契约」注释钉同值 30.0/36.0/42.0s）手抄同口径——改一处必改另一处（矩阵 r2054 钉 C++ 侧常量，
+#   资产侧由本表「采样数 = SR×时长」逐位生成，漂移即曲目与自动吐盘节律错位）。
+DISC_TRACK_DUR = [30.0, 36.0, 42.0]
+
+
+def _disc_note(buf, start_s, semitone, dur_s, vol):
+    """单音钢琴质感渲染（gen_note_piano 同族数学，sum 进 buf；相邻音允许余音叠加）。
+
+    谐波列 1..6 幅度 1/k^1.35 + 失谐第二弦（+0.15%）拍频共鸣 + 逐泛音衰减（τ_k=0.55/√k）+
+    2ms attack + 慢衰减包络——与音符盒音色同源（「唱片机是音符盒的匣装形态」的音色连续性，
+    机制等价 MC「note block 与 music disc 音色同族」的听感）。semitone 走 note_freq(n) 等程律
+    （A4=440Hz 基准）。纯固定数列合成，零随机源（PLAN §2-K 资产工具纪律外溢）。
+    """
+    f0 = note_freq(semitone)
+    b = int(SR * start_s)
+    n_s = int(SR * dur_s)
+    harm_amp = [0.0, 1.0, 0.39, 0.024, 0.13, 0.008, 0.05]
+    for i in range(n_s):
+        t = i / SR
+        s = 0.0
+        for k in range(1, 7):
+            tau = 0.55 / math.sqrt(k)
+            s += harm_amp[k] * math.exp(-t / tau) * math.sin(2 * math.pi * f0 * k * t)
+        s += 0.18 * math.exp(-t / 0.55) * math.sin(2 * math.pi * f0 * 1.0015 * t)
+        attack = min(1.0, t / 0.002)
+        s *= vol * attack * math.exp(-t / 0.5)
+        j = b + i
+        if j < len(buf):
+            buf[j] += s
+
+
+def gen_disc_track(idx):
+    """t1083 音乐盘曲目 idx（0/1/2）：确定性程序合成旋律（原创，零 MC 资产）。
+
+    三张盘同一钢琴质感音色（_disc_note，与音符盒同族），仅曲式 / 调式 / 节奏 / 时长不同：
+      - 0 琥珀旋律（30s）：C 大调五声、轻快中速 92 BPM、旋律 + 根音低音线（暖亮）。
+      - 1 深巷回声（36s）：A 小调五声、舒缓 66 BPM、稀疏旋律 + 五度低音（沉静）。
+      - 2 夜航曲（42s）：D 大调五声、流动 80 BPM、长句 + 摇摆八分律动（飘渺）。
+    时长 = DISC_TRACK_DUR[idx]（C++ kJukeboxTrackDurationSec 契约值，见上方两处同步注）。
+    """
+    dur = DISC_TRACK_DUR[idx]
+    n = int(SR * dur)
+    out = [0.0] * n
+    spb = 60.0 / {0: 92.0, 1: 66.0, 2: 80.0}[idx]  # 每拍秒数
+    # 曲式表：(半音（None=休止）, 拍数)。C/A/D 五声音阶内旋律 + 低音线（相隔 12 半音以下的根音 /
+    #   五度支撑），全部固定数列（零随机源）；音域 clamp 在 note_freq 域 [0,24] 内。
+    melodic = {
+        0: [  # 琥珀旋律：C 五声（C D E G A）
+            (0, 1), (4, 1), (7, 1), (9, 1), (7, 1), (4, 1), (0, 2),
+            (2, 1), (4, 1), (7, 1), (12, 1), (9, 1), (7, 2),
+            (4, 1), (7, 1), (9, 1), (12, 1), (9, 1), (7, 1), (4, 2),
+            (2, 1), (0, 1), (2, 1), (4, 1), (2, 1), (0, 2),
+        ],
+        1: [  # 深巷回声：A 小调五声（A C D E G）
+            (9, 2), (None, 1), (7, 1), (4, 1), (0, 2), (None, 1),
+            (9, 1), (12, 1), (9, 1), (7, 2), (4, 2),
+            (0, 2), (2, 1), (4, 1), (7, 1), (9, 2), (None, 1),
+            (12, 2), (9, 1), (7, 1), (4, 2), (2, 2),
+        ],
+        2: [  # 夜航曲：D 五声（D E F# A B）
+            (2, 1), (4, 1), (2, 1), (4, 1), (9, 1), (11, 1), (12, 2),
+            (11, 1), (9, 1), (7, 2), (4, 1), (2, 2),
+            (4, 1), (7, 1), (9, 1), (11, 1), (12, 1), (11, 1), (9, 2),
+            (7, 1), (4, 1), (2, 2),
+        ],
+    }
+    melody = melodic[idx]
+    t_cursor = 0.0
+    for semi, beats in melody:
+        if semi is not None:
+            _disc_note(out, t_cursor, semi, 0.9, 0.55)  # 旋律音 0.9s 余音、vol 0.55（低音线下留声部空间）
+        t_cursor += beats * spb
+    # 低音线：每 2 段旋律时值落一个根音 / 五度长音（vol 0.30，长余音 1.4s；音域 -12 半音 clamp 0 下限）。
+    bi = 0
+    roots = {0: 0, 1: 9, 2: 2}
+    bass_step = 2.0 * spb
+    t_cursor = 0.0
+    while t_cursor < dur - 1.0:
+        root = roots[idx]
+        semi = root + (0 if (bi % 4) < 2 else 7)
+        semi = max(0, semi - 12)
+        _disc_note(out, t_cursor, semi, 1.4, 0.30)
+        bi += 1
+        t_cursor += bass_step
+    # 末尾 0.35s 三角窗收口（防截断爆音；finalize 峰值归一 0.85）。
+    fade = int(SR * 0.35)
+    for j in range(fade):
+        out[n - 1 - j] *= j / fade
+    return finalize(out, target_peak=0.85)
+
+
 def gen_achievement():
     """成就解锁 toast 音（t1021）：三音上行钟琴 arpeggio（E5→G#5→B5，错峰 0.11s）。
     每音 = 基频 + 0.5×二次谐 + 0.22×三次谐（钟铃质感）× 快起（6ms）慢衰（τ≈160ms）指数包络；
@@ -1091,12 +1184,17 @@ def main():
              ("achievement", gen_achievement),
              ("chest_open", gen_chest_open),
              ("chest_close", gen_chest_close)]
+    # t1083 唱片机曲目（disc_track_00..02.wav，两位编号同 makeDiscPath %02d 口径）：--only 支持
+    #   "disc" 全组 / 单轨名。
+    for i in range(3):
+        clips.append((f"disc_track_{i:02d}", (lambda ii: lambda: gen_disc_track(ii))(i)))
     # t1028 音符盒 25 档音高（note_pitch_00..24.wav）：--only 支持 "note" 全组 / 单档名。
     for n in range(25):
         clips.append((f"note_pitch_{n:02d}", (lambda nn: lambda: gen_note_piano(nn))(n)))
     for name, gen in clips:
         if only is not None and name not in only and not (
-                name.startswith("note_pitch_") and "note" in only):
+                name.startswith("note_pitch_") and "note" in only) and not (
+                name.startswith("disc_track_") and "disc" in only):
             continue
         samples = gen()
         path = out_dir / f"{name}.wav"
