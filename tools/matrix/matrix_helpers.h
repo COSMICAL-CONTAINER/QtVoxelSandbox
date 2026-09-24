@@ -534,4 +534,14 @@ private:
                               //   域内真/域外恒拒行为级]，r2059g 结构钉[五员锚注 + 物化门行计数 7
                               //   + 批头锚注族 + world.h 声明注族]。sparse 构造缝 + loadChunkAt 物化
                               //   （r2053c/r2047c 同门），rig 世界零接触，接 section58）
+    void section60_write_gate_scan_box(); // t1090 写门家族「核心域假设」同族清偿·后续批探针段（置尾
+                              //   先例沿用：r2060a destroySphereSilent 外环承重墙[负坐标弹坑毁块 +
+                              //   天光回灌 + 空返回面 + 对照]，r2060b 树叶腐朽外环承重墙[负坐标叶入队
+                              //   + hashVoxel 确定性窗驱动渐退 + 对照叶永留 + 天光回灌]，r2060c 重力
+                              //   级联外环承重墙[②支撑破坏柱坍 + ③26 邻浮沙连锁 + 坍落柱天光回灌]，
+                              //   r2060d fixed 世界零变化墙[四员 Fixed 分支逐字原样行为级]，r2060e
+                              //   FallingBlock 实体负坐标列着地承重墙[级联链 entitymanager 面]，
+                              //   r2060f 结构钉[十站点锚注 + 无界盒/包键计数 + 退化盒防御钉 + t1089/
+                              //   t1074 零变化复钉 + 批头/留池锚注族]。sparse 构造缝 + loadChunkAt
+                              //   物化（r2053c/r2047c 同门），rig 世界零接触，接 section59）
 };

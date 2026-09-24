@@ -1309,6 +1309,10 @@ add_executable(redstone_matrix_test
     #   sparse 构造缝 + loadChunkAt 物化（r2053c/r2047c 同门）——零新 include 面，
     #   helpers 枢纽已含全部依赖）。
     tools/matrix/section59_write_gate_outer.cpp
+    # t1090 写门家族「核心域假设」同族清偿·后续批探针段（置尾先例沿用：6 腿 r2060a-f，filter 词
+    #   r2060；sparse 构造缝 + loadChunkAt 物化（r2053c/r2047c 同门）——零新 include 面，
+    #   helpers 枢纽已含全部依赖）。
+    tools/matrix/section60_write_gate_scan_box.cpp
     src/Game/hopperstore.h
     src/Game/entityshadowfield.cpp
     src/Game/entityshadowfield.h
