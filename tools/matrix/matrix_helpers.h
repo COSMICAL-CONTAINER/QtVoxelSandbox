@@ -515,4 +515,12 @@ private:
                               //   tick 接线钉 + 转化 id 逐位 + t1085 头注锚]。流体窗口直调
                               //   tickWaterFlow/tickLavaFlow（section03 同款），fresh 48×48×96 双 seed
                               //   小世界族，rig 世界零接触，接 section56）
+    void section58_sugarcane_growth(); // t1088 甘蔗生长口径归一探针段（置尾先例沿用：r2058a 草/土基
+                              //   生长命中承重墙[放宽基材集行为级 + 石基对照]，r2058b 沙基回归+邻水门
+                              //   保持墙[t446 行为保留 + 无水不长回归柱]，r2058c 上限 3 精确墙[2 高柱
+                              //   恰到 3 + 3 高柱第 4 次拔高恒拒；t406「max5」翻案行为级]，r2058d 结构钉
+                              //   [sugarcaneBaseBlock 单一权威三面源钉 + 真值表 + 上限常量 =3 源钉 +
+                              //   翻案/退役锚注 + worldgen 1..3 公式钉 + 残留禁出]。生长窗口直调
+                              //   tickSugarcaneGrowth（50 调 = 1 窗），fresh 48×48×96 s82，rig 世界零
+                              //   接触，接 section57）
 };

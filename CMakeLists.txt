@@ -1301,6 +1301,10 @@ add_executable(redstone_matrix_test
     #   流体窗口直调 tickWaterFlow/tickLavaFlow（section03 同款）——零新 include 面，helpers
     #   枢纽已含全部依赖）。
     tools/matrix/section57_lava_water_contact.cpp
+    # t1088 甘蔗生长口径归一探针段（置尾先例沿用：4 腿 r2058a-d，filter 词 r2058；
+    #   生长窗口直调 tickSugarcaneGrowth（50 调 = 1 窗，节流常量同源）——零新 include 面，
+    #   helpers 枢纽已含全部依赖）。
+    tools/matrix/section58_sugarcane_growth.cpp
     src/Game/hopperstore.h
     src/Game/entityshadowfield.cpp
     src/Game/entityshadowfield.h
