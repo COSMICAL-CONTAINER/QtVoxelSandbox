@@ -426,6 +426,9 @@ void MatrixRun::section53_hopper()
         QString diag;
 
         // (1) def 行逐字段（Core 单一权威表；追加不插中间——id 145 = 存档格式契约）。
+        //     t1083 lawful 修订：Jukebox=146 尾部追加后漏斗不再是最末方块（Count 146→147、图集
+        //     189→191——唱片机两瓦片追加不插中间）。钉的语义 =「漏斗行契约逐位不变 + 尾部追加
+        //     不重排」，非「漏斗恒最末」→ 钉值随注册表尾部增长同步前移（t1077 同门先例）。
         const auto &hd = BR::def(BR::Hopper);
         const bool d1 = hd.id == 145 && hd.solid && hd.shape == BR::ShapeFull
             && hd.hardness == 3.0f && hd.toolType == int(BR::Pickaxe)
@@ -434,8 +437,8 @@ void MatrixRun::section53_hopper()
             && hd.topTile == 186 && hd.bottomTile == 187 && hd.sideTile == 187 && hd.frontTile == 188
             && QLatin1String(hd.name) == QLatin1String("hopper")
             && QLatin1String(hd.display) == QLatin1String("漏斗")
-            && int(BR::Count) == 146 && BR::mcBlockId(quint8(BR::Hopper)) == 0
-            && BR::AtlasTileCount == 189;
+            && int(BR::Jukebox) == 146 && int(BR::Count) == 147 && BR::mcBlockId(quint8(BR::Hopper)) == 0
+            && BR::AtlasTileCount == 191;
         ok = ok && d1;
         if (!d1) diag += QStringLiteral("[d1 id=%2 cnt=%3]")
                             .arg(hd.id).arg(int(BR::Count));
