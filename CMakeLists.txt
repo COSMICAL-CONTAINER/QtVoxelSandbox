@@ -1293,6 +1293,10 @@ add_executable(redstone_matrix_test
     #   真链交互 rig = t945 同门（QQuickWindow 载体 + grab/loadSavedState/placeBlock）——零新
     #   include 面，helpers 枢纽已含全部依赖）。
     tools/matrix/section55_jukebox.cpp
+    # t1084 纸/书/书架探针段（置尾先例沿用：4 腿 r2055a-d，filter 词 r2055；
+    #   真链破坏 rig = t1083 同门（QQuickWindow 载体 + grab/loadSavedState/beginMining 泵墙钟）
+    #   ——零新 include 面，helpers 枢纽已含全部依赖）。
+    tools/matrix/section56_paper_book_bookshelf.cpp
     src/Game/hopperstore.h
     src/Game/entityshadowfield.cpp
     src/Game/entityshadowfield.h
