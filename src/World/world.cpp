@@ -4218,9 +4218,11 @@ void World::checkFlowerMushroomOnEdit(int x, int y, int z, quint8 oldId, quint8 
 //   t571 标注【自然失撑掉落：恒发（含创造）】。
 void World::checkPressurePlateOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 {
-    // 仅本格被破为 Air 且被破块非压力板时，查正上方是否压力板失撑。（被破块本身是压力板时跳过 ——
-    //   玩家直破压力板的掉落由 finishMiningAt 通用 drop 路径负责（dropId=自身），避免双重掉落。）
-    if (id != BlockRegistry::Air || BlockRegistry::isPressurePlate(oldId)) return;
+    // 仅本格被破为 Air 且被破块非压力板 / 中继器时，查正上方是否压力板 / 中继器失撑。（被破块本身是
+    //   本族时跳过——玩家直破的掉落由 finishMiningAt 通用 drop 路径负责（dropId=自身），避免双重掉落。）
+    if (id != BlockRegistry::Air || BlockRegistry::isPressurePlate(oldId)
+        || BlockRegistry::isRepeater(oldId)) // t1095：中继器入本钩子族（直破走通用掉落，防双掉）
+        return;
     const int by = y + 1;
     if (by < 0 || by >= m_height) return;
     // t1094 域门（checkPressurePlateOnEdit）两模式分流（Fixed 分支现行语句原样——零变化墙）：
@@ -4230,10 +4232,16 @@ void World::checkPressurePlateOnEdit(int x, int y, int z, quint8 oldId, quint8 i
         if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
     }
     const quint8 above = m_chunks.blockAt(x, by, z);
-    if (!BlockRegistry::isPressurePlate(above)) return;
-    // 压力板失撑 → 静默清 Air（直写 + 标脏，不经 World::setBlock → 不重入本检查）+ 发破块反馈 + 掉落物 + 重 flood 光。
+    if (!BlockRegistry::isPressurePlate(above)
+        && !BlockRegistry::isRepeater(above)) // t1095：中继器同压力板支撑语义（完整立方顶面放置）
+        return;
+    // 压力板 / 中继器失撑 → 静默清 Air（直写 + 标脏，不经 World::setBlock → 不重入本检查）+ 发破块反馈
+    //   + 掉落物 + 重 flood 光。t1095：中继器被静默摘除后其供能变化须经 notePowerWrite 入脏集（粉失电 /
+    //   下游链熄灭），同玩家直挖路径的电力触发面——压力板无输出侧无此面，幂等无害。
     m_chunks.setBlock(x, by, z, BlockRegistry::Air);
-    noteGrowthWrite(x, by, z, above, BlockRegistry::Air); // 压力板非生长方块 → no-op，保持一致
+    if (BlockRegistry::isRepeater(above))
+        notePowerWrite(x, by, z, above, BlockRegistry::Air);
+    noteGrowthWrite(x, by, z, above, BlockRegistry::Air); // 压力板 / 中继器非生长方块 → no-op，保持一致
     emit blockBroken(x, by, z, int(above));                 // 破块粒子 / 音（机制等价 MC 失撑坍落反馈）
     emit blockDroppedAsItem(x, by, z, int(above));         // 呈掉落物实体（dropId=自身 → 掉压力板）
     recomputeLightAround(x, by, z, above, BlockRegistry::Air); // solid=false 故遮光变化小，仍重 flood 保正确
@@ -5270,6 +5278,8 @@ bool World::isPowerFamilyBlock(quint8 id)
         || id == BR::IronDoor                            // 接收器：铁门（t722，仅红石驱动开合）
         || id == BR::IronTrapdoor                        // 接收器：铁活板门（t723，仅红石驱动开合）
         || id == BR::NoteBlock                           // 接收器：音符盒（t1028，通电上升沿发声；bit5 记忆位）
+        || id == BR::Repeater                            // t1095 中继器（受控电源：定向输入 + 延迟档翻转输出；
+                                                         //   入族保编辑可达性，同漏斗全族入族先例）
         || BR::isLever(id) || BR::isWoodButton(id) || BR::isStoneButton(id) // 源：拉杆 / 按钮（state bit0）
         || BR::isPressurePlate(id)                       // 源：压力板（state bit0）
         || id == BR::DetectorRail;                       // 源：探测轨有车标记（state bit4）
@@ -5283,14 +5293,17 @@ static bool isPowerEmitterBlock(quint8 id)
     using BR = BlockRegistry;
     return id == BR::RedstoneBlock
         || id == BR::RedstoneTorch
+        || id == BR::Repeater               // t1095 中继器入 emitter 家族（纯 id 判定——亮 / 灭都算，
+                                            //   触发面只答「是否须重算」；亮态电源面在 powerSourceLevel）
         || BR::isLever(id) || BR::isWoodButton(id) || BR::isStoneButton(id)
         || BR::isPressurePlate(id)
         || id == BR::DetectorRail;
 }
 
 // 电源对邻格的强电值（机制等价 MC 1.0 各电源直供 15）：红石块恒 15；红石火把亮态 15（熄灭态 0）；
-// 拉杆 / 按钮按下态（state bit0）15；压力板压下态（state bit0）15；探测轨「有车」标记（state bit4）15。
-// 其余 → 0。只读 m_chunks + state。
+// 拉杆 / 按钮按下态（state bit0）15；压力板压下态（state bit0）15；探测轨「有车」标记（state bit4）15；
+// t1095 中继器亮态（state bit4）15（受控电源——输出端供强电，机制等价 MC 中继器输出强充能 15）。其余 → 0。
+// 只读 m_chunks + state。
 int World::powerSourceLevel(int x, int y, int z) const
 {
     const quint8 b = m_chunks.blockAt(x, y, z);
@@ -5298,6 +5311,8 @@ int World::powerSourceLevel(int x, int y, int z) const
     if (b == BlockRegistry::RedstoneBlock) return 15;                 // t657 恒电源
     if (b == BlockRegistry::RedstoneTorch)
         return (st & BlockRegistry::RedstoneTorchStateOffFlag) ? 0 : 15; // t657 亮态供能 / 熄灭（反相）不供
+    if (b == BlockRegistry::Repeater)
+        return (st & BlockRegistry::RepeaterStatePoweredFlag) ? 15 : 0; // t1095 亮态输出强充能 / 灭态不供
     if (BlockRegistry::isLever(b) || BlockRegistry::isWoodButton(b)
         || BlockRegistry::isStoneButton(b) || BlockRegistry::isPressurePlate(b))
         return (st & 1) ? 15 : 0;                                     // 拉杆 / 按钮按下 / 压力板压下（state bit0）
@@ -5310,6 +5325,40 @@ int World::powerSourceLevel(int x, int y, int z) const
 bool World::isPowerSource(int x, int y, int z) const
 {
     return powerSourceLevel(x, y, z) > 0;
+}
+
+// t1095 ① 水平邻 (dx,dz) 是否向 (x,y,z) 定向供电（声明注释见 world.h）。
+//   非中继器源：全向（powerSourceLevel>0 即馈电，既有 v1 口径逐字保留——对非中继器零行为变化）。
+//   中继器：仅输出端馈电（其输出朝向指向本格 = 朝向 == -(dx,dz)，邻格→本格方向）。这一行就是二极管
+//   整流的判定核心：Phase A 粉播种与中继器输入读取共用本谓词（禁第二套定向判定——goldenRailChainStep
+//   单一权威同门）。
+bool World::sourceFeedsCell(int x, int y, int z, int dx, int dz) const
+{
+    const int nx = x + dx, nz = z + dz;
+    const quint8 nb = m_chunks.blockAt(nx, y, nz);
+    if (nb == BlockRegistry::Repeater) {
+        if ((m_chunks.stateAt(nx, y, nz) & BlockRegistry::RepeaterStatePoweredFlag) == 0)
+            return false; // 灭态中继器不馈电
+        int fdx = 0, fdz = 0;
+        BlockRegistry::repeaterOutDelta(m_chunks.stateAt(nx, y, nz), fdx, fdz);
+        return fdx == -dx && fdz == -dz; // 输出朝向须指向本格（邻格→本格方向 = -(dx,dz)）——二极管整流
+    }
+    return powerSourceLevel(nx, y, nz) > 0;
+}
+
+// t1095 ② 中继器输入端读取（声明注释见 world.h）：只读后端格——输出反向水平邻。
+bool World::repeaterInputOn(int x, int y, int z, quint8 state) const
+{
+    int dx = 0, dz = 0;
+    BlockRegistry::repeaterOutDelta(state, dx, dz);
+    const int bx = x - dx, bz = z - dz; // 输入端 = 输出反向的水平邻格
+    // ① 后端格电源（经 ① 定向：后端格若是中继器，须其输出朝向本格——链上互喂正确 / 背靠背互灌被拒）。
+    if (sourceFeedsCell(x, y, z, -dx, -dz)) return true;
+    // ② 后端格通电粉（v1 全向读邻简化：不做粉形状判定，与 isReceivingPower 的 v1 全向口径一致；
+    //   MC 粉须指向中继器背面的形状语义属 directional 输入，留后续任务——登记面同接收器全向简化）。
+    const quint8 bb = m_chunks.blockAt(bx, y, bz);
+    return BlockRegistry::isRedstoneDust(bb)
+        && (m_chunks.stateAt(bx, y, bz) & BlockRegistry::RedstoneDustPowerMask) > 0;
 }
 
 // (x,y,z) 接收器是否被邻格供电（邻源激活 → 15；或邻粉电力级 >0）。v1 简化：全向 6 正交邻读
@@ -5645,15 +5694,17 @@ bool World::recomputePowerLocal()
     std::vector<quint64> bfsq;            // 距离 BFS 队列
     // 播种：域内粉的 6 正交邻有活跃源（源开关是外部驱动——写 state / 改 id 已落地，实时读无需快照）→ 距 1。
     //   源经斜角不供能（同 isReceivingPower / 旧读法只查 6 正交邻）。
+    //   t1095：水平 4 向改走 sourceFeedsCell 定向馈电（中继器只喂朝向格的粉 = 二极管整流）；
+    //   垂直 2 向保留原判定（中继器恒贴地薄板无垂直朝向，非中继器源全向逐字保留 → 对既有电路零变化）。
     for (const quint64 k : region) {
         int x, y, z;
         unpackGrowthCell(k, x, y, z);
         bool seeded = false;
         for (const auto &d : kNb) {
-            if (powerSourceLevel(x + d[0], y + d[1], z + d[2]) > 0) {
-                seeded = true;
-                break;
-            }
+            const bool fed = (d[1] == 0)
+                ? sourceFeedsCell(x, y, z, d[0], d[2])                       // t1095 水平定向
+                : powerSourceLevel(x + d[0], y + d[1], z + d[2]) > 0;        // 垂直全向（原样）
+            if (fed) { seeded = true; break; }
         }
         // t740 火把斜下供粉（机制等价 MC 1.0：立在方块顶面的红石火把为**贴地一圈斜角粉**供 15——火把格
         //   比这些粉高一格且水平错一格，6 正交读不到 → 经典「火把立块上、地面粉环绕」布线在 v1 整圈死粉
@@ -5797,8 +5848,10 @@ bool World::recomputePowerLocal()
             || b == BlockRegistry::IronDoor            // t722 铁门（仅红石驱动开合；上下两格各自入集，接收器分支内同翻）
             || b == BlockRegistry::IronTrapdoor        // t723 铁活板门（仅红石驱动开合；单格）
             || b == BlockRegistry::NoteBlock           // t1028 音符盒（通电上升沿发声；bit5 通电记忆位做真沿）
-            || b == BlockRegistry::Rail)               // t812 普通轨转辙器（T 交叉升沿切弯；非转辙器
+            || b == BlockRegistry::Rail                // t812 普通轨转辙器（T 交叉升沿切弯；非转辙器
                                                        //   形态分支内 no-op）
+            || b == BlockRegistry::Repeater)           // t1095 中继器（定向输入 + 延迟档翻转输出——
+                                                       //   分支内走 repeaterInputOn，不读全向 powered）
             receivers.insert(packGrowthCell(x, y, z));
     };
     for (const quint64 k : region) {
@@ -5999,6 +6052,41 @@ bool World::recomputePowerLocal()
                     : quint8(st & quint8(~BlockRegistry::RailSwitchPoweredFlag)); // 降沿：只清记忆，不回弹
                 if (ns != st) {
                     m_chunks.setBlock(x, y, z, b, ns);
+                    any = true;
+                }
+            }
+        } else if (b == BlockRegistry::Repeater) {
+            // t1095 中继器：定向输入 + 延迟档翻转输出（机制等价 MC 1.0 repeater 延迟 1..4 redstone tick；
+            //   本工程红石 tick = tickRedstone 一 pass）。挂起计数（state bit[7:5]）= 输入≠输出已持续的
+            //   pass 数——首评置 1、每评 +1、达「档+1」翻转并清零（档=1 → 首评后下一 pass 翻 = 恰 1 tick
+            //   延迟）。输入回同步 → 取消挂起清零（脉冲短于延迟档不穿透，MC 同口径）。挂起期间自回插脏集
+            //   （定点迭代——同火把重亮回插模式）；翻转时把前端格入脏集（前端粉定向播种 15 / 前端接收器
+            //   复查）；输出位翻转不改 lightEmission → 无光场重 flood；中继器格自身不入（输入恒后端 /
+            //   输出恒前端，self-feedback 振荡无几何路径）。
+            const int delay = BlockRegistry::repeaterDelayTicks(st);        // 1..4
+            const bool input = repeaterInputOn(x, y, z, st);                // 定向读后端（仅后端格）
+            const bool out = (st & BlockRegistry::RepeaterStatePoweredFlag) != 0;
+            int cnt = BlockRegistry::repeaterPendingCount(st);
+            if (input == out) {
+                if (cnt != 0) { // 取消挂起：输入与输出一致（稳态收敛 / 脉冲短于延迟档不穿透）
+                    m_chunks.setBlock(x, y, z, b, BlockRegistry::repeaterPendingCountState(st, 0));
+                    any = true;
+                }
+            } else {
+                ++cnt;
+                if (cnt > delay) {
+                    // 达档翻转：输出位翻 + 计数清零（input=on → 置位 / input=off → 清位）。
+                    const quint8 ns = (input ? quint8(st | BlockRegistry::RepeaterStatePoweredFlag)
+                                             : quint8(st & quint8(~BlockRegistry::RepeaterStatePoweredFlag)));
+                    m_chunks.setBlock(x, y, z, b, BlockRegistry::repeaterPendingCountState(ns, 0));
+                    int fx = 0, fz = 0;
+                    BlockRegistry::repeaterOutDelta(st, fx, fz); // 前端格 = 朝向格
+                    m_powerDirty.insert(packGrowthCell(x + fx, y, z + fz)); // 前端粉播种 / 接收器复查
+                    any = true;
+                } else {
+                    // 未达档：持久化计数 + 自回插（下一 pass 继续数——定点迭代，同火把重亮回插）。
+                    m_chunks.setBlock(x, y, z, b, BlockRegistry::repeaterPendingCountState(st, cnt));
+                    m_powerDirty.insert(k); // 自回插：本格为锚点，下一 pass addReceiver 直达续算
                     any = true;
                 }
             }

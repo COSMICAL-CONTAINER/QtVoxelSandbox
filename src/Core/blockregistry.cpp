@@ -771,6 +771,16 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   侧·底=jukebox_side(190 匣体木纹面)；无朝向语义 → 无 mesher tileFor state 分支（六面状态恒定，
     //   有无盘不改贴图——MC 1.0 唱片机同口径，播放视觉只有音轨本体无方块态变化）。
     /* jukebox             */ {int(BlockRegistry::Jukebox),            189,190,190,190, true,  BlockRegistry::ShapeFull,     2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::Jukebox),           1, 64, "jukebox",        "唱片机"},
+    // t1095 红石中继器（Repeater=147）：延迟四档 + 二极管整流 + 输出强充能 15（续距）的红石受控电源
+    //   （机制语义在 World::tickRedstone 中继器分支；属性注释见 blockregistry.h Id 枚举 Repeater 行）。
+    //   贴地薄板异形（solid=false / ShapeRepeater——2/16 厚，机制等价 MC repeater 2px hitbox；isFullCube
+    //   自动 false 落体分支语义同漏斗；邻居不剔面）、hardness=0（瞬破，同压力板 / 火把量级；MC 中继器
+    //   hardness 0 同档）/ NoTool（空手可采且掉落，requiresTool=false）。dropId=自身、dropCount=1、
+    //   maxStack=64。贴图 per-state（PartialBlockGeometry Repeater case 据输出位选）：熄=repeater_off(191)
+    //   / 亮=repeater_on(192，frontTile 字段复用承载亮态瓦片——Farmland 湿态顶面同门)。音色 GroupStone
+    //   （石质底板，同压力板石族）。进创造调色板（红石 tab——机关件组，Inventory.qml redstoneIds + 本表
+    //   creativeBlocks；红石 tab 排除面自动隐藏方块 tab 条目）。
+    /* repeater            */ {int(BlockRegistry::Repeater),           191,191,191,192, false, BlockRegistry::ShapeRepeater, 0.0f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::Repeater),          1, 64, "repeater",       "红石中继器"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -968,6 +978,11 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     //   播放机制等价实现——红石面 1.0 无此机制，不映射不登记缺口）。**t691 教训**：一行一条目 +
     //   行内注释，防聚合初始化零填充回归（本行追加后全表行数与 Count 147 一致）。
     /* jukebox                */ 84,
+    // t1095 红石中继器 → MC 1.0 **存在** id 93（unpowered_repeater，Beta 1.3 引入、1.0.0 沿用；
+    //   亮态是同族 id 94 powered_repeater——本工程用单 id + state bit4 分亮灭，取代表值 93；
+    //   延迟四档 / 二极管整流 / 输出强充能 15 机制等价实现）。**t691 教训**：一行一条目 + 行内注释，
+    //   防聚合初始化零填充回归（本行追加后全表行数与 Count 148 一致）。
+    /* repeater               */ 93,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -1326,6 +1341,14 @@ bool BlockRegistry::isDispenser(quint8 blockId)
 bool BlockRegistry::isJukebox(quint8 blockId)
 {
     return blockId == Jukebox;
+}
+
+// t1095 红石中继器统一谓词（单一权威）：blockId == Repeater 即中继器。供 World 电力族判定
+//   （isPowerFamilyBlock / isPowerEmitterBlock）/ 失撑掉落复检 / PlayerController 右键调档分支判定
+//   （避免各处硬编码 id 判定漂移，同 isJukebox 单 id 模式）。单 id 故裸相等判定。
+bool BlockRegistry::isRepeater(quint8 blockId)
+{
+    return blockId == Repeater;
 }
 
 // t609 投掷器统一谓词（单一权威）：blockId == Dropper 即投掷器（机制等价 MC 1.0 dropper——全部物品弹出
@@ -1792,6 +1815,13 @@ int shapeBoxesInto(BlockRegistry::Shape sh, quint8 state, BlockRegistry::BlockAA
         // t1093 漏斗三盒异形（单一权威 hopperShapeBoxes——与渲染 / 选中 / 射线 / 列顶同源）：顶箅板 +
         //   漏斗颈 + 排料嘴（嘴位随 state）。可站顶面 10/16（>0.5 → 需跳跃上身，机制等价 MC 漏斗站面）。
         return BlockRegistry::hopperShapeBoxes(state, out, cap);
+    case BlockRegistry::ShapeRepeater:
+        // t1095 中继器贴地薄板（机制等价 MC repeater 2px hitbox：满格 footprint × 2/16 厚）。
+        //   碰撞 / 选中 / 射线三消费者同源本盒（t639 四消费者纪律——渲染在 PartialBlockGeometry
+        //   Repeater case 同高底板 + 双焰标 / 滑标纯视觉凸出，床头板同先例）。2/16 < auto-step
+        //   门槛 → 可踩可跨（同压力板）。state 不参与盒形（朝向 / 档位纯渲染面）。
+        putAABB(out, cap, n, {0.0f, 0.0f, 0.0f, 1.0f, 0.125f, 1.0f});
+        return n;
     }
     return 0; // 未知 shape → 空（兜底，同旧 shapeBoxes 兜底空 vector）
 }
@@ -1956,6 +1986,7 @@ float BlockRegistry::collisionTopY(quint8 blockId, quint8 state)
     case ShapeSnowLayer: return snowLayerHeight(state);
     case ShapeIronBars: return 1.0f; // t998 铁栏杆立柱满格高（1.0 可跳跃越过，区别栅栏 1.5）
     case ShapeHopper:  return 0.625f; // t1093 漏斗顶箅板顶面 10/16（hopperShapeBoxes 最高盒顶 = 可站面）
+    case ShapeRepeater: return 0.125f; // t1095 中继器贴地薄板 2/16（ShapeRepeater 碰撞盒顶 = 可踩面）
     }
     return -1.0f; // 未知 shape → 空（兜底，同 shapeBoxes）
 }
@@ -2134,6 +2165,7 @@ float BlockRegistry::solidTopOffset(quint8 blockId, quint8 state)
     case ShapeSnowLayer: return snowLayerHeight(state);       // t505 积雪层薄板顶 = snowLayerHeight(state)（1/8..1.0）
     case ShapeIronBars: return 1.0f;                          // t998 铁栏杆立柱满格高（PCF 列顶随视觉立柱）
     case ShapeHopper:   return 0.625f;                        // t1093 漏斗顶箅板顶面 10/16（PCF 列顶随可站面）
+    case ShapeRepeater: return 0.125f;                        // t1095 中继器薄板顶 2/16（PCF 列顶随可踩面）
     default:            return 1.0f;                          // ShapeNone（air/torch/water）不入 heightmap 顶，兜底 1.0
     }
 }
@@ -2894,6 +2926,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case IronTrapdoor: // t723 铁活板门 → 石质音色（金属质，同铁门族）
     case IronBars: // t998 铁栏杆 → 石质音色（金属质薄杆，同 iron_block 族；机制等价 MC iron bars metal SoundType）
     case BoneBlock: // t1077 骨块 → 石质音色（石质整立方，同 stone_brick / 存储块装饰族）
+    case Repeater: // t1095 红石中继器 → 石质音色（石质底板，同压力板石族 / 机关件；机制等价 MC repeater stone SoundType）
         return GroupStone;
     case Ice: // t395 冰 → 石质音色（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）
     case Glass: // t405 玻璃 → 石质音色（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）

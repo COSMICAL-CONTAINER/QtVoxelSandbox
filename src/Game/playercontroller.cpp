@@ -3859,6 +3859,20 @@ void PlayerController::placeBlock()
             emit swingArm(); // 调音也是一次「使用」动作 → 挥手（t29）
             return;
         }
+        // t1095 右键中继器 → 循环调延迟档（useBlock 语义，MC 同款：右键 = 1→2→3→4→1 回绕调档）。
+        //   review0909 #2 / t1050 同门：补 !sneakPlaceBlock 门——潜行持方块右键 = 旁路 useBlock 走下方
+        //   放置路径（放置语义不被调档吞）。延迟档段 +1 回绕（repeaterTunedState 单一权威：朝向 / 输出位 /
+        //   挂起计数原样保留——调档只改后续时序不复位电力态，MC 同口径）。id 不变只 state 变 → World::
+        //   setBlock 5 参数版走重网格化路径（发 worldChanged 不发 broken/placed，同门 / 音符盒口径）；
+        //   调档无播报无发声（MC 中继器右键仅内部档位变化）→ 无新信号面，零 QML 迁移。
+        if (!sneakPlaceBlock && BlockRegistry::isRepeater(hitId)) {
+            const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
+            const quint8 ns = BlockRegistry::repeaterTunedState(st);
+            m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId, ns);
+            m_lastPlaceMs = now;
+            emit swingArm(); // 调档也是一次「使用」动作 → 挥手（t29）
+            return;
+        }
         // t1083 右键唱片机 → 放入 / 吐盘 / 续播状态机（useBlock 语义；MC 1.0 jukebox 同款三语义）。
         //   review0909 #2 口径：补 !sneakPlaceBlock 门（潜行持方块右键 = 旁路走下方放置路径，放置语义
         //   不被吞）。分支序 =「播放中 → 吐盘；盘在机未播（载入态）→ 续播；空机持盘 → 放入；空机
@@ -5275,6 +5289,11 @@ void PlayerController::placeBlock()
         } else {
             placeState = BlockRegistry::HopperFacingDownFlag; // 顶 / 底面 → 排料口朝下
         }
+    } else if (m_selectedBlock == BlockRegistry::Repeater) {
+        // t1095 中继器朝向：输出端朝玩家所视方向（机制等价 MC 中继器放置输出沿玩家面向续传——
+        //   信号从玩家侧（输入端）向前续传）。低 2 位 chestFrontFace 同源编码（0=+X 1=-X 2=+Z 3=-Z）；
+        //   延迟档默认 1（bit[3:2]=0）；输出位 / 挂起计数恒 0（World 电力层首算写入）。
+        placeState = quint8(horizontalFacing() & 3);
     } else if (m_selectedBlock == BlockRegistry::Pumpkin) {
         // t638 ② 南瓜前面（刻面 pumpkin_face）朝玩家侧：state = horizontalFacing ^ 1（同箱子 / 熔炉 / 发射器
         //   编码；机制等价 MC 1.0 刻面南瓜放置时脸朝玩家——此前南瓜 placeBlock 未写 state → 恒 state=0
@@ -5538,6 +5557,13 @@ void PlayerController::placeBlock()
         //   对仙人掌恒真 = 轨可依仙人掌放置漏网（MC 1.0 仙人掌缩体非可支撑面）。石/沙等常规支撑零影响。
         const quint8 below = m_world->blockAt(tx, ty - 1, tz);
         if (!BlockRegistry::solidSupportBlock(below)) return; // ② 下方非完整立方 / 仙人掌支撑 → 拒（不挥）
+    }
+    // t1095 中继器放置支撑预检（机制等价 MC 中继器须实体支撑面）：目标格正下方须完整立方且非仙人掌
+    //   （solidSupportBlock 统一权威，同铁轨 ② 口径——仙人掌缩体非可支撑面 t945/t1017 家族口径）。
+    //   失撑掉落反应面 = World::checkPressurePlateOnEdit 钩子族扩展（压力板同构语义，两面同源）。
+    if (m_selectedBlock == BlockRegistry::Repeater) {
+        const quint8 below = m_world->blockAt(tx, ty - 1, tz);
+        if (!BlockRegistry::solidSupportBlock(below)) return; // 下方悬空 / 非完整支撑 → 拒（不挥）
     }
     // t501 木梯放置预检（spec「须完整方块侧支撑」）：木梯贴**完整立方方块的侧面**（机制等价 MC 1.0 ladder
     //   须贴实体方块面）。两重守卫：

@@ -243,6 +243,7 @@ bool isPackDerivedIconFamily(quint8 id)
     case BlockRegistry::CrackedStoneBrick: // t998 入族（同上；瓦片 182 与石砖同 RNG 基底，图标随程序瓦片恒新）
     case BlockRegistry::IronBars:          // t998 入族（薄杆异形——atlasIconSpecForBlock IronBars 特型盒集（细柱+四向横板满连形态），图标贴放置观感）
     case BlockRegistry::NoteBlock:         // t1028 入族（Glass 同款语义外延——无 qrc 手绘图，程序图集重渲是唯一原生路径；ShapeFull 泛化立方投影）
+    case BlockRegistry::Repeater:          // t1095 入族（NoteBlock 同门——无 qrc 手绘图，程序图集重渲是唯一原生路径；ShapeRepeater 特型薄板盒投影，见 atlasIconSpecForBlock）
         return true;
     default:
         return false;
@@ -903,6 +904,10 @@ QVariantList Hotbar::creativeBlocks() const
              //   红石机关件归红石 tab（Inventory.qml redstoneIds 含 145 → 方块 tab 自动隐藏，与发射器/投掷器同页）。
              //   配方 5 铁锭 + 1 箱子（工作台）。
              int(BlockRegistry::Hopper),                                     // 漏斗（收集掉落物 + 容器抽取/输出 + 红石锁停）
+             // t1095 红石中继器（机制等价 MC 1.0 repeater——延迟四档 / 二极管整流 / 输出强充能 15；
+             //   tickRedstone 中继器分支机制面）。红石机关件归红石 tab（Inventory.qml redstoneIds 含 147
+             //   → 方块 tab 自动隐藏，与红石灯 / 音符盒同页）；创造取用（生存配方登记后续批）。
+             int(BlockRegistry::Repeater),                                   // 红石中继器（延迟四档；右键调档；续距）
              // t628 手动点火机关三件（t490 已建方块但漏进调色板——blockregistry.h 注释承诺「进创造调色板」未兑现；
              //   本任务补齐 + 接图标 + 配方）。右键激活：拉杆扳开沿/按钮按下沿 fire 邻接 TNT + 发射器/投掷器一次
              //   （按钮 ~1s 自动弹回；拉杆保持扳开直到再右键）。机关件紧随发射器 / 投掷器排列。

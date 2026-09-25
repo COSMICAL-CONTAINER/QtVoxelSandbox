@@ -384,6 +384,7 @@ ChunkMeshData MeshBuilder::build(const ChunkMeshSnapshot &snap, Reason reason)
                                             || b == BlockRegistry::EnchantingTable // t620 附魔台 0.75 矮盒经 PartialBlockGeometry 渲染（非满格）
                                             || BlockRegistry::isAnvil(b)     // t766 铁砧三盒异形（基座+腰柱+砧台）经 PartialBlockGeometry 渲染（非满格；isAnvil 覆盖三阶段 id）
                                             || b == BlockRegistry::Hopper    // t1093 漏斗三盒异形（顶箅板+颈+嘴，hopperShapeBoxes 单一权威）经 PartialBlockGeometry 渲染（t1080 整立方降级翻案；solid=false 邻居不剔面）
+                                            || b == BlockRegistry::Repeater  // t1095 中继器贴地薄板异形（底板+双焰标+档位滑标）经 PartialBlockGeometry 渲染（solid=false 邻居不剔面）
                                             || BlockRegistry::isBed(b);     // t457 床低 3D 模型经 PartialBlockGeometry 渲染（非整立方）
                     const bool isCrossX   = BlockRegistry::isCrossBillboard(b);
                     // t638 ① 木门镂空窗：门上半格栅窗贴图带 alpha（pack door_wood_upper.png 窗格真透明 /

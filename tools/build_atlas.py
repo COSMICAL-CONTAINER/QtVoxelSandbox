@@ -419,6 +419,11 @@ TILES = [
     #   描述词，零 MC 专有名词）。tools/build_jukebox.py 程序生成原创像素图（§9 override (a)）。
     "default_jukebox_top",           # 189 jukebox_top（顶面：木拼板面 + 居中圆盘槽 + 槽缘亮台阶线；Jukebox 顶面）
     "default_jukebox_side",          # 190 jukebox_side（侧面/底面：竖板木纹 + 上下板缝 + 中段搁架暗带）
+    # t1095 红石中继器两张（机制等价 MC 1.0 repeater 的延迟四档 / 二极管整流 / 输出强充能 15 的红石受控
+    #   电源）。名称 / 贴图纯原创自绘（§9 区隔，零 MC 专有名词）：石质底板 + 双焰标 + 中缝滑标槽。
+    #   tools/build_repeater.py 程序生成原创像素图（§9 override (a)）。
+    "default_repeater_off",          # 191 repeater_off（熄态底板：石灰底板 + 暗红双焰标 + 近黑中缝槽）
+    "default_repeater_on",           # 192 repeater_on（亮态底板：底板略提亮 + 亮红焰标 + 中缝滑标亮线）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

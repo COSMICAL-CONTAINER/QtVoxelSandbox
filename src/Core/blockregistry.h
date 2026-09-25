@@ -1190,7 +1190,39 @@ public:
         //       解码常驻 + 无播放游标持久化面，如实登记）。
         //   配方：8 木板环 + 1 钻石 → 1 唱片机（工作台 3×3，MC 1.0 同料）。进创造调色板（方块 tab）。
         Jukebox          = 146, // 唱片机：右键放入音乐盘播放（音轨结束/再右键/被破坏吐盘）；木制发声匣
-        Count           = 147, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t1095 红石中继器（Repeater）：机制等价 MC 1.0 repeater（Beta 1.3 引入 id 93/94，1.0.0 沿用）。
+        //   **四语义**（wiki 2026 实读口径）：
+        //   ① 延迟四档——1..4 redstone tick（本工程红石 tick = tickRedstone 10Hz 一 pass ≈ 0.1s，恰同量级）；
+        //     右键循环调档（音符盒 t1028 调音同门），放置默认 1 档。
+        //   ② 二极管整流——输出端不回输入：输入端只读「后端格」（朝向反向的水平邻格），输出沿朝向向前；
+        //     后端格若也是中继器，还须其输出朝向本格才计（防「背靠背/侧向」互灌）。
+        //   ③ 输出强充能 15——亮态自身即电源（powerSourceLevel 15），前端格粉从 15 重新起步 = 信号续距
+        //     （红石粉 15 格衰减重置，机制等价 MC 中继器续距）。
+        //   ④ **锁定面 1.0 无**——中继器锁存（locked repeater）是 1.5+ 机制，如实登记非 1.0 不做。
+        //   **v1 简化登记**（world.h 红石系统头注释同面）：接收器（灯 / TNT / 轨）经 isReceivingPower
+        //   全向 6 邻读源 → 中继器亮态时**侧邻**接收器也点亮（MC 仅前端格强充能；isReceivingPower 的
+        //   「无前后向语义」既有 v1 口径自然外延，directional 接收器留后续任务）。粉的定向馈电（seed 面）
+        //   是准确的：中继器只喂朝向格的粉（sourceFeedsCell 定向判定）。
+        //   **形态**：贴地薄板 2/16 厚（ShapeRepeater，机制等价 MC 中继器 2px hitbox；solid=false 非整立方
+        //   → 邻居不剔面；isFullCube=false 落体分支语义同漏斗；lightOpacity 全透）。渲染走 PartialBlockGeometry
+        //   （底板 + 双焰标 + 档位滑标三盒，滑标位随延迟档移动——调档视觉可辨）。支撑语义同压力板族：放置
+        //   须完整立方顶面（solidSupportBlock），失撑整钩子掉落（checkPressurePlateOnEdit 族扩展）。
+        //   hardness=0（瞬破，同压力板 / 火把量级；MC 中继器 hardness 0 同档）、NoTool（空手可采且掉落，
+        //   requiresTool=false）、dropId=自身、dropCount=1、maxStack=64。音色 GroupStone（石质底板）。
+        //   **获得途径 = 创造调色板**（红石 tab）；生存配方（3 石 + 2 红石火把 + 1 红石粉）登记后续批，
+        //   本单交付清单未含配方面（如实登记非缺口——机制面完整，获取面简化）。
+        //   贴图两张（熄 / 亮）：tools/build_repeater.py 程序生成原创自绘 §9a（tile 191 off / 192 on，
+        //   frontTile 字段复用承载亮态瓦片——Farmland 湿态顶面同门）。
+        //   **state 编码**（复用 chunk m_states，存档 round-trip 保真；漏斗朝向 + 音符盒调音双同门）：
+        //     bit[1:0]（RepeaterStateFaceMask）   = 输出朝向 0=+X 1=-X 2=+Z 3=-Z（chestFrontFace 同源编码；
+        //                                           放置 = 玩家面向 = 输出沿玩家视向续传，输入端在玩家侧）。
+        //     bit[3:2]（RepeaterStateDelayMask）  = 延迟档-1（0..3 → 1..4 redstone tick；右键循环写）。
+        //     bit4   （RepeaterStatePoweredFlag） = 输出强充能记忆位（亮态 → powerSourceLevel 15；亮贴图）。
+        //     bit[7:5]（RepeaterStateCountMask）  = 挂起计数（运行期瞬态：输入≠输出的 pass 数；达档+1 翻转。
+        //                                           随 state 落盘无害——重载后续算幂等；无运行期侧表 =
+        //                                           「重置契约」教训的零登记面）。
+        Repeater         = 147, // 红石中继器：延迟四档 + 二极管整流 + 输出强充能 15（续距）；贴地薄板；右键调档
+        Count           = 148, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -1658,6 +1690,13 @@ public:
                             //   自动 false（沙 / 铁砧落体落上按「不完整方块」分支碎成掉落物——沙随后被漏斗收集
                             //   成物品、铁砧恒还原方块，机制等价 MC）。几何单一权威 = hopperShapeBoxes（碰撞 /
                             //   选中 / 射线 / 渲染四处同源，铁砧 anvilShapeBoxes 同门）。
+        ShapeRepeater = 12, // t1095 中继器：贴地薄板 2/16 厚（机制等价 MC repeater 2px hitbox，满格 footprint；
+                            //   collision/selection/raycast 同盒 y[0,2/16]——t639 四消费者同源：shapeBoxesInto
+                            //   单一权威 + solidTopOffset/collisionTopY 0.125 两镜像 + 渲染 PartialBlockGeometry
+                            //   底板同高）。solid=false（非整立方 → 邻居不剔面；lightOpacity 默认全透）；可踩
+                            //   （2/16 薄板 auto-step 跨越语义同压力板）；支撑须完整立方顶面 + 失撑掉落同压力板
+                            //   族钩子（checkPressurePlateOnEdit 扩展）。渲染双焰标 + 档位滑标凸出碰撞板（纯视觉
+                            //   凸出，床头板同先例）。
     };
 
     // t505 积雪层（SnowLayer）层数上界（state 0..7 = 8 级高度）。机制等价 MC 1.0 snow layer 8 层
@@ -1948,7 +1987,10 @@ public:
     //   per-face——盘槽恒顶面、匣体侧 / 底（无排料嘴类朝向语义 → 无 mesher tileFor state 分支）；
     //   tools/build_jukebox.py 程序生成原创像素图 §9a）。**追加不插中间**（tile 索引是资源包映射
     //   契约的一部分，插入中间即整段错位——t1077/t1080 先例）。
-    static constexpr int AtlasTileCount = 191;
+    // t1095：191..192=红石中继器两张（191=repeater_off 熄态底板 / 192=repeater_on 亮态底板；
+    //   tools/build_repeater.py 程序生成原创像素图 §9a；Repeater 恒走 PartialBlockGeometry 异形段，
+    //   state bit4 选 191/192——同红石粉亮度档选瓦的呈现层选择模式）。
+    static constexpr int AtlasTileCount = 193; // t1095 起 191→193（中继器 tile 191 off / 192 on 尾部追加，不插中间存档契约）
 
     // t668 图集瓦片像素边长（HD 图集：16→64）。**单一权威**：tools/build_atlas.py TILE（打包像素大小）/
     //   ResourcePackManager::kTile（运行期包内贴图缩放目标）与 mesher 半纹素内缩（chunkgeometry hx/hy、
@@ -2389,6 +2431,60 @@ public:
         const int p = (noteBlockPitch(state) + 1) % NoteBlockPitchCount;
         return quint8(quint8(p) | (state & NoteBlockStatePoweredFlag));
     }
+
+    // ── t1095 红石中继器（Repeater）state 常量 + 编解码单一权威（语义见 Id 枚举 Repeater 行注释）──
+    // 输出朝向段：bit[1:0] = 0=+X 1=-X 2=+Z 3=-Z（chestFrontFace 同源编码，同漏斗低 2 位同门）。
+    static constexpr quint8 RepeaterStateFaceMask = 0x03;
+    // 延迟档段：bit[3:2] = 延迟档-1（0..3 → 1..4 redstone tick；右键循环写，音符盒调音段同门）。
+    static constexpr int    RepeaterStateDelayShift = 2;
+    static constexpr quint8 RepeaterStateDelayMask  = 0x0C;
+    // 延迟档数（MC 口径 4 档：1..4 redstone tick；调档回绕 (d+1) % 4）。
+    static constexpr int RepeaterDelayCount = 4;
+    // 输出强充能记忆位（bit4）：置位 = 输出端供强电 15 + 亮贴图。World 电力层挂起计数达档翻转 /
+    //   输入回同步清位；无手开路径（同铁门「仅红石驱动」口径）。
+    static constexpr quint8 RepeaterStatePoweredFlag = 0x10;
+    // 挂起计数段：bit[7:5] = 输入≠输出已持续的 pass 数（0..7；达「档+1」翻转并清零。2 bits 不够——
+    //   计数在翻转判定处可达 delay+1=5，故占 3 bits）。运行期瞬态随 state 落盘无害（重载后续算幂等）。
+    static constexpr int    RepeaterStateCountShift = 5;
+    static constexpr quint8 RepeaterStateCountMask  = 0xE0;
+    // 中继器统一谓词（单一权威，同 isJukebox 单 id 模式）。
+    static bool isRepeater(quint8 blockId);
+    // 延迟档解码（1..4；越界位清零兜底同 chestFrontFace 口径）。
+    static constexpr int repeaterDelayTicks(quint8 state)
+    {
+        return int((state & RepeaterStateDelayMask) >> RepeaterStateDelayShift) + 1;
+    }
+    // 挂起计数解码 / 编码（0..7 域外 clamp 兜底，同 jukeboxInsertState 防脏值越段口径）。
+    static constexpr int repeaterPendingCount(quint8 state)
+    {
+        return int((state & RepeaterStateCountMask) >> RepeaterStateCountShift);
+    }
+    static constexpr quint8 repeaterPendingCountState(quint8 state, int count)
+    {
+        const quint8 c = (count >= 0 && count <= 7)
+                             ? quint8(quint8(count) << RepeaterStateCountShift) : quint8(0);
+        return quint8((state & quint8(~RepeaterStateCountMask)) | c);
+    }
+    // 输出端位移解码单一权威（World 定向馈电判定 / 前端格定位 / mesher 双焰标摆位三方同源——
+    //   禁各处自写解码，同 hopperOutDelta 模式）：水平 4 向（中继器恒贴地薄板，无垂直朝向）。
+    static constexpr void repeaterOutDelta(quint8 state, int &dx, int &dz)
+    {
+        switch (state & RepeaterStateFaceMask) { // 0=+X 1=-X 2=+Z 3=-Z
+        case 0:  dx = 1;  dz = 0;  break;
+        case 1:  dx = -1; dz = 0;  break;
+        case 2:  dx = 0;  dz = 1;  break;
+        default: dx = 0;  dz = -1; break; // 3 = NegZ
+        }
+    }
+    // 右键调档单一权威：延迟档 +1 回绕（档域 (field+1) % 4 → 新 field），朝向 / 输出位 / 挂起计数原样
+    //   保留（音符盒 noteBlockTunedState 同门；调档不复位电力态——MC 同此，延迟档只改后续时序）。
+    static quint8 repeaterTunedState(quint8 state)
+    {
+        const int d = (repeaterDelayTicks(state)) % RepeaterDelayCount; // 档-1 域 +1 回绕
+        return quint8(quint8(state & quint8(~RepeaterStateDelayMask))
+                      | quint8(d << RepeaterStateDelayShift));
+    }
+
     // 音高 → 音名（「C4」「A4」「C#5」……）：n=0 → C4，n%12 走半音名表，n/12 叠八度；
     //   频率口径 f = 440×2^((n-9)/12)（n=9 = A4 = 440Hz，dev-plan t1028 公式）。UI 文案单一权威
     //   （PlayerController 调音播报 / 探针断言同源，防两处手抄漂移）。
