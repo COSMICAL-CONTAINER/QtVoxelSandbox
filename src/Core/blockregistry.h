@@ -1147,8 +1147,10 @@ public:
         //   抽取 / 输出 / 红石锁停；MC 1.0 无此方块 → kMcBlockId 行取 0）。**§9 区隔**：「漏斗」「Hopper」
         //   为通用描述词（工业/农用给料漏斗是先于 MC 的通用机械词），零 MC 专有名词 / 资产；贴图程序生成
         //   原创自绘 §9a（tools/build_hopper.py：顶箅 186 / 锅体 187 / 排料嘴 188）。
-        //   **整立方 opaque**（solid=true / ShapeFull，同发射器 / 投掷器机关盒家族体量——MC 漏斗本是异形
-        //   漏斗体，本工程 v1 如实降级为整立方，异形漏斗体几何登记候选池）。hardness=3.0（机制等价 MC
+        //   **t1093 异形三盒**（solid=false / ShapeHopper——顶箅板 + 漏斗颈 + 排料嘴，hopperShapeBoxes 单一
+        //   权威）：t1080 曾整立方降级（登记候选池），本单翻案为真实漏斗体——可站顶面 10/16、isFullCube=false
+        //   （沙/铁砧落体分支语义随之，机制等价 MC）、lightOpacity 全透（漏斗开顶，机制等价 MC；区别铁砧 /
+        //   耕地「满遮防漏光柱」特例——漏斗顶部本就是开口）。hardness=3.0（机制等价 MC
         //   hopper hardness 3）/ Pickaxe 加速 / minTier=1 + requiresTool=true（机制等价 MC「需镐采掘才掉落」
         //   ——空手 / 非镐破块不掉）。dropId=自身、dropCount=1、maxStack=64。音色归 GroupStone（金属质同
         //   铁栏杆族）。进创造调色板（红石 tab，机关件组——hotbar creativeBlocks + Inventory.qml redstoneIds）。
@@ -1163,7 +1165,10 @@ public:
         //   每 0.4s（kHopperTransferIntervalSec，机制等价 MC 8 game tick 传输周期）一轮「输出 → 抽取 →
         //   收集」；被红石信号激活（World::isReceivingPower）→ 本轮全停（收集 / 抽取 / 输出三语义一并停，
         //   机制等价 MC hopper 被供电锁停）。内容面 = HopperStore（Game 层 per-block 5 槽，同 ChestStore /
-        //   DispenserStore 族模式）。UI 面：无开盖界面（禁为此单新开 QML 玩法路径——UI 登记候选池）。
+        //   DispenserStore 族模式）。**UI 面（t1093）**：右键漏斗 → hopperOpened 信号 → HopperUI 开盖界面
+        //   （ChestUI/DispenserUI 同门：Main.qml 单向消费增量路由，t1080 关单登记的 UI 候选授权面兑现）。
+        //   **比较器读数面（t1093 裁定子降级）**：比较器方块本工程不存在（MC 1.5+ 且依赖红石比较器承载）→
+        //   无承载面非缺口，比较器本体另列候选池（纪元 + 依赖面双重理由），零代码零新号。
         Hopper           = 145, // 漏斗：收集掉落物 + 容器抽取/输出 + 红石锁停的搬运机关（机制等价 MC 1.5+ hopper）
         // ── t1083 唱片机（Jukebox）：木制发声匣方块——右键放入音乐盘 → 播放（音轨结束 / 再右键 /
         //   被破坏 → 吐出盘）。机制等价 MC 1.0 jukebox（id 84）的放入 / 取出 / 播放三语义；红石触发面
@@ -1646,6 +1651,13 @@ public:
                             //   {0.375,0,0.375,0.625,1,0.625}（4/16 见方 × 1.0，略宽于视觉柱；1.0 高可跳跃越过，
                             //   区别 ShapeFence 1.5 不可越）；selection/raycast 特例给「十字条带」双盒覆盖横板
                             //   走向（邻接无关，见 blockregistry.cpp selectionAABBs/raycastAABBs t998 注）。
+        ShapeHopper   = 11, // t1093 漏斗：三盒异形（顶箅板满格 footprint y[8,10]/16 可站 + 漏斗颈 4..12/16 ×
+                            //   y[4,8]/16 + 排料嘴 5..11/16 × y[0,4]/16；嘴位随 state——bit2 朝下贴底心、否则沿
+                            //   bit[1:0] 朝向贴边）。solid=false（非满格 → 邻居不剔面；lightOpacity 走 default 全透，
+                            //   机制等价 MC 漏斗开顶透光）；isCollidable 走 default true（可站可挡）；isFullCube
+                            //   自动 false（沙 / 铁砧落体落上按「不完整方块」分支碎成掉落物——沙随后被漏斗收集
+                            //   成物品、铁砧恒还原方块，机制等价 MC）。几何单一权威 = hopperShapeBoxes（碰撞 /
+                            //   选中 / 射线 / 渲染四处同源，铁砧 anvilShapeBoxes 同门）。
     };
 
     // t505 积雪层（SnowLayer）层数上界（state 0..7 = 8 级高度）。机制等价 MC 1.0 snow layer 8 层
@@ -1667,6 +1679,15 @@ public:
         float minX, minY, minZ;
         float maxX, maxY, maxZ;
     };
+
+    // t1093 漏斗三盒几何单一权威（ShapeHopper）：把 (state) 解码成 3 个 cell-local [0,1]^3 子盒写入 out，
+    //   返回写入数（恒 3；防御 cap<3 → 返 0 + 调用方兜底，同 shapeBoxesInto putAABB 钳制口径）。盒序稳定：
+    //   顶箅板（满格 footprint，y[8,10]/16，顶面 = 可站面 10/16）→ 漏斗颈（4..12/16 × y[4,8]/16）→ 排料嘴
+    //   （5..11/16 × y[0,4]/16；bit2(HopperFacingDownFlag) 贴底心 / 否则沿 bit[1:0] 朝向贴边——hopperOutDelta
+    //   同源编码）。消费方四处同源：shapeBoxesInto（碰撞）/ selectionAABBs·raycastAABBs（选中·射线，经
+    //   shapeBoxes 薄壳）/ collisionTopY·solidTopOffset（列顶）/ PartialBlockGeometry Hopper case（渲染，
+    //   World→Core 向下合法，anvilShapeBoxes/bedHalfBoxes 单一权威同门）。
+    static int hopperShapeBoxes(quint8 state, BlockAABB *out, int cap);
 
     // 方块定义（每方块一项；单一权威数据源）。改方块任何属性只改 kDefs 一行，全工程生效。
     // 行索引 == 方块 id（air 行同时作越界 / 不可挖掘 / 不掉落兜底）。
@@ -1921,8 +1942,8 @@ public:
     //       pack 无对应文件（bone block 是 MC 1.10+ 方块，1.8.2.2 demo 包无此 PNG）→ 映射慷慨登记
     //       （t627 先例）缺则安全跳过保程序瓦片。
     // t1080：186..188=漏斗三张（186=hopper_top 顶箅 / 187=hopper_side 锅体 / 188=hopper_front 排料嘴；
-    //   Hopper per-face——顶箅恒顶面、锅体侧 / 底、排料嘴贴排料口所朝面（mesher 据 state 选，同发射器
-    //   tileFor 分支）；tools/build_hopper.py 程序生成原创像素图 §9a）。
+    //   Hopper per-face——t1093 起由 PartialBlockGeometry Hopper case 据 hopperShapeBoxes 盒序选：顶箅板
+    //   顶面=186 / 其余盒面=187 / 排料嘴盒全=188；tools/build_hopper.py 程序生成原创像素图 §9a）。
     // t1083：189..190=唱片机两张（189=jukebox_top 顶面盘槽 / 190=jukebox_side 侧面匣体木纹；Jukebox
     //   per-face——盘槽恒顶面、匣体侧 / 底（无排料嘴类朝向语义 → 无 mesher tileFor state 分支）；
     //   tools/build_jukebox.py 程序生成原创像素图 §9a）。**追加不插中间**（tile 索引是资源包映射

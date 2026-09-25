@@ -948,6 +948,12 @@ signals:
     //   呈现层只消费（PLAN §2 分层）。坐标 = 玩家所点发射器格的整数世界坐标。注：踩压力板触发的射箭陷阱
     //   （scanDispenserTraps）与「玩家右键开 UI」是两条互不干扰的路径——前者机关自动触发，后者玩家手动查看。
     void dispenserOpened(int x, int y, int z);
+    // t1093 右键漏斗（hopper）：placeBlock 检测到命中格为 Hopper → 发本信号（不放置；携命中格世界坐标）→
+    //   呈现层 Connections 打开 HopperUI（释放指针）。机制等价 MC 右键漏斗开漏斗物品栏界面（5 槽容腔 +
+    //   背包）。同 dispenserOpened 模式：Game 层发语义事件（携坐标供 HopperStore 寻址该漏斗的 5 槽），
+    //   呈现层只消费（PLAN §2 分层；t1080 关单登记的 UI 候选授权面兑现——Main.qml 单向消费增量）。
+    //   遮挡判定从简：无「上方压盖不开」门（dev-spec 明示从简，同发射器族「任意姿态可开」口径）。
+    void hopperOpened(int x, int y, int z);
     // 火把放置（t125 朝向修正）：placeBlock 成功放置 Torch 后发，携带玩家点击面的外法线（指向玩家侧，
     //   = m_hitNx/Ny/Nz）。呈现层（torchHost）据此把火把定向为「柄嵌玩家所点墙面」——替代旧 recomputeOrient
     //   固定优先级（下>-X>+X>-Z>+Z）：旧逻辑在「墙+地并存」（墙插火把下方恰有地面）时误判垂直立柱，
@@ -1254,6 +1260,12 @@ private:
     //   （Entities→World 向下合规）；本槽只补 Game 层专属面：清苗（静默写，同玩家踩踏分支口径）+
     //   dropCropDrops 弹落（t1026 单一权威——掉落表不出 Game 层，Entities 层不产掉落）。无苗 no-op。
     void onMobTrampledFarmland(int x, int y, int z);
+    // t1093 爆炸破坏漏斗掉容腔内容 + 清条目（EntityManager::explosionVoxelDestroyed 收口槽，setEntityManager
+    //   内直连——onMobTrampledFarmland 同门）。机制等价 MC「被爆炸摧毁的容器掉落内容」：翻案 t1080 登记
+    //   的「内容不退回」口径。分层：Entities 层发语义事件（携被破坏格坐标 + 原方块 id），Game 层持
+    //   HopperStore 排空 5 槽经 m_itemEntities 落实体 + clearHopper（非漏斗格 no-op——同族箱/炉保持登记
+    //   口径不动，本单范围 = 漏斗）。条目清理防「破后重放同格旧容腔复活」（finishMiningAt 同注）。
+    void onExplosionVoxelDestroyed(int x, int y, int z, int blockId);
     // t739 红石粉失撑掉落（R19.11 用户复盘「红石粉不得浮空」）：破块后查**正上方格**，若为红石粉导线、
     //   且本格（粉的唯一支撑位——粉恒铺在支撑格顶面）已非有效支撑（isDustSupport 单一权威：完整立方 /
     //   上半砖）→ 粉直接掉落为红石粉物品（0x224，与放置来源一致；激活态照样掉）。机制等价 MC「红石粉

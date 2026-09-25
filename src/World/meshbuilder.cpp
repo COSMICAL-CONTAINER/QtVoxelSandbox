@@ -143,21 +143,9 @@ static int tileFor(quint8 block, int face, quint8 state)
             return d.topTile;                                            // 顶/底 = furnace_top（复用）
         return d.sideTile;                                               // 其余三侧面 = furnace_side（复用）
     }
-    // t1080 漏斗朝向：排料嘴（hopper_front 188）贴**排料口所朝面**——bit2（HopperFacingDownFlag）置位 =
-    //   朝下 → 排料嘴贴底面（漏斗口朝下往下方容器喂料）；bit2=0 = 水平 → 排料嘴贴 chestFrontFace 解码的
-    //   水平面（同发射器编码）。顶面恒顶箅 hopper_top(186)；其余面锅体 hopper_side(187)。
-    if (block == BlockRegistry::Hopper) {
-        const BlockRegistry::BlockDef &d = BlockRegistry::def(block);
-        if (state & BlockRegistry::HopperFacingDownFlag) {
-            if (face == int(BlockRegistry::Bottom)) return d.frontTile; // 排料嘴（朝下）
-            if (face == int(BlockRegistry::Top)) return d.topTile;      // 顶箅
-            return d.sideTile;                                          // 锅体
-        }
-        const int frontFace = int(BlockRegistry::chestFrontFace(state)); // 排料口所朝水平面
-        if (face == frontFace) return d.frontTile;                       // 排料嘴（水平）
-        if (face == int(BlockRegistry::Top)) return d.topTile;           // 顶箅
-        return d.sideTile;                                               // 锅体（含底面）
-    }
+    // t1080 漏斗朝向分支已随 t1093 迁出：漏斗改走 PASS 1 异形路径（PartialBlockGeometry Hopper case，
+    //   贴图 per-face 由该 case 据 hopperShapeBoxes 盒序消费 def 三 tile——186 顶箅 / 187 锅体 / 188 排料嘴），
+    //   本 tileFor 不再被漏斗触达（t408 耕地 PASS2→PASS1 迁移同门；分支移除防死代码，历史形态见 t1080 提交）。
     // t234/t406 耕地：顶面（+Y）恒 farmland_dry(26)（topTile）；湿润等级 0..3（state 低 2 位）由顶点色暗化
     //   体现（darker=wetter，见下方 farmlandHydrBrightMul），不再切换 dry/wet 两贴图（4 级靠顶点色
     //   连续暗化实现，无需扩图集 + 2 贴图）。侧/底 = dirt(2)。
@@ -395,6 +383,7 @@ ChunkMeshData MeshBuilder::build(const ChunkMeshSnapshot &snap, Reason reason)
                                             || b == BlockRegistry::SnowLayer // t505 积雪层薄板经 PartialBlockGeometry 渲染（state 高度 1/8..1.0；非满格）
                                             || b == BlockRegistry::EnchantingTable // t620 附魔台 0.75 矮盒经 PartialBlockGeometry 渲染（非满格）
                                             || BlockRegistry::isAnvil(b)     // t766 铁砧三盒异形（基座+腰柱+砧台）经 PartialBlockGeometry 渲染（非满格；isAnvil 覆盖三阶段 id）
+                                            || b == BlockRegistry::Hopper    // t1093 漏斗三盒异形（顶箅板+颈+嘴，hopperShapeBoxes 单一权威）经 PartialBlockGeometry 渲染（t1080 整立方降级翻案；solid=false 邻居不剔面）
                                             || BlockRegistry::isBed(b);     // t457 床低 3D 模型经 PartialBlockGeometry 渲染（非整立方）
                     const bool isCrossX   = BlockRegistry::isCrossBillboard(b);
                     // t638 ① 木门镂空窗：门上半格栅窗贴图带 alpha（pack door_wood_upper.png 窗格真透明 /
@@ -825,6 +814,7 @@ ChunkMeshData MeshBuilder::build(const ChunkMeshSnapshot &snap, Reason reason)
                             if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isBed(blk)) continue; // t457 床低 3D 模型已在 PASS 1；不进整立方面（否则满格立方覆盖低床）
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::EnchantingTable) continue; // t620 附魔台 0.75 矮盒已在 PASS 1；不进整立方面（否则满格立方覆盖矮盒）
                             if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isAnvil(blk)) continue; // t766 铁砧三盒异形已在 PASS 1；不进整立方面（否则满格立方覆盖三盒造型，退回「上下各一半」观感）
+                            if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::Hopper) continue; // t1093 漏斗三盒异形已在 PASS 1；不进整立方面（否则满格立方覆盖漏斗体，退回 t1080 整立方观感）
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::Painting) continue; // t720 画作渲染走 paintingHost QML delegate（贴图不进图集）；立方面路径会把画格画成 tile 0 草顶立方
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::Fire) continue; // t724 火焰渲染走 fireHost QML delegate（fire_strip 翻书条带不进图集）；立方面路径会把火格画成 tile 0 草顶立方
                             if (!isWater && !isLava && !isGlass && !isIceBlk && blk == BlockRegistry::EmberGate) continue; // t725 余烬门渲染走 portalHost QML delegate（portal_strip 翻书不进图集）；立方面路径会把门格画成 tile 0 草顶立方
@@ -942,6 +932,7 @@ ChunkMeshData MeshBuilder::build(const ChunkMeshSnapshot &snap, Reason reason)
                         if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isBed(b)) continue; // t457 床低 3D 模型已在 PASS 1；不进整立方面
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::EnchantingTable) continue; // t620 附魔台 0.75 矮盒已在 PASS 1
                         if (!isWater && !isLava && !isGlass && !isIceBlk && BlockRegistry::isAnvil(b)) continue; // t766 铁砧三盒异形已在 PASS 1；不进整立方面（greedy 同 culled 路径双保险）
+                        if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::Hopper) continue; // t1093 漏斗三盒异形已在 PASS 1；不进整立方面（greedy 同 culled 路径双保险）
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::Painting) continue; // t720 画作渲染走 paintingHost QML delegate（贴图不进图集）；不进整立方面
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::Fire) continue; // t724 火焰渲染走 fireHost QML delegate（fire_strip 翻书不进图集）；不进整立方面
                         if (!isWater && !isLava && !isGlass && !isIceBlk && b == BlockRegistry::EmberGate) continue; // t725 余烬门渲染走 portalHost QML delegate（portal_strip 翻书不进图集）；不进整立方面

@@ -1146,6 +1146,30 @@ int PartialBlockGeometry::append(
                 BlockRegistry::def(blockId).topTile);
         break;
     }
+    case BlockRegistry::Hopper: {
+        // t1093 漏斗三盒异形渲染（机制等价 MC 漏斗体：顶箅板 + 漏斗颈 + 排料嘴）：盒布局**直接消费
+        //   BlockRegistry::hopperShapeBoxes 单一权威**（World→Core 向下合法；碰撞 / 选中 / 射线 / 列顶
+        //   同源同盒——bedHalfBoxes/anvilShapeBoxes 单一权威同门），渲染轮廓 = 碰撞轮廓（无「视觉与
+        //   碰撞脱岗」面）。t1080 曾整立方渲染（solid=true / ShapeFull）；本单改 solid=false（邻居不剔面
+        //   → 漏斗周身 gap 处邻块墙面正确绘制）+ 本异形 case。贴图 per-face：顶箅板 +Y 顶面 = def.topTile
+        //   （186 顶箅）；排料嘴盒全 = def.frontTile（188 排料嘴）；其余 = tileIndex(PosX)=187 锅体。
+        //   不做邻居剔除（异形小体约定，同铁砧 / 耕地；盒间内面被自身遮挡 overdraw 可忽）。
+        BlockRegistry::BlockAABB hb[3];
+        if (BlockRegistry::hopperShapeBoxes(state, hb, 3) != 3) break; // 权威失效兜底（不应发生）
+        const int tileBody = tile;                                   // 187 锅体（append 头部 PosX 权威）
+        const int tileTop  = BlockRegistry::def(blockId).topTile;    // 186 顶箅
+        const int tileMouth = BlockRegistry::def(blockId).frontTile; // 188 排料嘴
+        // ① 顶箅板（顶面 186 顶箅，侧·底 187 锅体）——可站顶面 10/16。
+        pushBox(verts, idx, lx, ly, lz, hb[0].minX, hb[0].maxX, hb[0].minY, hb[0].maxY, hb[0].minZ, hb[0].maxZ,
+                tileBody, light, tileW, hx, hy, v0, v1, tileTop);
+        // ② 漏斗颈（全 187）。
+        pushBox(verts, idx, lx, ly, lz, hb[1].minX, hb[1].maxX, hb[1].minY, hb[1].maxY, hb[1].minZ, hb[1].maxZ,
+                tileBody, light, tileW, hx, hy, v0, v1);
+        // ③ 排料嘴（全 188；朝下贴底心 / 水平朝向贴边——盒位即朝向）。
+        pushBox(verts, idx, lx, ly, lz, hb[2].minX, hb[2].maxX, hb[2].minY, hb[2].maxY, hb[2].minZ, hb[2].maxZ,
+                tileMouth, light, tileW, hx, hy, v0, v1);
+        break;
+    }
     case BlockRegistry::BedRed: case BlockRegistry::BedOrange: case BlockRegistry::BedYellow:
     case BlockRegistry::BedGreen: case BlockRegistry::BedCyan: case BlockRegistry::BedBlue:
     case BlockRegistry::BedMagenta: case BlockRegistry::BedBlack:

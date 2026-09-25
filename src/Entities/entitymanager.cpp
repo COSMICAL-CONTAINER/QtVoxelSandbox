@@ -5563,6 +5563,10 @@ void EntityManager::detonateStalker(int idx, Entity &e, World *world, const QVec
         //   在该格生成掉落实体（机制等价 MC 爆炸把被毁方块弹成物品）。dropId<=0（如 leaves 默认 0 / 矿石须冶炼类）
         //   → 不掉。用 QRandomGenerator（玩家交互掉落的随机性，非 worldgen 确定性范畴 §2-K）。
         for (const World::DestroyedVoxel &d : destroyed) {
+            // t1093 爆炸破坏上报（每被毁格一发）：Game 层 PlayerController 据原 id 收口容器内容散落
+            //   （漏斗 → 排空 HopperStore 落实体 + 清条目，机制等价 MC「被炸毁的容器掉落内容」）。
+            //   分层：Entities 不持容器存储 → 语义事件携 (坐标, id)，消费面在 Game（见信号头注）。
+            emit explosionVoxelDestroyed(d.x, d.y, d.z, int(d.oldId));
             // t494 爬行者爆炸引燃 TNT（用户「爬行者爆炸也可以点燃 TNT，链式反应一个原理」）：destroyed 内
             //   oldId==TntBlock → spawnPrimedTnt（短引信 kChainFuseSec，同 TNT 链式口径）→ 连锁传播。**不**走爆炸
             //   掉落（TNT 被炸引燃而非掉成物品，同 TNT detonateTntSphere 语义）。机制等价 MC 苦力怕爆炸引燃邻接 TNT。
@@ -5671,6 +5675,8 @@ void EntityManager::detonateTntSphere(int cx, int cy, int cz, World *world, cons
     //   顺序：先掉落 / 引燃（据 destroyed 列表，TNT 方块已被 destroySphereSilent 清为 Air 故不重复破坏），再伤玩家 + 音视。
     //   水中：destroyed 空 → 需**另扫球内 TNT** 完成链式引燃（水下 TNT 连锁不断）。
     for (const World::DestroyedVoxel &d : destroyed) {
+        // t1093 爆炸破坏上报（同 Stalker 路径；TNT 方块路径的容器内容散落同链收口）。
+        emit explosionVoxelDestroyed(d.x, d.y, d.z, int(d.oldId));
         // t493 恢复爆炸**链式引燃**（用户明确要链式传递）：爆炸破坏的 TNT 方块 → spawnPrimedTnt（引燃态实体，
         //   fuse=短引信 kChainFuseSec + jitter 随机错峰 → 快速连锁推进）→ 各 PrimedTnt fuse 到 0 再次引爆 → 递归
         //   连锁传播。机制等价 MC TNT 连锁（链式引燃的 TNT 比手点更短引信，快连锁观感）。**不**走爆炸掉落（TNT
