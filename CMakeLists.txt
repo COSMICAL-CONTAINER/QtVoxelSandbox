@@ -1078,6 +1078,12 @@ add_executable(redstone_matrix_test
     #   计数钉 + 既有红石族回归柱 + 负坐标墙复钉 + 惰性编辑零重算]。sparse 构造缝 + loadChunkAt 物化
     #   （r2053c/r2059-r2064 同门），rig 世界零接触，无新增 .cpp）。
     tools/matrix/section65_repeater.cpp
+    # t1096 蕴辉瓶（投掷释经验）探针段（置尾先例沿用：runAll 末执行，filter 词 r2066；4 腿 r2066a-d =
+    #   右键投掷行为柱[真 pc 发射链 + 初速/重力/朝向 + 创造不耗/生存消耗/挥手] / 触地即碎承重墙[无实体
+    #   也碎 + mob 触碰 0 伤害即碎 + 命中格精确 + 零世界变更] / XP 释放面[拆球守恒 + canonical split +
+    #   确定性 seed roll 信封] / 结构钉[0x263 段尾追加 + 名面/调色板 + 投掷入口/释放链源钉族 + QML 路由
+    #   与 delegate 钉 + 零方块/零图集反探]。真链 pc rig（t891 同门），rig 世界零接触）。
+    tools/matrix/section66_glimmer_bottle.cpp
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
     #   确定性等价承重墙[8 形态快照 worker ≡ 同步直调逐位恒等：顶点/索引/统计三面]/队列纪律
     #   [容量压小满载 kErrQueueFull 可见拒绝 + 拒绝项不入账 + 接受项恰一产出按 requestId 对账]/
