@@ -1061,6 +1061,13 @@ add_executable(redstone_matrix_test
     #   + 临时库（r2015 先例），rig 世界 w 零接触，无新增 .cpp——world/chunk 系源文件已列）。
     tools/matrix/section22_chunkevictor.cpp
     src/World/chunkevictor.h
+    # t1092 棕色染料生存源——可可豆探针段（置尾先例沿用：runAll 末执行，filter 词 r2062；4 腿
+    #   r2062a-d = 地牢池 roll 行为柱[确定性 seed 命中 + 复现 + 数量区间 + 千 seed 宽频带] / 转换行为柱
+    #   [1:1 产棕 + 行名身份 + 错误原料负例 + 两跳链端到端] / 16 色生存可达闭包钉[基源含池门控可可豆 →
+    #   shapeless 不动点 16/16] / 结构钉[段位源钉 + 池行逐字段 + 合成行源钉 + maxStack 双层面 + 三呈现面
+    #   + 荚面降级登记注 + 零方块/零图集反探]。纯表腿 + 源码钉，rig 世界零接触，无新增 .cpp——loottable
+    #   已列下方探针附加）。
+    tools/matrix/section62_cocoa_bean_dye.cpp
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
     #   确定性等价承重墙[8 形态快照 worker ≡ 同步直调逐位恒等：顶点/索引/统计三面]/队列纪律
     #   [容量压小满载 kErrQueueFull 可见拒绝 + 拒绝项不入账 + 接受项恰一产出按 requestId 对账]/
