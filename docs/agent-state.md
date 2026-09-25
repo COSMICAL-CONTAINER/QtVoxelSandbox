@@ -14,16 +14,16 @@
 ```yaml
 project: QtMinecraft
 state: IN_PROGRESS
-current_task: **t1097 IN_PROGRESS（§14 常设授权候选池·池底重盘压轴——酿造台+药水系统）**：1.0.0 基线内最后一块大件；核实先行 + 范围裁定权在核实（地狱疣获取链无下界需裁定/效果注入基座 = PlayerState t715 中毒缓慢已在/喷溅型投掷 = t1096 蕴辉瓶抛物同门）；预期多轮次可分层交付如实登记。串行 voxel-dev，filter 词 r2067；完成 → 候选池残项（小件合集）。
+current_task: **t1098 IN_PROGRESS（§14 常设授权候选池顺延——残项小批合集）**：四件 = 中继器生存配方[3 石+2 红石火把+1 红石粉 MC 同料，t1095 关单登记缺口，材料链在场核实] + ChunkStore removeDatabase 卫生单[t1074 登记拆卸期噪音，零行为变化] + 红石家族纪元标注审计[docs-only] + 比较器纪元裁定停放面[docs-only，MC 1.5+ 非基准，t1093 子降级与 t1097 后续轮⑤挂靠收口]。派工前逐一现场核实。串行 voxel-dev，filter 词 r2068。
 current_task_status: IN_PROGRESS
-last_completed_task: t1096 经验瓶·蕴辉瓶（2026-09-25 闭环；矩阵 802→806——GlimmerBottleId 0x263 段尾追加 + Kind 尾追加 + 投掷破碎释放 XP[3..11 双掷口径 + **canonical split 阈值链 247/123/63/31/15/7/3/1** 纯确定性拆球收口 XpOrbManager] + 投掷入口在 Air 守卫前分流[归一教训正确应用]；生存获取裁定创造专属[村民交易 1.3.1+ 非基准且无村民系统]；NEG-2 恰红面初稿误记实跑后据实修正——自我修正纪律良好。详录 = dev-plan t1096 关单条目）
-last_completed_task_prev: t1095 红石中继器（2026-09-25 闭环，矩阵 797→802 红石家族 1.0 主力件收官；详录 = dev-plan t1095 关单条目）
-last_completed_task_commits: fix(t1096)（9774062：物品 id+投射体 tick+拆球收口+投掷分支+呈现面，9 文件 +270/−2）+ test(t1096)（e33d257：section66 r2066a-d 四腿 + helpers/CMake 入册，+506）
-last_verified_commit: test(t1096)（矩阵 **806 PASS / 0 FAIL ×2**：matrix_t1096_{pos,final}.log EXIT=0[pos 必全矩阵]；新基线腿集合 md5[规范配方 grep -a -oE "^PASS \| [a-z0-9]+ " | sort | md5sum]三日志全等 9b493da5b66ba9874bafc0172c575cee；NEG-1 恰红 {r2066a,d} / NEG-2 恰红 {r2066a,b,d}[据实订正版] 双还原 4/4 绿；冒烟 tail20 回填 logs/voxelsandbox_t1096_tail20.log[横幅+root objects 齐]；主控独立脱离式复跑 806/0 同 md5 三方恒等 matrix_orch_t1096_verify.log）
+last_completed_task: t1097 酿造台+药水系统第一轮（2026-09-26 闭环；矩阵 806→810——BrewingStand=148/Count 149/kMcBlockId 117 两盒异形 + BrewingStore 五槽机制[20s/轮一次转换全部合格瓶位/瓶栈保留/燃料计量每操作 -1 归零补燃满口径] + BrewingUI + 物品族 0x264..0x26A 七件[瓶/水瓶/灰烬疣/粗制/迅捷/力量/糖] + 饮用面 EffectSpeed/EffectStrength 尾追加 180s；三项范围裁定留痕[灰烬疣分层交付创造专属/效果集两链生存可达/1.0 酿造语义三元组]；**验收修正件 = 主控 diff 亲读抓 F1 燃料计量永不递减 1 粉无限酿造 parity bug → SendMessage 回传同链修复 1b728a6/73443f4**[含 agent 顺带发现追赶轮无映射空转缺陷]；后续轮六件登记候选池。详录 = dev-plan t1097 关单条目）
+last_completed_task_prev: t1096 经验瓶·蕴辉瓶（2026-09-25 闭环，矩阵 802→806；详录 = dev-plan t1096 关单条目）
+last_completed_task_commits: fix(t1097)（035ed80 首轮：方块+存储+机制+UI+物品族+饮用面，29 文件 +2041/−20；1b728a6 验收修正：燃料递减+追赶门+合格复判+亮标现值）+ test(t1097)（0af0802：section67 r2067a-d 四腿+lawful 前移 7 处；73443f4：r2067a 燃料口径重钉+满口径场景③+NEG 再生）
+last_verified_commit: test(t1097)（矩阵 **810 PASS / 0 FAIL ×2**：matrix_t1097_{pos,final}.log；腿集合 md5[规范配方 grep -a -oE "^PASS \| [a-z0-9]+ " | sort | md5sum]三方恒等 d2360c45208c60911834989f369391b1[md5 对腿 ID 词元哈希，腿文修订不迁移值]；NEG-1 恰红 {r2067a} / NEG-2 恰红 {r2067c} 双还原 4/4 绿；冒烟 tail20 logs/voxelsandbox_t1097_tail20.log[横幅+root objects 实文]；主控独立脱离式复跑 810/0 同 md5 三方恒等 matrix_orch_t1097_verify.log）
 last_governance_review: 2026-09-25（audit #20 GREEN——窗口 da82e54..9079f74 15 提交/t1089-t1093 五闭环证据链全实核[五单三方 md5 全等 f0c7de88/55e63ca6/38c77b86/77a122b1/4a48413b + NEG 十份恰红面十份还原逐日志吻合 + t1089 md5 配方勘误留痕核实 + 留池台账问询实答（辅助门五处实为 t1091 全清）]；账本三方一致/腿数链 762→790 无断；15 提交零署名；**F1[MEDIUM] 治理计数字段五闭环失更**[counter 恒 0/due 恒 false/Workspace Guard HEAD 恒 t1088——本批回填并恢复按单递增惯例，若 #21 窗口仍失更降 YELLOW]清偿 + F2[LOW 候选池重复条目]清偿 + 2 INFO 无需动作；详见 governance-audit-2026-09-25-b.md）
 governance_review_due: false
-completed_tasks_since_governance_review: 3（t1094 + t1095 + t1096 闭环；审计 #20 GREEN 于 2026-09-25）
-next_task: **t1097 酿造台+药水（池底重盘压轴，在飞，预期多轮次）→ 之后顺延（残项小批合集：中继器生存配方/removeDatabase 卫生单/红石纪元标注审计/比较器本体与非 1.0 停放面…）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1096 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
+completed_tasks_since_governance_review: 4（t1094 + t1095 + t1096 + t1097 闭环；审计 #20 GREEN 于 2026-09-25——下一审计窗口 = t1098 闭环后 5/5 → audit #21）
+next_task: **t1098 残项小批合集（在飞）→ 之后顺延：酿造后续轮（效果链五条/红石延长/喷溅/粒子音效——灰烬疣生存获取停放下界维度待用户）+ 比较器停放面收口 + 用户侧并行 P5 实机清单/§30.6/§31/择机 push（本地领先远端 70+ 笔）**
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -33,7 +33,7 @@ needs_human: false
 
 ## Workspace Guard
 
-- HEAD = t1096 经验瓶代码终态（fix(t1096) 9774062 + test(t1096) e33d257 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 806 腿满绿（66 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（current_task/last_completed_*/counter 按单递增/Workspace Guard HEAD 行同步终态——审计 #20 F1 教训：t1089-t1093 五闭环漏更 counter 与 HEAD 行，逐单递增惯例恢复）。**禁并发构建/并发跑矩阵**（t813 build_stamps 每次构建强制全目标重链——两进程并发构建可产出损坏 exe，2026-09-21 三崩留痕；并发跑共享夹具面同理存疑，验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075 过程日志落仓库根 + t1081 复跑双进程事故两教训——cwd 相对路径在跨命令持久化下不可靠）。**冒烟证据每闭环回填 tail20**（审计 #16-F4/#17-F1 两现 + t1088 三现——回填件须含启动横幅与 root objects 实文，主控验收时核对）。
+- HEAD = t1097 酿造台+药水第一轮代码终态（fix(t1097) 035ed80 + test(t1097) 0af0802 + fix(t1097) 1b728a6 + test(t1097) 73443f4 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 810 腿满绿（67 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（current_task/last_completed_*/counter 按单递增/Workspace Guard HEAD 行同步终态——审计 #20 F1 教训：t1089-t1093 五闭环漏更 counter 与 HEAD 行，逐单递增惯例恢复；t1097 件 = counter 3→4 + HEAD 行同步第二单全过）。**禁并发构建/并发跑矩阵**（t813 build_stamps 每次构建强制全目标重链——两进程并发构建可产出损坏 exe，2026-09-21 三崩留痕；并发跑共享夹具面同理存疑，验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075 过程日志落仓库根 + t1081 复跑双进程事故两教训——cwd 相对路径在跨命令持久化下不可靠）。**冒烟证据每闭环回填 tail20**（审计 #16-F4/#17-F1 两现 + t1088 三现——回填件须含启动横幅与 root objects 实文，主控验收时核对）。
 - 纪律①-⑨全在案；**大 TU 编译一律 -j 1**（09-13 蓝屏教训；分段后单段增量 -j 4 实测安全）。**矩阵测试为 tools/matrix/ 分层结构**：改探针只重编对应段 TU（秒级）+ `--filter <substring>` 只跑本任务腿；新腿落对应段文件，新段置尾 runAll 末执行、须 ≤500KB；section11 起「自建 fresh 小世界」先例（48×48×96 seed 82 + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)）。
 - **R20.06 起值类型纪律**：src/Core/ 新值类型一律 result.h QObjectFree 编译期钉 + 头内 static_assert；命令/事件队列满载拒绝与快照队列覆盖最老是两域容量策略分化，勿「统一」。
 - **R20.07 起编排壳纪律**：GameSession 只做编排（命令 → 整 tick 边界 → World::setBlock 权威），禁复制游戏逻辑；**QML 现行玩法路径零变化是 R20 主线不变量**（Main.qml 含 "GameSession" 即违零迁移阴性钉 r2007b）。
@@ -50,6 +50,7 @@ needs_human: false
 
 ## Recovery Point
 
+- 2026-09-26：t1097 酿造台+药水第一轮闭环（矩阵 806→810，md5 d2360c45 三方恒等；四提交 035ed80/0af0802/1b728a6/73443f4；主控 diff 亲读抓 F1 燃料计量 parity bug 同链修复回传——验收修正件流程首例；后续轮六件登记候选池）。恢复点 = 本条；在飞 = t1098 残项小批合集（r2068）。
 - 最近闭环：**t1096 经验瓶·蕴辉瓶**（2026-09-25，fix(t1096) 9774062 + test(t1096) e33d257 + 本 docs）：矩阵 802→806。**真缺口交付**（全仓零命中；原创名 GlimmerBottle §9）：GlimmerBottleId 0x263 段尾追加 + Kind 尾追加投掷抛物体（重力抛物/mob 触碰 0 伤害/触地即碎/5s 寿命兜底）+ **XP 释放 = 3..11 双掷口径 + canonical split 阈值链纯确定性拆球**收口 XpOrbManager.spawnOrbsForTotal + 投掷入口 Air 守卫前分流（归一教训正确应用）+ 创造不耗/生存耗 1；生存获取裁定创造专属（村民交易 1.3.1+ 非基准且无村民系统）。腿 r2066a-d；NEG-1 {a,d}/NEG-2 {a,b,d}[恰红面初稿误记实跑据实修正] 恰红；全矩阵 pos/final 806/0 md5 恒等 9b493da5 + 主控复跑三方恒等。**待实机确认**：图标/billboard 翻滚/经验球磁吸/抛掷距离手感。**下一任务 = t1097 酿造台+药水（压轴大件）**。
 - 最近闭环：**t1095 红石中继器**（2026-09-25，fix(t1095) 0ec65b6 + test(t1095) cfa6f0d + 本 docs）：矩阵 797→802。**红石家族 1.0 主力件收官**：Repeater=147 尾追加 + kMcBlockId 93 + ShapeRepeater 三盒 + state 编码全落盘零侧表（朝向/延迟档/输出位/**挂起计数 3 bits**——翻转判定计数可达 delay+1=5 的 2 bits 溢出预判留痕）+ sourceFeedsCell 定向馈电整流（Phase A 水平 4 向改定向、垂直与非中继器源逐字零变化）+ 挂起计数语义（脉冲短于延迟档不穿透 = MC 同口径）+ 锁存面 1.0 无如实登记。腿 r2065a-e；NEG-1 {a}/NEG-2 {b} 恰红；全矩阵 pos/final 802/0 md5 恒等 a2f3eb64 + 主控复跑三方恒等；5 处 lawful 钉修订（429 恢复后揪出 t879 第二处 191 漏钉）。429 一次中断 + 截断写入风险 → 续作第一优先修复零返工。**待实机确认**：观感/调档手感/续距目视/红石 tab 图标/破支撑掉落；生存配方缺口登记后续批。**下一任务 = t1096 经验瓶**。
 - 最近闭环：**t1094 写门家族残面批**（2026-09-25，fix(t1094) 7aae571 + test(t1094) efb8e9e + 本 docs）：矩阵 790→797。**四组+现场新增两链面全确认零降级——写门家族全弧收官**（t1074 立项 → 四批 22 员+键域+链面全清）：①tickRedstone inBounds（recomputePowerLocal 统一域 lambda——外环电路灯不亮轨不灭）②goldenRailChainStep（动力轨链第二根永不亮）③recheckAttachments 十员（附着失撑悬空）④mob 火/岩浆足印扫描（外环 mob 贴火不燃）+ 两处链面合并清偿（checkCactusOnEdit 邻扫/dropUnsupportedDoorsAbove 收口——t1090 先例）。腿 r2064a-g（mob 足印 60 拍窗 hp==9 精确火焰指纹）；NEG-1 {a,e,g}/NEG-2 {b,c,d,g} 恰红；全矩阵 final/final2 797/0 md5 恒等 7416b136 + 主控复跑恒等（本单 pos 为 filter 跑——命名偏差留痕）。**候选池见底处置**（§14-④）：新增中继器/酿造药水/经验瓶三候选；**t1095 中继器在飞**。**待实机确认**：外环红石降沿/farm 坍落拾取/mob 点燃观感/附着脱落呈现。
