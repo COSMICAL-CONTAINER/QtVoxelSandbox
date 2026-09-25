@@ -7538,9 +7538,9 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             //   primed TNT（同形 continue）同族符号假设 t1090 批头**留池不修**登记面已由 t1091 清偿
             //   （本批三员：t1091 域门（primed TNT tick）/ t1091 域门（Mob tick）/ entitystore 的
             //   t1091 域门（ItemEntity tick）——Item 现役物理在 EntityStore，本文件 Item kind 仅遗留
-            //   视觉中性化）。本批现场新发现同族面**留池不修**（后续批另立单）：mob 火/岩浆接触足印
-            //   扫描的 worldW/worldD 核心盒行（nx<0||nx>=int(worldW) 等——负侧/出核足印列被钳，中心
-            //   列快速路径不受影响）。
+            //   视觉中性化）。本批现场新发现同族面已由 t1094 残面批清偿（回填注）：mob 火/岩浆接触
+            //   足印扫描的 worldW/worldD 核心盒行（AABB 主扫 + 站顶分支，锚注见 Mob tick 火接触段
+            //   两处 t1094 拆站点注）——中心列快速路径不受影响，与留池注口径一致。
             if (!world->isSparse() && (cx < 0 || cz < 0))
                 continue; // 列坐标非法（fixed 世界 XZ 边界外）→ 跳过
             e.vy -= kGravity * float(dt);
@@ -7879,8 +7879,16 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                             for (int cz = zLo; cz <= zHi && !touchingLava; ++cz) {
                                 for (const auto &o : kNb4) {
                                     const int nx = cx + o[0], nz = cz + o[1];
-                                    if (nx < 0 || nz < 0 || nx >= int(worldW) || nz >= int(worldD)
-                                        || yy >= world->height()) continue;
+                                    // t1094 域门（mob 火/岩浆接触 AABB 足印扫描）两模式分流（Fixed
+                                    //   分支现行语句原样——零变化墙，t1091 Mob tick 同形先例）：sparse
+                                    //   负坐标列合法（已物化外环）→ 不再以「坐标非负」符号假设钳足印
+                                    //   列——旧码把外环 mob 贴火/燃块走位的侧壁接触面整体钳掉（中心列
+                                    //   快速路径不受影响）。y 域两模式同构（有限高）无条件保留。格读经
+                                    //   world->blockAt 物化门 + isBurningAt（t1091 域门）侧表真值。
+                                    if (yy >= world->height()) continue;
+                                    if (!world->isSparse()
+                                        && (nx < 0 || nz < 0 || nx >= int(worldW) || nz >= int(worldD)))
+                                        continue;
                                     const quint8 nid = world->blockAt(nx, yy, nz);
                                     const bool fireSrc = nid == BlockRegistry::Fire
                                                          || world->isBurningAt(nx, yy, nz);
@@ -7905,9 +7913,15 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     if (!touchingLava && footY - 1 >= 0 && footY - 1 < world->height()) {
                         const int supY = footY - 1;
                         for (int cx = xLo; cx <= xHi && !touchingLava; ++cx) {
-                            if (cx < 0 || cx >= int(worldW)) continue;
+                            // t1094 邻扫门（mob 火/岩浆站顶足印扫）两模式分流（Fixed 分支现行语句
+                            //   原样——零变化墙）：sparse 负坐标列合法 → 不再以「坐标非负」符号假设
+                            //   钳支撑面足印列（外环 mob 站燃块旁的站顶接触面恒不点燃）。格读经
+                            //   blockAt 物化门 + isBurningAt（t1091 域门）。
+                            if (!world->isSparse()
+                                && (cx < 0 || cx >= int(worldW))) continue;
                             for (int cz = zLo; cz <= zHi && !touchingLava; ++cz) {
-                                if (cz < 0 || cz >= int(worldD)) continue;
+                                if (!world->isSparse()
+                                    && (cz < 0 || cz >= int(worldD))) continue;
                                 const quint8 nid = world->blockAt(cx, supY, cz);
                                 if ((nid == BlockRegistry::Fire || world->isBurningAt(cx, supY, cz))
                                     && mMinY <= float(footY) + kTouchSkin) {
