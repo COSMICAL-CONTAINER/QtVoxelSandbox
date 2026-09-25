@@ -1180,6 +1180,14 @@ public:
     //   红石粉 15 格衰减；v1 简化：粉 6 向互连含上下爬墙，接收器全向读邻无前后向语义）。接收器
     //   （TntBlock / RedstoneLamp / GoldenRail / Dispenser / Dropper / IronDoor / IronTrapdoor）任一邻格
     //   电力 >0 或邻源激活 → 通电。
+    //   **t1095 中继器（Repeater，受控电源）**：输入端只读「后端格」（朝向反向水平邻）——后端电源（含链上
+    //   中继器，经 sourceFeedsCell 定向）或后端通电粉 → 挂起计数达延迟档（1..4 redstone tick，右键循环调档）
+    //   翻转输出位；亮态自身即电源（powerSourceLevel 15，前端粉从 15 重新起步 = 续距）。二极管整流：粉播种
+    //   经 sourceFeedsCell 水平定向（中继器只喂朝向格的粉）+ 输入只读后端（输出不回输入）。挂起计数存
+    //   state bit[7:5]（无运行期侧表 → 零重置契约面；落盘无害重载续算幂等）。**v1 简化登记**：接收器经
+    //   isReceivingPower 全向读源 → 中继器亮态时侧邻接收器也点亮（MC 仅前端格强充能；isReceivingPower
+    //   既有「无前后向语义」v1 口径自然外延，directional 接收器留后续任务）。**1.0 无锁存面**：中继器
+    //   锁存（locked repeater）是 1.5+ 机制，如实登记非 1.0 不做。
     //   **t740 火把斜下供粉**（机制等价 MC 1.0 立式火把为贴地一圈斜角粉供电）：立在方块顶面的红石火把
     //   额外喂 4 个斜下格的粉（BFS 距 1 = 电力 15）——「火把立块上、地面粉环绕」经典布线在旧 v1 整圈死粉。
     //   配套两条防振荡 / 防失达（详见 world.cpp 各处 t740 注释）：① 火把反相判定不读**基座环粉**（火把
@@ -2322,8 +2330,18 @@ private:
     void tickTorchBurnout();
     // 编辑格是否属红石族（粉 / 源 / 接收器 —— notePowerWrite 判定 + tickRedstone 邻接收器扫描共用）。
     static bool isPowerFamilyBlock(quint8 id);
-    // (x,y,z) 处电源对邻格的强电值（红石块 / 亮火把 / 拉杆 on / 按钮按下 / 压力板压下 / 探测轨有车 → 15；
-    //   非源 → 0）。isPowerSource 的值版（同判定取值）。
+    // t1095 中继器（受控电源）电力面两件：
+    //   ① 水平邻 (dx,dz) 是否向 (x,y,z) 定向供电：非中继器源全向（powerSourceLevel>0）；**中继器仅输出端**
+    //     （其输出朝向指向本格 = 朝向 == -(dx,dz)）——二极管整流的判定核心，Phase A 粉播种与中继器输入
+    //     读取同源共用（禁第二套定向判定漂移，goldenRailChainStep 单一权威同门）。
+    bool sourceFeedsCell(int x, int y, int z, int dx, int dz) const;
+    //   ② 中继器 (x,y,z)（state 带朝向）的输入端是否通电：只读「后端格」（输出反向水平邻）——后端格
+    //     电源（含链上中继器，经 ① 定向）或后端格通电粉（v1 全向读邻简化：不做粉形状判定，与
+    //     isReceivingPower 的 v1 口径一致）。输出不回输入 = 二极管整流；self-feedback 结构性不可能
+    //     （输入恒在后端、输出恒在前端，同格自反馈无几何路径）。
+    bool repeaterInputOn(int x, int y, int z, quint8 state) const;
+    // (x,y,z) 处电源对邻格的强电值（红石块 / 亮火把 / 拉杆 on / 按钮按下 / 压力板压下 / 探测轨有车 /
+    //   t1095 中继器亮态 → 15；非源 → 0）。isPowerSource 的值版（同判定取值）。
     int powerSourceLevel(int x, int y, int z) const;
     // 电力局部重算核心：从脏锚点集 BFS 粉连通域（上界 kPowerFloodCap），重算各粉电力级 + 连接位并静默写
     //   state；随后扫描域内接收器写通电位 / 发触发信号。返回是否有实际写入（caller 据此收口 worldChanged）。

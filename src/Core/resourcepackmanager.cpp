@@ -2714,6 +2714,11 @@ AtlasIconSpec atlasIconSpecForBlock(int blockId)
     case BlockRegistry::AbyssGate: // 祭坛框 13/16 高（endframe 化；顶瓦片含未放眼态合成）
         addBox(0.0, 0.0, 0.0, 1.0, 0.8125, 1.0, topT, sideT, sideT);
         break;
+    case BlockRegistry::Repeater: // t1095 中继器贴地薄板 2/16（与 ShapeRepeater 碰撞 / 渲染底板同形；
+        //   顶面取 topTile=191 熄态底板瓦 / 侧·前同——item 图标 = 熄态观感，与放置默认态一致，
+        //   同 RedstoneLamp 图标取 off 态瓦片口径；frontTile=192 亮态瓦不进图标）。
+        addBox(0.0, 0.0, 0.0, 1.0, 0.125, 1.0, topT, sideT, sideT);
+        break;
     case BlockRegistry::Anvil: // 铁砧三段：底座 + 束腰 + 砧面台（顶瓦片 = 各阶段砧面 anvil_top*）
     case BlockRegistry::AnvilChipped:
     case BlockRegistry::AnvilDamaged:

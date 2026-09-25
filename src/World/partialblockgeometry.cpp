@@ -1170,6 +1170,49 @@ int PartialBlockGeometry::append(
                 tileMouth, light, tileW, hx, hy, v0, v1);
         break;
     }
+    case BlockRegistry::Repeater: {
+        // t1095 中继器贴地薄板异形渲染（机制等价 MC repeater：石质底板 + 双焰标 + 档位滑标）。
+        //   底板 = 2/16 厚满格 footprint（与 ShapeRepeater 碰撞 / 选中 / 射线同高同源——t639 四消费者
+        //   纪律）；双焰标 / 滑标凸出底板（纯视觉不进碰撞，床头板同先例），沿**输出朝向轴**摆位 =
+        //   朝向可辨（贴图固定 +X 语义，几何承载朝向——压力板 / 铁轨「贴图固定、几何表达」同口径）。
+        //   state 分派两瓦（呈现层选择，同红石粉亮度档模式）：输出位（bit4）= 0 → repeater_off(191)
+        //   / 1 → repeater_on(192，frontTile 字段复用承载亮态瓦片——Farmland 湿态同门)。滑标位随延迟
+        //   档（1..4 → 沿轴 4 站位）移动 = 调档视觉可辨。
+        const bool lit = (state & BlockRegistry::RepeaterStatePoweredFlag) != 0;
+        const int tileBase = lit ? BlockRegistry::def(blockId).frontTile   // 192 亮态底板
+                                 : tile;                                   // 191 熄态（append 头部 PosX 权威）
+        int fx = 0, fz = 0;
+        BlockRegistry::repeaterOutDelta(state, fx, fz);
+        const int delay = BlockRegistry::repeaterDelayTicks(state);        // 1..4
+        const float s = 1.0f / 16.0f;
+        // ① 底板：满格 footprint × y[0, 2/16]（顶/底 = 本态底板瓦，侧 4 面同瓦——薄板整面采样）。
+        pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, 0.f, 2.f * s, 0.f, 1.f,
+                tileBase, light, tileW, hx, hy, v0, v1);
+        // ② 双焰标：沿朝向轴，输入端（后端）焰标贴 -front 侧 3/16 处 / 输出端焰标贴 +front 侧 13/16 处
+        //   （cell-local 轴坐标）；正交轴居中 7..9/16；y[2/16, 6/16] 高 4/16 的 2/16 见方小柱。
+        const auto pushTorch = [&](float axisPos) {
+            const float x0 = (fx != 0) ? axisPos - s : 7.f * s;
+            const float x1 = (fx != 0) ? axisPos + s : 9.f * s;
+            const float z0 = (fz != 0) ? axisPos - s : 7.f * s;
+            const float z1 = (fz != 0) ? axisPos + s : 9.f * s;
+            pushBox(verts, idx, lx, ly, lz, x0, x1, 2.f * s, 6.f * s, z0, z1,
+                    tileBase, light, tileW, hx, hy, v0, v1);
+        };
+        const float inPos  = (fx > 0 || fz > 0) ? 3.f * s : 13.f * s;  // 后端（-front 侧）
+        const float outPos = (fx > 0 || fz > 0) ? 13.f * s : 3.f * s;  // 前端（+front 侧）
+        pushTorch(inPos);
+        pushTorch(outPos);
+        // ③ 档位滑标：沿朝向轴 4 站位（档 1..4 → 轴位 5/7/9/11 /16——焰标间中带），y[2/16, 4/16]。
+        const float axisMap[4] = {5.f * s, 7.f * s, 9.f * s, 11.f * s};
+        const float sp = axisMap[delay - 1];
+        const float sx0 = (fx != 0) ? sp - s : 7.f * s;
+        const float sx1 = (fx != 0) ? sp + s : 9.f * s;
+        const float sz0 = (fz != 0) ? sp - s : 7.f * s;
+        const float sz1 = (fz != 0) ? sp + s : 9.f * s;
+        pushBox(verts, idx, lx, ly, lz, sx0, sx1, 2.f * s, 4.f * s, sz0, sz1,
+                tileBase, light, tileW, hx, hy, v0, v1);
+        break;
+    }
     case BlockRegistry::BedRed: case BlockRegistry::BedOrange: case BlockRegistry::BedYellow:
     case BlockRegistry::BedGreen: case BlockRegistry::BedCyan: case BlockRegistry::BedBlue:
     case BlockRegistry::BedMagenta: case BlockRegistry::BedBlack:
