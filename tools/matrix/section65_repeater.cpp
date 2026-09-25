@@ -493,4 +493,106 @@ void MatrixRun::section65_repeater()
                " redstone still triggers zero power recomputes as the t937 narrow face demands)"
             << (ok ? QString() : diag);
     });
+
+    // ── r2068a：中继器生存配方链（t1098 件一；矩阵 810→811）────────────────────────────────
+    //   交付面（fix(t1098) 行注立证）：recipe.cpp repeater 行（底行 3 石 + 中排 火把-红石粉-火把
+    //   → 1，工作台 shaped，多重集 {Stone:3, RedstoneTorch:2, Redstone:1} 唯一）+ smelting.cpp
+    //   圆石→石头行（兑现石钮 / 石压力板 / 石砖族行注「石头经熔炉烧圆石产出」——此前 kSmelt 漏行，
+    //   注释与表不符）。腿面：三合成命中（工作台 canonical + 上移平移 + 2×2 背包栏拒绝 + 中料缺失
+    //   拒绝）+ 材料链源钉族（三 id 源钉 + repeater 行钉 + smelt 行行为钉）+ 唯一性钉（同多重集
+    //   全表行计数恰 1）。零世界（纯表面，rig 零接触）。
+    //   NEG-1 面 = 配方判定面（中排红石粉格变异）→ 本腿恰红；NEG-2 面 = r2068b（连接卫生摘除）。
+    runLeg(QStringLiteral("r2068a repeater survival crafting chain (t1098: the table-only shaped"
+        " recipe torch-dust-torch over three stone yields one repeater at both grid"
+        " translations, is rejected in the 2x2 inventory grid and when the center dust is"
+        " missing, the ingredient ids are pinned at source [stone 3, redstone torch 129,"
+        " redstone dust item 0x224] with the furnace link cobble-to-stone now present, and"
+        " the ingredient multiset is unique across the whole recipe table)"), [&]() {
+        bool ok = true;
+        QString diag;
+        const int kS = int(BR::Stone);
+        const int kT = int(BR::RedstoneTorch);
+        const int kD = RecipeRegistry::RedstoneId;
+        // (1) 三合成命中面（工作台 shaped 精确 + 平移 + 负面两枚；t802 expectCraft 同门）。
+        const auto expectCraft = [&](const int *grid, int n, int wantOut, int wantCnt,
+                                     const char *tag) {
+            const RecipeRegistry::Recipe *r = RecipeRegistry::match(grid, n);
+            if (!r || r->outputId != wantOut || r->outputCount != wantCnt) {
+                diag += QStringLiteral("[%1 got-%2] ").arg(QLatin1String(tag))
+                            .arg(r ? QStringLiteral("out=%1 cnt=%2")
+                                        .arg(r->outputId).arg(r->outputCount)
+                                   : QStringLiteral("null"));
+                ok = false;
+            }
+        };
+        const auto expectNoMatch = [&](const int *grid, int n, const char *tag) {
+            if (RecipeRegistry::match(grid, n)) {
+                diag += QStringLiteral("[%1 unexpectedly-matched] ").arg(QLatin1String(tag));
+                ok = false;
+            }
+        };
+        const int gCanon[9] = { 0, 0, 0, kT, kD, kT, kS, kS, kS };
+        expectCraft(gCanon, 3, int(BR::Repeater), 1, "canon");
+        const int gShift[9] = { kT, kD, kT, kS, kS, kS, 0, 0, 0 };
+        expectCraft(gShift, 3, int(BR::Repeater), 1, "shift-up");
+        const int g2x2[9] = { kT, kD, kS, kS };
+        expectNoMatch(g2x2, 2, "2x2-inventory-reject");
+        const int gNoDust[9] = { 0, 0, 0, kT, 0, kT, kS, kS, kS };
+        expectNoMatch(gNoDust, 3, "missing-dust-reject");
+        // (2) 材料链源钉族（剥注释 pinSet 锚真实语句 + smelt 行行为钉——比源钉更强：直接查表）。
+        const QString srcRoot = QDir(QCoreApplication::applicationDirPath()
+            + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src"));
+        const QStringList missBrH = pinSet(srcRoot + QStringLiteral("/Core/blockregistry.h"), {
+            SrcPin("stone id source", "Stone         = 3,", 1),
+            SrcPin("redstone torch id source", "RedstoneTorch = 129,", 1)});
+        const QStringList missRh = pinSet(srcRoot + QStringLiteral("/Game/recipe.h"), {
+            SrcPin("redstone dust item id source", "RedstoneId      = 0x224;", 1)});
+        const QStringList missRc = pinSet(srcRoot + QStringLiteral("/Game/recipe.cpp"), {
+            SrcPin("repeater recipe row tail", "int(BlockRegistry::Repeater), 1, 1, \"repeater\" }", 1),
+            SrcPin("repeater mid-row judgment face",
+                   "int(BlockRegistry::RedstoneTorch), RecipeRegistry::RedstoneId,"
+                   " int(BlockRegistry::RedstoneTorch),", 1)});
+        const bool smeltLink = SmeltingRegistry::smeltResult(int(BR::Cobble)) == int(BR::Stone);
+        if (!smeltLink) {
+            diag += QStringLiteral("[smelt-link got=%1]")
+                        .arg(SmeltingRegistry::smeltResult(int(BR::Cobble)));
+            ok = false;
+        }
+        // (3) 唯一性钉：同原料多重集全表行计数恰 1（多重集比较 = 无序计数对，r2068a 申报面）。
+        int multisetRows = 0;
+        const int total = RecipeRegistry::recipeCount();
+        for (int i = 0; i < total; ++i) {
+            const RecipeRegistry::Recipe *r = RecipeRegistry::recipeAt(i);
+            if (!r)
+                continue;
+            int stoneN = 0, torchN = 0, dustN = 0;
+            for (int c = 0; c < 9; ++c) {
+                if (r->pattern[c] == kS) ++stoneN;
+                else if (r->pattern[c] == kT) ++torchN;
+                else if (r->pattern[c] == kD) ++dustN;
+            }
+            if (stoneN == 3 && torchN == 2 && dustN == 1)
+                ++multisetRows;
+        }
+        if (multisetRows != 1) {
+            diag += QStringLiteral("[multiset-rows=%1]").arg(multisetRows);
+            ok = false;
+        }
+        const bool pinsOk = missBrH.isEmpty() && missRh.isEmpty() && missRc.isEmpty();
+        if (!pinsOk)
+            diag += QStringLiteral("[pins br=%1 rh=%2 rc=%3]")
+                        .arg(missBrH.join(QLatin1Char(',')), missRh.join(QLatin1Char(',')),
+                             missRc.join(QLatin1Char(',')));
+        ok = ok && pinsOk;
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2068a repeater survival crafting chain (the table-only shaped recipe"
+               " torch-dust-torch over three stone yields one repeater at both grid"
+               " translations, is rejected in the 2x2 inventory grid and when the center"
+               " dust is missing, the ingredient ids are pinned at source with the furnace"
+               " link cobble-to-stone now present, and the ingredient multiset is unique"
+               " across the whole recipe table)"
+            << (ok ? QString() : diag);
+    });
 }

@@ -38,6 +38,15 @@
 // 时长控制：腿内 sparse 世界 spawnPreGenerateRadius=0 + 半径压小（(1,1,3)：gen 窗 3×3、scan
 //   窗 7×7 给驱逐留 annulus）；收敛轮询 deadline 有界（防 flake 不挂死）；临时库 fresh + 用后
 //   即删（QDir::temp() pid 键名，绝不触 saves/）。
+// r2068b 专用：'still in use' 捕获槽（QtMessageHandler 是裸函数指针不可捕获——文件级 static
+// 落账，用后还原 handler；r2029d 同门先例）。
+static QStringList s_r2068bStillInUse;
+static void r2068bMessageSink(QtMsgType, const QMessageLogContext &, const QString &m)
+{
+    if (m.contains(QLatin1String("still in use")))
+        s_r2068bStillInUse.append(m);
+}
+
 void MatrixRun::section28_eviction_persistence()
 {
     constexpr int kWS = 80, kDS = 80, kH = 96, kSeed = 42; // sparse 核心域（与 W2 段同族）
@@ -849,5 +858,84 @@ void MatrixRun::section28_eviction_persistence()
                              " delegating, QML stays clean, and the generation chain keeps its"
                              " three suppression windows over a single funnel mark"
                           << (ok ? QString() : diag);
+    });
+
+    // ── r2068b：ChunkStore 连接卫生（t1098 件二；拆卸告警清偿，零行为变化）──────────────────
+    //   现场（fix(t1098) chunkstore.cpp 行注立证）：每个开-用-关方法此前在 removeDatabase 摘名
+    //   点仍持活 QSqlDatabase / QSqlQuery 引用 → Qt 必打 "still in use" 告警并 disable 连接
+    //   （t1074 登记的拆卸期纯噪音；r2025 段实测逐调用复现）。修法 = 句柄收内层作用域先析构
+    //   再摘名（SQL 序 / 失败面逐位不变）。腿面：捕获窗罩全 API 面直驱 → 窗内零 "still in
+    //   use" + 每次调用后连接名集合不含 chunkstore 名 + 行为柱（persist/has/load 往返逐位、
+    //   流元数据写-读-清、代次推进、loadAllRows 计数）。NEG-2 面 = revert 任一方法的作用域
+    //   收口 → 捕获窗恰红本腿（r2068a 不受影响）。零世界（临时库 fresh + 用后即删，rig 零接触）。
+    runLeg(QStringLiteral("r2068b chunkstore connection hygiene (t1098: driving the whole"
+        " ChunkStore surface over a fresh temp sqlite captures zero still-in-use messages"
+        " inside the window, the named connection is fully removed after every call, and"
+        " the behavior column is unchanged: persist and has and load round-trip bit-exact,"
+        " stream-meta write-read-clear, generation advance, loadAllRows count)"), [&]() {
+        bool ok = true;
+        QString diag;
+        const QString dbH = QDir::temp().absoluteFilePath(
+            QStringLiteral("voxel_r2068b_%1.sqlite").arg(QCoreApplication::applicationPid()));
+        QFile::remove(dbH); // fresh（r2028 tempDb 同门：pid 键名，绝不触 saves/）
+        s_r2068bStillInUse.clear();
+        QtMessageHandler prevHandler = qInstallMessageHandler(&r2068bMessageSink);
+        // 全 API 面直驱（每方法各自开-用-关；捕获窗罩全程；r2028 柱 1 的 ChunkStore 直驱同门）。
+        Chunk cH(0, 0, 16);
+        cH.setBlock(1, 2, 3, BR::Stone);
+        ChunkStore cs;
+        cs.bind(dbH);
+        cs.setStreamWorldId(dbH);
+        const bool persisted = cs.persistChunk(3, 2, cH).isOk();
+        const bool hasHit = cs.hasChunk(3, 2);
+        const bool hasMiss = !cs.hasChunk(2, 2);
+        ChunkStoreBlob back;
+        const bool loaded = cs.loadChunk(3, 2, back);
+        // 往返逐位柱：blob 尺寸 + 编辑字节（索引 lx + kSize*(lz + kSize*ly) = 1+16*(3+16*2)）。
+        const qint64 editIdx = 1 + 16 * (3 + 16 * 2);
+        const bool roundTrip = loaded && back.voxels.size() == cH.voxelCount()
+            && back.voxels.size() == back.states.size()
+            && back.voxels.size() == back.light.size()
+            && quint8(back.voxels.at(int(editIdx))) == quint8(BR::Stone);
+        const bool countOk = cs.chunkCount() == 1;
+        // 流元数据面：置位（base/save = 0——fresh 库无 save_coord 台账）→ 读回 → 推进 1 → 清位。
+        const bool marked = cs.markStreamingWorld(48, 48);
+        StreamWorldMeta metaM;
+        const bool metaMarked = marked && cs.readStreamWorldMeta(metaM) && metaM.streaming
+            && metaM.coreW == 48 && metaM.coreD == 48 && metaM.baseGen == 0
+            && metaM.saveGen == 0;
+        const qint64 advanced = cs.advanceStreamSaveGeneration();
+        const bool cleared = cs.clearStreamingWorldFlag();
+        StreamWorldMeta metaC;
+        const bool metaCleared = cs.readStreamWorldMeta(metaC) && !metaC.streaming
+            && metaC.saveGen == 1;
+        QVector<ChunkStoreBlob> rows;
+        const int rowCount = cs.loadAllRows(rows);
+        const bool rowsOk = rowCount == 1 && rows.size() == 1 && rows.first().cx == 3
+            && rows.first().cz == 2;
+        // 卫生柱：捕获窗内零告警 + 摘名后连接名集合不含 chunkstore 名（Qt Sql 全局登记面）。
+        const bool noWarn = s_r2068bStillInUse.isEmpty();
+        const bool connGone = !QSqlDatabase::connectionNames()
+                                   .contains(QStringLiteral("voxelsandbox_chunkstore"));
+        qInstallMessageHandler(prevHandler); // 捕获窗收口（用后即还原——r2029d 同门）
+        ok = ok && persisted && hasHit && hasMiss && roundTrip && countOk && metaMarked
+            && advanced == 1 && cleared && metaCleared && rowsOk && noWarn && connGone;
+        if (!ok)
+            diag += QStringLiteral("[p=%1 h+=%2 h-=%3 rt=%4 n=%5 mm=%6 adv=%7 cl=%8 mc=%9"
+                                   " rows=%10 nw=%11 cg=%12 w=%13]")
+                        .arg(persisted).arg(hasHit).arg(hasMiss).arg(roundTrip).arg(countOk)
+                        .arg(metaMarked).arg(qint64(advanced)).arg(cleared).arg(metaCleared)
+                        .arg(rowsOk).arg(noWarn).arg(connGone).arg(s_r2068bStillInUse.size());
+        QFile::remove(dbH); // 用后即删
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2068b chunkstore connection hygiene (driving the whole ChunkStore"
+               " surface over a fresh temp sqlite captures zero still-in-use messages"
+               " inside the window, the named connection is fully removed after every"
+               " call, and the behavior column is unchanged: persist and has and load"
+               " round-trip bit-exact, stream-meta write-read-clear, generation advance,"
+               " loadAllRows count)"
+            << (ok ? QString() : diag);
     });
 }
