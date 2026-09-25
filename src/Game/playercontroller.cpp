@@ -342,10 +342,17 @@ void PlayerController::setEntityManager(EntityManager *m)
     if (m_entityManager)
         disconnect(m_entityManager, &EntityManager::farmlandTrampledByMob, this,
                    &PlayerController::onMobTrampledFarmland);
+    // t1093 爆炸破坏漏斗掉容腔内容（同门直连：EntityManager 爆炸破坏沿发 explosionVoxelDestroyed →
+    //   本类对漏斗格排空 HopperStore 落实体 + 清条目；机制等价 MC「被炸毁的容器掉落内容」）。
+    if (m_entityManager)
+        disconnect(m_entityManager, &EntityManager::explosionVoxelDestroyed, this,
+                   &PlayerController::onExplosionVoxelDestroyed);
     m_entityManager = m;
     if (m_entityManager) {
         connect(m_entityManager, &EntityManager::farmlandTrampledByMob, this,
                 &PlayerController::onMobTrampledFarmland, Qt::UniqueConnection);
+        connect(m_entityManager, &EntityManager::explosionVoxelDestroyed, this,
+                &PlayerController::onExplosionVoxelDestroyed, Qt::UniqueConnection);
     }
     updateFoodLure(); // t1025：换实体管理器（进世界 / 重载）即按当前持物重刷引诱门控表
     emit entityManagerChanged();
@@ -2254,6 +2261,32 @@ void PlayerController::onMobTrampledFarmland(int x, int y, int z)
     dropCropDrops(x, cy, z, crop, cstate);
 }
 
+// t1093 爆炸破坏漏斗掉容腔内容 + 清条目（见 playercontroller.h 头注释）：EntityManager 爆炸破坏沿
+//   （detonateStalker / detonateTntSphere 球形破坏循环）对每个被毁格发 explosionVoxelDestroyed →
+//   本槽对漏斗格排空 HopperStore 5 槽（元数据全量随栈：附魔 / 改名 / 耐久，同 finishMiningAt 破漏斗
+//   掉内容模式）+ clearHopper 清条目（防「同格重放漏斗继承旧容腔」）。机制等价 MC「被爆炸摧毁的容器
+//   掉落全部内容」——翻案 t1080「内容不退回」登记口径（漏斗本体掉落仍走既有 explosionDroppedItem
+//   概率链，MC 口径容器本体与内容是两条独立掉落）。非漏斗格 / hopperStore 未注入 → no-op（同族箱 /
+//   炉 / 发射器保持「内容不退回」登记口径零牵连——t1085 固化面 / t1089 写门族零触碰：本槽不写栅格，
+//   只读 HopperStore + 经 m_itemEntities 落实体，World 写入面零改动）。创造模式同样掉内容（爆炸是
+//   系统事件非采集行为，机制等价 MC 爆炸容器内容必散落；本体方块掉落沿用既有爆炸概率口径）。
+void PlayerController::onExplosionVoxelDestroyed(int x, int y, int z, int blockId)
+{
+    if (!m_hopperStore || blockId != BlockRegistry::Hopper) return;
+    if (m_itemEntities) {
+        for (int i = 0; i < HopperStore::kSlotsPerHopper; ++i) {
+            const int sid = m_hopperStore->slotIdAt(x, y, z, i);
+            const int scnt = m_hopperStore->slotCountAt(x, y, z, i);
+            if (sid <= 0 || scnt <= 0) continue;
+            m_itemEntities->spawnItem(x, y, z, sid, scnt,
+                                      m_hopperStore->slotEnchantsAt(x, y, z, i),
+                                      m_hopperStore->slotNameAt(x, y, z, i),
+                                      m_hopperStore->slotDurabilityAt(x, y, z, i));
+        }
+    }
+    m_hopperStore->clearHopper(x, y, z);
+}
+
 // t739 红石粉失撑掉落（见 playercontroller.h 头注释）：破块后查正上方格，若为红石粉导线、且本格
 //   （粉的唯一支撑位）已非有效支撑（isDustSupport 单一权威：完整立方 / 上半砖；本格刚被破为 Air →
 //   恒失撑，但保留复检以兼容「破坏后仍有支撑残留」的演化，如双半砖合并）→ 粉直接掉落为红石粉物品
@@ -3724,6 +3757,15 @@ void PlayerController::placeBlock()
     }
     if (!sneakPlaceBlock && BlockRegistry::isDropper(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz))) {
         emit dispenserOpened(m_hitBx, m_hitBy, m_hitBz); // t609 投掷器共用发射器 UI / store（标题由 QML 按 id 判）
+        return;
+    }
+    // t1093：右键漏斗 → 打开 HopperUI 物品栏界面（同工作台 / 熔炉 / 箱子 / 发射器模式：优先于放置，
+    //   无论手持何物右键漏斗即开；手持方块 + 潜行 → 走 sneakPlaceBlock 旁路对面放置）。发 hopperOpened(x,y,z)
+    //   携命中格世界坐标 → 呈现层 Connections 打开 HopperUI（释放指针）；HopperStore 据坐标寻址该漏斗的
+    //   5 槽。机制等价 MC 右键漏斗开物品栏。遮挡判定从简（无「上方压盖不开」门——dev-spec 明示从简，
+    //   同箱子矿车「任意姿态可开」口径）。
+    if (!sneakPlaceBlock && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Hopper) {
+        emit hopperOpened(m_hitBx, m_hitBy, m_hitBz);
         return;
     }
     // t387/t388 右键床 → 尝试睡觉（useBlock 语义；优先于放置，同工作台 / 箱子模式：右键已放置的床即睡，不另放块）。

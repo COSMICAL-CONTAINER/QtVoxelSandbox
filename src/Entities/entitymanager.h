@@ -1210,6 +1210,14 @@ signals:
     //   dropCropDrops 弹落（掉落表单一权威在 Game 层，Entities 不产掉落，分层口径）。纯语义事件，
     //   呈现层不消费（headless 语义）；无订阅者时无害。
     void farmlandTrampledByMob(int x, int y, int z);
+    // t1093 爆炸破坏漏斗掉容腔内容（detonateStalker / detonateTntSphere 球形破坏循环内发，每被毁格一发）：
+    //   坐标 = 被破坏格，blockId = 原方块 id（destroySphereSilent 返回的 DestroyedVoxel.oldId）。Game 层
+    //   PlayerController::onExplosionVoxelDestroyed（setEntityManager 内直连，farmlandTrampledByMob 同门）
+    //   对漏斗格排空 HopperStore 落实体 + 清条目——机制等价 MC「被爆炸摧毁的容器掉落内容」。分层（PLAN §2）：
+    //   Entities 层不持容器存储（HopperStore 属 Game，向上不可依赖）→ 只发语义事件携 (坐标, id)，消费面
+    //   由 Game 层收口；非漏斗格广播无害（Game 侧 id 门 no-op）；无订阅者时无害。本体方块掉落仍走既有
+    //   explosionDroppedItem 概率链，与本信号互不替代。
+    void explosionVoxelDestroyed(int x, int y, int z, int blockId);
     // t304 玩家箭命中 mob（spec「抛物+伤害 mobs」的命中反馈）：玩家弓射出的箭（spawnArrowPlayer）在 tick 内
     //   命中 mob 时发。damageEntity 已扣血 + 红闪 + 归零 mobDied 死亡掉落；本信号额外驱动命中音（呈现层 →
     //   AudioManager.playMobHurt，同近战 attackMob→PlayerController.mobAttacked 模式）。mobType = 被命中 mob 子类 id。

@@ -755,13 +755,14 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   存储块无 per-face 语义；tools/build_bone_block.py 程序生成原创像素图 §9a）。音色归 GroupStone。
     /* bone_block          */ {int(BlockRegistry::BoneBlock),          185,185,185,185, true,  BlockRegistry::ShapeFull,     2.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::BoneBlock),         1, 64, "bone_block",     "骨块"},
     // t1080 漏斗（Hopper=145）：收集掉落物 + 容器抽取/输出 + 红石锁停的搬运机关（机制等价 MC 1.5+ hopper，
-    //   机制四语义在 PlayerController::scanHoppers；属性注释见 blockregistry.h Id 枚举 Hopper 行）。整立方
-    //   opaque（solid=true / ShapeFull，同发射器 / 投掷器机关盒家族体量；MC 漏斗异形体 v1 如实降级整立方，
-    //   登记候选池）、hardness=3.0（MC hopper 同档）/ Pickaxe / minTier=1 + requiresTool=true（需镐才掉）。
-    //   dropId=自身、dropCount=1、maxStack=64。贴图 per-face：顶=hopper_top(186 顶箅) / 侧·底=hopper_side(187
-    //   锅体) / 排料口面=hopper_front(188 排料嘴)；mesher tileFor 据 state 选（HopperFacingDownFlag 朝下时
-    //   排料嘴贴底面，见 meshbuilder.cpp Hopper 分支）。音色归 GroupStone（金属质）。
-    /* hopper              */ {int(BlockRegistry::Hopper),             186,187,187,188, true,  BlockRegistry::ShapeFull,     3.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Hopper),            1, 64, "hopper",         "漏斗"},
+    //   机制四语义在 PlayerController::scanHoppers；属性注释见 blockregistry.h Id 枚举 Hopper 行）。
+    //   **t1093 异形三盒**（solid=false / ShapeHopper——顶箅板 + 漏斗颈 + 排料嘴，hopperShapeBoxes 单一权威；
+    //   t1080 曾整立方降级，本单翻案为真实漏斗体：可站顶面 10/16 + 邻居不剔面 + 全透光 + isFullCube=false
+    //   落体分支语义，机制等价 MC），hardness=3.0（MC hopper 同档）/ Pickaxe / minTier=1 + requiresTool=true
+    //   （需镐才掉）。dropId=自身、dropCount=1、maxStack=64。贴图 per-face（PartialBlockGeometry Hopper case
+    //   据 hopperShapeBoxes 盒序消费）：顶=hopper_top(186 顶箅，箅板顶面) / 其余=hopper_side(187 锅体) /
+    //   排料嘴盒全=hopper_front(188 排料嘴)。音色归 GroupStone（金属质）。
+    /* hopper              */ {int(BlockRegistry::Hopper),             186,187,187,188, false, BlockRegistry::ShapeHopper,   3.0f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::Hopper),            1, 64, "hopper",         "漏斗"},
     // t1083 唱片机（Jukebox=146）：木制发声匣——放入音乐盘播放 / 音轨结束 / 再右键 / 被破坏吐盘
     //   （机制语义在 PlayerController useBlock + tickJukeboxes；属性注释见 blockregistry.h Id 枚举
     //   Jukebox 行）。整立方 opaque（solid=true / ShapeFull，同音符盒 / 漏斗机关匣家族体量）、
@@ -1787,6 +1788,10 @@ int shapeBoxesInto(BlockRegistry::Shape sh, quint8 state, BlockRegistry::BlockAA
         //   MC 铁栏杆 1 格高可跳过，区别栅栏 1.5 不可越）。
         putAABB(out, cap, n, {0.375f, 0, 0.375f, 0.625f, 1.0f, 0.625f});
         return n;
+    case BlockRegistry::ShapeHopper:
+        // t1093 漏斗三盒异形（单一权威 hopperShapeBoxes——与渲染 / 选中 / 射线 / 列顶同源）：顶箅板 +
+        //   漏斗颈 + 排料嘴（嘴位随 state）。可站顶面 10/16（>0.5 → 需跳跃上身，机制等价 MC 漏斗站面）。
+        return BlockRegistry::hopperShapeBoxes(state, out, cap);
     }
     return 0; // 未知 shape → 空（兜底，同旧 shapeBoxes 兜底空 vector）
 }
@@ -1802,6 +1807,31 @@ std::vector<BlockRegistry::BlockAABB> shapeBoxes(BlockRegistry::Shape sh, quint8
     return out;
 }
 } // namespace
+
+// t1093 漏斗三盒几何单一权威（ShapeHopper；声明见 .h）：碰撞 / 选中 / 射线 / 列顶 / 渲染五处同源。
+//   三盒（16 像素格 → /16，与三贴图 footprint 同源）：① 顶箅板满格 footprint y[8,10]/16（顶面 10/16 =
+//   可站面；满格板 = 站立 / 落体承接面，机制等价 MC 漏斗顶板 outline）；② 漏斗颈 4..12/16 × y[4,8]/16；
+//   ③ 排料嘴 5..11/16 × y[0,4]/16——bit2(HopperFacingDownFlag) 置位贴底心，否则沿 bit[1:0] 朝向
+//   （hopperOutDelta 同源编码 0=+X 1=-X 2=+Z 3=-Z）平移贴该侧边（嘴朝向视觉/几何可辨）。
+int BlockRegistry::hopperShapeBoxes(quint8 state, BlockAABB *out, int cap)
+{
+    using AABB = BlockAABB;
+    if (cap < 3) return 0; // 防御（同 putAABB 钳制口径；kMaxAABBsPerCell=4 充足）
+    out[0] = AABB{0.0f, 0.5f, 0.0f, 1.0f, 0.625f, 1.0f};       // ① 顶箅板（可站顶面 10/16）
+    out[1] = AABB{0.25f, 0.25f, 0.25f, 0.75f, 0.5f, 0.75f};    // ② 漏斗颈
+    // ③ 排料嘴：state 解码单一源（与 hopperOutDelta 同表）。
+    if (state & HopperFacingDownFlag) {
+        out[2] = AABB{0.3125f, 0.0f, 0.3125f, 0.6875f, 0.25f, 0.6875f};   // 朝下：底心 6/16 见方
+    } else {
+        switch (state & 3) {                                              // 水平：贴朝向侧边
+        case 0:  out[2] = AABB{0.5625f, 0.0f, 0.3125f, 0.9375f, 0.25f, 0.6875f}; break; // +X
+        case 1:  out[2] = AABB{0.0625f, 0.0f, 0.3125f, 0.4375f, 0.25f, 0.6875f}; break; // -X
+        case 2:  out[2] = AABB{0.3125f, 0.0f, 0.5625f, 0.6875f, 0.25f, 0.9375f}; break; // +Z
+        default: out[2] = AABB{0.3125f, 0.0f, 0.0625f, 0.6875f, 0.25f, 0.4375f}; break; // -Z
+        }
+    }
+    return 3;
+}
 
 // collision 与 selection **同源**（t217 修正 t208）：两者都走 shapeBoxes（贴合渲染形状：门=薄板选中框、
 //   与视觉一致）。开门（t261）：门板旋 90° 贴铰链侧邻边 → shapeBoxes 返回「旋后贴边」panel AABB，
@@ -1925,6 +1955,7 @@ float BlockRegistry::collisionTopY(quint8 blockId, quint8 state)
     case ShapeBed:      return kBedMattressTop;
     case ShapeSnowLayer: return snowLayerHeight(state);
     case ShapeIronBars: return 1.0f; // t998 铁栏杆立柱满格高（1.0 可跳跃越过，区别栅栏 1.5）
+    case ShapeHopper:  return 0.625f; // t1093 漏斗顶箅板顶面 10/16（hopperShapeBoxes 最高盒顶 = 可站面）
     }
     return -1.0f; // 未知 shape → 空（兜底，同 shapeBoxes）
 }
@@ -2102,6 +2133,7 @@ float BlockRegistry::solidTopOffset(quint8 blockId, quint8 state)
     case ShapeBed:      return kBedMattressTop;               // t457 床床垫顶 ~0.31（PCF 软影遮挡高度同床垫顶）
     case ShapeSnowLayer: return snowLayerHeight(state);       // t505 积雪层薄板顶 = snowLayerHeight(state)（1/8..1.0）
     case ShapeIronBars: return 1.0f;                          // t998 铁栏杆立柱满格高（PCF 列顶随视觉立柱）
+    case ShapeHopper:   return 0.625f;                        // t1093 漏斗顶箅板顶面 10/16（PCF 列顶随可站面）
     default:            return 1.0f;                          // ShapeNone（air/torch/water）不入 heightmap 顶，兜底 1.0
     }
 }

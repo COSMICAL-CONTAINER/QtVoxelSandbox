@@ -100,6 +100,14 @@ Window {
     property int dispenserX: 0
     property int dispenserY: 0
     property int dispenserZ: 0
+    // t1093 漏斗子态：右键漏斗方块 → player.hopperOpened(x,y,z) → 显 HopperUI（1×5 漏斗容腔槽 +
+    //   玩家主栏 + hotbar）+ 释放指针。与其它背包面板互斥；E/Esc 关 → 恢复 grab。hopperX/Y/Z 记当前
+    //   所开漏斗的方块世界坐标（HopperStore 据此寻址该漏斗的 5 槽）。t1080 关单登记的 UI 候选授权面
+    //   兑现（QML 玩法路径零迁移约束下的单向消费增量）。
+    property bool hopperOpen: false
+    property int hopperX: 0
+    property int hopperY: 0
+    property int hopperZ: 0
     // t609 当前所开机关的标题（「发射器」/「投掷器」）：DispenserUI 被发射器（107）/ 投掷器（117）共用，
     //   openDispenser 按方块 id 设置 → 面板 titleText 绑定。纯呈现层态。
     property string dispenserTitle: "发射器"
@@ -234,6 +242,7 @@ Window {
         if (enchantingPanel.visible)     return enchantingPanel.hoveredKey
         if (anvilPanel.visible)          return anvilPanel.hoveredKey
         if (dispenserPanel.visible)      return dispenserPanel.hoveredKey
+        if (hopperPanel.visible)         return hopperPanel.hoveredKey // t1093
         if (inventoryPanel.visible)      return inventoryPanel.hoveredKey
         if (survivalPanel.visible)       return survivalPanel.hoveredKey
         return ""
@@ -1198,6 +1207,7 @@ Window {
         if (enchantingTableOpen) closeEnchantingTable()   // t650：附魔台两输入槽 → 背包
         if (anvilOpen) closeAnvil()                       // t650：铁砧 A/B 槽 → 背包
         if (dispenserOpen) closeDispenser()               // t650：发射器面板光标栈 → 背包
+        if (hopperOpen) closeHopper()               // t650：漏斗面板光标栈 → 背包（t1093 同门互斥收口）
         // t690(c)：三处合成格材料回背包（工作台 3×3 / 生存背包 2×2 / 创造背包生存 tab 2×2）——直调
         //   归还而非裸置 visible（绑定重求值可被引擎推迟，晚于 gatherPlayerState = §t650 同竞态）。
         craftingTablePanel.returnCraftToHotbar()
@@ -1355,6 +1365,7 @@ Window {
         if (enchantingTableOpen) closeEnchantingTable()
         if (anvilOpen) closeAnvil()
         if (dispenserOpen) closeDispenser()
+        if (hopperOpen) closeHopper()   // t1093：漏斗面板一并显式关（归还光标 + 面板槽；防御纵深同发射器行）
         chestLidAngle = 0    // t196：复位盖子角（防 worldlist→再进世界时残留半开盖子；scene 已离场，动画不可见）
         settingsOpen = false
         progressOpen = false    // pause-menu：退出世界关进度面板（防遗留）
@@ -1389,6 +1400,7 @@ Window {
         if (enchantingTableOpen) closeEnchantingTable()
         if (anvilOpen) closeAnvil()
         if (dispenserOpen) closeDispenser()
+        if (hopperOpen) closeHopper()   // t1093：回菜单也关漏斗（t650 同门：归还确定性同步，防光标栈遗留）
         chestLidAngle = 0    // t196：复位盖子角（防回菜单 / 再进世界残留半开盖子）
         settingsOpen = false           // t139：回菜单时关设置面板（防遗留）
         progressOpen = false           // pause-menu：回菜单关进度面板（防遗留）
@@ -1603,6 +1615,7 @@ Window {
         else if (enchantingPanel.visible)    enchantingPanel.swapHoveredWithHotbar(hotbarIdx)
         else if (anvilPanel.visible)         anvilPanel.swapHoveredWithHotbar(hotbarIdx)
         else if (dispenserPanel.visible)     dispenserPanel.swapHoveredWithHotbar(hotbarIdx)
+        else if (hopperPanel.visible)        hopperPanel.swapHoveredWithHotbar(hotbarIdx) // t1093
         else if (inventoryPanel.visible)     inventoryPanel.swapHoveredWithHotbar(hotbarIdx)
         else if (survivalPanel.visible)      survivalPanel.swapHoveredWithHotbar(hotbarIdx)
     }
@@ -1631,6 +1644,7 @@ Window {
         else if (enchantingPanel.visible)    panel = enchantingPanel
         else if (anvilPanel.visible)         panel = anvilPanel
         else if (dispenserPanel.visible)     panel = dispenserPanel
+        else if (hopperPanel.visible)        panel = hopperPanel // t1093
         else if (inventoryPanel.visible)     panel = inventoryPanel
         else if (survivalPanel.visible)      panel = survivalPanel
         if (!panel) return
@@ -1676,6 +1690,7 @@ Window {
         if (enchantingTableOpen) closeEnchantingTable()
         if (anvilOpen) closeAnvil()
         if (dispenserOpen) closeDispenser()
+        if (hopperOpen) closeHopper()
         craftingTableOpen = true
         progress.onInventoryOpened()  // progress 成就：打开背包（工作台）
         player.release()
@@ -1697,6 +1712,7 @@ Window {
         if (enchantingTableOpen) closeEnchantingTable()
         if (anvilOpen) closeAnvil()
         if (dispenserOpen) closeDispenser()
+        if (hopperOpen) closeHopper()
         furnaceX = fx; furnaceY = fy; furnaceZ = fz  // t494 记熔炉格坐标（供 FurnaceUI setFurnaceLit）
         furnaceOpen = true
         progress.onInventoryOpened()  // progress 成就：打开背包（熔炉）
@@ -1738,6 +1754,7 @@ Window {
         if (enchantingTableOpen) closeEnchantingTable()
         if (anvilOpen) closeAnvil()
         if (dispenserOpen) closeDispenser()
+        if (hopperOpen) closeHopper()
         chestX = x; chestY = y; chestZ = z
         // t225 读箱子朝向 state（前面所朝方向；placeBlock 写入 = horizontalFacing^1，锁面朝玩家）→
         //   驱动盖子铰链侧（chestLidYaw）。& 3 防御性掩码（与 BlockRegistry::chestFrontFace 的 state&3 同源）。
@@ -1801,6 +1818,7 @@ Window {
         if (chestOpen) closeChest()
         if (anvilOpen) closeAnvil()
         if (dispenserOpen) closeDispenser()
+        if (hopperOpen) closeHopper()
         enchantX = x; enchantY = y; enchantZ = z
         enchantingTableOpen = true
         // t548：不再调 progress.onInventoryOpened —— 该调用会把「打开背包」成就解锁当 toast 弹在面板之上
@@ -1840,6 +1858,7 @@ Window {
         if (enchantingTableOpen) closeEnchantingTable()
         if (anvilOpen) closeAnvil()
         if (dispenserOpen) closeDispenser()
+        if (hopperOpen) closeHopper()
         anvilX = x; anvilY = y; anvilZ = z
         anvilOpen = true
         // t548：同附魔台 —— 铁砧非背包，不触发 open_inventory 成就 toast（黑色小 UI 残留根因）。
@@ -1877,6 +1896,7 @@ Window {
         if (chestOpen) closeChest()
         if (enchantingTableOpen) closeEnchantingTable()
         if (anvilOpen) closeAnvil()
+        if (hopperOpen) closeHopper()
         dispenserX = x; dispenserY = y; dispenserZ = z
         // t609：投掷器（id=117=BlockRegistry::Dropper）共用本面板 / DispenserStore——标题按所开方块 id 设
         //   （发射器 107 显「发射器」/ 投掷器 117 显「投掷器」；id=117 字面量+注释，同 torch=13 模式）。
@@ -1889,6 +1909,32 @@ Window {
         if (!dispenserOpen) return
         dispenserOpen = false
         returnHeldToHotbar()           // t56：关包归还光标手持栈（同 closeChest / closeFurnace）
+        player.grab()
+        keyInput.forceActiveFocus()
+    }
+    // t1093 打开 / 关闭漏斗面板（openDispenser 同门）：打开 → release（光标可见点漏斗 / 主栏槽）；
+    //   关 → grab + 焦点回键位层。与其它背包面板互斥（开漏斗前关其它，反之同——各 open* / 关闭路径
+    //   均补 closeHopper 一行）。x/y/z = 所开漏斗的方块世界坐标（player.hopperOpened 携带；HopperStore
+    //   据此寻址 5 槽）。关包归还光标手持栈（同 closeDispenser）。
+    function openHopper(x, y, z) {
+        if (appState !== "playing" || hopperOpen) return
+        if (inventoryOpen) closeInventory()
+        if (craftingTableOpen) closeCraftingTable()
+        if (furnaceOpen) closeFurnace()
+        if (chestOpen) closeChest()
+        if (enchantingTableOpen) closeEnchantingTable()
+        if (anvilOpen) closeAnvil()
+        if (dispenserOpen) closeDispenser()
+        if (hopperOpen) closeHopper()
+        hopperX = x; hopperY = y; hopperZ = z
+        hopperOpen = true
+        // 同附魔台 / 铁砧 / 发射器口径：漏斗非背包，不触发 open_inventory 成就 toast（黑色小 UI 残留根因）。
+        player.release()
+    }
+    function closeHopper() {
+        if (!hopperOpen) return
+        hopperOpen = false
+        returnHeldToHotbar()           // t56：关包归还光标手持栈（同 closeDispenser）
         player.grab()
         keyInput.forceActiveFocus()
     }
@@ -3487,6 +3533,9 @@ Window {
         // t517：右键发射器 → player 发 dispenserOpened(x,y,z) → 开 DispenserUI（释放指针 / 关包互斥）。
         //   坐标供后续 DispenserStore per-block 寻址（t517 本轮坐标暂留）。
         function onDispenserOpened(x, y, z) { window.openDispenser(x, y, z) }
+        // t1093：右键漏斗 → player 发 hopperOpened(x,y,z) → 开 HopperUI（释放指针 / 关包互斥）。
+        //   坐标供 HopperStore 寻址该漏斗的 5 槽。t1080 关单登记的 UI 候选授权面兑现。
+        function onHopperOpened(x, y, z) { window.openHopper(x, y, z) }
         // t152：右键门 / 活版门 useBlock → player 发 doorToggled(open) → 路由到 AudioManager 开门 / 关门音。
         //   一次开合动作 = 一次音（门两格同翻 player 只发一次）。音频层只消费，PLAN §2 分层。
         function onDoorToggled(open) { open ? audio.playDoorOpen() : audio.playDoorClose() }
@@ -12154,6 +12203,7 @@ Window {
                 if (window.enchantingTableOpen) { try { window.closeEnchantingTable() } catch (e) {} }
                 if (window.anvilOpen) { try { window.closeAnvil() } catch (e) {} }
                 if (window.dispenserOpen) { try { window.closeDispenser() } catch (e) {} }
+                if (window.hopperOpen) { try { window.closeHopper() } catch (e) {} } // t1093：同门互斥收口（光标栈归还 + 面板槽）
                 // t690(c)：合成格显式同步归还（同上方 saveAndExitToWorldList 的修法 + t650 模式）。直调幂等
                 //   （槽空零迭代），不依赖面板 visible 绑定重求值（引擎可推迟，会晚于 returnHeldToHotbar /
                 //   dropAllItems → 材料不随尸体掉落、掉进已重置的空背包——正是 t650 要杀的竞态）。
@@ -12701,6 +12751,7 @@ Window {
                 else if (window.enchantingTableOpen) window.closeEnchantingTable()
                 else if (window.anvilOpen) window.closeAnvil()
                 else if (window.dispenserOpen) window.closeDispenser()
+                else if (window.hopperOpen) window.closeHopper() // t1093：E 关漏斗面板（同发射器分支）
                 else window.toggleInventory()
                 e.accepted = true; return
             }
@@ -12747,6 +12798,10 @@ Window {
             // t517 发射器面板：Esc 关（同铁砧 / 附魔台 / 工作台 / 熔炉 / 箱子；!captured 时 Esc 落 QML → 本分支）。
             if (e.key === Qt.Key_Escape && window.dispenserOpen) {
                 window.closeDispenser(); e.accepted = true; return
+            }
+            // t1093 漏斗面板：Esc 关（同发射器 / 铁砧族；!captured 时 Esc 落 QML → 本分支）。
+            if (e.key === Qt.Key_Escape && window.hopperOpen) {
+                window.closeHopper(); e.accepted = true; return
             }
             // F3 调试叠层切换（t10，PLAN §2-F）：playing 态按 F3 显/隐左上角调试文本。
             //   t143：同时跟踪 f3Held=true（无条件，menu 态也设，与 shiftHeld 同模式），供 B 键修饰判定。
@@ -15633,6 +15688,25 @@ Window {
         visible: window.appState === "playing" && window.dispenserOpen
         z: 150
         onClosed: window.closeDispenser()
+        onDiscardHeldRequested: player.dropHeldCursor()
+        onDiscardHeldOneRequested: player.dropHeldCursorOne()
+    }
+
+    // t1093 漏斗物品栏面板：右键漏斗方块打开（player.hopperOpened → openHopper）。仅 playing &&
+    //   hopperOpen 时显（与其它背包面板互斥）。E/Esc/关闭信号关 → 宿主恢复 grab。
+    //   漏斗 5 槽内容存 HopperStore（按 hopperX/Y/Z 寻址；跨开关持久）；主栏 / hotbar 共享 hotbar VM。
+    //   z 与其它面板一致（150）；光标手持物浮动图标 z=300 仍在其上。
+    HopperUI {
+        id: hopperPanel
+        anchors.fill: parent
+        hotbar: hotbarVM
+        hopperStore: hopperStore
+        hopperX: window.hopperX
+        hopperY: window.hopperY
+        hopperZ: window.hopperZ
+        visible: window.appState === "playing" && window.hopperOpen
+        z: 150
+        onClosed: window.closeHopper()
         onDiscardHeldRequested: player.dropHeldCursor()
         onDiscardHeldOneRequested: player.dropHeldCursorOne()
     }
