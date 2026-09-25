@@ -14,16 +14,16 @@
 ```yaml
 project: QtMinecraft
 state: IN_PROGRESS
-current_task: **t1095 IN_PROGRESS（§14 常设授权候选池·池底重盘——红石中继器）**：Beta 1.3（2011-02）机制在 1.0 基线内，t1087 裁定单确证全仓零存在 = 真缺口；延迟四档/整流单向/续距 15 + tickRedstone/goldenRailChainStep 集成 + 程序生成贴图。串行 voxel-dev，filter 词 r2065；完成 → 候选池下一位（酿造/经验瓶…）。
+current_task: **t1096 IN_PROGRESS（§14 常设授权候选池·池底重盘——经验瓶）**：投掷物破碎释放经验（1.0.0 基线内）；预期交付 = ExperienceBottleId 材料段新号 + 右键投掷（投射族同门）+ 触地破碎释放 XpOrbManager.spawnOrbs（t1081 同门）+ MaterialIcon 自绘；生存获取面如实裁定（无村民系统则创造专属）。串行 voxel-dev，filter 词 r2066；完成 → 候选池下一位（酿造台药水大件/中继器生存配方…）。
 current_task_status: IN_PROGRESS
-last_completed_task: t1094 写门家族残面批（2026-09-25 闭环；矩阵 790→797——**四组+现场新增两链面全确认零降级，写门家族全弧收官**[t1074 立项→四批 22 员+键域+链面全清]：tickRedstone inBounds[外环电路灯不亮]/goldenRailChainStep[动力轨链第二根永不亮]/recheckAttachments 十员[附着失撑悬空]/mob 足印扫描[外环 mob 贴火不燃]+checkCactusOnEdit 邻扫+dropUnsupportedDoorsAbove 收口两处合并清偿；证据命名注 = pos 为 filter 跑，全矩阵对 = final/final2。详录 = dev-plan t1094 关单条目）
-last_completed_task_prev: t1093 漏斗降级四件批（2026-09-25 闭环，矩阵 786→790 三交付一子降级；详录 = dev-plan t1093 关单条目）
-last_completed_task_commits: fix(t1094)（7aae571：16+2 站点域门/盒门两模式分流 + 批头锚注/清偿回填，world.cpp + entitymanager.cpp，+161−27）+ test(t1094)（efb8e9e：section64 r2064a-g 七腿 + helpers/CMake 入册，+575）
-last_verified_commit: test(t1094)（矩阵 **797 PASS / 0 FAIL**：matrix_t1094_{final,final2}.log 双跑[本单 pos 为 filter 跑——命名偏差留痕]；新基线腿集合 md5[规范配方 grep -a -oE "^PASS \| [a-z0-9]+ " | sort | md5sum]恒等 7416b136d836e37027cd093c54cda5e0；NEG-1 恰红 {r2064a,e,g} / NEG-2 恰红 {r2064b,c,d,g} 双还原 7/7 绿；冒烟 tail20 回填 logs/voxelsandbox_t1094_tail20.log[主控自 build/ 归位，横幅+root objects 齐]；主控独立脱离式复跑 797/0 同 md5 恒等 matrix_orch_t1094_verify.log）
+last_completed_task: t1095 红石中继器（2026-09-25 闭环；矩阵 797→802——红石家族 1.0 主力件收官：Repeater=147 尾追加 + kMcBlockId 93 + ShapeRepeater 三盒 + **state 编码全落盘零侧表**[朝向/延迟档/输出位/挂起计数 3 bits——2 bits 溢出预判留痕] + sourceFeedsCell 定向馈电整流[Phase A 水平 4 向改定向，垂直与非中继器源逐字零变化] + 挂起计数语义[脉冲短于延迟档不穿透 MC 同口径]；5 处 lawful 钉修订含 429 恢复后揪出的 t879 第二处 191 漏钉；锁存面 1.0 无如实登记；生存配方缺口登记后续批。详录 = dev-plan t1095 关单条目）
+last_completed_task_prev: t1094 写门家族残面批（2026-09-25 闭环，矩阵 790→797 四组+两链面零降级全弧收官；详录 = dev-plan t1094 关单条目）
+last_completed_task_commits: fix(t1095)（0ec65b6：方块注册+电力机制+渲染+交互+资产，15 文件）+ test(t1095)（cfa6f0d：section65 r2065a-e 五腿 + 5 处 lawful 钉修订）
+last_verified_commit: test(t1095)（矩阵 **802 PASS / 0 FAIL ×2**：matrix_t1095_{pos,final}.log[pos 必全矩阵——t1094 命名偏差勘误后首单]；新基线腿集合 md5[规范配方 grep -a -oE "^PASS \| [a-z0-9]+ " | sort | md5sum]三日志全等 a2f3eb64f895601edc4fdad702a4bb21；NEG-1 恰红 {r2065a} / NEG-2 恰红 {r2065b} 双还原 5/5 绿；冒烟 tail20 回填 logs/voxelsandbox_t1095_tail20.log[2.6KB 短会话件横幅+root objects 齐合规]；主控独立脱离式复跑 802/0 同 md5 三方恒等 matrix_orch_t1095_verify.log）
 last_governance_review: 2026-09-25（audit #20 GREEN——窗口 da82e54..9079f74 15 提交/t1089-t1093 五闭环证据链全实核[五单三方 md5 全等 f0c7de88/55e63ca6/38c77b86/77a122b1/4a48413b + NEG 十份恰红面十份还原逐日志吻合 + t1089 md5 配方勘误留痕核实 + 留池台账问询实答（辅助门五处实为 t1091 全清）]；账本三方一致/腿数链 762→790 无断；15 提交零署名；**F1[MEDIUM] 治理计数字段五闭环失更**[counter 恒 0/due 恒 false/Workspace Guard HEAD 恒 t1088——本批回填并恢复按单递增惯例，若 #21 窗口仍失更降 YELLOW]清偿 + F2[LOW 候选池重复条目]清偿 + 2 INFO 无需动作；详见 governance-audit-2026-09-25-b.md）
 governance_review_due: false
-completed_tasks_since_governance_review: 1（t1094 闭环；审计 #20 GREEN 于 2026-09-25——**按单递增惯例恢复后首单**[审计 #20 F1]）
-next_task: **t1095 红石中继器（池底重盘首位，在飞）→ 之后顺延（酿造台药水/经验瓶/removeDatabase 卫生单/红石纪元标注审计/比较器本体与非 1.0 停放面…）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1094 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
+completed_tasks_since_governance_review: 2（t1094 + t1095 闭环；审计 #20 GREEN 于 2026-09-25）
+next_task: **t1096 经验瓶（池底重盘，在飞）→ 之后顺延（酿造台药水大件/中继器生存配方批/removeDatabase 卫生单/红石纪元标注审计/比较器本体…）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1095 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -33,7 +33,7 @@ needs_human: false
 
 ## Workspace Guard
 
-- HEAD = t1094 写门家族残面批代码终态（fix(t1094) 7aae571 + test(t1094) efb8e9e 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 797 腿满绿（64 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿；**写门家族全弧收官**）。**每闭环控制块全字段更新**（current_task/last_completed_*/counter 按单递增/Workspace Guard HEAD 行同步终态——审计 #20 F1 教训：t1089-t1093 五闭环漏更 counter 与 HEAD 行，逐单递增惯例恢复）。**禁并发构建/并发跑矩阵**（t813 build_stamps 每次构建强制全目标重链——两进程并发构建可产出损坏 exe，2026-09-21 三崩留痕；并发跑共享夹具面同理存疑，验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075 过程日志落仓库根 + t1081 复跑双进程事故两教训——cwd 相对路径在跨命令持久化下不可靠）。**冒烟证据每闭环回填 tail20**（审计 #16-F4/#17-F1 两现 + t1088 三现——回填件须含启动横幅与 root objects 实文，主控验收时核对）。
+- HEAD = t1095 红石中继器代码终态（fix(t1095) 0ec65b6 + test(t1095) cfa6f0d 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 802 腿满绿（65 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（current_task/last_completed_*/counter 按单递增/Workspace Guard HEAD 行同步终态——审计 #20 F1 教训：t1089-t1093 五闭环漏更 counter 与 HEAD 行，逐单递增惯例恢复）。**禁并发构建/并发跑矩阵**（t813 build_stamps 每次构建强制全目标重链——两进程并发构建可产出损坏 exe，2026-09-21 三崩留痕；并发跑共享夹具面同理存疑，验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075 过程日志落仓库根 + t1081 复跑双进程事故两教训——cwd 相对路径在跨命令持久化下不可靠）。**冒烟证据每闭环回填 tail20**（审计 #16-F4/#17-F1 两现 + t1088 三现——回填件须含启动横幅与 root objects 实文，主控验收时核对）。
 - 纪律①-⑨全在案；**大 TU 编译一律 -j 1**（09-13 蓝屏教训；分段后单段增量 -j 4 实测安全）。**矩阵测试为 tools/matrix/ 分层结构**：改探针只重编对应段 TU（秒级）+ `--filter <substring>` 只跑本任务腿；新腿落对应段文件，新段置尾 runAll 末执行、须 ≤500KB；section11 起「自建 fresh 小世界」先例（48×48×96 seed 82 + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)）。
 - **R20.06 起值类型纪律**：src/Core/ 新值类型一律 result.h QObjectFree 编译期钉 + 头内 static_assert；命令/事件队列满载拒绝与快照队列覆盖最老是两域容量策略分化，勿「统一」。
 - **R20.07 起编排壳纪律**：GameSession 只做编排（命令 → 整 tick 边界 → World::setBlock 权威），禁复制游戏逻辑；**QML 现行玩法路径零变化是 R20 主线不变量**（Main.qml 含 "GameSession" 即违零迁移阴性钉 r2007b）。
@@ -50,6 +50,7 @@ needs_human: false
 
 ## Recovery Point
 
+- 最近闭环：**t1095 红石中继器**（2026-09-25，fix(t1095) 0ec65b6 + test(t1095) cfa6f0d + 本 docs）：矩阵 797→802。**红石家族 1.0 主力件收官**：Repeater=147 尾追加 + kMcBlockId 93 + ShapeRepeater 三盒 + state 编码全落盘零侧表（朝向/延迟档/输出位/**挂起计数 3 bits**——翻转判定计数可达 delay+1=5 的 2 bits 溢出预判留痕）+ sourceFeedsCell 定向馈电整流（Phase A 水平 4 向改定向、垂直与非中继器源逐字零变化）+ 挂起计数语义（脉冲短于延迟档不穿透 = MC 同口径）+ 锁存面 1.0 无如实登记。腿 r2065a-e；NEG-1 {a}/NEG-2 {b} 恰红；全矩阵 pos/final 802/0 md5 恒等 a2f3eb64 + 主控复跑三方恒等；5 处 lawful 钉修订（429 恢复后揪出 t879 第二处 191 漏钉）。429 一次中断 + 截断写入风险 → 续作第一优先修复零返工。**待实机确认**：观感/调档手感/续距目视/红石 tab 图标/破支撑掉落；生存配方缺口登记后续批。**下一任务 = t1096 经验瓶**。
 - 最近闭环：**t1094 写门家族残面批**（2026-09-25，fix(t1094) 7aae571 + test(t1094) efb8e9e + 本 docs）：矩阵 790→797。**四组+现场新增两链面全确认零降级——写门家族全弧收官**（t1074 立项 → 四批 22 员+键域+链面全清）：①tickRedstone inBounds（recomputePowerLocal 统一域 lambda——外环电路灯不亮轨不灭）②goldenRailChainStep（动力轨链第二根永不亮）③recheckAttachments 十员（附着失撑悬空）④mob 火/岩浆足印扫描（外环 mob 贴火不燃）+ 两处链面合并清偿（checkCactusOnEdit 邻扫/dropUnsupportedDoorsAbove 收口——t1090 先例）。腿 r2064a-g（mob 足印 60 拍窗 hp==9 精确火焰指纹）；NEG-1 {a,e,g}/NEG-2 {b,c,d,g} 恰红；全矩阵 final/final2 797/0 md5 恒等 7416b136 + 主控复跑恒等（本单 pos 为 filter 跑——命名偏差留痕）。**候选池见底处置**（§14-④）：新增中继器/酿造药水/经验瓶三候选；**t1095 中继器在飞**。**待实机确认**：外环红石降沿/farm 坍落拾取/mob 点燃观感/附着脱落呈现。
 - 最近闭环：**t1093 漏斗降级四件批**（2026-09-25，fix(t1093) 1998cf5 + test(t1093) 06f471f + 本 docs）：矩阵 786→790。**三交付一子降级**：①开盖 UI 真交付（HopperUI.qml 1×5 容器+主栏+hotbar，9 处面板互斥收口，t1080 UI 候选授权面兑现）②异形碰撞真交付（ShapeHopper 三盒：顶箅可站 y[8,10]/16+颈+嘴随朝向；hopperShapeBoxes 单一权威五处同源；谓词族自动跟随——沙碎被漏斗收集域收走=机制等价 MC）③比较器读数子降级（承载面比较器方块 1.5+ 无——纪元+依赖面双重理由，零代码零新号）④爆炸掉内容真交付（翻案 t1080「内容不退回」：Entities 层语义事件 explosionVoxelDestroyed 双发射点+Game 层排空 HopperStore 元数据全量+clearHopper 防重放复活）。腿 r2063a-d；NEG-1 {b}/NEG-2 {c} 恰红；全矩阵 pos/final 790/0 md5 恒等 4a48413b + 主控复跑三方恒等。**待实机确认**：开盖界面与槽操作/异形观感与透光/顶箅站立/沙碎被收铁砧还原/爆炸内容散落/朝向嘴盒。**下一任务 = t1094 写门残面批**。
 - 最近闭环：**t1092 棕色染料生存源**（2026-09-25，fix(t1092) e4eca47 + test(t1092) dd4c039 + 本 docs）：矩阵 782→786。**纪元裁定双面**：可可豆地牢战利品[Beta 1.2 起]1.0 基准内交付（池行 1.0 原值字面 10/1..2，权重和 143→153，权重基数差诚实注）；丛林可可荚[MC 1.2]降级留池（陶瓦/染色玻璃同款先例）。交付 = CocoaBeanId 0x262 段尾追加 + 1:1 转换行（墨囊同门，防物品通胀）+ 名/调色板/drawCocoaBean 自绘。**16/16 全色生存可达收口**（t1078「最后一环」兑现，r2062c 闭包钉：基源+池门控→不动点 16/16）。腿 r2062a-d；NEG-1 {a,c,d}/NEG-2 {b,c,d} 恰红；全矩阵 pos/final 786/0 md5 恒等 77a122b1 + 主控复跑三方恒等。t1057 中文 needle 教训二现（不重复立册）。**待实机确认**：调色板图标观感/地牢箱开出/合成链/堆叠。**下一任务 = t1093 漏斗降级四件批**。
