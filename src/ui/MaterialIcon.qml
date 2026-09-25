@@ -2007,6 +2007,67 @@ Item {
                 R(5, 16, 10, 1, glass)            // 瓶底壁
             }
 
+            // t1097 玻璃瓶（0x264）：空玻璃瓶形（软木塞顶 + 细颈 + 透明空瓶身，无液体；与蕴辉瓶同族
+            //   瓶形、内无液 = 「空瓶」读感）。原创自绘（§9a）。
+            const drawGlassBottle = () => {
+                const cork = "#8a6a3c", glass = "#c8dce0", glassLite = "#e8f4f6", inner = "#f4fbfc"
+                R(8, 2, 4, 1, cork)               // 软木塞
+                R(8, 3, 4, 2, glass)              // 细颈
+                R(8, 5, 4, 1, glassLite)          // 颈部受光
+                R(6, 6, 8, 1, glass)              // 瓶肩
+                R(5, 7, 10, 10, glass)            // 瓶体外壁
+                R(6, 8, 8, 8, inner)              // 瓶内空腔（近白透亮 = 空）
+                R(5, 7, 1, 10, glassLite)         // 左缘受光
+                R(14, 7, 1, 10, glass)            // 右缘壁
+                R(5, 16, 10, 1, glass)            // 瓶底壁
+                R(6, 8, 2, 2, glassLite)          // 空瓶高光
+            }
+
+            // t1097 药水瓶形共用（0x265..0x269）：软木塞 + 细颈 + 圆肩瓶体 + 三色液体（液色 deep /
+            //   mid / lite 三参数 = 瓶内液体配色；水瓶 / 粗制 / 迅捷 / 力量四味同构异色）。原创自绘（§9a）。
+            const drawPotion = (deep, mid, lite) => {
+                const cork = "#8a6a3c", glass = "#c8dce0", glassLite = "#e8f4f6"
+                R(8, 2, 4, 1, cork)               // 软木塞
+                R(8, 3, 4, 2, glass)              // 细颈
+                R(8, 5, 4, 1, glassLite)          // 颈部受光
+                R(6, 6, 8, 1, glass)              // 瓶肩
+                R(5, 7, 10, 10, glass)            // 瓶体外壁
+                R(6, 8, 8, 8, mid)                // 液体主色
+                R(6, 8, 8, 1, lite)               // 液面受光
+                R(9, 10, 3, 3, deep)              // 液体深处色
+                R(6, 9, 2, 2, lite)               // 高光
+                R(5, 7, 1, 10, glassLite)         // 左缘受光
+                R(14, 7, 1, 10, glass)            // 右缘壁
+                R(5, 16, 10, 1, glass)            // 瓶底壁
+            }
+
+            // t1097 灰烬疣（0x266）：扭曲红褐块茎 + 白斑节点（灰烬维度基础材料读感；原创形态配色，
+            //   非任何在售游戏美术）。原创自绘（§9a）。
+            const drawAshWart = () => {
+                const wart = "#a04434", wartDk = "#6e2c20", node = "#e8d0c0", stem = "#78483a"
+                R(6, 4, 4, 2, stem)               // 顶茎
+                R(5, 6, 6, 3, wart)               // 块茎上段
+                R(4, 9, 8, 4, wart)               // 块茎主段
+                R(5, 13, 6, 3, wartDk)            // 块茎下段（暗）
+                R(6, 8, 2, 2, node)               // 白斑节点 1
+                R(9, 11, 2, 2, node)              // 白斑节点 2
+                R(5, 6, 1, 2, "#c05a48")          // 上段受光
+                R(4, 9, 1, 4, "#c05a48")          // 主段受光
+            }
+
+            // t1097 糖（0x26A）：白色晶体小堆（三粒晶簇 + 闪点；糖堆读感）。原创自绘（§9a）。
+            const drawSugar = () => {
+                const grain = "#f4f4f0", grainDk = "#d8d8d2", shine = "#ffffff"
+                R(5, 11, 7, 2, grainDk)           // 糖堆底
+                R(6, 9, 5, 2, grain)              // 糖堆主体
+                R(7, 8, 3, 1, grain)              // 堆尖
+                R(5, 13, 7, 1, grainDk)           // 堆脚阴影
+                R(8, 6, 2, 2, grain)              // 晶粒 1
+                R(11, 9, 2, 1, grainDk)           // 晶粒 2
+                R(4, 9, 1, 1, grainDk)            // 晶粒 3
+                R(8, 6, 1, 1, shine)              // 闪点
+            }
+
             switch (root.materialId) {
             case 0x200: drawStick();        break
             case 0x201: drawCoal();         break
@@ -2093,6 +2154,14 @@ Item {
             case 0x261: drawDiscNight(); break // 音乐盘（夜航曲）：唱片机曲目 2；战利品/创造
             case 0x262: drawCocoaBean(); break // t1092 可可豆（地牢战利品；1:1 转换棕染料——染料链最后一环）
             case 0x263: drawGlimmerBottle(); break // t1096 蕴辉瓶（右键投掷 → 碎裂释经验球；创造专属）
+            // t1097 酿造链物品族（0x264..0x26A）：通用词 / §9 原创名，纯原创自绘（§9a）。
+            case 0x264: drawGlassBottle(); break // 玻璃瓶（玻璃 3 V → 3 瓶；水瓶载体 + 饮后返还）
+            case 0x265: drawPotion("#3a66c8", "#7fb0f0", "#c8e0ff"); break // 水瓶（瓶 + 水；可饮无效果返空瓶）
+            case 0x266: drawAshWart(); break // 灰烬疣（水瓶 → 粗制基础材料；第一轮创造专属）
+            case 0x267: drawPotion("#8a5aa0", "#c08cd8", "#e8ccf4"); break // 粗制药水（水瓶 + 灰烬疣酿成；可饮无效果）
+            case 0x268: drawPotion("#3aa0e8", "#7fd0f8", "#d0f0ff"); break // 迅捷药水（粗制 + 糖；移速 +20%/级 180s）
+            case 0x269: drawPotion("#c86a2a", "#f0a860", "#ffd8b0"); break // 力量药水（粗制 + 燃烬粉；近战 +130%/级 180s）
+            case 0x26A: drawSugar(); break // 糖（1 甘蔗 → 1 糖；迅捷药水原料）
             // t788 染料 16 色（0x24B..0x25A，白→黑羊毛色序；三色参数取 build_wool.py 同源色板）
             case 0x24B: drawDye("#f0f0ee", "#f9f9f8", "#959594"); break // 白色染料（白花破坏掉落；染白羊毛/白床）
             case 0x24C: drawDye("#de781e", "#ee9f69", "#8a4a13"); break // 橙色染料

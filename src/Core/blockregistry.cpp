@@ -781,6 +781,15 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   （石质底板，同压力板石族）。进创造调色板（红石 tab——机关件组，Inventory.qml redstoneIds + 本表
     //   creativeBlocks；红石 tab 排除面自动隐藏方块 tab 条目）。
     /* repeater            */ {int(BlockRegistry::Repeater),           191,191,191,192, false, BlockRegistry::ShapeRepeater, 0.0f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::Repeater),          1, 64, "repeater",       "红石中继器"},
+    // t1097 酿造台（BrewingStand=148）：酿造系统载体方块（机制语义在 PlayerController::scanBrewingStands
+    //   + placeBlock 酿造台分支；属性注释见 blockregistry.h Id 枚举 BrewingStand 行）。两盒异形
+    //   （solid=false / ShapeBrewingStand——底座板 + 中柱，brewingStandShapeBoxes 单一权威；isFullCube
+    //   自动 false 落体分支语义同漏斗；邻居不剔面）、hardness=0.5（MC brewing stand 同档）/ NoTool
+    //   （空手可采且掉落，requiresTool=false——MC「Any tool」口径）。dropId=自身、dropCount=1、
+    //   maxStack=64。贴图 per-state（PartialBlockGeometry BrewingStand case 据亮标选）：idle=brewing_stand(193)
+    //   / lit=brewing_stand_lit(194，frontTile 字段复用承载亮态瓦片——熔炉 / 中继器同门)。音色 GroupStone。
+    //   进创造调色板（方块 tab 功能方块组）。配方 1 燃烬棒 + 底行 3 圆石（MC 同料）。
+    /* brewing_stand       */ {int(BlockRegistry::BrewingStand),       193,193,193,194, false, BlockRegistry::ShapeBrewingStand, 0.5f, int(BlockRegistry::NoTool), 0, false, int(BlockRegistry::BrewingStand),     1, 64, "brewing_stand",  "酿造台"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -983,6 +992,10 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     //   延迟四档 / 二极管整流 / 输出强充能 15 机制等价实现）。**t691 教训**：一行一条目 + 行内注释，
     //   防聚合初始化零填充回归（本行追加后全表行数与 Count 148 一致）。
     /* repeater               */ 93,
+    // t1097 酿造台 → MC 1.0 **存在** id 117（brewing stand，Beta 1.9 pre 系列引入、1.0.0 正式版沿用；
+    //   右键开酿造 UI / 烈焰粉燃料 20 次 / 单次 400 ticks 机制等价实现）。**t691 教训**：一行一条目 +
+    //   行内注释，防聚合初始化零填充回归（本行追加后全表行数与 Count 149 一致）。
+    /* brewing_stand          */ 117,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -1822,6 +1835,10 @@ int shapeBoxesInto(BlockRegistry::Shape sh, quint8 state, BlockRegistry::BlockAA
         //   门槛 → 可踩可跨（同压力板）。state 不参与盒形（朝向 / 档位纯渲染面）。
         putAABB(out, cap, n, {0.0f, 0.0f, 0.0f, 1.0f, 0.125f, 1.0f});
         return n;
+    case BlockRegistry::ShapeBrewingStand:
+        // t1097 酿造台两盒异形（单一权威 brewingStandShapeBoxes——与渲染 / 选中 / 射线 / 列顶同源，
+        //   hopperShapeBoxes 同门）：底座板（可踩 2/16）+ 中柱（可站顶 10/16）。state 不参与盒形。
+        return BlockRegistry::brewingStandShapeBoxes(state, out, cap);
     }
     return 0; // 未知 shape → 空（兜底，同旧 shapeBoxes 兜底空 vector）
 }
@@ -1861,6 +1878,20 @@ int BlockRegistry::hopperShapeBoxes(quint8 state, BlockAABB *out, int cap)
         }
     }
     return 3;
+}
+
+// t1097 酿造台两盒几何单一权威（ShapeBrewingStand；声明见 .h）：碰撞 / 选中 / 射线 / 列顶 / 渲染五处同源。
+//   两盒（16 像素格 → /16，与贴图 footprint 同源）：① 底座板 1..15/16 见方 footprint × y[0,2]/16（可踩面，
+//   < auto-step 门槛）；② 中柱 6..10/16 见方 × y[2,10]/16（顶面 10/16 = 可站面，同漏斗 0.625 口径）。
+//   盒序稳定：底座 → 中柱（渲染 case 同序消费）。state 不参与盒形（无朝向；亮标是渲染面）。
+int BlockRegistry::brewingStandShapeBoxes(quint8 state, BlockAABB *out, int cap)
+{
+    using AABB = BlockAABB;
+    Q_UNUSED(state);
+    if (cap < 2) return 0; // 防御（同 putAABB 钳制口径）
+    out[0] = AABB{1.0f / 16.0f, 0.0f, 1.0f / 16.0f, 15.0f / 16.0f, 2.0f / 16.0f, 15.0f / 16.0f}; // ① 底座板
+    out[1] = AABB{6.0f / 16.0f, 2.0f / 16.0f, 6.0f / 16.0f, 10.0f / 16.0f, 10.0f / 16.0f, 10.0f / 16.0f}; // ② 中柱
+    return 2;
 }
 
 // collision 与 selection **同源**（t217 修正 t208）：两者都走 shapeBoxes（贴合渲染形状：门=薄板选中框、
@@ -1987,6 +2018,7 @@ float BlockRegistry::collisionTopY(quint8 blockId, quint8 state)
     case ShapeIronBars: return 1.0f; // t998 铁栏杆立柱满格高（1.0 可跳跃越过，区别栅栏 1.5）
     case ShapeHopper:  return 0.625f; // t1093 漏斗顶箅板顶面 10/16（hopperShapeBoxes 最高盒顶 = 可站面）
     case ShapeRepeater: return 0.125f; // t1095 中继器贴地薄板 2/16（ShapeRepeater 碰撞盒顶 = 可踩面）
+    case ShapeBrewingStand: return 0.625f; // t1097 酿造台中柱顶 10/16（brewingStandShapeBoxes 最高盒顶 = 可站面）
     }
     return -1.0f; // 未知 shape → 空（兜底，同 shapeBoxes）
 }
@@ -2166,6 +2198,7 @@ float BlockRegistry::solidTopOffset(quint8 blockId, quint8 state)
     case ShapeIronBars: return 1.0f;                          // t998 铁栏杆立柱满格高（PCF 列顶随视觉立柱）
     case ShapeHopper:   return 0.625f;                        // t1093 漏斗顶箅板顶面 10/16（PCF 列顶随可站面）
     case ShapeRepeater: return 0.125f;                        // t1095 中继器薄板顶 2/16（PCF 列顶随可踩面）
+    case ShapeBrewingStand: return 0.625f;                    // t1097 酿造台中柱顶 10/16（PCF 列顶随可站面）
     default:            return 1.0f;                          // ShapeNone（air/torch/water）不入 heightmap 顶，兜底 1.0
     }
 }

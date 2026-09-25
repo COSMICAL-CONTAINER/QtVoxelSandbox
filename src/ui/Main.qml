@@ -105,6 +105,12 @@ Window {
     //   所开漏斗的方块世界坐标（HopperStore 据此寻址该漏斗的 5 槽）。t1080 关单登记的 UI 候选授权面
     //   兑现（QML 玩法路径零迁移约束下的单向消费增量）。
     property bool hopperOpen: false
+    // t1097 酿造面板子态：右键酿造台 → brewingStandOpened → 显本面板（BrewingUI）+ 释放指针。
+    //   brewingX/Y/Z = 所开酿造台的世界坐标（BrewingStore 据此寻址 5 槽 + 酿造进度）。
+    property bool brewingOpen: false
+    property int brewingX: 0
+    property int brewingY: 0
+    property int brewingZ: 0
     property int hopperX: 0
     property int hopperY: 0
     property int hopperZ: 0
@@ -243,6 +249,7 @@ Window {
         if (anvilPanel.visible)          return anvilPanel.hoveredKey
         if (dispenserPanel.visible)      return dispenserPanel.hoveredKey
         if (hopperPanel.visible)         return hopperPanel.hoveredKey // t1093
+        if (brewingPanel.visible)        return brewingPanel.hoveredKey // t1097
         if (inventoryPanel.visible)      return inventoryPanel.hoveredKey
         if (survivalPanel.visible)       return survivalPanel.hoveredKey
         return ""
@@ -1045,6 +1052,9 @@ Window {
         // t1080 漏斗按世界持久化 + 修跨世界泄漏：hopperStore 跨世界长驻（同 chestStore / dispenserStore 族），
         //   进世界前 loadAll 整体替换内存（先清后填）。存档 hoppers 由 runExitSave 第 5 参落 hoppers 表。
         hopperStore.loadAll(worldStore.loadHoppers())
+        // t1097 酿造台按世界持久化 + 跨世界泄漏收口：brewingStore 跨世界长驻（同 hopperStore 族），
+        //   enterWorld 时整体替换（清旧世界残留 + 填本世界酿造台）。
+        brewingStore.loadAll(worldStore.loadBrewingStands())
         // progress 按世界持久化：进世界前 loadVariant 整体替换内存（清旧世界残留 + 填本世界进度）。无存档
         //   progress 表 → 空 map → 重置默认（全 0 统计 + 全未解锁成就）。存档由 saveAndExit saveProgress 落盘。
         progress.loadVariant(worldStore.loadProgress())
@@ -1207,7 +1217,8 @@ Window {
         if (enchantingTableOpen) closeEnchantingTable()   // t650：附魔台两输入槽 → 背包
         if (anvilOpen) closeAnvil()                       // t650：铁砧 A/B 槽 → 背包
         if (dispenserOpen) closeDispenser()               // t650：发射器面板光标栈 → 背包
-        if (hopperOpen) closeHopper()               // t650：漏斗面板光标栈 → 背包（t1093 同门互斥收口）
+        if (hopperOpen) closeHopper()
+        if (brewingOpen) closeBrewing()               // t650：漏斗面板光标栈 → 背包（t1093 同门互斥收口）
         // t690(c)：三处合成格材料回背包（工作台 3×3 / 生存背包 2×2 / 创造背包生存 tab 2×2）——直调
         //   归还而非裸置 visible（绑定重求值可被引擎推迟，晚于 gatherPlayerState = §t650 同竞态）。
         craftingTablePanel.returnCraftToHotbar()
@@ -1258,7 +1269,8 @@ Window {
                                                  ? { valid: true, x: player.spawnPoint.x, y: player.spawnPoint.y, z: player.spawnPoint.z }
                                                  : { valid: false },
                                              gatherPlayerState(), progress.toVariant(),
-                                             hopperStore.allHoppers())
+                                             hopperStore.allHoppers(),
+                                             brewingStore.allBrewingStands())
     }
     // t1064 退出存档失败退避重试（review0901 登记清偿，出处见 saveAndExitToWorldList 重试段注释）：
     //   「保存并退出」按钮与 onClosing 关窗两路径**共用唯一实现**（禁第二份退避逻辑散写；两处
@@ -1365,7 +1377,8 @@ Window {
         if (enchantingTableOpen) closeEnchantingTable()
         if (anvilOpen) closeAnvil()
         if (dispenserOpen) closeDispenser()
-        if (hopperOpen) closeHopper()   // t1093：漏斗面板一并显式关（归还光标 + 面板槽；防御纵深同发射器行）
+        if (hopperOpen) closeHopper()
+        if (brewingOpen) closeBrewing()   // t1093：漏斗面板一并显式关（归还光标 + 面板槽；防御纵深同发射器行）
         chestLidAngle = 0    // t196：复位盖子角（防 worldlist→再进世界时残留半开盖子；scene 已离场，动画不可见）
         settingsOpen = false
         progressOpen = false    // pause-menu：退出世界关进度面板（防遗留）
@@ -1400,7 +1413,8 @@ Window {
         if (enchantingTableOpen) closeEnchantingTable()
         if (anvilOpen) closeAnvil()
         if (dispenserOpen) closeDispenser()
-        if (hopperOpen) closeHopper()   // t1093：回菜单也关漏斗（t650 同门：归还确定性同步，防光标栈遗留）
+        if (hopperOpen) closeHopper()
+        if (brewingOpen) closeBrewing()   // t1093：回菜单也关漏斗（t650 同门：归还确定性同步，防光标栈遗留）
         chestLidAngle = 0    // t196：复位盖子角（防回菜单 / 再进世界残留半开盖子）
         settingsOpen = false           // t139：回菜单时关设置面板（防遗留）
         progressOpen = false           // pause-menu：回菜单关进度面板（防遗留）
@@ -1616,6 +1630,7 @@ Window {
         else if (anvilPanel.visible)         anvilPanel.swapHoveredWithHotbar(hotbarIdx)
         else if (dispenserPanel.visible)     dispenserPanel.swapHoveredWithHotbar(hotbarIdx)
         else if (hopperPanel.visible)        hopperPanel.swapHoveredWithHotbar(hotbarIdx) // t1093
+        else if (brewingPanel.visible)       brewingPanel.swapHoveredWithHotbar(hotbarIdx) // t1097
         else if (inventoryPanel.visible)     inventoryPanel.swapHoveredWithHotbar(hotbarIdx)
         else if (survivalPanel.visible)      survivalPanel.swapHoveredWithHotbar(hotbarIdx)
     }
@@ -1645,6 +1660,7 @@ Window {
         else if (anvilPanel.visible)         panel = anvilPanel
         else if (dispenserPanel.visible)     panel = dispenserPanel
         else if (hopperPanel.visible)        panel = hopperPanel // t1093
+        else if (brewingPanel.visible)       panel = brewingPanel // t1097
         else if (inventoryPanel.visible)     panel = inventoryPanel
         else if (survivalPanel.visible)      panel = survivalPanel
         if (!panel) return
@@ -1691,6 +1707,7 @@ Window {
         if (anvilOpen) closeAnvil()
         if (dispenserOpen) closeDispenser()
         if (hopperOpen) closeHopper()
+        if (brewingOpen) closeBrewing()
         craftingTableOpen = true
         progress.onInventoryOpened()  // progress 成就：打开背包（工作台）
         player.release()
@@ -1713,6 +1730,7 @@ Window {
         if (anvilOpen) closeAnvil()
         if (dispenserOpen) closeDispenser()
         if (hopperOpen) closeHopper()
+        if (brewingOpen) closeBrewing()
         furnaceX = fx; furnaceY = fy; furnaceZ = fz  // t494 记熔炉格坐标（供 FurnaceUI setFurnaceLit）
         furnaceOpen = true
         progress.onInventoryOpened()  // progress 成就：打开背包（熔炉）
@@ -1755,6 +1773,7 @@ Window {
         if (anvilOpen) closeAnvil()
         if (dispenserOpen) closeDispenser()
         if (hopperOpen) closeHopper()
+        if (brewingOpen) closeBrewing()
         chestX = x; chestY = y; chestZ = z
         // t225 读箱子朝向 state（前面所朝方向；placeBlock 写入 = horizontalFacing^1，锁面朝玩家）→
         //   驱动盖子铰链侧（chestLidYaw）。& 3 防御性掩码（与 BlockRegistry::chestFrontFace 的 state&3 同源）。
@@ -1819,6 +1838,7 @@ Window {
         if (anvilOpen) closeAnvil()
         if (dispenserOpen) closeDispenser()
         if (hopperOpen) closeHopper()
+        if (brewingOpen) closeBrewing()
         enchantX = x; enchantY = y; enchantZ = z
         enchantingTableOpen = true
         // t548：不再调 progress.onInventoryOpened —— 该调用会把「打开背包」成就解锁当 toast 弹在面板之上
@@ -1859,6 +1879,7 @@ Window {
         if (anvilOpen) closeAnvil()
         if (dispenserOpen) closeDispenser()
         if (hopperOpen) closeHopper()
+        if (brewingOpen) closeBrewing()
         anvilX = x; anvilY = y; anvilZ = z
         anvilOpen = true
         // t548：同附魔台 —— 铁砧非背包，不触发 open_inventory 成就 toast（黑色小 UI 残留根因）。
@@ -1897,6 +1918,7 @@ Window {
         if (enchantingTableOpen) closeEnchantingTable()
         if (anvilOpen) closeAnvil()
         if (hopperOpen) closeHopper()
+        if (brewingOpen) closeBrewing()
         dispenserX = x; dispenserY = y; dispenserZ = z
         // t609：投掷器（id=117=BlockRegistry::Dropper）共用本面板 / DispenserStore——标题按所开方块 id 设
         //   （发射器 107 显「发射器」/ 投掷器 117 显「投掷器」；id=117 字面量+注释，同 torch=13 模式）。
@@ -1926,6 +1948,7 @@ Window {
         if (anvilOpen) closeAnvil()
         if (dispenserOpen) closeDispenser()
         if (hopperOpen) closeHopper()
+        if (brewingOpen) closeBrewing()
         hopperX = x; hopperY = y; hopperZ = z
         hopperOpen = true
         // 同附魔台 / 铁砧 / 发射器口径：漏斗非背包，不触发 open_inventory 成就 toast（黑色小 UI 残留根因）。
@@ -1935,6 +1958,30 @@ Window {
         if (!hopperOpen) return
         hopperOpen = false
         returnHeldToHotbar()           // t56：关包归还光标手持栈（同 closeDispenser）
+        player.grab()
+        keyInput.forceActiveFocus()
+    }
+    // t1097 打开 / 关闭酿造面板（openHopper 同门）：打开 → release（光标可见点台 / 主栏槽）；
+    //   关 → grab + 焦点回键位层。与其它背包面板互斥（各 open* 均补 closeBrewing 一行，反之同）。
+    //   x/y/z = 所开酿造台的方块世界坐标。酿造 tick 权威在 C++ scanBrewingStands（面板不推进）。
+    function openBrewing(x, y, z) {
+        if (appState !== "playing" || brewingOpen) return
+        if (inventoryOpen) closeInventory()
+        if (craftingTableOpen) closeCraftingTable()
+        if (furnaceOpen) closeFurnace()
+        if (chestOpen) closeChest()
+        if (enchantingTableOpen) closeEnchantingTable()
+        if (anvilOpen) closeAnvil()
+        if (dispenserOpen) closeDispenser()
+        if (hopperOpen) closeHopper()
+        brewingX = x; brewingY = y; brewingZ = z
+        brewingOpen = true
+        player.release()
+    }
+    function closeBrewing() {
+        if (!brewingOpen) return
+        brewingOpen = false
+        returnHeldToHotbar()           // t56：关包归还光标手持栈（同族口径）
         player.grab()
         keyInput.forceActiveFocus()
     }
@@ -2117,7 +2164,10 @@ Window {
         if (word === "poison" || word === "中毒")    { eff = PlayerState.EffectPoison;    name = "中毒" }
         else if (word === "slowness" || word === "slow" || word === "缓慢") { eff = PlayerState.EffectSlowness; name = "缓慢" }
         else if (word === "fire" || word === "着火")  { eff = PlayerState.EffectFire;     name = "着火" }
-        else return "未知效果: " + args[0] + "（用 poison/slowness/fire/clear）"
+        // t1097 药水效果入 /effect 测试入口（同族命名：英文小写词 + 中文通用词）。
+        else if (word === "speed" || word === "迅捷")    { eff = PlayerState.EffectSpeed;    name = "迅捷" }
+        else if (word === "strength" || word === "力量") { eff = PlayerState.EffectStrength; name = "力量" }
+        else return "未知效果: " + args[0] + "（用 poison/slowness/fire/speed/strength/clear）"
         player.applyStatusEffect(eff, secs, isNaN(lvl) || lvl < 1 ? 1 : lvl)
         return secs <= 0 ? ("已清除「" + name + "」效果")
                          : ("已施加「" + name + "」" + Math.ceil(secs) + " 秒（等级 " + (isNaN(lvl) || lvl < 1 ? 1 : lvl) + "）")
@@ -2864,6 +2914,9 @@ Window {
     // t1080 漏斗内容存储 VM（按方块世界坐标键控的 5 槽容腔；机制面 = PlayerController::scanHoppers，
     //   破漏斗清孤儿掉内容；无开盖 UI——本单如实降级，revision/读族留作未来 HopperUI 复用）。
     HopperStore { id: hopperStore }
+    // t1097 酿造内容存储 VM（按方块世界坐标键控的 5 槽：3 瓶 + 原料 + 燃料 + 酿造进度 / 燃料计量；
+    //   机制面 = PlayerController::scanBrewingStands，破酿造台清孤儿掉内容；BrewingUI 单向消费）。
+    BrewingStore { id: brewingStore }
     // progress 玩家进度系统 VM（统计 + 成就；跨世界持久化存 worldstore progress 表）。各事件源经 QML 桥接
     //   调埋点（onBlockMined/onCraft/onMobKilled 等）；成就解锁弹 toast（achievementUnlocked 信号）。
     PlayerProgress { id: progress }
@@ -3394,6 +3447,8 @@ Window {
         // t1080：注入漏斗内容存储 + 熔炉内容存储（scanHoppers 机制面的容器族读写；同 peer VM 注入模式）。
         hopperStore: hopperStore
         furnaceStore: furnaceStore
+        // t1097：注入酿造内容存储（scanBrewingStands 机制面的读写；同 peer VM 注入模式）。
+        brewingStore: brewingStore
         // t1022：注入键位映射表（setKey 入口 canonicalKey 规范化 —— 运动键重映射全局生效的引擎侧权威）。
         keybinds: keybindsMgr
         // t889：世界模拟总闸绑 window.worldRunning —— 硬档 tickImpl 早退（实体桶 / step 全停）+ 复跑顺延
@@ -3543,6 +3598,10 @@ Window {
         // t1093：右键漏斗 → player 发 hopperOpened(x,y,z) → 开 HopperUI（释放指针 / 关包互斥）。
         //   坐标供 HopperStore 寻址该漏斗的 5 槽。t1080 关单登记的 UI 候选授权面兑现。
         function onHopperOpened(x, y, z) { window.openHopper(x, y, z) }
+        // t1097：右键酿造台 → player 发 brewingStandOpened(x,y,z) → 开 BrewingUI（释放指针 / 关包互斥）。
+        //   坐标供 BrewingStore 寻址该台的 5 槽 + 酿造进度。C++ scanBrewingStands 机制 tick 权威，
+        //   面板只单向消费（读 store + 槽往返；不推进酿造——t177 三轮教训的 C++ 侧终局形态）。
+        function onBrewingStandOpened(x, y, z) { window.openBrewing(x, y, z) }
         // t152：右键门 / 活版门 useBlock → player 发 doorToggled(open) → 路由到 AudioManager 开门 / 关门音。
         //   一次开合动作 = 一次音（门两格同翻 player 只发一次）。音频层只消费，PLAN §2 分层。
         function onDoorToggled(open) { open ? audio.playDoorOpen() : audio.playDoorClose() }
@@ -12243,6 +12302,7 @@ Window {
                 if (window.anvilOpen) { try { window.closeAnvil() } catch (e) {} }
                 if (window.dispenserOpen) { try { window.closeDispenser() } catch (e) {} }
                 if (window.hopperOpen) { try { window.closeHopper() } catch (e) {} } // t1093：同门互斥收口（光标栈归还 + 面板槽）
+                if (window.brewingOpen) { try { window.closeBrewing() } catch (e) {} } // t1097：同门互斥收口
                 // t690(c)：合成格显式同步归还（同上方 saveAndExitToWorldList 的修法 + t650 模式）。直调幂等
                 //   （槽空零迭代），不依赖面板 visible 绑定重求值（引擎可推迟，会晚于 returnHeldToHotbar /
                 //   dropAllItems → 材料不随尸体掉落、掉进已重置的空背包——正是 t650 要杀的竞态）。
@@ -12401,6 +12461,21 @@ Window {
                                                dispenserStore.slotDurabilityAt(x, y, z, di))
                 }
                 dispenserStore.clearDispenser(x, y, z)
+            }
+            // t1097：酿造台被破 → 把 5 槽内容 spawnItem 掉落世界（机制等价 MC 1.0 破酿造台掉落内容——
+            //   同熔炉 / 发射器 / 漏斗族），再 brewingStore.clearBrewing 清孤儿条目。id=148=
+            //   BlockRegistry::BrewingStand（字面量 + 注释，同 furnace=10 / chest=22 既有模式）。
+            //   【自然掉落：恒发（含创造）】—— 同容器族口径。
+            if (id === 148) {
+                for (let bi = 0; bi < brewingStore.slotCount; ++bi) {
+                    const bid = brewingStore.slotIdAt(x, y, z, bi)
+                    const bcount = brewingStore.slotCountAt(x, y, z, bi)
+                    if (bid !== 0 && bcount > 0)
+                        itemEntities.spawnItem(x, y, z, bid, bcount, brewingStore.slotEnchantsAt(x, y, z, bi),
+                                               brewingStore.slotNameAt(x, y, z, bi),
+                                               brewingStore.slotDurabilityAt(x, y, z, bi))
+                }
+                brewingStore.clearBrewing(x, y, z)
             }
             // t799：沙/沙砾失撑坍落改由 World 层 checkGravityBlockOnEdit（写入口全收口：放置 / 挖掘 / 爆炸 /
             //   TNT 点火 / 焚毁 / 流体静默写同一谓词判定）发 gravityBlockFell → 下方 onGravityBlockFell 转实体。
@@ -12791,6 +12866,7 @@ Window {
                 else if (window.anvilOpen) window.closeAnvil()
                 else if (window.dispenserOpen) window.closeDispenser()
                 else if (window.hopperOpen) window.closeHopper() // t1093：E 关漏斗面板（同发射器分支）
+                else if (window.brewingOpen) window.closeBrewing() // t1097：E 关酿造面板（同族分支）
                 else window.toggleInventory()
                 e.accepted = true; return
             }
@@ -12841,6 +12917,10 @@ Window {
             // t1093 漏斗面板：Esc 关（同发射器 / 铁砧族；!captured 时 Esc 落 QML → 本分支）。
             if (e.key === Qt.Key_Escape && window.hopperOpen) {
                 window.closeHopper(); e.accepted = true; return
+            }
+            // t1097 酿造面板：Esc 关（同族；!captured 时 Esc 落 QML → 本分支）。
+            if (e.key === Qt.Key_Escape && window.brewingOpen) {
+                window.closeBrewing(); e.accepted = true; return
             }
             // F3 调试叠层切换（t10，PLAN §2-F）：playing 态按 F3 显/隐左上角调试文本。
             //   t143：同时跟踪 f3Held=true（无条件，menu 态也设，与 shiftHeld 同模式），供 B 键修饰判定。
@@ -15410,6 +15490,8 @@ Window {
                             return (packSrc && packSrc.toString().length > 0) ? packSrc
                                 : (modelData.type === PlayerState.EffectPoison ? "qrc:/textures/icon_effect_poison.png"
                                 : modelData.type === PlayerState.EffectSlowness ? "qrc:/textures/icon_effect_slowness.png"
+                                : modelData.type === PlayerState.EffectSpeed ? "qrc:/textures/icon_effect_speed.png"
+                                : modelData.type === PlayerState.EffectStrength ? "qrc:/textures/icon_effect_strength.png"
                                 : "qrc:/textures/icon_effect_fire.png")
                         }
                     }
@@ -15746,6 +15828,25 @@ Window {
         visible: window.appState === "playing" && window.hopperOpen
         z: 150
         onClosed: window.closeHopper()
+        onDiscardHeldRequested: player.dropHeldCursor()
+        onDiscardHeldOneRequested: player.dropHeldCursorOne()
+    }
+
+    // t1097 酿造面板：右键酿造台方块打开（player.brewingStandOpened → openBrewing）。仅 playing &&
+    //   brewingOpen 显（与其它背包面板互斥——各 open* 互相关闭）。z 同漏斗面板档。
+    //   tick 面：酿造推进权威在 C++ scanBrewingStands（tickImpl 管线），面板**不 tick**——槽状态读
+    //   brewingStore（revision 触碰刷新），单向消费零玩法路径迁移。
+    BrewingUI {
+        id: brewingPanel
+        anchors.fill: parent
+        hotbar: hotbarVM
+        brewingStore: brewingStore
+        brewingX: window.brewingX
+        brewingY: window.brewingY
+        brewingZ: window.brewingZ
+        visible: window.appState === "playing" && window.brewingOpen
+        z: 150
+        onClosed: window.closeBrewing()
         onDiscardHeldRequested: player.dropHeldCursor()
         onDiscardHeldOneRequested: player.dropHeldCursorOne()
     }

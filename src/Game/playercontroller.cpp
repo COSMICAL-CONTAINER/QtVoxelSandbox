@@ -126,6 +126,17 @@ int PlayerController::foodHungerAmount(int itemId)
     return 0;
 }
 
+// t1097 饮用品判定（单一权威；foodHungerAmount 姊妹面，头注释见 .h）：水瓶 / 粗制药水 / 迅捷 /
+//   力量药水可饮。水瓶 / 粗制可饮无效果（MC 1.0 口径——水瓶饮用零效果；粗制是无效果载体）；
+//   迅捷 / 力量在 finishEating 据持物挂效果。新增可饮药水只改本方法一处。
+bool PlayerController::isDrinkableItem(int itemId)
+{
+    return itemId == RecipeRegistry::WaterBottleId
+        || itemId == RecipeRegistry::AwkwardPotionId
+        || itemId == RecipeRegistry::SpeedPotionId
+        || itemId == RecipeRegistry::StrengthPotionId;
+}
+
 PlayerController::PlayerController(QQuickItem *parent) : QQuickItem(parent)
 {
     connect(this, &QQuickItem::windowChanged, this, &PlayerController::onWindowChanged);
@@ -449,6 +460,15 @@ void PlayerController::setFurnaceStore(FurnaceStore *s)
     if (m_furnaceStore == s) return;
     m_furnaceStore = s;
     emit furnaceStoreChanged();
+}
+
+// t1097 酿造内容存储注入（同 setHopperStore 模式）：scanBrewingStands 机制面读写酿造台 5 槽 +
+//   酿造进度 / 燃料计量 + 破酿造台清孤儿掉内容；null 时酿造机制整体跳过（方块仍在、酿造静默——防御路径）。
+void PlayerController::setBrewingStore(BrewingStore *s)
+{
+    if (m_brewingStore == s) return;
+    m_brewingStore = s;
+    emit brewingStoreChanged();
 }
 
 // t1013 矿井箱 → 箱子矿车转正（Q_INVOKABLE；Main.qml enterWorld 在 chestStore.loadAll（存档键条目就位）+
@@ -957,7 +977,9 @@ bool PlayerController::eventFilter(QObject *o, QEvent *e)
                     }
                     // t267：手持食物（面包 / 甜浆果）→ 右键**按住**进食（不再单击即食；spec「单击即食→改长按右键」）。
                     //   t467：经 foodHungerAmount 单一权威判「是否食物」，新增食物只改本判定一处（避免各处硬编码 BreadId）。
-                    if (foodHungerAmount(heldForEat) > 0) { beginEating(); return true; }
+                    //   t1097：饮用品（水瓶 / 药水族）同门并入——长按右键喝（MC 饮用也是长按，~1.6s 同进食时长；
+                    //   kEatDuration 复用），finishEating 据持物分流进食 / 饮用结算。
+                    if (foodHungerAmount(heldForEat) > 0 || isDrinkableItem(heldForEat)) { beginEating(); return true; }
                     // t304 手持弓 → 右键长按拉弓（不进 placeBlock；弓非方块，selectedBlock 已守 Air）。机制等价
                     //   MC 1.0 右键拉弓。持物判据直读 hotbar（单一权威，免 QML 绑定滞后窗口，同面包 / 桶修法）。
                     if (heldForEat == int(ToolRegistry::Bow)) { beginBowDraw(); return true; }
@@ -1279,6 +1301,9 @@ void PlayerController::tickImpl()
     // t1080 漏斗机制 tick（机关扫描族同门——常开、内自检、独立 0.4s 相位；硬暂停不达此行 = 暂停期
     //   漏斗冻结，机制等价 MC 暂停一切）。dt 推进每漏斗冷却；到期跑「输出 -> 抽取 -> 收集」一轮。
     scanHoppers(dt);
+    // t1097 酿造机制 tick（机关扫描族同门——常开、内自检；硬暂停不达此行 = 暂停期酿造冻结，
+    //   机制等价 MC 暂停一切）。dt 推进每台酿造进度 + 燃料计量 + 亮标 state 位。
+    scanBrewingStands(dt);
     // t1083 唱片机播放状态机 tick（机关扫描族同门——常开、内自检；硬暂停不达此行 = 暂停期音轨
     //   计时冻结，机制等价 MC 暂停一切 / 暂停时唱片不推进）。dt 推进每台播放中唱片机剩余时长；
     //   到期自动吐盘。
@@ -2460,6 +2485,10 @@ void PlayerController::attackMob(int entityIndex)
     int heldEnch[4] = {0, 0, 0, 0};
     if (m_hotbar) m_hotbar->selectedItemEnchants(heldEnch);
     float dmg = EnchantRegistry::weaponAttackDamage(heldItemId, heldEnch);
+    // t1097 力量效果（EffectStrength，机制等价 MC 1.0 旧口径 strength +130%/级近战伤害乘算——附魔加成后、
+    //   暴击 ×1.5 之前叠入，与 MC「力量作用于基础伤害」口径一致）。仅 Survival 有药水效果（门控）。
+    if (m_strengthTimer > 0.0f)
+        dmg *= (1.0f + kStrengthBonusPerLevel * float(m_strengthLevel > 0 ? m_strengthLevel : 1));
     if (m_hotbar) {
         // review0830 #26：亡灵族目标门改单一权威谓词（t476 裸清单漏 t952 幼体 → 亡灵杀手对幼体不生效，
         //   且 t961 显示面 (+M) 无条件显示 = 显示与实战劈叉）。isUndeadFamily 与 undeadBurnsInDaylight
@@ -2842,8 +2871,9 @@ void PlayerController::beginEating()
     m_rightDown = true;
     if (!canPlace()) return; // 观察者不能进食（沿用 placeBlock 入口门控）
     if (!m_hotbar || !m_captured) return;
-    // t467：经 foodHungerAmount 单一权威判「持物是否食物」（面包 / 甜浆果）；非食物 → 不进（仍记 m_rightDown）。
-    if (foodHungerAmount(m_hotbar->selectedItemId()) == 0) return;
+    // t467：经 foodHungerAmount 单一权威判「持物是否食物」（面包 / 甜浆果）；t1097 起饮用品（水瓶 /
+    //   药水族）同门并入——非食物非饮用品 → 不进（仍记 m_rightDown）。
+    if (foodHungerAmount(m_hotbar->selectedItemId()) == 0 && !isDrinkableItem(m_hotbar->selectedItemId())) return;
     // t513 吃完冷却：上一件食物食完的冷却期（m_eatCooldown>0）内 → 不进新一轮累积（按住右键不连食）。
     //   m_rightDown 已记（即便冷却内按下，按钮按下事实成立 → 冷却到 0 后 updateEating 连食分支接手）。
     if (m_eatCooldown > 0.0f) return;
@@ -2902,10 +2932,27 @@ void PlayerController::finishEating()
     //   Creative/Spectator 无敌不着毒，同火 / 窒息模式）。起效 → m_poisonTimer=kPoisonDuration（tickImpl 每秒
     //   -1 饥饿 + -1 HP）；期间再食另一毒薯重置时长（可叠续）。中毒视觉复用既有链（fallDamageTaken → damaged
     //   红闪 / 视角晃；hungerUpdated → 鼓腿凹）。
+    // t669 毒薯食物中毒：食毒马铃薯 60% 概率起效（机制等价 MC 1.0 poisonous potato 60% 中毒；仅 Survival 结算，
+    //   Creative/Spectator 无敌不着毒，同火 / 窒息模式）。起效 → m_poisonTimer=kPoisonDuration（tickImpl 每秒
+    //   -1 饥饿 + -1 HP）；期间再食另一毒薯重置时长（可叠续）。中毒视觉复用既有链（fallDamageTaken → damaged
+    //   红闪 / 视角晃；hungerUpdated → 鼓腿凹）。
     if (eatenId == RecipeRegistry::PoisonousPotatoId && m_mode == Survival
         && QRandomGenerator::global()->bounded(100) < kPoisonChancePct) {
         m_poisonTimer = kPoisonDuration;
         m_poisonDmgAccum = 0.0f;
+    }
+    // t1097 药水饮用结算（长按右键喝满 kEatDuration → 到此分流）：水瓶 / 粗制药水 = 可饮无效果（MC 口径）；
+    //   迅捷 / 力量药水 → applyStatusEffect 挂效果（Survival 专用门内置；效果时长 kPotionDurationSec=180s、
+    //   等级 1）。生存消耗 1 件 + 返 1 空瓶（MC 1.0：瓶不消失，喝完留空瓶；addStack 智能合并）；创造不耗
+    //   不返（创造调色板无限源口径，同创造食不耗——创造返还空瓶会凭空造瓶，非 MC 口径）。
+    if (isDrinkableItem(eatenId)) {
+        if (eatenId == RecipeRegistry::SpeedPotionId)
+            applyStatusEffect(PlayerState::EffectSpeed, kPotionDurationSec, 1);
+        else if (eatenId == RecipeRegistry::StrengthPotionId)
+            applyStatusEffect(PlayerState::EffectStrength, kPotionDurationSec, 1);
+        if (m_mode == Survival) {
+            m_hotbar->addStack(int(RecipeRegistry::GlassBottleId), 1); // 喝完留空瓶（MC 口径）
+        }
     }
     m_lastPlaceMs = m_evtClock.elapsed();
     emit swingArm(); // 进食完成挥手（一次「使用」动作）
@@ -2947,14 +2994,15 @@ void PlayerController::updateEating(float dt)
     //   t513：beginEating 内已守 m_eatCooldown>0 早退，故冷却期不会误启；此处条件不变（冷却态 m_eating 保持 true
     //   不进此分支，仅在 finishEating 走 cancelEating 即单次进食后仍按时此分支接手，且 beginEating 自判冷却挡）。
     if (!m_eating && m_rightDown && canPlace() && m_hotbar
-        && foodHungerAmount(m_hotbar->selectedItemId()) > 0) {
+        && (foodHungerAmount(m_hotbar->selectedItemId()) > 0 || isDrinkableItem(m_hotbar->selectedItemId()))) {
         beginEating();
     }
 
     if (!m_eating) return;
     if (!m_hotbar || !m_captured) { cancelEating(); return; }
-    // 持物变（切槽 / 食物耗尽换非食物）→ 取消进食（同挖掘目标变更清进度）。t467 经 foodHungerAmount 单一权威判食物。
-    if (foodHungerAmount(m_hotbar->selectedItemId()) == 0) { cancelEating(); return; }
+    // 持物变（切槽 / 食物耗尽换非食物非饮用品）→ 取消进食（同挖掘目标变更清进度）。t467 经
+    //   foodHungerAmount 单一权威判食物；t1097 饮用品同门并入。
+    if (foodHungerAmount(m_hotbar->selectedItemId()) == 0 && !isDrinkableItem(m_hotbar->selectedItemId())) { cancelEating(); return; }
 
     // t513 冷却期：progress 暂停（不累积、不发屑粒），仅保留 m_eating=true 使手持动画持续显示冷却态。
     //   冷却到 0 后下一 tick 自然恢复下方累积路径。progress 已在 finishEating 归 0 + eatBeat=-1，冷却结束首轮
@@ -3588,6 +3636,16 @@ void PlayerController::applyStatusEffect(int effect, float seconds, int level)
         m_fireTimer = secs;
         if (secs <= 0.0f) m_fireDmgTimer = 0.0f;
         break;
+    case PlayerState::EffectSpeed:
+        // t1097 迅捷（药水饮用入口）：m_speedTimer（step() 走路分支 ×(1+0.2×level)，机制等价 MC swiftness）。
+        m_speedTimer = secs;
+        m_speedLevel = (secs > 0.0f) ? lvl : 0;
+        break;
+    case PlayerState::EffectStrength:
+        // t1097 力量（药水饮用入口）：m_strengthTimer（attackMob 伤害 ×(1+1.3×level)，机制等价 MC 旧口径 strength）。
+        m_strengthTimer = secs;
+        m_strengthLevel = (secs > 0.0f) ? lvl : 0;
+        break;
     default:
         break; // EffectNone / 未知 → 忽略
     }
@@ -3602,6 +3660,11 @@ void PlayerController::clearStatusEffects()
     m_slowLevel = 0;
     m_fireTimer = 0.0f;
     m_fireDmgTimer = 0.0f;
+    // t1097 药水效果同步清（重生 / 存档加载 / /effect clear 路径——效果系家族一致口径）。
+    m_speedTimer = 0.0f;
+    m_speedLevel = 0;
+    m_strengthTimer = 0.0f;
+    m_strengthLevel = 0;
     if (m_burning) { m_burning = false; emit burningChanged(); } // t344 火焰叠层同步隐
 }
 
@@ -3632,6 +3695,21 @@ QVariantList PlayerController::buildActiveEffects() const
             m.insert(QStringLiteral("type"), int(PlayerState::EffectFire));
             m.insert(QStringLiteral("seconds"), int(std::ceil(m_fireTimer)));
             m.insert(QStringLiteral("level"), 1);
+            list.append(m);
+        }
+        // t1097 药水效果（固定序扩展尾：.../Fire/Speed/Strength；HUD 图标路由 Main.qml 同步扩展）。
+        if (m_speedTimer > 0.0f) {
+            QVariantMap m;
+            m.insert(QStringLiteral("type"), int(PlayerState::EffectSpeed));
+            m.insert(QStringLiteral("seconds"), int(std::ceil(m_speedTimer)));
+            m.insert(QStringLiteral("level"), m_speedLevel > 0 ? m_speedLevel : 1);
+            list.append(m);
+        }
+        if (m_strengthTimer > 0.0f) {
+            QVariantMap m;
+            m.insert(QStringLiteral("type"), int(PlayerState::EffectStrength));
+            m.insert(QStringLiteral("seconds"), int(std::ceil(m_strengthTimer)));
+            m.insert(QStringLiteral("level"), m_strengthLevel > 0 ? m_strengthLevel : 1);
             list.append(m);
         }
     }
@@ -3766,6 +3844,14 @@ void PlayerController::placeBlock()
     //   同箱子矿车「任意姿态可开」口径）。
     if (!sneakPlaceBlock && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Hopper) {
         emit hopperOpened(m_hitBx, m_hitBy, m_hitBz);
+        return;
+    }
+    // t1097：右键酿造台 → 打开 BrewingUI 酿造界面（同漏斗 / 熔炉 / 箱子家族：优先于放置，无论手持何物
+    //   右键酿造台即开；手持方块 + 潜行 → sneakPlaceBlock 旁路对面放置）。发 brewingStandOpened(x,y,z)
+    //   携命中格世界坐标 → 呈现层 Connections 打开 BrewingUI（释放指针）；BrewingStore 据坐标寻址该台
+    //   的 5 槽 + 酿造进度。机制等价 MC 1.0 右键酿造台开酿造界面。
+    if (!sneakPlaceBlock && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::BrewingStand) {
+        emit brewingStandOpened(m_hitBx, m_hitBy, m_hitBz);
         return;
     }
     // t387/t388 右键床 → 尝试睡觉（useBlock 语义；优先于放置，同工作台 / 箱子模式：右键已放置的床即睡，不另放块）。
@@ -4132,6 +4218,22 @@ void PlayerController::placeBlock()
             emit swingArm();
         }
         return; // 空桶（舀水 / 舀岩浆成功与否）不再走放置路径
+    }
+    // t1097 玻璃瓶装水（机制等价 MC 1.0：瓶右键水 → 水瓶；**瓶不带走水**——与桶舀走水源不同，瓶装水
+    //   零世界写入，机制等价 MC 瓶装水不动水源格）。手持玻璃瓶（GlassBottleId，材料段）右键命中水（任意
+    //   水格均可，MC 口径；桶才要求源 state==0）→ 扣 1 瓶 + 予 1 水瓶（addStack 智能合并，瓶栈其余保留）。
+    //   创造同给（桶舀水「所有模式都换桶」t199 同门）。瓶非方块 → selectedBlock 归 Air，须在
+    //   `m_selectedBlock == Air` 守卫之前分流（同桶 / 蕴辉瓶分支模式）。分层：读含水射线（RayFilter::
+    //   HitWater，t174 独立含水射线面）+ 写 Hotbar VM；零栅格写入。
+    if (m_hotbar && m_world && heldItemId == RecipeRegistry::GlassBottleId) {
+        const RayHit bHit = raycastVoxel(*m_world, position(), lookDirection(), kReach, RayFilter::HitWater);
+        if (bHit.valid && m_world->blockAt(bHit.bx, bHit.by, bHit.bz) == BlockRegistry::Water) {
+            m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 扣 1 空瓶
+            m_hotbar->addStack(int(RecipeRegistry::WaterBottleId), 1); // 予 1 水瓶（同 id 合并 → 空槽）
+            m_lastPlaceMs = now;
+            emit swingArm();
+        }
+        return; // 玻璃瓶（装水成功 / 未命中水）均不再走放置路径
     }
     // t656 红石粉导线放置（机制等价 MC 1.0 redstone dust：**红石粉物品本身就是导线** —— 右键放置成
     //   RedstoneDust 方块，不另立物品 id / 不设合成配方（MC 1.0 红石粉由采矿获得；本工程 RedstoneOre
@@ -6791,6 +6893,106 @@ void PlayerController::scanHoppers(float dt)
         }
     }
 }
+// ── t1097 酿造机制引擎（scanHoppers 机关扫描族同门）────────────────────────────────────────────
+// 机制等价 MC 1.0 酿造循环，每帧推进（dt 累积；连续进度型，无冷却相位）：
+//   (1) 原料空 / 无合格瓶位 → 进度清零静默（MC：无原料或瓶不可酿 → 酿造箭复位）。
+//   (2) 有合格瓶位且 fuelOps<=0 → 补燃 1 燃烬粉（kPowderFuelOps=20，MC 原值）；燃料空 → 不推进。
+//   (3) 推进进度 += dt；满 kBrewSecs(20s) → 消耗 1 原料 + 全部合格瓶位原位转换 + 进度归零。
+//   (4) 亮标跨 0 输入 → 写 state bit0（setBlock 同 id 不同 state：仅 worldChanged 重建——setFurnaceLit 同门）。
+//   格上已非酿造台 → 跳过（孤儿条目 inert，漏斗族同口径）。null store / 无世界 → no-op。
+void PlayerController::scanBrewingStands(float dt)
+{
+    if (!m_brewingStore || !m_world) return;
+    const QStringList keys = m_brewingStore->standKeys();
+    if (keys.isEmpty()) return;
+
+    for (const QString &k : keys) {
+        int bx = 0, by = 0, bz = 0;
+        if (!BrewingStore::parseKey(k, bx, by, bz)) continue;
+        if (m_world->blockAt(bx, by, bz) != BlockRegistry::BrewingStand) continue; // 孤儿条目 inert
+        const int si = int(BrewingStore::kSlotIngredient);
+        const int fi = int(BrewingStore::kSlotFuel);
+        const int ing = m_brewingStore->slotIdAt(bx, by, bz, si);
+        const int ingCnt = m_brewingStore->slotCountAt(bx, by, bz, si);
+        const int fuelId = m_brewingStore->slotIdAt(bx, by, bz, fi);
+        const int fuelCnt = m_brewingStore->slotCountAt(bx, by, bz, fi);
+        // 合格瓶位（瓶原位转换语义：药水槽自身 id 变产物）。
+        int eligible = 0;
+        for (int i = 0; i < 3; ++i) {
+            const int bottleId = m_brewingStore->slotIdAt(bx, by, bz, i);
+            if (BrewingStore::brewResult(ing, bottleId) != 0) ++eligible;
+        }
+        const qreal prog0 = m_brewingStore->brewProgressAt(bx, by, bz);
+        // 无合格瓶位 → 进度清零静默（MC：无瓶可酿 → 酿造箭复位）+ 亮标熄灭（跨 0 输入写）。
+        if (ingCnt <= 0 || eligible == 0) {
+            if (prog0 > 0.0) m_brewingStore->setBrewProgress(bx, by, bz, 0.0);
+            const quint8 idleSt = m_world->stateAt(bx, by, bz);
+            if (idleSt & BlockRegistry::BrewingStandStateLitFlag)
+                m_world->setBlock(bx, by, bz, BlockRegistry::BrewingStand,
+                                  quint8(idleSt & ~BlockRegistry::BrewingStandStateLitFlag));
+            continue;
+        }
+        const int fuelOps0 = m_brewingStore->fuelOpsAt(bx, by, bz);
+        if (fuelOps0 <= 0 && fuelId == RecipeRegistry::BlazePowderId && fuelCnt > 0) {
+            // 补燃：燃料槽扣 1 粉 + fuelOps 重置满（MC：计量不足时才烧新粉）。
+            const QVariantList e = m_brewingStore->slotEnchantsAt(bx, by, bz, fi);
+            const QString nm = m_brewingStore->slotNameAt(bx, by, bz, fi);
+            const int dr = m_brewingStore->slotDurabilityAt(bx, by, bz, fi);
+            if (fuelCnt == 1) {
+                m_brewingStore->setSlot(bx, by, bz, fi, 0, 0, e, nm, dr);
+            } else {
+                m_brewingStore->setSlot(bx, by, bz, fi, fuelId, fuelCnt - 1, e, nm, dr);
+            }
+            m_brewingStore->setFuelOps(bx, by, bz, BrewingStore::kPowderFuelOps);
+        }
+        const int fuelOps = m_brewingStore->fuelOpsAt(bx, by, bz);
+        if (fuelOps <= 0) continue; // 燃料空 → 不推进（进度保留，MC 暂停语义）
+        // 推进（钳大 dt 防漏产多产：20s 一轮，大 dt 一次跨满 → while 循环按 20s 步进多轮）。
+        qreal prog = prog0 + double(dt);
+        int ingCntNow = ingCnt;
+        bool completed = false;
+        while (prog >= BrewingStore::kBrewSecs) {
+            // 完成：消耗 1 原料 + 全部合格瓶位原位转换（re-read：转换会改瓶 id → 逐位重算）。
+            const QVariantList e = m_brewingStore->slotEnchantsAt(bx, by, bz, si);
+            const QString nm = m_brewingStore->slotNameAt(bx, by, bz, si);
+            const int dr = m_brewingStore->slotDurabilityAt(bx, by, bz, si);
+            int left = ingCntNow - 1;
+            if (left <= 0) {
+                m_brewingStore->setSlot(bx, by, bz, si, 0, 0, e, nm, dr);
+            } else {
+                m_brewingStore->setSlot(bx, by, bz, si, ing, left, e, nm, dr);
+            }
+            // 瓶原位转换（当前原料对该槽位瓶的映射；转换保留瓶栈数量——MC 1.0 瓶槽可堆叠 64，整栈同变）。
+            for (int i = 0; i < 3; ++i) {
+                const int bottleId = m_brewingStore->slotIdAt(bx, by, bz, i);
+                const int bottleCnt = m_brewingStore->slotCountAt(bx, by, bz, i);
+                const int res = BrewingStore::brewResult(ing, bottleId);
+                if (res != 0) {
+                    const QVariantList be = m_brewingStore->slotEnchantsAt(bx, by, bz, i);
+                    const QString bnm = m_brewingStore->slotNameAt(bx, by, bz, i);
+                    const int bdr = m_brewingStore->slotDurabilityAt(bx, by, bz, i);
+                    m_brewingStore->setSlot(bx, by, bz, i, res, bottleCnt, be, bnm, bdr);
+                }
+            }
+            completed = true;
+            prog -= BrewingStore::kBrewSecs;
+            ingCntNow = m_brewingStore->slotCountAt(bx, by, bz, si);
+            if (ingCntNow <= 0) { prog = 0.0; break; } // 原料用尽 → 停多轮（下一 tick 复判）
+        }
+        if (completed || prog != prog0)
+            m_brewingStore->setBrewProgress(bx, by, bz, prog);
+        // 亮标：酿造进行中（有合格瓶位 + 有燃料计量 + 进度推进中）→ bit0 置位；否则清位（跨 0 输入才写）。
+        const bool wantLit = (eligible > 0 && fuelOps > 0);
+        const quint8 curSt = m_world->stateAt(bx, by, bz);
+        const bool isLit = (curSt & BlockRegistry::BrewingStandStateLitFlag) != 0;
+        if (wantLit != isLit) {
+            const quint8 newSt = wantLit ? quint8(curSt | BlockRegistry::BrewingStandStateLitFlag)
+                                         : quint8(curSt & ~BlockRegistry::BrewingStandStateLitFlag);
+            m_world->setBlock(bx, by, bz, BlockRegistry::BrewingStand, newSt);
+        }
+    }
+}
+
 // t628 按钮自动复位（见 m_buttonRecoverCells / updateButtonRecovery 头注释）：每 tick 递减按下倒计时；
 //   到期该格仍是按钮（isWoodButton/isStoneButton）且 bit0 置位 → 清 bit0（5 参数 setBlock，id 不变只 state 变
 //   → 仅 worldChanged 重建 mesh，按钮弹回视觉）+ 移除表项；该格已非按钮 / bit0 已清（被破 / 被替换）→ 仅移除
@@ -8300,13 +8502,17 @@ void PlayerController::step(qreal dt)
     //   ×kSlowSpeedMul=0.85）：m_slowTimer>0 时水平速度再乘此倍数（与蹲 / 水下 / 拉弓 / 蛛网同乘入模式叠加）。
     //   仅 Survival 有缓慢（applyStatusEffect 门控）；飞 / 观察者分支已 early return 不受影响。
     const float slowMul = (m_slowTimer > 0.0f) ? kSlowSpeedMul : 1.0f;
+    // t1097 迅捷效果加速（EffectSpeed，机制等价 MC 1.0 swiftness +20%/级移速）：m_speedTimer>0 时水平速度
+    //   再乘增幅（与蹲 / 水下 / 缓慢同乘入模式叠加；仅 Survival 有药水效果——applyStatusEffect 门控）。
+    const float speedFxMul = (m_speedTimer > 0.0f)
+        ? (1.0f + kSpeedBoostPerLevel * float(m_speedLevel > 0 ? m_speedLevel : 1)) : 1.0f;
     // t468 冰上滑动（spec「冰面摩擦力极低→玩家移动加速滑；松键后惯性继续滑一段才停」）。机制等价 MC 1.0 冰滑行：
     //   非冰地面 → 瞬时设速（旧手感：松键即停）；冰面 → 水平速度向「目标速度」做指数接近（1 - exp(-rate*dt)），
     //   rate = iceSlipApproach（Ice 中等 / PackIce 更滑 / BlueIce 最滑）。松键时 wish=0 → 目标=0 → 速度按同 rate
     //   衰减 → 冰上明显惯性滑行（BlueIce 滑得最远）。帧率无关（exp(-rate*dt)）。仅走路模式（飞态已 early return）。
     //   水中（feetInWater）不走冰滑行（水中已减速 + 浮力，无冰面；waterMul 仍乘入目标速度）。
-    const float targetVx = wish.x() * kWalk * speedMul() * waterMul * bowMul * webMul * slowMul;
-    const float targetVz = wish.z() * kWalk * speedMul() * waterMul * bowMul * webMul * slowMul;
+    const float targetVx = wish.x() * kWalk * speedMul() * waterMul * bowMul * webMul * slowMul * speedFxMul;
+    const float targetVz = wish.z() * kWalk * speedMul() * waterMul * bowMul * webMul * slowMul * speedFxMul;
     if (onIce() && !feetInWater()) {
         const quint8 iceBlk = m_world->blockAt(int(std::floor(m_pos.x())),
                                                 int(std::floor(m_pos.y())) - 1,
@@ -8970,6 +9176,25 @@ void PlayerController::step(qreal dt)
     } else {
         m_slowTimer = 0.0f;
         m_slowLevel = 0;
+    }
+
+    // t1097 药水效果推进（EffectSpeed / EffectStrength 时序源；来源 = finishEating 饮用结算 / applyStatusEffect）。
+    //   仅 Survival 生效（同缓慢门控）；归零解除 + 等级清位（防切回 Survival 陈旧串入）。迅捷的应用不在本段
+    //   —— step() 走路分支读 m_speedTimer 乘增幅（见该处注释）；力量在 attackMob 伤害段读 m_strengthTimer。
+    if (m_mode == Survival) {
+        if (m_speedTimer > 0.0f) {
+            m_speedTimer -= float(dt);
+            if (m_speedTimer <= 0.0f) { m_speedTimer = 0.0f; m_speedLevel = 0; } // 定时解除
+        }
+        if (m_strengthTimer > 0.0f) {
+            m_strengthTimer -= float(dt);
+            if (m_strengthTimer <= 0.0f) { m_strengthTimer = 0.0f; m_strengthLevel = 0; } // 定时解除
+        }
+    } else {
+        m_speedTimer = 0.0f;
+        m_speedLevel = 0;
+        m_strengthTimer = 0.0f;
+        m_strengthLevel = 0;
     }
 
     // t715 状态效果快照广播（效果框架 v1 收编口）：组装当前活跃效果（中毒 m_poisonTimer / 缓慢 m_slowTimer /

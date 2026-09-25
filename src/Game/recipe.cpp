@@ -1273,6 +1273,29 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
     { int(RecipeRegistry::Inventory2x2), true,
       { RecipeRegistry::CocoaBeanId, 0, 0, 0, 0, 0, 0, 0, 0 },
       RecipeRegistry::DyeBrownId,        1, 1, "dye_brown_from_cocoa" },
+    // ── t1097 酿造链合成配方三条（表尾追加；机制等价 MC 1.0 酿造前置链）──────────────────────────
+    //   糖：1 甘蔗 → 1 糖（无序 2×2 单原料，机制等价 MC 1.0 sugar——1 sugar cane → 1 sugar；迅捷药水
+    //   原料，甘蔗 worldgen 在场 → 生存可达）。多重集 {Sugarcane:1} 与纸（3 甘蔗 shaped）/
+    //   可可豆 / 墨囊（各自 id）互异 → 无冲突。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { int(BlockRegistry::Sugarcane), 0, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::SugarId,           1, 1, "sugar_from_cane" },
+    //   玻璃瓶：玻璃 3 V 形（顶行左右 + 中行居中）→ 3 瓶（有序 3×3 仅工作台，机制等价 MC 1.0 glass
+    //   bottle 同料同产率 3 glass → 3 bottles；3 宽 V 包围盒放不进 2×2）。最小包围盒 3×2。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::GlassId, 0, RecipeRegistry::GlassId,
+        0, RecipeRegistry::GlassId, 0,
+        0, 0, 0 },
+      RecipeRegistry::GlassBottleId, 3, 1, "glass_bottle" },
+    //   酿造台：1 燃烬棒（顶行居中）+ 底行 3 圆石 → 1 台（有序 3×3 仅工作台，机制等价 MC 1.0 brewing
+    //   stand 配方——blaze rod top + 3 cobblestone bottom row 同料）。燃烬棒 = t726 烈焰链（燃烬者死亡
+    //   掉落 / 燃烬棒烧制燃烬粉）→ 酿造台生存可达（含燃料燃烬粉同链）。多重集 {BlazeRod:1, Cobble:3}
+    //   唯一（矿车 5 铁 U / 音符盒 8 木板环均异）。
+    { int(RecipeRegistry::Table3x3), false,
+      { 0, RecipeRegistry::BlazeRodId, 0,
+        0, 0, 0,
+        int(BlockRegistry::Cobble), int(BlockRegistry::Cobble), int(BlockRegistry::Cobble) },
+      int(BlockRegistry::BrewingStand), 1, 1, "brewing_stand" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。
@@ -1298,6 +1321,15 @@ static_assert(RecipeRegistry::LapisId         == 0x236, "LapisId 须与 BlockReg
 // t891② 烈焰弹 id 钉位（工程惯例）：0x25C = 熟鱼 0x25B 之上首个空闲号（不重排既有材料段——存档权威）。
 //   Core 层 resourcepackmanager.cpp itemFilenameMap 与 QML MaterialIcon case 用同一字面量 → 三处互钉。
 static_assert(RecipeRegistry::FireChargeId    == 0x25C, "FireChargeId 须为材料段 0x25C（itemFilenameMap / MaterialIcon case 0x25C 同字面量互钉）");
+// t1097 酿造链 id 段位钉（工程惯例）：0x264..0x26A = 蕴辉瓶 0x263 之上**段尾连续追加**（不插中间 = 存档
+//   安全铁律）。Core 层 resourcepackmanager / QML MaterialIcon case 用同字面量互钉。
+static_assert(RecipeRegistry::GlassBottleId    == 0x264, "GlassBottleId 须为材料段 0x264（蕴辉瓶 0x263 之上段尾追加）");
+static_assert(RecipeRegistry::WaterBottleId    == 0x265, "WaterBottleId 须为材料段 0x265");
+static_assert(RecipeRegistry::AshWartId        == 0x266, "AshWartId 须为材料段 0x266");
+static_assert(RecipeRegistry::AwkwardPotionId  == 0x267, "AwkwardPotionId 须为材料段 0x267");
+static_assert(RecipeRegistry::SpeedPotionId    == 0x268, "SpeedPotionId 须为材料段 0x268");
+static_assert(RecipeRegistry::StrengthPotionId == 0x269, "StrengthPotionId 须为材料段 0x269");
+static_assert(RecipeRegistry::SugarId          == 0x26A, "SugarId 须为材料段 0x26A");
 // t788 染料跨层契约（同 Coal/Lapis 模式）：Core 层 blockregistry.cpp 四花的 dropId 用字面量（Core 不 include
 //   Game 头）：红花→0x259 / 黄花→0x24F / 蓝花→0x256 / 白花→0x24B；本处钉死 recipe.h 染料常量 == 字面量，
 //   任一处改动忘了同步另一处 → 编译失败（防「破花掉落断裂 / 染色链丢原料」）。另钉 DyeIdBase / DyeBlackId

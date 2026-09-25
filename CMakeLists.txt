@@ -305,6 +305,11 @@ qt_add_executable(voxelsandbox
     #   逐字对齐 DispenserStore 族（同族 per-block 方块内容器，不新开容器抽象）。纯存储类（无光 / 无 World 依赖）。
     src/Game/hopperstore.cpp
     src/Game/hopperstore.h
+    # t1097 酿造台内容存储 VM（Game 层）：按方块世界坐标键控的 5 槽（3 瓶 + 原料 + 燃料）+ 酿造进度 /
+    #   燃料计量；PlayerController::scanBrewingStands 机制面读写 + 破酿造台清孤儿掉内容 + Main.qml 装配 /
+    #   持久化。形状 / 口径对齐 HopperStore / FurnaceStore 族（同族 per-block 方块内容器）。纯存储类。
+    src/Game/brewingstore.cpp
+    src/Game/brewingstore.h
     # progress 玩家进度系统（Game 层 ViewModel）：统计（时间/挖放/路程/击杀/死亡/合成/拾取）+ 成就解锁。
     #   跨世界持久化（同 ChestStore/FurnaceStore，存 worldstore progress 表）。各事件源经 QML 桥接调埋点。
     src/Game/playerprogress.cpp
@@ -372,6 +377,7 @@ qt_add_qml_module(voxelsandbox
         src/ui/AnvilUI.qml
         src/ui/DispenserUI.qml
         src/ui/HopperUI.qml    # t1093 漏斗开盖界面（1×5 容器 + 主栏 + hotbar；DispenserUI 同门，读 HopperStore per-block 5 槽）
+        src/ui/BrewingUI.qml   # t1097 酿造界面（右键酿造台打开；5 槽 = 3 瓶 + 原料 + 燃料 + 进度条；读 BrewingStore，C++ tick 权威单向消费）
         src/ui/VitalIcon.qml
         src/ui/ToolIcon.qml
         src/ui/MaterialIcon.qml
@@ -679,6 +685,8 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_effect_poison.png          # t715 中毒效果图标（build_effect_icons.py 程序自绘原创；绿色药水瓶剪影）
         textures/icon_effect_slowness.png        # t715 缓慢效果图标（build_effect_icons.py 程序自绘原创；深灰蓝厚重靴剪影）
         textures/icon_effect_fire.png            # t715 着火效果图标（build_effect_icons.py 程序自绘原创；黄芯火苗剪影）
+        textures/icon_effect_speed.png           # t1097 迅捷效果图标（疾风双箭头；原创自绘）
+        textures/icon_effect_strength.png        # t1097 力量效果图标（握拳剪影；原创自绘）
         textures/icon_snow.png                   # t482 雪块立方体图标（build_cube_icons.py；各面=冷白冰晶噪点，同积雪层）
         textures/icon_abyss_gate.png             # t634/t644 暗渊门立方体图标（--from-pack：endframe_top+side 裁顶空白，与放置态一致）
         textures/icon_cobweb.png                 # t484 蜘蛛网 flat 2D 图标（build_cube_icons.py；透明底+灰白蛛丝放射网纹）
@@ -1084,6 +1092,9 @@ add_executable(redstone_matrix_test
     #   确定性 seed roll 信封] / 结构钉[0x263 段尾追加 + 名面/调色板 + 投掷入口/释放链源钉族 + QML 路由
     #   与 delegate 钉 + 零方块/零图集反探]。真链 pc rig（t891 同门），rig 世界零接触）。
     tools/matrix/section66_glimmer_bottle.cpp
+    # t1097 酿造台 + 药水探针段（4 腿 r2067a-d，filter 词 r2067；酿造 tick 直调 + 真链 pc rig——
+    #   brewingstore 已列，零新 include 面）。
+    tools/matrix/section67_brewing.cpp
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
     #   确定性等价承重墙[8 形态快照 worker ≡ 同步直调逐位恒等：顶点/索引/统计三面]/队列纪律
     #   [容量压小满载 kErrQueueFull 可见拒绝 + 拒绝项不入账 + 接受项恰一产出按 requestId 对账]/
@@ -1397,6 +1408,10 @@ add_executable(redstone_matrix_test
     src/Game/hopperstore.h
     src/Game/furnacestore.cpp
     src/Game/furnacestore.h
+    # t1097 酿造机制探针附加：BrewingStore（5 槽 + 酿造配方表/燃料计量静态查询 + 引擎键快照；
+    #   playercontroller.cpp scanBrewingStands 引用其符号——同 hopperstore/furnacestore 补列口径）。
+    src/Game/brewingstore.cpp
+    src/Game/brewingstore.h
     src/Game/loottable.cpp
     src/Game/raycast.cpp
     src/Entities/xporbmanager.cpp
