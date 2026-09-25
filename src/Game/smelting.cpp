@@ -46,6 +46,11 @@ constexpr SmeltEntry kSmelt[] = {
     //   教训漏一张 = 链断：只进本表不进 XP 表则烤得出鱼但不给经验，反之亦然）。钓鱼获生鱼 → 熔炉烤熟 →
     //   高价食物（+4 = 生鱼 +2 的两倍，本工程口径见 recipe.h CookedFishId 注释）。
     { RecipeRegistry::RawFishId,       RecipeRegistry::CookedFishId,     "cooked_fish" }, // 生鱼 → 熟鱼（t836 钓鱼链）
+    // t1098 石材熔炼链：圆石 → 石头（机制等价 MC 1.0 furnace smelting cobblestone → stone）。中继器
+    //   生存配方（recipe.cpp t1098 行）3 石原料的前置，同时兑现石按钮 / 石压力板 / 石砖族既有行注
+    //   「石头经熔炉烧圆石产出」——此前 kSmelt 漏行 = 注释声称的生存链实际断着（石头仅 worldgen
+    //   深石形态在册，挖掘掉圆石、无物品获取面）。
+    { int(BlockRegistry::Cobble),      int(BlockRegistry::Stone),        "stone" }, // 圆石 → 石头（t1098 石材链）
 };
 
 constexpr FuelEntry kFuel[] = {
@@ -103,6 +108,9 @@ constexpr SmeltXpEntry kSmeltXp[] = {
     { RecipeRegistry::DyeGreenId,   1, "cactus_green" }, // 绿色染料：烧仙人掌给 1 XP（t788）
     // t836 鱼肉获取链：熟鱼 1 XP（生鱼冶炼产物，同木炭 / 燃烬粉 / 绿染料量级 —— 非金属加工食物；两表同接）。
     { RecipeRegistry::CookedFishId, 1, "cooked_fish" }, // 熟鱼：烤生鱼给 1 XP（t836）
+    // t1098 石头 XP 行：圆石冶炼给 0 XP（同玻璃口径——建材无金属价值；MC 圆石冶炼 0.2 XP 取整落 0。
+    //   行本身与 kSmelt 成对补全[t788 教训两表同接]，smeltXpReward 对缺席行同返 0，行为零变化）。
+    { int(BlockRegistry::Stone),     0, "stone" }, // 石头：圆石冶炼 0 XP（建材，同玻璃口径）
 };
 } // namespace
 
