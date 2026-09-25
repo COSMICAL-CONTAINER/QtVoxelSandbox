@@ -561,4 +561,14 @@ private:
                               //   r2062d 结构钉[段位源钉 + 池行逐字段 + 合成行源钉 + maxStack 双层面 +
                               //   名/调色板/图标三呈现面 + 荚面降级登记注 + 零方块/零图集反探]。
                               //   纯表腿 + 源码钉，rig 世界零接触，接 section61）
+    void section63_hopper_degraded(); // t1093 漏斗降级四件批探针段（置尾先例沿用：r2063a UI 路由钉
+                              //   [hopperOpened 信号/发射行/QML open·close/面板实例化/store 注入/E·Esc·
+                              //   互斥收口五面源钉] + 5 槽 store 面[全元数据往返/revision/清条目]，
+                              //   r2063b 碰撞行为柱[三盒逐位 + 可站顶 0.625 三权威 + 朝向嘴位 + 谓词族 +
+                              //   射线 sub-AABB + 真 EntityManager tick 沙落「不完整方块分支」]，
+                              //   r2063c 爆炸掉内容[真链 detonateTntBlock → 内容实体落地带元数据 + 条目
+                              //   清空 + 本体毁 + 非漏斗格广播无害]，r2063d 结构钉[def 行逐字段 + Shape
+                              //   枚举值 11 + 单一权威盒逐位两态 + mesher 三路由源钉 + 爆炸双发射点源钉 +
+                              //   比较器反探 + fixed 零变化墙[收集/输出机制回归柱]]。各腿自建 fresh 48×48×96
+                              //   s82 小世界族，rig 世界零接触，接 section62）
 };
