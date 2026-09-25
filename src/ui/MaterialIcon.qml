@@ -1957,6 +1957,35 @@ Item {
             const drawDiscEcho  = () => drawDisc("#3f6f8f", "#7fb0c8", "#26485f")
             const drawDiscNight = () => drawDisc("#5a4f8f", "#9a8fc8", "#382f5f")
 
+            // t1092 可可豆（0x262）：地牢战利品 + 棕染料 1:1 转换原料。MC 可可豆物品图标 = 数粒棕豆
+            //   斜置散布；本工程原创豆形 = 圆角豆体（深棕壳 + 主棕体 + 左上受光高光 + 中脊暗缝——豆形
+            //   识别面）三粒三角散布（左上横置 / 右侧竖置 / 下方横置）。纯原创自绘（§9a）；pack 无映射
+            //   （mcMaterialId 越表界 -1 → ResourcePackManager 无映射回退本自绘）。
+            const drawCocoaBean = () => {
+                const shell = "#4a2812", body = "#7a4a26", lite = "#a06a3c", ridge = "#5c3418"
+                // 豆 1（左上，横置：rows 5..8 / cols 3..9）
+                R(4, 5, 5, 1, body)                          // 豆体上缘
+                R(3, 6, 7, 2, body)                          // 豆体主段
+                R(4, 8, 5, 1, body)                          // 豆体下缘
+                R(3, 6, 1, 2, shell) ; R(9, 6, 1, 2, shell)  // 两端壳
+                R(4, 5, 3, 1, lite) ; R(3, 6, 1, 1, lite)    // 左上受光高光
+                R(4, 7, 5, 1, ridge)                         // 中脊暗缝
+                // 豆 2（右侧，竖置：rows 10..13 / cols 13..18）
+                R(14, 10, 4, 1, body)                        // 豆体上缘
+                R(13, 11, 6, 2, body)                        // 豆体主段
+                R(14, 13, 4, 1, body)                        // 豆体下缘
+                R(13, 11, 1, 2, shell) ; R(18, 11, 1, 2, shell)
+                R(14, 10, 2, 1, lite) ; R(13, 11, 1, 1, lite)
+                R(15, 11, 1, 2, ridge)                       // 竖向中脊
+                // 豆 3（下方，横置：rows 15..18 / cols 4..10）
+                R(5, 15, 5, 1, body)
+                R(4, 16, 7, 2, body)
+                R(5, 18, 5, 1, body)
+                R(4, 16, 1, 2, shell) ; R(10, 16, 1, 2, shell)
+                R(5, 15, 3, 1, lite) ; R(4, 16, 1, 1, lite)
+                R(5, 17, 5, 1, ridge)
+            }
+
             switch (root.materialId) {
             case 0x200: drawStick();        break
             case 0x201: drawCoal();         break
@@ -2041,6 +2070,7 @@ Item {
             case 0x25F: drawDiscAmber(); break // 音乐盘（琥珀旋律）：唱片机曲目 0；地牢战利品
             case 0x260: drawDiscEcho();  break // 音乐盘（深巷回声）：唱片机曲目 1；矿井战利品
             case 0x261: drawDiscNight(); break // 音乐盘（夜航曲）：唱片机曲目 2；战利品/创造
+            case 0x262: drawCocoaBean(); break // t1092 可可豆（地牢战利品；1:1 转换棕染料——染料链最后一环）
             // t788 染料 16 色（0x24B..0x25A，白→黑羊毛色序；三色参数取 build_wool.py 同源色板）
             case 0x24B: drawDye("#f0f0ee", "#f9f9f8", "#959594"); break // 白色染料（白花破坏掉落；染白羊毛/白床）
             case 0x24C: drawDye("#de781e", "#ee9f69", "#8a4a13"); break // 橙色染料

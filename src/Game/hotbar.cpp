@@ -686,7 +686,13 @@ QVariantList Hotbar::creativeMaterials() const
         //   彩色盘面（drawDisc 色带区分，§9 原创）。三盘连续同列（同蛋区连续性口径）。
         int(RecipeRegistry::MusicDiscAmberId), // 音乐盘（琥珀旋律）：唱片机曲目 0；地牢战利品
         int(RecipeRegistry::MusicDiscEchoId),  // 音乐盘（深巷回声）：唱片机曲目 1；矿井战利品
-        int(RecipeRegistry::MusicDiscNightId)  // 音乐盘（夜航曲）：唱片机曲目 2；战利品/创造
+        int(RecipeRegistry::MusicDiscNightId), // 音乐盘（夜航曲）：唱片机曲目 2；战利品/创造
+        // t1092 可可豆（材料段 0x262；机制等价 MC 1.0 cocoa bean）：地牢战利品（1.0 基准内唯一生存源，
+        //   recipe.h 纪元裁定注）+ 棕染料 1:1 转换原料（染料链「最后一环」）。创造调色板补全便于测试
+        //   转换 / 染色链（战利品权重 10 稀有位，创造直取是免肝测试面）。可堆叠 64（材料段默认）；
+        //   非方块 → 右键不放置。MaterialIcon 自绘可可豆（drawCocoaBean，§9 原创）。排盘区尾（段尾
+        //   追加不插中间——三盘连续同列先例 r2054b 不受扰动）。
+        int(RecipeRegistry::CocoaBeanId)       // 可可豆：地牢战利品；1:1 转换棕色染料（t1092）
     };
 }
 
@@ -1218,6 +1224,9 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::MusicDiscAmberId) return QStringLiteral("音乐盘（琥珀旋律）"); // 唱片机曲目 0；地牢战利品
         if (blockId == RecipeRegistry::MusicDiscEchoId)  return QStringLiteral("音乐盘（深巷回声）"); // 唱片机曲目 1；矿井战利品
         if (blockId == RecipeRegistry::MusicDiscNightId) return QStringLiteral("音乐盘（夜航曲）");   // 唱片机曲目 2；战利品/创造
+        // t1092 可可豆（材料段 0x262；机制等价 MC 1.0 cocoa bean）：地牢战利品；1:1 转换棕染料原料。
+        //   零 MC 专名（§9）。
+        if (blockId == RecipeRegistry::CocoaBeanId) return QStringLiteral("可可豆"); // 地牢战利品；棕染料原料（t1092）
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落；打火石配方原料。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::FlintId) return QStringLiteral("燧石"); // 挖沙砾概率掉落；打火石配方原料
         // t891② 烈焰弹（材料段 0x25C；机制等价 MC fire charge）：燃烬粉+煤/炭+火药合成 3 发；右键发射火球

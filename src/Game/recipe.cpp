@@ -1223,7 +1223,8 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
     //   灰=黑+白（ink sac + bone meal）/ 浅灰=灰+白 / 青=绿+蓝 / 紫=红+蓝。**t1078 交付动机（染料获取
     //   链补全）**：t788 起 16 色染料仅 5 色有生存源（四花 + 仙人掌烧绿），其余 9 色只可创造取用 → 生存
     //   「花→染料→羊毛」链断在二级色；本批后 15/16 色生存可达（棕色染料机制源 = 可可豆，本工程无可可豆
-    //   → 维持仅创造，候选池登记）。**选型（落选面）**：MC 三料配方（墨囊+2 白→3 浅灰 / 蓝+2 红+白→4
+    //   → 维持仅创造，候选池登记。**t1092 时点注**：可可豆（CocoaBeanId 0x262）地牢战利品入池 + 1:1
+    //   转换行（本表末段）→ 16/16 全色生存可达，上句为 t1078 交付时点快照）。**选型（落选面）**：MC 三料配方（墨囊+2 白→3 浅灰 / 蓝+2 红+白→4
     //   品红）不取——只收「2→2」一种形态，链闭合已足且少一类匹配歧义；骨粉不充当白色染料入混色（本工程
     //   骨粉 BonemealId 0x232 是催熟道具、白染料 DyeWhiteId 0x24B 才入染料段，两 id 分工钉死，边界由
     //   r2051c 反探）。多重集 {DyeX, DyeY} 各条唯一（染料 id 互异）→ 无序不与既有配方冲突（{Dye, Wool} /
@@ -1263,6 +1264,15 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
     { int(RecipeRegistry::Inventory2x2), true,
       { RecipeRegistry::InkSacId, 0, 0, 0, 0, 0, 0, 0, 0 },
       RecipeRegistry::DyeBlackId,        1, 1, "dye_black_from_ink" },
+    // t1092 可可豆 → 棕色染料（1 条 shapeless 2×2 单原料 1:1 转换）。机制等价 MC 1.0「可可豆即棕染料」
+    //   （dye id 351 damage 3 同物异名）；本工程可可豆（CocoaBeanId 0x262，地牢战利品——1.0 基准内唯一
+    //   生存源，recipe.h 纪元裁定注）与棕染料（DyeBrownId 0x257）是分立 id → 以 1:1 转换桥接（非 1:多，
+    //   防物品通胀——MC 语义两者本同物；t1078 墨囊同门）。t1078 登记的「棕色机制源缺失 → 15/16」自此
+    //   收口（16/16 全色生存可达，染料链「最后一环」兑现）。单原料 shapeless 在 2×2 / 3×3 任意格命中
+    //   （同墨囊转黑 / t802 燃烬棒分解同构）；多重集 {CocoaBeanId:1} 唯一。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::CocoaBeanId, 0, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::DyeBrownId,        1, 1, "dye_brown_from_cocoa" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。
