@@ -430,7 +430,10 @@ void MatrixRun::section53_hopper()
         //     189→191——唱片机两瓦片追加不插中间）。钉的语义 =「漏斗行契约逐位不变 + 尾部追加
         //     不重排」，非「漏斗恒最末」→ 钉值随注册表尾部增长同步前移（t1077 同门先例）。
         const auto &hd = BR::def(BR::Hopper);
-        const bool d1 = hd.id == 145 && hd.solid && hd.shape == BR::ShapeFull
+        //     t1093 lawful 修订：漏斗异形翻案（solid true→false / ShapeFull→ShapeHopper 三盒，
+        //     hopperShapeBoxes 单一权威）——钉的语义 =「漏斗行契约逐位不变」，非「恒整立方降级」
+        //     （t1083 Count 前移同门先例：钉值随本方块属性翻案同步）。
+        const bool d1 = hd.id == 145 && !hd.solid && hd.shape == BR::ShapeHopper
             && hd.hardness == 3.0f && hd.toolType == int(BR::Pickaxe)
             && hd.requiresTool && hd.minToolTier == 1
             && hd.dropId == int(BR::Hopper) && hd.dropCount == 1 && hd.maxStack == 64
@@ -488,8 +491,10 @@ void MatrixRun::section53_hopper()
             SrcPin("id row", "Hopper           = 145", 1),
             SrcPin("down flag", "HopperFacingDownFlag = 0x04", 1),
             SrcPin("out delta", "static void hopperOutDelta", 1)});
+        //     t1093 lawful 修订：漏斗 tileFor 分支随 PASS2→PASS1 迁移退役（tileFor 不再触达漏斗），
+        //     钉改指 PASS 1 异形收纳行（同语义「mesher 漏斗贴图路由面」新落点）。
         const QStringList missMsh = pinSet(srcRoot + QStringLiteral("/World/meshbuilder.cpp"), {
-            SrcPin("tileFor branch", "if (block == BlockRegistry::Hopper)", 1)});
+            SrcPin("partial route", "|| b == BlockRegistry::Hopper", 1)});
         const QStringList missHb = pinSet(srcRoot + QStringLiteral("/Game/hotbar.cpp"), {
             SrcPin("creative row", "int(BlockRegistry::Hopper),", 1)});
         const QStringList missRec = pinSet(srcRoot + QStringLiteral("/Game/recipe.cpp"), {
@@ -507,8 +512,10 @@ void MatrixRun::section53_hopper()
         ok = ok && allMiss.isEmpty();
         if (!allMiss.isEmpty()) diag += QStringLiteral("[pins %1] ").arg(allMiss.join(u','));
 
-        // (5) QML 装配钉 + QML 零触碰反探：Main.qml 四接线（实例化 / 注入 / 存 / 读）在旁；全 QML 树无
-        //     HopperUI 词元（无开盖界面——本单 UI 降级，禁新开 QML 玩法路径）。
+        // (5) QML 装配钉 + UI 面反探：Main.qml 四接线（实例化 / 注入 / 存 / 读）在旁。
+        //     t1093 lawful 修订：开盖 UI 交付（t1080 登记的 UI 候选授权面兑现）——反探从
+        //     「全 QML 树无 HopperUI 文件（UI 降级）」改为「恰一份 HopperUI.qml（授权面单文件，
+        //     禁第二份 UI 复制品）」。
         const QString mainQml = srcRoot + QStringLiteral("/ui/Main.qml");
         QFile mf(mainQml);
         const QString mainTxt = mf.open(QIODevice::ReadOnly) ? QString::fromUtf8(mf.readAll()) : QString();
@@ -523,8 +530,8 @@ void MatrixRun::section53_hopper()
         QDirIterator it(srcRoot + QStringLiteral("/ui"), QStringList() << QStringLiteral("HopperUI*"),
             QDir::Files, QDirIterator::Subdirectories);
         while (it.hasNext()) { it.next(); ++qmlUiFiles; } // 反探口径 = 无新 UI **文件**（注释词元不误伤）
-        ok = ok && qmlUiFiles == 0;
-        if (qmlUiFiles != 0) diag += QStringLiteral("[d5 ui exists x%1] ").arg(qmlUiFiles);
+        ok = ok && qmlUiFiles == 1;
+        if (qmlUiFiles != 1) diag += QStringLiteral("[d5 ui exists x%1] ").arg(qmlUiFiles);
 
         // (6) hoppers 表真 SQLite 往返（t1016 临时库先例）：allHoppers 产物 -> saveAll 末参 ->
         //     关库重开 loadHoppers() -> {x,y,z,slots:[{id,count}x5]} 逐位；旧 caller 缺省参（不传
