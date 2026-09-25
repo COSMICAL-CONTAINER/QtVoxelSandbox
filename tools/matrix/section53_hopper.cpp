@@ -440,8 +440,8 @@ void MatrixRun::section53_hopper()
             && hd.topTile == 186 && hd.bottomTile == 187 && hd.sideTile == 187 && hd.frontTile == 188
             && QLatin1String(hd.name) == QLatin1String("hopper")
             && QLatin1String(hd.display) == QLatin1String("漏斗")
-            && int(BR::Jukebox) == 146 && int(BR::Count) == 148 && BR::mcBlockId(quint8(BR::Repeater)) == 93 // t1095 lawful 前移：Count 147→148（Repeater=147 尾部追加）；新增 mcBlockId(Repeater)==93 行为级钉
-            && BR::AtlasTileCount == 193; // t1095 lawful 前移：191→193（中继器 tile 191..192 追加）
+            && int(BR::Jukebox) == 146 && int(BR::Count) == 149 && BR::mcBlockId(quint8(BR::Repeater)) == 93 // t1097 lawful 前移：Count 148→149（BrewingStand=148 尾部追加；t1095 曾 147→148）；mcBlockId(Repeater)==93 行为级钉不变
+            && BR::AtlasTileCount == 195; // t1097 lawful 前移：193→195（酿造台 tile 193..194 追加；t1095 曾 191→193）
         ok = ok && d1;
         if (!d1) diag += QStringLiteral("[d1 id=%2 cnt=%3]")
                             .arg(hd.id).arg(int(BR::Count));

@@ -595,4 +595,14 @@ private:
                               //   例防御]，r2066d 结构钉[id 段位尾追加 + 名面/调色板 + 投掷入口/释放链源钉
                               //   族 + QML 路由与 delegate 钉 + 零方块/零图集反探]。fixed 48×48×96 s82 +
                               //   真链 pc rig（t891 同门），rig 世界零接触，接 section65）
+    void section67_brewing(); // t1097 酿造台 + 药水系统探针段（置尾先例沿用：r2067a 酿造机制承重墙
+                              //   [scanBrewingStands 直编：20s 一轮 + 燃烬粉 20 次计量 + 三瓶同酿 + 瓶栈
+                              //   数量保留 + 无原料进度复位 + 亮标翻转]，r2067b 效果链 + 配方面承重墙
+                              //   [brewResult/fuelOpsFor 静态表 + 三合成配方命中 + applyStatusEffect 挂
+                              //   EffectSpeed/EffectStrength 快照与到期]，r2067c 装水 + 饮用链行为柱[真 pc
+                              //   rig：瓶装水零世界写入 + 水瓶/药水长按饮用 + 空瓶返还 + 生存耗 1 创造不
+                              //   耗]，r2067d 结构钉[0x264..0x26A 段尾 + 方块 148/Count 149/kMcBlockId 117/
+                              //   Shape 13/图集 195/枚举尾追加/常量族/配方行/名面调色板/全链源钉族/锚注/
+                              //   相邻族零污染]。fixed 48×48×96 s82 + 真链 pc rig（t891 同门），rig 世界
+                              //   零接触，接 section66）
 };
