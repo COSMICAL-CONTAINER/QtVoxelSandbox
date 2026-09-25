@@ -1070,6 +1070,7 @@ add_executable(redstone_matrix_test
     #   已列下方探针附加）。
     tools/matrix/section62_cocoa_bean_dye.cpp
     tools/matrix/section63_hopper_degraded.cpp
+    tools/matrix/section64_write_gate_residual2.cpp
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
     #   确定性等价承重墙[8 形态快照 worker ≡ 同步直调逐位恒等：顶点/索引/统计三面]/队列纪律
     #   [容量压小满载 kErrQueueFull 可见拒绝 + 拒绝项不入账 + 接受项恰一产出按 requestId 对账]/
