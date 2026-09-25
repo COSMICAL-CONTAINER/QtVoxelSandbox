@@ -14,16 +14,16 @@
 ```yaml
 project: QtMinecraft
 state: IN_PROGRESS
-current_task: **t1093 IN_PROGRESS（§14 常设授权候选池——漏斗降级四件批）**：开盖 UI[ChestUI 复用]/异形碰撞体/比较器读数[预期子降级——承载面=比较器方块 1.5+ 无]/爆炸破坏掉内容语义；漏斗本体 1.5+ 已登记混入面继承处理不再逐件裁纪元；逐件核实可降级。串行 voxel-dev，filter 词 r2063；完成 → 候选池下一位。
+current_task: **t1094 IN_PROGRESS（§14 常设授权候选池——写门家族残面批）**：tickRedstone inBounds[Phase A/B] + goldenRailChainStep 盒 + recheckAttachments 子钩子柱坍盒门 + mob 火/岩浆接触足印扫描盒；逐组核实先行可降级（三型选型按 t1089/t1090/t1091 先例对号）。串行 voxel-dev，filter 词 r2064；完成 → 候选池下一位。
 current_task_status: IN_PROGRESS
-last_completed_task: t1092 棕色染料生存源（2026-09-25 闭环；矩阵 782→786——纪元裁定双面：可可豆地牢战利品[Beta 1.2 起]1.0 基准内交付[池行 1.0 原值字面 10/1..2，权重和 143→153]+丛林可可荚[MC 1.2]降级留池；交付 = CocoaBeanId 0x262 + 1:1 转换行[墨囊同门] + **16/16 全色生存可达收口**[t1078「最后一环」兑现，r2062c 闭包钉]；t1057 中文 needle 教训二现不重复立册。详录 = dev-plan t1092 关单条目）
-last_completed_task_prev: t1091 写门家族第三批残项（2026-09-25 闭环，矩阵 775→782 九员零降级+packGrowthCell 复核翻案+流体键碰撞修复；详录 = dev-plan t1091 关单条目）
-last_completed_task_commits: fix(t1092)（e4eca47：CocoaBeanId 0x262+池行+1:1 转换行+名/调色板/图标，6 文件零 Core）+ test(t1092)（dd4c039：section62 r2062a-d 四腿 + helpers/CMake 入册）
-last_verified_commit: test(t1092)（矩阵 **786 PASS / 0 FAIL ×2**：matrix_t1092_{pos,final}.log EXIT=0；新基线腿集合 md5[规范配方 grep -a -oE "^PASS \| [a-z0-9]+ " | sort | md5sum]三日志全等 77a122b1a4d1fff776c6623732c40c14；NEG-1 恰红 {r2062a,c,d} / NEG-2 恰红 {r2062b,c,d} 双还原 4/4 绿；冒烟 tail20 回填 logs/voxelsandbox_t1092_tail20.log[145,448 B 横幅+root objects 齐]；主控独立脱离式复跑 786/0 同 md5 三方恒等 matrix_orch_t1092_verify.log）
+last_completed_task: t1093 漏斗降级四件批（2026-09-25 闭环；矩阵 786→790——**三交付一子降级**：①开盖 UI 真交付[HopperUI.qml 1×5+互斥收口，t1080 UI 候选授权面兑现]②异形碰撞真交付[ShapeHopper 三盒几何单一权威五处同源+谓词族自动跟随+沙碎被收=机制等价 MC]③比较器读数子降级[承载面=比较器方块 1.5+ 无，零代码零新号]④爆炸掉内容真交付[翻案 t1080「内容不退回」——Entities 层语义事件 explosionVoxelDestroyed 双发射点 + Game 层排空 HopperStore 元数据全量]。详录 = dev-plan t1093 关单条目）
+last_completed_task_prev: t1092 棕色染料生存源（2026-09-25 闭环，矩阵 782→786 16/16 全色生存可达收口；详录 = dev-plan t1092 关单条目）
+last_completed_task_commits: fix(t1093)（1998cf5：ShapeHopper 三盒几何权威+UI 信号路由+爆炸语义事件，Core/World/Entities/Game/QML 七文件）+ test(t1093)（06f471f：section63 r2063a-d 四腿 + r2052d 三处 lawful 钉面修订）
+last_verified_commit: test(t1093)（矩阵 **790 PASS / 0 FAIL ×2**：matrix_t1093_{pos,final}.log EXIT=0；新基线腿集合 md5[规范配方 grep -a -oE "^PASS \| [a-z0-9]+ " | sort | md5sum]三日志全等 4a48413b09916efa4056df2f8af933ad；NEG-1 恰红 {r2063b} / NEG-2 恰红 {r2063c} 双还原 4/4 绿；冒烟 tail20 回填 logs/voxelsandbox_t1093_tail20.log[129,797 B 横幅+root objects 齐]；主控独立脱离式复跑 790/0 同 md5 三方恒等 matrix_orch_t1093_verify.log）
 last_governance_review: 2026-09-25（audit #19 GREEN——窗口 429bf73..6d9fa83 11 提交/t1084-t1088 五闭环证据链全实核[三代码单三方 md5 全等 29d2fbe4/3b232c04/3d672867 + NEG 六份恰红面+六份还原逐日志吻合 + 相邻族十二份 reg 零污染 + 两裁定单零代码核实（grindstone 全仓 0 命中/observer 唯一命中 miniaudio 第三方头）]；账本三方一致/腿数链 750→762 无断；11 提交零署名；1 LOW 发现 F1[t1088 中断链过程注缺档——dev-plan 已补录同体例过程注]批内清偿 + 3 INFO 无需动作；详见 governance-audit-2026-09-25.md）
 governance_review_due: false
 completed_tasks_since_governance_review: 0（审计 #19 GREEN 于 2026-09-25）
-next_task: **t1093 漏斗降级四件批（候选池，在飞）→ 之后顺延（写门残面批[tickRedstone inBounds 等]/红石家族纪元标注审计/removeDatabase 卫生单/性能类…）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1092 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
+next_task: **t1094 写门残面批（候选池，在飞）→ 之后顺延（红石家族纪元标注审计/removeDatabase 卫生单/性能类…；比较器本体已列候选）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1093 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -50,6 +50,7 @@ needs_human: false
 
 ## Recovery Point
 
+- 最近闭环：**t1093 漏斗降级四件批**（2026-09-25，fix(t1093) 1998cf5 + test(t1093) 06f471f + 本 docs）：矩阵 786→790。**三交付一子降级**：①开盖 UI 真交付（HopperUI.qml 1×5 容器+主栏+hotbar，9 处面板互斥收口，t1080 UI 候选授权面兑现）②异形碰撞真交付（ShapeHopper 三盒：顶箅可站 y[8,10]/16+颈+嘴随朝向；hopperShapeBoxes 单一权威五处同源；谓词族自动跟随——沙碎被漏斗收集域收走=机制等价 MC）③比较器读数子降级（承载面比较器方块 1.5+ 无——纪元+依赖面双重理由，零代码零新号）④爆炸掉内容真交付（翻案 t1080「内容不退回」：Entities 层语义事件 explosionVoxelDestroyed 双发射点+Game 层排空 HopperStore 元数据全量+clearHopper 防重放复活）。腿 r2063a-d；NEG-1 {b}/NEG-2 {c} 恰红；全矩阵 pos/final 790/0 md5 恒等 4a48413b + 主控复跑三方恒等。**待实机确认**：开盖界面与槽操作/异形观感与透光/顶箅站立/沙碎被收铁砧还原/爆炸内容散落/朝向嘴盒。**下一任务 = t1094 写门残面批**。
 - 最近闭环：**t1092 棕色染料生存源**（2026-09-25，fix(t1092) e4eca47 + test(t1092) dd4c039 + 本 docs）：矩阵 782→786。**纪元裁定双面**：可可豆地牢战利品[Beta 1.2 起]1.0 基准内交付（池行 1.0 原值字面 10/1..2，权重和 143→153，权重基数差诚实注）；丛林可可荚[MC 1.2]降级留池（陶瓦/染色玻璃同款先例）。交付 = CocoaBeanId 0x262 段尾追加 + 1:1 转换行（墨囊同门，防物品通胀）+ 名/调色板/drawCocoaBean 自绘。**16/16 全色生存可达收口**（t1078「最后一环」兑现，r2062c 闭包钉：基源+池门控→不动点 16/16）。腿 r2062a-d；NEG-1 {a,c,d}/NEG-2 {b,c,d} 恰红；全矩阵 pos/final 786/0 md5 恒等 77a122b1 + 主控复跑三方恒等。t1057 中文 needle 教训二现（不重复立册）。**待实机确认**：调色板图标观感/地牢箱开出/合成链/堆叠。**下一任务 = t1093 漏斗降级四件批**。
 - 最近闭环：**t1091 写门家族第三批残项**（2026-09-25，fix(t1091) c6aee9a + test(t1091) 1fb726b + 本 docs）：矩阵 775→782。**九员全确认零降级**：①实体 tick 同形列跳过三员（primed TNT 冻空引爆/Mob 边走边飘/Item 冻结在生成高度——定位勘误：第三员实为 EntityStore::tick）②packGrowthCell **复核翻案 t1089 留池口径为真缺口**（population 增量面灌真实负坐标→幻影回读：作物误剔/流体漏扫/燃烧键每窗整键摘除）+ 回读链合并清偿（tickFire 四门+火邻域门+流体十门+**流体体素线性键负坐标碰撞修复**[keyOf(-7,81,-8)==keyOf(41,80,39)→packGrowthCell 保符号打包，键单 tick 生灭故核心域逐位等价 r2056 实证]）③五处辅助门（雨露判/点燃/燃烧查询/附着复检/铁轨重连）。腿 r2061a-g；NEG-1 {a,b,g}/NEG-2 {c,d,e,g} 恰红；全矩阵 pos/final 782/0 md5 恒等 38c77b86 + 主控复跑三方恒等。**写门家族主线三批收官**；残面（tickRedstone inBounds 等）留池。**待实机确认**：掉落物落地/外环 TNT/mob 不飘/雨天灭火/铺轨重连/水体流动/核心域零变化。**下一任务 = t1092 棕色染料生存源**。
 - 最近闭环：**t1090 写门家族后续批**（2026-09-25，fix(t1090) 6802b62 + test(t1090) e22978a + 本 docs）：矩阵 769→775。**四员全确认零降级**：①destroySphereSilent 扫描门+回灌盒（外环弹坑全漏扫/回灌盒负侧倒置退化 no-op）②decayLeavesAround+tickLeafDecay+packLeafCell quint16 合并清偿（新键型 x:26|y:12|z:26 保符号往返；与 t1089 packGrowthCell 留池口径的辨析留痕——键在成员核心路径直喂栅格 vs 仅索引自洽）③重力级联邻域门四站（外环沙柱悬空）④FallingBlock tick 负坐标列跳过合并清偿（同链不同址——只开半边=负侧回归换形，论证留痕）。**扫描门选型留痕 = 扫描域无界化**（读/写原语统一物化门自带过滤，逐格物化查=重复权威零增益）；refloodBox 退化盒防御原样（f 腿钉在场）。腿 r2060a-f；NEG-1 {a,f}/NEG-2 {c,e,f} 恰红；全矩阵 pos/final 775/0 md5 恒等 55e63ca6 + 主控复跑三方恒等。留池转 t1091：primed TNT/Mob/Item 同形跳过 + packGrowthCell + 五处辅助门。**待实机确认**：出核爆炸弹坑/树叶渐退/沙柱坍落着地/核心域零观感变化。**下一任务 = t1091 写门家族第三批残项**。
