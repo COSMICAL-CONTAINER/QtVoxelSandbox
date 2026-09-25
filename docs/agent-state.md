@@ -20,9 +20,9 @@ last_completed_task: t1098 残项小批合集（2026-09-26 闭环；矩阵 810�
 last_completed_task_prev: t1097 酿造台+药水系统第一轮（2026-09-26 闭环，矩阵 806→810；含验收修正件 F1 燃料计量 parity bug 同链修复；详录 = dev-plan t1097 关单条目）
 last_completed_task_commits: fix(t1098)（ef140da：中继器配方行+smelt/kSmeltXp 行+chunkstore 十处作用域收口+Repeater 行注同步，4 文件 +201/−154）+ test(t1098)（c3f0556：r2068a section65 + r2068b section28 捕获窗，+190）
 last_verified_commit: test(t1098)（矩阵 **812 PASS / 0 FAIL ×2**：matrix_t1098_{pos,final}.log；腿集合 md5[规范配方]三方恒等 6aa9a59584bc10c76a0b63a4d4c7c5bb；NEG-1 恰红 {r2068a} / NEG-2 恰红 {r2068b}[nw=0→w=1+行为柱恒 1 零行为变化自证] 双还原；冒烟 tail20 logs/voxelsandbox_t1098_tail20.log[横幅+root objects 实文]；pos/final/冒烟三日志 "still in use" 全 0；主控独立脱离式复跑 812/0 同 md5 三方恒等 matrix_orch_t1098_verify.log）
-last_governance_review: 2026-09-25（audit #20 GREEN——窗口 da82e54..9079f74 15 提交/t1089-t1093 五闭环证据链全实核[五单三方 md5 全等 f0c7de88/55e63ca6/38c77b86/77a122b1/4a48413b + NEG 十份恰红面十份还原逐日志吻合 + t1089 md5 配方勘误留痕核实 + 留池台账问询实答（辅助门五处实为 t1091 全清）]；账本三方一致/腿数链 762→790 无断；15 提交零署名；**F1[MEDIUM] 治理计数字段五闭环失更**[counter 恒 0/due 恒 false/Workspace Guard HEAD 恒 t1088——本批回填并恢复按单递增惯例，若 #21 窗口仍失更降 YELLOW]清偿 + F2[LOW 候选池重复条目]清偿 + 2 INFO 无需动作；详见 governance-audit-2026-09-25-b.md）
-governance_review_due: true（5/5 到期——审计 #21 已派，只读独立 agent 参照 governance-audit-2026-09-25-b.md 规程，窗口 9079f74..t1098 关单 docs 提交）
-completed_tasks_since_governance_review: 5（t1094 + t1095 + t1096 + t1097 + t1098 闭环；审计 #20 GREEN 于 2026-09-25——**5/5 触发审计 #21，已派在飞**）
+last_governance_review: 2026-09-26（audit #21 GREEN——窗口 9079f74..7353eb8 18 提交/t1094-t1098 五闭环证据链全实核[五单 md5 三方恒等 7416b136/a2f3eb64/9b493da5/d2360c45/6aa9a595 + NEG 十份恰红十份还原吻合 + t1097 md5 不变性机理独立复现 + 控制块全字段纪律五单逐单递增守住=#20 YELLOW 升级条件未触发]；**F1[MEDIUM] t1096 两笔提交带 Co-Authored-By 尾注**[9774062/e33d257——规则此前仅在用户记忆层与派工简报层，t1096 简报未复述、agent 沿 harness 默认；清偿=不改写历史+Workspace Guard 补明文+派工简报恒带] + F2-F4 INFO 落档；详见 governance-audit-2026-09-26.md）
+governance_review_due: false（审计 #21 GREEN 落档清零）
+completed_tasks_since_governance_review: 0（审计 #21 GREEN 于 2026-09-26——下一审计窗口 = t1099 起 5 闭环 → 审计 #22）
 next_task: **t1099 酿造效果链扩展（在飞，与审计 #21 并行——审计只读窗口闭于 t1098 关单 docs）→ 之后顺延：红石延长/喷溅型药水/粒子音效 + 压力板纪元标注更正 + 激活铁轨台账行 + 用户侧并行 P5 实机清单/§30.6/§31/择机 push（本地领先远端 70+ 笔）**
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
@@ -33,7 +33,7 @@ needs_human: false
 
 ## Workspace Guard
 
-- HEAD = t1098 残项小批合集代码终态（fix(t1098) ef140da + test(t1098) c3f0556 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 812 腿满绿（67 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（current_task/last_completed_*/counter 按单递增/Workspace Guard HEAD 行同步终态——审计 #20 F1 教训恢复惯例；t1097/t1098 两单全过）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（回填件须含启动横幅与 root objects 实文，主控验收时核对）。
+- HEAD = t1098 残项小批合集代码终态（fix(t1098) ef140da + test(t1098) c3f0556 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 812 腿满绿（67 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（current_task/last_completed_*/counter 按单递增/Workspace Guard HEAD 行同步终态——审计 #20 F1 教训恢复惯例；t1097/t1098 两单全过）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（回填件须含启动横幅与 root objects 实文，主控验收时核对）。**git 提交禁任何 AI 署名尾注**（Co-Authored-By / Generated with 等——审计 #21 F1 教训：规则此前仅在用户记忆层，t1096 两笔 9774062/e33d257 因派工简报未复述而沿 harness 默认带注；本行入档后每单派工简报仍须恒带此句，已带注历史不改写[破窗定义代价超收益]）。
 - 纪律①-⑨全在案；**大 TU 编译一律 -j 1**（09-13 蓝屏教训；分段后单段增量 -j 4 实测安全）。**矩阵测试为 tools/matrix/ 分层结构**：改探针只重编对应段 TU（秒级）+ `--filter <substring>` 只跑本任务腿；新腿落对应段文件，新段置尾 runAll 末执行、须 ≤500KB；section11 起「自建 fresh 小世界」先例（48×48×96 seed 82 + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)）。
 - **R20.06 起值类型纪律**：src/Core/ 新值类型一律 result.h QObjectFree 编译期钉 + 头内 static_assert；命令/事件队列满载拒绝与快照队列覆盖最老是两域容量策略分化，勿「统一」。
 - **R20.07 起编排壳纪律**：GameSession 只做编排（命令 → 整 tick 边界 → World::setBlock 权威），禁复制游戏逻辑；**QML 现行玩法路径零变化是 R20 主线不变量**（Main.qml 含 "GameSession" 即违零迁移阴性钉 r2007b）。
