@@ -6897,7 +6897,9 @@ void PlayerController::scanHoppers(float dt)
 // 机制等价 MC 1.0 酿造循环，每帧推进（dt 累积；连续进度型，无冷却相位）：
 //   (1) 原料空 / 无合格瓶位 → 进度清零静默（MC：无原料或瓶不可酿 → 酿造箭复位）。
 //   (2) 有合格瓶位且 fuelOps<=0 → 补燃 1 燃烬粉（kPowderFuelOps=20，MC 原值）；燃料空 → 不推进。
-//   (3) 推进进度 += dt；满 kBrewSecs(20s) → 消耗 1 原料 + 全部合格瓶位原位转换 + 进度归零。
+//   (3) 推进进度 += dt；满 kBrewSecs(20s) → 消耗 1 原料 + 全部合格瓶位原位转换 + 燃料计量 -1
+//       （MC 1.0 原值口径：1 燃烬粉=恰好 20 次酿造操作，一次操作=一批转换全部合格瓶位、与瓶数无关；
+//       计量归零即停追赶——燃料空暂停语义，进度保留、下一 tick 复判由 (2) 补燃接手）。
 //   (4) 亮标跨 0 输入 → 写 state bit0（setBlock 同 id 不同 state：仅 worldChanged 重建——setFurnaceLit 同门）。
 //   格上已非酿造台 → 跳过（孤儿条目 inert，漏斗族同口径）。null store / 无世界 → no-op。
 void PlayerController::scanBrewingStands(float dt)
@@ -6947,11 +6949,20 @@ void PlayerController::scanBrewingStands(float dt)
         }
         const int fuelOps = m_brewingStore->fuelOpsAt(bx, by, bz);
         if (fuelOps <= 0) continue; // 燃料空 → 不推进（进度保留，MC 暂停语义）
-        // 推进（钳大 dt 防漏产多产：20s 一轮，大 dt 一次跨满 → while 循环按 20s 步进多轮）。
+        // 推进（钳大 dt 防漏产多产：20s 一轮，大 dt 一次跨满 → while 循环按 20s 步进多轮；
+        //   追加 fuelOpsNow>0 门——计量归零即停追赶，MC 燃料空暂停语义）。
         qreal prog = prog0 + double(dt);
+        int fuelOpsNow = fuelOps;
         int ingCntNow = ingCnt;
         bool completed = false;
-        while (prog >= BrewingStore::kBrewSecs) {
+        while (prog >= BrewingStore::kBrewSecs && fuelOpsNow > 0) {
+            // 完成前合格瓶位复判（上一轮转换可能已使瓶对原料不再合格——原料对产物无映射 →
+            //   停追赶 + 箭复位语义，防「无映射仍扣原料」的空转轮）。
+            int eligibleNow = 0;
+            for (int i = 0; i < 3; ++i) {
+                if (BrewingStore::brewResult(ing, m_brewingStore->slotIdAt(bx, by, bz, i)) != 0) ++eligibleNow;
+            }
+            if (eligibleNow == 0) { prog = 0.0; break; }
             // 完成：消耗 1 原料 + 全部合格瓶位原位转换（re-read：转换会改瓶 id → 逐位重算）。
             const QVariantList e = m_brewingStore->slotEnchantsAt(bx, by, bz, si);
             const QString nm = m_brewingStore->slotNameAt(bx, by, bz, si);
@@ -6976,13 +6987,18 @@ void PlayerController::scanBrewingStands(float dt)
             }
             completed = true;
             prog -= BrewingStore::kBrewSecs;
+            // t1097-fix 燃料计量递减（MC 1.0 原值口径：1 燃烬粉=恰好 20 次酿造操作；一次操作=
+            //   一批转换全部合格瓶位、与瓶数无关——本批三瓶同酿亦只 -1）。计量归零 → 停追赶
+            //   （燃料空暂停语义：进度保留，下一 tick 复判由补燃分支接手烧新粉）。
+            --fuelOpsNow;
+            m_brewingStore->setFuelOps(bx, by, bz, fuelOpsNow);
             ingCntNow = m_brewingStore->slotCountAt(bx, by, bz, si);
             if (ingCntNow <= 0) { prog = 0.0; break; } // 原料用尽 → 停多轮（下一 tick 复判）
         }
         if (completed || prog != prog0)
             m_brewingStore->setBrewProgress(bx, by, bz, prog);
-        // 亮标：酿造进行中（有合格瓶位 + 有燃料计量 + 进度推进中）→ bit0 置位；否则清位（跨 0 输入才写）。
-        const bool wantLit = (eligible > 0 && fuelOps > 0);
+        // 亮标：酿造进行中（有合格瓶位 + 有燃料计量[递减后现值] + 进度推进中）→ bit0 置位；否则清位（跨 0 输入才写）。
+        const bool wantLit = (eligible > 0 && fuelOpsNow > 0);
         const quint8 curSt = m_world->stateAt(bx, by, bz);
         const bool isLit = (curSt & BlockRegistry::BrewingStandStateLitFlag) != 0;
         if (wantLit != isLit) {
