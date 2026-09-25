@@ -1837,8 +1837,9 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
 //   影坐标——索引成员一致性不受影响，tick 回读面留池）。
 //   t1090 清偿注（后续批落地回填）：前三项 + FallingBlock tick 面已由 t1090 后续批清偿（扫描门与
 //   盒域批，批头锚注见 packLeafCell 上方）；packGrowthCell 截断面与五处辅助固定盒门已由 t1091
-//   第三批残项清偿（批头锚注见 packGrowthCell 上方与下方 t1091 批头）——本批现场新发现的
-//   tickRedstone inBounds / goldenRailChainStep 核心盒与 recheckAttachments 子钩子盒面**仍留池**。
+//   第三批残项清偿（批头锚注见 packGrowthCell 上方与下方 t1091 批头）；本批现场新发现的
+//   tickRedstone inBounds / goldenRailChainStep 核心盒与 recheckAttachments 子钩子盒面在 t1091
+//   批时点**仍留池**（当时点如实登记），已由 t1094 残面批清偿（批头锚注见下方 t1094 批头）。
 // ── t1091 写门家族「核心域假设」同族清偿·第三批残项（实体 tick 列门 + 键域 + 辅助固定盒门）────
 // 病灶：t1074/t1089/t1090 同族收官批。三组九员 + 键域 + 链面：①entitymanager primed TNT tick 与
 //   Mob tick 的同形 cx<0||cz<0 列跳过（t1090 留池）+ entitystore ItemEntity tick 同形门（任务书
@@ -1866,6 +1867,27 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
 //   Phase B addReceiver 核心盒——m_powerDirty 回读链的负侧收口仍在）+ goldenRailChainStep px/pz 盒
 //   + recheckAttachments ① 族子钩子 / 柱坍盒门（清单见 recheckAttachmentsAfterClear 内留池注）+
 //   entitymanager mob 火/岩浆接触足印扫描 worldW/worldD 盒（中心列快速路径不受影响）。
+//   t1094 清偿注（后续批落地回填）：上列四组残面已由 t1094 写门家族残面批全部清偿（批头锚注见下方
+//   t1094 批头）。
+// ── t1094 写门家族「核心域假设」同族清偿·残面批（红石回读链 + 金轨链步 + 附着复检子钩子 + mob 足印）──
+// 病灶：t1091 批头留池四组 + 现场核实新增两处链承重面。逐组核实（调用面盘点 → 外环可达性 → 旧门
+//   后果形态）全确认真缺口，零降级：①tickRedstone inBounds（recomputePowerLocal 统一域 lambda——
+//   notePowerWrite 经 t1091 保符号键把已物化外环真实格灌进 m_powerDirty，本 lambda 却以核心 dims 为
+//   域界把 seedDust 播种 / addReceiver 登记 / addTorch 反相 / 邻粉回插整体幻影化丢弃 = 外环电路放/拆
+//   后灯不亮、轨不灭、TNT 点不着）；②goldenRailChainStep px/pz 盒（链 BFS / 熄灭波前 / 反向走查
+//   的负侧步进恒断 = 外环动力轨链第二根起永不亮/永不灭）；③recheckAttachments ① 族子钩子与柱坍盒
+//   门（清单十员 + 现场核实新增链承重面两员：checkCactusOnEdit ④ 邻接碎柱邻扫门是 dropCactusColumn
+//   的外环可达承重面、dropUnsupportedDoorsAbove 是 checkTrapdoorDoorSupportOnEdit 判定面的级联执行
+//   收口——t1090 合并清偿先例「只开一半 = 把『方块悬空』换成『判定可达但坍落被吞』的半开状态」，
+//   合并清偿如实登记）；④entitymanager mob 火/岩浆接触足印扫描 worldW/worldD 盒（AABB 主扫 + 站顶
+//   分支——sparse 下 aiClampDomainMax 哨兵使正侧早已无界、负侧 nx<0/nz<0 仍被钳 = 外环 mob 贴火/
+//   燃块走位的侧壁/站顶接触面恒不点燃；中心列快速路径不受影响与 t1091 留池注口径一致）。
+// 修法纪律同 t1089/t1090/t1091：Fixed 分支现行语句原样（零变化墙）；sparse = y 域两模式同构（有限
+//   高）+ x/z 无界；读经 blockAt/stateAt 物化门、写经 m_chunks.setBlock 物化拒 / setBlock 家族 / 各
+//   note 索引（t1089/t1091 键域）——扫描域无界化（t1090 裁定先例），未加 chunkContentPresent（对
+//   单一权威的重复，r2059g 物化门行计数钉维持 7 不动）；实体门 = t1090 FallingBlock 两模式分流同式
+//   （!world->isSparse() 守卫，Fixed 原句零变化墙）。数值 id 零改动、零图集、零 QML 玩法路径迁移；
+//   不碰 t1089/t1090/t1091 已修站点（r2059/r2060/r2061 族腿回归承重）。
 // ────────────────────────────────────────────────────────────────────────────────────────
 
 // t117/t220 FallingBlock 着地专用：m_chunks.setBlock 直写 + emit worldChanged，不发 blockPlaced（与玩家放置
@@ -3399,7 +3421,12 @@ void World::checkFireOnEdit(int x, int y, int z)
     constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
     for (const auto &n : kNb) {
         const int nx = x + n[0], ny = y + n[1], nz = z + n[2];
-        if (nx < 0 || ny < 0 || nz < 0 || nx >= m_width || ny >= m_height || nz >= m_depth) continue;
+        // t1094 邻扫门（checkFireOnEdit）两模式分流（Fixed 分支现行语句原样——零变化墙）：sparse
+        //   y 域两模式同构（有限高）+ x/z 无界——旧码固定盒把外环编辑的立地火失撑复检整体吞掉
+        //   （支撑清了外环火悬空残留旧态不熄）。读经 blockAt/fireSupportedAt（t1091 邻域门）。
+        if (ny < 0 || ny >= m_height) continue;
+        if (m_chunks.mode() == WorldMode::Fixed
+            && (nx < 0 || nz < 0 || nx >= m_width || nz >= m_depth)) continue;
         if (m_chunks.blockAt(nx, ny, nz) != BlockRegistry::Fire) continue;
         if (!fireSupportedAt(nx, ny, nz))
             setBlock(nx, ny, nz, BlockRegistry::Air); // 失撑即灭（tickFire (a0) 逐窗兜底静默直写路径）
@@ -4026,7 +4053,13 @@ std::vector<World::DestroyedVoxel> World::destroySphereSilent(int cx, int cy, in
 //   t571 标注【自然失撑掉落：恒发（含创造）】—— World 层无 drop 标志概念，失撑坍落是结构后果，模式无关。
 void World::dropCactusColumn(int x, int y, int z)
 {
-    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    // t1094 域门（dropCactusColumn）两模式分流（Fixed 分支现行语句原样——零变化墙）：sparse x/z
+    //   无界——旧码固定盒把外环仙人掌柱坍整体吞掉（失撑/邻接碎柱后柱残留悬空）。y 域由 while
+    //   条件（cy>=0 && cy<m_height）两模式同构天然承管；读经 blockAt 物化门、写经 m_chunks.setBlock
+    //   物化拒（未物化拒写零副作用）。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    }
     bool any = false;
     int cy = y;
     while (cy >= 0 && cy < m_height && m_chunks.blockAt(x, cy, z) == BlockRegistry::Cactus) {
@@ -4074,7 +4107,13 @@ void World::checkCactusOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
         constexpr int kNb[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
         for (const auto &d : kNb) {
             const int nx = x + d[0], nz = z + d[1];
-            if (nx >= 0 && nz >= 0 && nx < m_width && nz < m_depth
+            // t1094 邻扫门（checkCactusOnEdit 邻接碎柱）两模式分流（Fixed 分支现行语句原样——零
+            //   变化墙）：sparse x/z 无界——本门是 dropCactusColumn 外环可达性的**链承重面**（t1090
+            //   合并清偿先例：只开柱坍函数不开本面，「放整立方贴外环仙人掌碎柱」仍死）。读经 blockAt
+            //   物化门；写经 dropCactusColumn（t1094 域门）。
+            const bool nbOk = (m_chunks.mode() != WorldMode::Fixed)
+                || (nx >= 0 && nz >= 0 && nx < m_width && nz < m_depth);
+            if (nbOk
                 && y >= 0 && y < m_height
                 && m_chunks.blockAt(nx, y, nz) == BlockRegistry::Cactus) {
                 int baseY = y; // 下探柱基（柱中段命中 → 整柱从基座坍落）
@@ -4102,7 +4141,12 @@ void World::checkDeadBushOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
     if (id != BlockRegistry::Air || oldId == BlockRegistry::DeadBush) return;
     const int by = y + 1;
     if (by < 0 || by >= m_height) return;
-    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    // t1094 域门（checkDeadBushOnEdit）两模式分流（Fixed 分支现行语句原样——零变化墙）：sparse x/z
+    //   无界（by 域已两模式同构）——旧码固定盒把外环枯灌木失撑复检整体吞掉（支撑清了灌木悬空残留）。
+    //   读经 blockAt 物化门、写经 m_chunks.setBlock 物化拒。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    }
     if (m_chunks.blockAt(x, by, z) != BlockRegistry::DeadBush) return;
     // 枯灌木失撑 → 静默清 Air（直写 + 标脏，不经 World::setBlock → 不重入本检查）+ 发破块反馈 + 掉落木棒 + 重 flood 光。
     constexpr int kStickItemId = 0x200; // 木棒（= RecipeRegistry::StickId，材料段基址 0x200；Core 不依赖 Game 故字面量）
@@ -4137,7 +4181,12 @@ void World::checkFlowerMushroomOnEdit(int x, int y, int z, quint8 oldId, quint8 
     if (BlockRegistry::isGroundPlant(oldId)) return;
     const int by = y + 1;
     if (by < 0 || by >= m_height) return;
-    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    // t1094 域门（checkFlowerMushroomOnEdit）两模式分流（Fixed 分支现行语句原样——零变化墙）：
+    //   sparse x/z 无界（by 域已两模式同构）——旧码固定盒把外环花/蘑菇/草丛失撑复检整体吞掉
+    //   （支撑清了植物悬空残留）。读经 blockAt 物化门、写经 m_chunks.setBlock 物化拒。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    }
     const quint8 above = m_chunks.blockAt(x, by, z);
     if (!BlockRegistry::isGroundPlant(above)) return;
     // 失撑判据：①本格被破为 Air（t507 全族口径）；②t903 草丛置换面 —— 正上方是草丛且本格被置换为非合法
@@ -4174,7 +4223,12 @@ void World::checkPressurePlateOnEdit(int x, int y, int z, quint8 oldId, quint8 i
     if (id != BlockRegistry::Air || BlockRegistry::isPressurePlate(oldId)) return;
     const int by = y + 1;
     if (by < 0 || by >= m_height) return;
-    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    // t1094 域门（checkPressurePlateOnEdit）两模式分流（Fixed 分支现行语句原样——零变化墙）：
+    //   sparse x/z 无界（by 域已两模式同构）——旧码固定盒把外环压力板失撑复检整体吞掉（TNT 点燃
+    //   清基后外环板悬空残留）。读经 blockAt 物化门、写经 m_chunks.setBlock 物化拒。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    }
     const quint8 above = m_chunks.blockAt(x, by, z);
     if (!BlockRegistry::isPressurePlate(above)) return;
     // 压力板失撑 → 静默清 Air（直写 + 标脏，不经 World::setBlock → 不重入本检查）+ 发破块反馈 + 掉落物 + 重 flood 光。
@@ -4199,7 +4253,12 @@ void World::checkPressurePlateOnEdit(int x, int y, int z, quint8 oldId, quint8 i
 void World::checkTrapdoorDoorSupportOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
 {
     Q_UNUSED(oldId); // 守卫按「编辑后本格是否仍本族」（id 谓词）判——oldId 保留供 checkXxxOnEdit 族签名一致
-    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    // t1094 域门（checkTrapdoorDoorSupportOnEdit）两模式分流（Fixed 分支现行语句原样——零变化墙）：
+    //   sparse x/z 无界——旧码固定盒把外环板/门失撑复检整体吞掉（拆支撑后外环板悬空残留）。级联
+    //   掉落写经 dropUnsupportedDoorsAbove（t1094 域门，链承重收口同批合并——t1090 先例）。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    }
     // 单格依附面快照谓词：活板门在 (bx,by,bz) 是否仍依附任一实体面（下方 + 四侧；trapdoorSupportBlock
     //   单一权威——排除活板门/门自身）。
     const auto hasAttach = [&](int bx, int by, int bz) -> bool {
@@ -4209,7 +4268,11 @@ void World::checkTrapdoorDoorSupportOnEdit(int x, int y, int z, quint8 oldId, qu
         static constexpr int kNb[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
         for (const auto &d : kNb) {
             const int nx = bx + d[0], nz = bz + d[1];
-            if (nx < 0 || nz < 0 || nx >= m_width || nz >= m_depth) continue;
+            // t1094 邻扫门（checkTrapdoorDoorSupportOnEdit 依附侧邻）两模式分流（Fixed 分支现行
+            //   语句原样——零变化墙）：sparse x/z 无界——旧码固定盒把外环侧撑格漏检（侧贴墙拆墙
+            //   后外环板失撑判不出）。读经 blockAt/stateAt 物化门。
+            if (m_chunks.mode() == WorldMode::Fixed
+                && (nx < 0 || nz < 0 || nx >= m_width || nz >= m_depth)) continue;
             if (BlockRegistry::trapdoorSupportBlock(m_chunks.blockAt(nx, by, nz),
                                                     m_chunks.stateAt(nx, by, nz)))
                 return true;
@@ -4232,7 +4295,10 @@ void World::checkTrapdoorDoorSupportOnEdit(int x, int y, int z, quint8 oldId, qu
     static constexpr int kNb[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
     for (const auto &d : kNb) {
         const int nx = x + d[0], nz = z + d[1];
-        if (nx < 0 || nz < 0 || nx >= m_width || nz >= m_depth) continue;
+        // t1094 邻扫门（checkTrapdoorDoorSupportOnEdit 侧板邻扫）两模式分流（Fixed 分支现行语句
+        //   原样——零变化墙）：sparse x/z 无界——旧码固定盒把外环侧板漏复检。读经 blockAt 物化门。
+        if (m_chunks.mode() == WorldMode::Fixed
+            && (nx < 0 || nz < 0 || nx >= m_width || nz >= m_depth)) continue;
         if (y < 0 || y >= m_height) continue;
         if (BlockRegistry::isTrapdoor(m_chunks.blockAt(nx, y, nz)) && !hasAttach(nx, y, nz))
             dropUnsupportedDoorsAbove(nx, y, nz);
@@ -4246,8 +4312,17 @@ void World::checkTrapdoorDoorSupportOnEdit(int x, int y, int z, quint8 oldId, qu
 //   （含创造）】—— 破坏支撑是因、附着物脱落是果（t571 族标注口径）。
 void World::dropUnsupportedDoorsAbove(int x, int y, int z)
 {
-    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
-    if (y < 0 || y >= m_height) return;
+    // t1094 域门（dropUnsupportedDoorsAbove）两模式分流（Fixed 分支现行语句原样——零变化墙）：
+    //   sparse x/z 无界（y 域由 while 边界 + 门内 uy 检查两模式同构承管）——本员是
+    //   checkTrapdoorDoorSupportOnEdit 判定面的**级联执行收口**（t1090 合并清偿先例：只开判定门
+    //   不开执行收口 = 外环「判定可达、坍落被吞」的半开状态）。读经 blockAt/stateAt 物化门、写经
+    //   m_chunks.setBlock 物化拒。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+        if (y < 0 || y >= m_height) return;
+    } else {
+        if (y < 0 || y >= m_height) return; // y 域两模式同构（有限高）；x/z 无界
+    }
     bool any = false;
     int cy = y;
     while (cy < m_height) {
@@ -4306,7 +4381,12 @@ void World::dropUnsupportedDoorsAbove(int x, int y, int z)
 //   t571 标注【自然失撑掉落：恒发（含创造）】—— 同 dropCactusColumn；「打掉甘蔗下面的沙子 → 整柱坍落」即走此路径。
 void World::dropSugarcaneColumn(int x, int y, int z)
 {
-    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    // t1094 域门（dropSugarcaneColumn）两模式分流（Fixed 分支现行语句原样——零变化墙）：sparse x/z
+    //   无界——旧码固定盒把外环甘蔗柱坍整体吞掉（失撑后柱残留悬空）。y 域由 while 条件两模式同构
+    //   天然承管；读经 blockAt 物化门、写经 m_chunks.setBlock 物化拒 + noteGrowthWrite（t1091 键域）。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    }
     bool any = false;
     int cy = y;
     while (cy >= 0 && cy < m_height && m_chunks.blockAt(x, cy, z) == BlockRegistry::Sugarcane) {
@@ -4353,7 +4433,12 @@ void World::checkSnowLayerOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
     if (id != BlockRegistry::Air) return;
     const int by = y + 1;
     if (by < 0 || by >= m_height) return;
-    if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    // t1094 域门（checkSnowLayerOnEdit）两模式分流（Fixed 分支现行语句原样——零变化墙）：sparse
+    //   x/z 无界（by 域已两模式同构）——旧码固定盒把外环雪层柱失撑坍落整体吞掉（支撑清了雪柱
+    //   悬空残留）。读经 blockAt/stateAt 物化门、写经 m_chunks.setBlock 物化拒。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || z < 0 || x >= m_width || z >= m_depth) return;
+    }
     if (m_chunks.blockAt(x, by, z) != BlockRegistry::SnowLayer) return;
     // 整柱坍落：自 by 起向上逐格清连续 SnowLayer，累加 (state+1) 层（cap 8；state 7=8 层=满格≈雪块）。
     //   静默直写（m_chunks.setBlock + 标脏，不经 World::setBlock → 不重入本检查）+ emit blockBroken（破块粒子 / 音）+
@@ -4507,6 +4592,9 @@ void World::recheckAttachmentsAfterClear(int x, int y, int z, quint8 oldId)
     //   checkRailOnEdit 失撑分支 / dropCactusColumn / dropSugarcaneColumn / checkFireOnEdit 6 邻扫
     //   门）——本员门开后这些子面在外环仍被各自盒钳（外环花 / 板 / 雪层 / 活板门 / 画 / 轨失撑 /
     //   仙人掌 / 甘蔗柱坍 / 失撑火即时熄残留旧态），需逐员核实后按 t1091 模板另批清偿。
+    //   t1094 清偿注（后续批落地回填）：上列十员已由 t1094 残面批逐员清偿（锚注 = 各站点「t1094
+    //   域门/邻扫门」注；另合并清偿链承重面两员——checkCactusOnEdit 邻接碎柱邻扫门 +
+    //   dropUnsupportedDoorsAbove 级联执行收口，t1090 合并清偿先例，论证见 t1094 批头）。
     // ② 6 邻火把 / 红石火把（火把非 solid 不撑他火把 → 单趟扫即足够，无级联）：
     bool torchDropped = false; // review24 #2：本扫是否实际掉落 ≥1 火把（决定收口 emit 是否发——无掉落零 emit）
     constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
@@ -4775,7 +4863,12 @@ void World::checkRailOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
     //   探测轨是源，isPowerFamilyBlock 含两者——轨被清后邻网络下 tick 重算，机制同 t683 爆炸补 note）。
     if (!BlockRegistry::isRail(oldId)) {
         const int ry = y + 1;
-        if (x >= 0 && z >= 0 && x < m_width && z < m_depth && ry >= 0 && ry < m_height) {
+        // t1094 域门（checkRailOnEdit 失撑分支）两模式分流（Fixed 分支现行语句原样——零变化墙）：
+        //   sparse x/z 无界（ry 域已两模式同构）——旧码固定盒把外环铁轨失撑掉落整体吞掉（挖支撑后
+        //   外环轨浮空残留）。读经 blockAt/stateAt 物化门、写经 m_chunks.setBlock 物化拒。
+        const bool xzOk = (m_chunks.mode() != WorldMode::Fixed)
+            || (x >= 0 && z >= 0 && x < m_width && z < m_depth);
+        if (xzOk && ry >= 0 && ry < m_height) {
             const quint8 rb = m_chunks.blockAt(x, ry, z);
             if (BlockRegistry::isRail(rb)
                 && !BlockRegistry::isTopFlushSupport(m_chunks.blockAt(x, y, z), m_chunks.stateAt(x, y, z))) {
@@ -5126,7 +5219,14 @@ void World::checkPaintingSupportOnEdit(int x, int y, int z, quint8 oldId, quint8
 {
     Q_UNUSED(oldId); // 守卫按「编辑后本格是否仍有效画墙」（id 谓词）判——oldId 保留供 checkXxxOnEdit 族签名一致
     if (m_inRemovePainting) return; // 连通域清除自管整张画；其清域写不再重入本钩子
-    if (x < 0 || z < 0 || x >= m_width || z >= m_depth || y < 0 || y >= m_height) return;
+    // t1094 域门（checkPaintingSupportOnEdit）两模式分流（Fixed 分支现行语句原样——零变化墙）：
+    //   sparse x/z 无界（y 域两模式同构）——旧码固定盒把外环画作失撑复检整体吞掉（拆墙后外环画
+    //   悬空残留）。读经 blockAt/stateAt 物化门、清画写经 setWaterSilent（t1089 域门）物化拒。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || z < 0 || x >= m_width || z >= m_depth || y < 0 || y >= m_height) return;
+    } else {
+        if (y < 0 || y >= m_height) return; // y 域两模式同构（有限高）；x/z 无界
+    }
     // 本格新内容仍是有效画墙（R1 口径：isCollidable ∨ isFullCube，与 tryPlacePainting cellOk 同源）→
     //   画保留（置换为另一实体墙块 / state-only 写不动支撑）。
     if (BlockRegistry::isCollidable(id, m_chunks.stateAt(x, y, z)) || BlockRegistry::isFullCube(id))
@@ -5135,7 +5235,10 @@ void World::checkPaintingSupportOnEdit(int x, int y, int z, quint8 oldId, quint8
     constexpr int kHoriz[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
     for (const auto &o : kHoriz) {
         const int px = x + o[0], py = y, pz = z + o[1];
-        if (px < 0 || pz < 0 || px >= m_width || pz >= m_depth) continue;
+        // t1094 邻扫门（checkPaintingSupportOnEdit 画邻扫）两模式分流（Fixed 分支现行语句原样——
+        //   零变化墙）：sparse x/z 无界——旧码固定盒把外环画格漏检。读经 blockAt/stateAt 物化门。
+        if (m_chunks.mode() == WorldMode::Fixed
+            && (px < 0 || pz < 0 || px >= m_width || pz >= m_depth)) continue;
         if (m_chunks.blockAt(px, py, pz) != BlockRegistry::Painting) continue;
         const quint8 st = m_chunks.stateAt(px, py, pz);
         const int face = int(st & BlockRegistry::PaintingStateFaceMask) >> BlockRegistry::PaintingStateFaceShift;
@@ -5248,7 +5351,12 @@ bool World::goldenRailChainStep(int x, int y, int z, int ax, int az, int &nx, in
         if ((con & need) == 0) return false; // 本轨不朝该向连接 → 链不由此走（平行邻轨在此被挡下）
     }
     const int px = x + ax, pz = z + az;
-    if (px < 0 || px >= m_width || pz < 0 || pz >= m_depth) return false;
+    // t1094 域门（goldenRailChainStep）两模式分流（Fixed 分支现行语句原样——零变化墙）：sparse x/z
+    //   无界——旧码固定盒把外环链步整体拒（动力轨链 BFS / 熄灭波前 / 反向走查的负侧步进恒断 =
+    //   外环链第二根起永不亮/永不灭）。读面 blockAt/stateAt 物化门（未物化读 0 = 无轨断链天然终止）。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (px < 0 || px >= m_width || pz < 0 || pz >= m_depth) return false;
+    }
     const int dy = BlockRegistry::railProbeDelta(
         { m_chunks.blockAt(px, y,     pz),
           m_chunks.blockAt(px, y + 1, pz),
@@ -5482,7 +5590,19 @@ bool World::recomputePowerLocal()
     // Phase A：BFS 收集连通粉域（从各锚点出发；锚点自身或 6 邻可达的粉全部入域）。
     std::unordered_set<quint64> region;   // 粉连通域（含锚点粉 + 其传播可达的全部粉）
     std::vector<quint64> frontier;        // BFS 队列
-    const auto inBounds = [&](int x, int y, int z) { return x >= 0 && x < W && y >= 0 && y < H && z >= 0 && z < D; };
+    // t1094 域门（tickRedstone inBounds）两模式分流（Fixed 分支现行语句原样——零变化墙）：sparse 核心
+    //   dims 是生成语义参数非域界 → 旧六比较 lambda 把负坐标锚点/邻格的粉域播种（seedDust）、接收器
+    //   登记（addReceiver）、火把反相（addTorch）与全部回插面整体拒掉（m_powerDirty 回读链负侧收口
+    //   ——notePowerWrite 经 t1091 保符号 packGrowthCell 把已物化外环真实格灌进脏集，本 lambda 却把它们
+    //   幻影化丢弃 = 外环电路放/拆后灯不亮轨不灭）。sparse = y 域两模式同构（有限高）+ x/z 无界；读经
+    //   blockAt/stateAt 物化门（未物化读 0 = 非粉/非接收器/非火把天然跳过）、写经 m_chunks.setBlock
+    //   物化拒 + 回插键经 packGrowthCell（t1091 保符号别名）→ 扫描域无界化即可（t1090 裁定先例）。
+    const bool powerFixedDomain = (m_chunks.mode() == WorldMode::Fixed);
+    const auto inBounds = [&](int x, int y, int z) -> bool {
+        if (powerFixedDomain)
+            return x >= 0 && x < W && y >= 0 && y < H && z >= 0 && z < D; // Fixed 分支现行语句原样
+        return y >= 0 && y < H; // y 域两模式同构（有限高）；x/z 无界
+    };
     const auto seedDust = [&](int x, int y, int z) {
         if (!inBounds(x, y, z)) return;
         if (!BlockRegistry::isRedstoneDust(m_chunks.blockAt(x, y, z))) return;
