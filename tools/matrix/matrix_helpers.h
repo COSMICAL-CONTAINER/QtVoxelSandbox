@@ -596,8 +596,8 @@ private:
                               //   族 + QML 路由与 delegate 钉 + 零方块/零图集反探]。fixed 48×48×96 s82 +
                               //   真链 pc rig（t891 同门），rig 世界零接触，接 section65）
     void section67_brewing(); // t1097 酿造台 + 药水系统探针段（置尾先例沿用：r2067a 酿造机制承重墙
-                              //   [scanBrewingStands 直编：20s 一轮 + 燃烬粉 20 次计量 + 三瓶同酿 + 瓶栈
-                              //   数量保留 + 无原料进度复位 + 亮标翻转]，r2067b 效果链 + 配方面承重墙
+                              //   [scanBrewingStands 直编：20s 一轮 + 燃烬粉 20 次计量每操作 -1 + 归零补
+                              //   燃重置 20 + 三瓶同酿 + 瓶栈数量保留 + 无原料进度复位 + 亮标翻转]，r2067b 效果链 + 配方面承重墙
                               //   [brewResult/fuelOpsFor 静态表 + 三合成配方命中 + applyStatusEffect 挂
                               //   EffectSpeed/EffectStrength 快照与到期]，r2067c 装水 + 饮用链行为柱[真 pc
                               //   rig：瓶装水零世界写入 + 水瓶/药水长按饮用 + 空瓶返还 + 生存耗 1 创造不
