@@ -11,8 +11,9 @@
 //   （火抗 / 再生 / 中毒 / 虚弱 / 瞬间治疗）登记后续轮。
 //
 // 腿面与阴性面设计（恰红归因先于腿文）：
-//   r2067a 酿造机制承重墙（scanBrewingStands 直编：水瓶 + 灰烬疣 20s 酿成粗制 + 燃烬粉 20 次计量 +
-//     三瓶同酿 + 瓶栈数量保留 + 无原料 / 无合格瓶位进度复位 + 连续酿造 + 亮标 bit0 跨 0 翻转）。
+//   r2067a 酿造机制承重墙（scanBrewingStands 直编：水瓶 + 灰烬疣 20s 酿成粗制 + 燃烬粉 20 次计量
+//     每完成一次操作 -1[一次操作=一批转换全部合格瓶位] + 计量归零补燃烧新粉重置 20 + 三瓶同酿 +
+//     瓶栈数量保留 + 无原料 / 无合格瓶位进度复位 + 连续酿造 + 亮标 bit0 跨 0 翻转）。
 //     NEG-1（摘完成转换面：scanBrewingStands while 完成分支头部置 completed=false + break）→ 恰红 =
 //     {r2067a}（a 的完成断言全失）；b / c 不受影响（静态表 / 饮用链不经酿造 tick），d 不受影响
 //     （源钉钉函数存在与常量，不钉该分支体）。
@@ -66,7 +67,9 @@ void MatrixRun::section67_brewing()
     runLeg("r2067a brewing mechanics load-bearing wall (a water bottle plus an ash wart in a placed"
         " brewing stand completes one 20-second brew that converts the bottle in place to the awkward"
         " potion and consumes exactly one ingredient, the ember powder fuel meter starts at twenty"
-        " operations and only decrements across completions, three bottles brew simultaneously from a"
+        " operations and decrements exactly once per completed operation with a three-bottle batch"
+        " still counting as one operation and a fresh powder burnt with the meter reset to twenty"
+        " when the next advance finds the meter at zero, three bottles brew simultaneously from a"
         " single ingredient with stack counts preserved, progress resets to zero when the ingredient"
         " runs out or no slot is eligible, consecutive brews chain on remaining ingredient, and the"
         " lit state bit flips on brewing start and end)", [&]() {
@@ -104,7 +107,7 @@ void MatrixRun::section67_brewing()
                           && store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotPotion0) == 1
                           && store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotIngredient) == 1 // 耗 1 原料
                           && store.brewProgressAt(bxp, byp, bzp) < 20.0
-                          && store.fuelOpsAt(bxp, byp, bzp) == BrewingStore::kPowderFuelOps - 0; // 计量不按完成递减（MC 20 次口径：仅在补燃时消耗新粉）
+                          && store.fuelOpsAt(bxp, byp, bzp) == BrewingStore::kPowderFuelOps - 1; // t1097-fix MC 20 次口径：每完成一次操作计量 -1（一次操作=一批转换全部合格瓶位）
         ok = ok && done;
         if (!done) diag += QStringLiteral("[done id=%1 ing=%2 prog=%3 ops=%4]")
                               .arg(store.slotIdAt(bxp, byp, bzp, BrewingStore::kSlotPotion0))
@@ -119,7 +122,7 @@ void MatrixRun::section67_brewing()
         store.setSlot(bxp, byp, bzp, BrewingStore::kSlotPotion1, RecipeRegistry::WaterBottleId, 1);
         store.setSlot(bxp, byp, bzp, BrewingStore::kSlotPotion2, RecipeRegistry::WaterBottleId, 2);
         store.setSlot(bxp, byp, bzp, BrewingStore::kSlotIngredient, RecipeRegistry::AshWartId, 1);
-        drive(20.5); // 一轮：1 份原料转换全部 5 瓶（跨 3 槽栈）
+        drive(20.5); // 一轮：1 份原料转换全部 5 瓶（跨 3 槽栈）——**一次操作**（一批），计量仅再 -1。
         const bool threeAtOnce =
             store.slotIdAt(bxp, byp, bzp, BrewingStore::kSlotPotion0) == RecipeRegistry::AwkwardPotionId
             && store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotPotion0) == 3
@@ -127,12 +130,14 @@ void MatrixRun::section67_brewing()
             && store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotPotion1) == 1
             && store.slotIdAt(bxp, byp, bzp, BrewingStore::kSlotPotion2) == RecipeRegistry::AwkwardPotionId
             && store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotPotion2) == 2
-            && store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotIngredient) == 0; // 原料耗尽
+            && store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotIngredient) == 0 // 原料耗尽
+            && store.fuelOpsAt(bxp, byp, bzp) == BrewingStore::kPowderFuelOps - 2; // 两轮操作各 -1（本批三瓶仍只算一次操作）
         ok = ok && threeAtOnce;
-        if (!threeAtOnce) diag += QStringLiteral("[three id0=%1 c0=%2 id1=%3 id2=%4 ing=%5]")
+        if (!threeAtOnce) diag += QStringLiteral("[three id0=%1 c0=%2 id1=%3 id2=%4 ing=%5 ops=%6]")
                                       .arg(store.slotIdAt(bxp, byp, bzp, 0)).arg(store.slotCountAt(bxp, byp, bzp, 0))
                                       .arg(store.slotIdAt(bxp, byp, bzp, 1)).arg(store.slotIdAt(bxp, byp, bzp, 2))
-                                      .arg(store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotIngredient));
+                                      .arg(store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotIngredient))
+                                      .arg(store.fuelOpsAt(bxp, byp, bzp));
         // 原料耗尽再驱 → 进度保持 0（不再推进；燃料不空烧——fuelOps 不动）。
         const int opsBeforeIdle = store.fuelOpsAt(bxp, byp, bzp);
         drive(21.0);
@@ -142,17 +147,49 @@ void MatrixRun::section67_brewing()
         if (!idleQuiet) diag += QStringLiteral("[idle prog=%1 ops=%2->%3]")
                                     .arg(store.brewProgressAt(bxp, byp, bzp)).arg(opsBeforeIdle)
                                     .arg(store.fuelOpsAt(bxp, byp, bzp));
+        // 场景 ③：计量满口径（t1097-fix）——计量归零后下一次推进消耗第 2 粉重置 20（fuelCnt 1→0 口径
+        //   换算到本场景 = fuelCnt 2→1）。粗制瓶 + 糖链（连续两操作可续）；播种计量 = store Q_INVOKABLE
+        //   直写（合法状态面——fuelOps 本就是 store 持久状态，非引擎外缝）。
+        store.setSlot(bxp, byp, bzp, BrewingStore::kSlotPotion0, RecipeRegistry::AwkwardPotionId, 1);
+        store.setSlot(bxp, byp, bzp, BrewingStore::kSlotIngredient, RecipeRegistry::SugarId, 3);
+        store.setSlot(bxp, byp, bzp, BrewingStore::kSlotFuel, RecipeRegistry::BlazePowderId, 2);
+        store.setFuelOps(bxp, byp, bzp, 1); // 播种：计量仅剩 1 次
+        drive(20.5); // op1：计量 1→0（fuelCnt 仍 2——粉未烧），粗制→迅捷 ×1
+        const bool drainToZero = store.slotIdAt(bxp, byp, bzp, BrewingStore::kSlotPotion0) == RecipeRegistry::SpeedPotionId
+                                 && store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotIngredient) == 2
+                                 && store.fuelOpsAt(bxp, byp, bzp) == 0
+                                 && store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotFuel) == 2;
+        ok = ok && drainToZero;
+        if (!drainToZero) diag += QStringLiteral("[drain id=%1 ing=%2 ops=%3 fuel=%4]")
+                                      .arg(store.slotIdAt(bxp, byp, bzp, BrewingStore::kSlotPotion0))
+                                      .arg(store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotIngredient))
+                                      .arg(store.fuelOpsAt(bxp, byp, bzp))
+                                      .arg(store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotFuel));
+        store.setSlot(bxp, byp, bzp, BrewingStore::kSlotPotion0, RecipeRegistry::AwkwardPotionId, 1); // 续瓶（玩家换入下一批）
+        drive(20.5); // op2：计量 0 + 有合格瓶位 → 补燃烧第 2 粉（fuelCnt 2→1）重置 20 → 完成后 19
+        const bool refillAtZero = store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotFuel) == 1
+                                  && store.fuelOpsAt(bxp, byp, bzp) == BrewingStore::kPowderFuelOps - 1
+                                  && store.slotIdAt(bxp, byp, bzp, BrewingStore::kSlotPotion0) == RecipeRegistry::SpeedPotionId
+                                  && store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotIngredient) == 1;
+        ok = ok && refillAtZero;
+        if (!refillAtZero) diag += QStringLiteral("[refill fuel=%1 ops=%2 id=%3 ing=%4]")
+                                       .arg(store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotFuel))
+                                       .arg(store.fuelOpsAt(bxp, byp, bzp))
+                                       .arg(store.slotIdAt(bxp, byp, bzp, BrewingStore::kSlotPotion0))
+                                       .arg(store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotIngredient));
 
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
             << "| r2067a brewing mechanics load-bearing wall (a water bottle plus an ash wart in a"
                " placed brewing stand completes one 20-second brew that converts the bottle in place"
                " to the awkward potion and consumes exactly one ingredient, the ember powder fuel"
-               " meter starts at twenty operations and only decrements across completions, three"
-               " bottles brew simultaneously from a single ingredient with stack counts preserved,"
-               " progress resets to zero when the ingredient runs out or no slot is eligible,"
-               " consecutive brews chain on remaining ingredient, and the lit state bit flips on"
-               " brewing start and end)"
+               " meter starts at twenty operations and decrements exactly once per completed"
+               " operation with a three-bottle batch still counting as one operation and a fresh"
+               " powder burnt with the meter reset to twenty when the next advance finds the meter"
+               " at zero, three bottles brew simultaneously from a single ingredient with stack"
+               " counts preserved, progress resets to zero when the ingredient runs out or no slot"
+               " is eligible, consecutive brews chain on remaining ingredient, and the lit state bit"
+               " flips on brewing start and end)"
             << (ok ? QString() : diag);
     });
 
