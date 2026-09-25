@@ -693,7 +693,14 @@ QVariantList Hotbar::creativeMaterials() const
         //   转换 / 染色链（战利品权重 10 稀有位，创造直取是免肝测试面）。可堆叠 64（材料段默认）；
         //   非方块 → 右键不放置。MaterialIcon 自绘可可豆（drawCocoaBean，§9 原创）。排盘区尾（段尾
         //   追加不插中间——三盘连续同列先例 r2054b 不受扰动）。
-        int(RecipeRegistry::CocoaBeanId)       // 可可豆：地牢战利品；1:1 转换棕色染料（t1092）
+        int(RecipeRegistry::CocoaBeanId),      // 可可豆：地牢战利品；1:1 转换棕色染料（t1092）
+        // t1096 蕴辉瓶（材料段 0x263；机制等价 MC 1.0 投掷释经验玻璃瓶）：右键投掷 → 碎裂释放经验球
+        //   （3..11 XP，canonical split）。**生存获取面 = 无**（1.0 无合成；村民交易 1.3.1+ 非基准且本
+        //   工程无村民 → 创造专属如实登记，recipe.h 纪元裁定注）——创造调色板行即唯一获取面，补全便于
+        //   测试投掷 / 释放链。可堆叠 64（材料段默认）；非方块 → 右键不放置（投掷分流在 playercontroller
+        //   selectedBlock Air 守卫之前）。MaterialIcon 自绘玻璃瓶盛辉光液（drawGlimmerBottle，§9 原创）。
+        //   排可可豆之后（段尾追加不插中间——可可豆 r2062 腿与三盘连续性不受扰动）。
+        int(RecipeRegistry::GlimmerBottleId)   // 蕴辉瓶：右键投掷 → 碎裂释经验球；创造专属（t1096）
     };
 }
 
@@ -1232,6 +1239,9 @@ QString Hotbar::nameForBlock(int blockId) const
         // t1092 可可豆（材料段 0x262；机制等价 MC 1.0 cocoa bean）：地牢战利品；1:1 转换棕染料原料。
         //   零 MC 专名（§9）。
         if (blockId == RecipeRegistry::CocoaBeanId) return QStringLiteral("可可豆"); // 地牢战利品；棕染料原料（t1092）
+        // t1096 蕴辉瓶（材料段 0x263；机制等价 MC 1.0 投掷释经验玻璃瓶）：右键投掷 → 碎裂释放经验球
+        //   （3..11 XP）。零 MC 专名（§9：MC 官方名「附魔之瓶」不采用，原创名「蕴辉瓶」）。
+        if (blockId == RecipeRegistry::GlimmerBottleId) return QStringLiteral("蕴辉瓶"); // 右键投掷 → 碎裂释经验球（t1096）
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落；打火石配方原料。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::FlintId) return QStringLiteral("燧石"); // 挖沙砾概率掉落；打火石配方原料
         // t891② 烈焰弹（材料段 0x25C；机制等价 MC fire charge）：燃烬粉+煤/炭+火药合成 3 发；右键发射火球

@@ -39,6 +39,27 @@ void XpOrbManager::spawnOrb(int x, int y, int z, int amount)
                  << "(live" << m_liveCount << "slots" << m_orbs.size() << ")";
 }
 
+// t1096 蕴辉瓶碎裂释经验拆球链（见 .h 头注）：canonical XP split 阈值链逐段拆球（while (i>0)
+//   { j=split(i); i-=j; spawn(j) }，机制等价 MC ThrownExpBottle.onImpact 的 spawn 循环）。total<=0
+//   自然 no-op。同总量 → 同分割序列（纯确定性，矩阵行为级验收面）；阈值 247/123/63/31/15/7/3/1。
+void XpOrbManager::spawnOrbsForTotal(int x, int y, int z, int total)
+{
+    int remaining = total;
+    while (remaining > 0) {
+        int piece;
+        if      (remaining >= 247) piece = 247;
+        else if (remaining >= 123) piece = 123;
+        else if (remaining >= 63)  piece = 63;
+        else if (remaining >= 31)  piece = 31;
+        else if (remaining >= 15)  piece = 15;
+        else if (remaining >= 7)   piece = 7;
+        else if (remaining >= 3)   piece = 3;
+        else                       piece = 1;
+        remaining -= piece;
+        spawnOrb(x, y, z, piece);
+    }
+}
+
 bool XpOrbManager::aliveAt(int i) const
 {
     if (i < 0 || i >= int(m_orbs.size())) return false;
