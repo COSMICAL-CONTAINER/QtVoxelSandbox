@@ -864,6 +864,19 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         RecipeRegistry::RedstoneId, 0, 0,
         0, 0, 0 },
       int(BlockRegistry::RedstoneTorch), 1, 1, "redstone_torch" },
+    // t1098 红石中继器（repeater）生存配方：中排 火把-红石粉-火把 + 底行 3 石头 → 1 中继器（有序 3×3，
+    //   仅工作台；最小包围盒 3×2）。机制等价 MC 1.0 配方（wiki Redstone Repeater：3 stone + 2 redstone
+    //   torch + 1 redstone dust → 1 repeater；中继器本体 Beta 1.3 引入 id 93/94、1.0.0 沿用——纪元标注
+    //   见 blockregistry.h Repeater 行，t1095）。多重集 {Stone:3, RedstoneTorch:2, Redstone:1} 唯一 →
+    //   不冲突：红石火把作原料全表仅此一行（其自身配方只作产物不作原料），石头作原料既有计量
+    //   {2 石压力板 / 1 石按钮 / 4 石砖} 均非 3。石头经熔炉烧圆石产出（smelting.cpp t1098 行，本单
+    //   同补——此前 kSmelt 漏行，石钮 / 石压力板 / 石砖族行注声称的「石头经熔炉烧圆石产出」自本行
+    //   起为真）。
+    { int(RecipeRegistry::Table3x3), false,
+      { 0,                                          0,                          0,
+        int(BlockRegistry::RedstoneTorch), RecipeRegistry::RedstoneId, int(BlockRegistry::RedstoneTorch),
+        int(BlockRegistry::Stone),                 int(BlockRegistry::Stone),  int(BlockRegistry::Stone) },
+      int(BlockRegistry::Repeater), 1, 1, "repeater" },
     // t565 白羊毛（wool）：4 线（2×2 满铺）→ 1 白羊毛（有序 2×2，背包栏 / 工作台均可）。机制等价 MC 1.0
     //   配方（4 string → 1 白羊毛；用户报「4 线合成白羊毛（背包 2×2 配方）」）。最小包围盒 2×2（满），
     //   shapedEqual 收缩后逐格比 → 2×2 背包栏 / 工作台角 2×2 均可合。产物 Wool=27（白色羊毛方块，可放置；

@@ -1209,8 +1209,8 @@ public:
         //   须完整立方顶面（solidSupportBlock），失撑整钩子掉落（checkPressurePlateOnEdit 族扩展）。
         //   hardness=0（瞬破，同压力板 / 火把量级；MC 中继器 hardness 0 同档）、NoTool（空手可采且掉落，
         //   requiresTool=false）、dropId=自身、dropCount=1、maxStack=64。音色 GroupStone（石质底板）。
-        //   **获得途径 = 创造调色板**（红石 tab）；生存配方（3 石 + 2 红石火把 + 1 红石粉）登记后续批，
-        //   本单交付清单未含配方面（如实登记非缺口——机制面完整，获取面简化）。
+        //   **获得途径 = 创造调色板**（红石 tab）+ 生存合成（t1098 接 recipe.cpp：3 石 + 2 红石火把 +
+        //   1 红石粉 → 1，工作台 shaped；石头经圆石熔炼产出——smelting.cpp 同单补行，生存链全通）。
         //   贴图两张（熄 / 亮）：tools/build_repeater.py 程序生成原创自绘 §9a（tile 191 off / 192 on，
         //   frontTile 字段复用承载亮态瓦片——Farmland 湿态顶面同门）。
         //   **state 编码**（复用 chunk m_states，存档 round-trip 保真；漏斗朝向 + 音符盒调音双同门）：
