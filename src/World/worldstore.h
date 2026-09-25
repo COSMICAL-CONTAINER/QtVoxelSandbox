@@ -117,7 +117,8 @@ public:
     //   缺省 {} → 不写不删，向前兼容）。
     Q_INVOKABLE bool saveAll(const QString &name, const QVariantList &chests = {}, const QVariantList &furnaces = {}, const QVariantList &dispensers = {},
                              const QVariantMap &worldTime = {}, const QVariantMap &bedSpawn = {},
-                             const QVariantList &hoppers = {});
+                             const QVariantList &hoppers = {},
+                             const QVariantList &brewingStands = {}); // t1097 第 8 参酿造台（同 hoppers 模式；旧 caller 缺省 {} 不写不删向前兼容）
     // t1016 读世界时钟快照（与 saveAll 第 5 参同形）：{phase: double, day: qlonglong, weather: int,
     //   hasWeather: bool, hasWeatherTimer: bool, weatherTimerMs: qlonglong}。旧存档缺键 → 逐键缺省
     //   （phase 0.0 = 新世界默认相位 / day 0 / weather 0 = Clear 晴天 / weatherTimerMs 0）——「新增字段
@@ -146,6 +147,9 @@ public:
     // t1080 读当前库的 hoppers 表为 QVariantList（同 saveAll 的 hoppers 形状）。未打开 → 空列表。
     //   caller（Main.qml.enterWorld）转交 hopperStore.loadAll 整体替换内存（清旧世界残留 + 填本世界漏斗）。
     Q_INVOKABLE QVariantList loadHoppers() const;
+    // t1097 读当前库的 brewing 表为 QVariantList（同 saveAll 的 brewingStands 形状 = allBrewingStands 产物形）。
+    //   未打开 → 空列表。caller（Main.qml.enterWorld）转交 brewingStore.loadAll 整体替换内存。
+    Q_INVOKABLE QVariantList loadBrewingStands() const;
     // progress 新系统 写玩家进度（统计 + 成就）单行表 key='main'。progress = PlayerProgress::toVariant() 产物。
     //   独立 upsert（INSERT OR REPLACE）。未打开 → false。caller（Main.qml.saveAndExitToWorldList）调。
     Q_INVOKABLE bool saveProgress(const QVariantMap &progress);
@@ -218,6 +222,8 @@ private:
     bool writeDispensers(const QVariantList &dispensers);
     // t1080 漏斗落盘（同 writeChests 模式：坐标列 + slots JSON 文本；caller 已开事务）。
     bool writeHoppers(const QVariantList &hoppers);
+    // t1097 酿造落盘实现（writeHoppers 同门；调用方 saveAll 已开事务，本方法不 BEGIN/COMMIT）。
+    bool writeBrewing(const QVariantList &stands);
 
     // ── t382 迁移注册表（world_version → kWorldVersion 的数据迁移；详见类头注释 + migrations()）──
     // 单条迁移：把存档数据从 (targetVersion-1) 推进到 targetVersion。apply 对一个 chunk 的三段 blob

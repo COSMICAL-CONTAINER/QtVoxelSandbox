@@ -87,7 +87,9 @@ public:
     // t715 状态效果类型枚举（v1：中毒 / 缓慢 / 着火；§9 零 MC 专名，命名与 DeathCause 同风格）。
     //   Q_ENUM 暴露给 QML（PlayerState.EffectPoison 等）；序号即效果图标路由键（QML 按此选 icon_effect_*.png）。
     //   **追加在末尾**（既有消费者按序 switch，追加不破坏；同 DeathCause 纪律）。
-    enum StatusEffect { EffectNone = 0, EffectPoison, EffectSlowness, EffectFire };
+    //   t1097 追加：EffectSpeed 迅捷（药水饮用，+20%/级移速）/ EffectStrength 力量（药水饮用，+130%/级
+    //   近战旧口径）——时序源在 PlayerController m_speedTimer / m_strengthTimer（m_slowTimer 同门）。
+    enum StatusEffect { EffectNone = 0, EffectPoison, EffectSlowness, EffectFire, EffectSpeed, EffectStrength };
     Q_ENUM(StatusEffect)
     // t311 死亡原因枚举（机制等价 MC 1.0 各来源死因，§9 改名为通用词）。Q_ENUM 暴露给 QML：
     //   PlayerState.Fall 等（同 EntityManager.MobPig 模式）。避免命名 None（Linux CI 下 X11 头 None 宏冲突）。

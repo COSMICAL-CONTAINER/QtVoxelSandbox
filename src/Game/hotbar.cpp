@@ -700,7 +700,20 @@ QVariantList Hotbar::creativeMaterials() const
         //   测试投掷 / 释放链。可堆叠 64（材料段默认）；非方块 → 右键不放置（投掷分流在 playercontroller
         //   selectedBlock Air 守卫之前）。MaterialIcon 自绘玻璃瓶盛辉光液（drawGlimmerBottle，§9 原创）。
         //   排可可豆之后（段尾追加不插中间——可可豆 r2062 腿与三盘连续性不受扰动）。
-        int(RecipeRegistry::GlimmerBottleId)   // 蕴辉瓶：右键投掷 → 碎裂释经验球；创造专属（t1096）
+        int(RecipeRegistry::GlimmerBottleId),  // 蕴辉瓶：右键投掷 → 碎裂释经验球；创造专属（t1096）
+        // t1097 酿造链物品族七件（材料段 0x264..0x26A，蕴辉瓶 0x263 之上段尾追加不插中间 = 存档安全铁律）。
+        //   机制等价 MC 1.0 酿造前置链：玻璃瓶（玻璃 3 V → 3 瓶）/ 水瓶（瓶 + 水）/ 灰烬疣（基础材料，
+        //   第一轮创造专属——无下界维度，登记候选池）/ 粗制药水（水瓶+疣）/ 迅捷 / 力量药水（粗制+糖 /
+        //   粗制+燃烬粉）/ 糖（甘蔗 1:1）。全员可堆叠 64（材料段默认）；非方块 → 右键不放置（水瓶 /
+        //   药水右键长按饮用走 eventFilter 分流；玻璃瓶右键水装水走 placeBlock 瓶分支——均在 selectedBlock
+        //   Air 守卫之前分流）。MaterialIcon 自绘色液瓶 / 瓶 / 疣 / 糖族（§9 原创）。
+        int(RecipeRegistry::GlassBottleId),    // 玻璃瓶：玻璃 3 V 形 → 3 瓶；水瓶载体 + 饮后返还
+        int(RecipeRegistry::WaterBottleId),    // 水瓶：瓶右键水装水；可饮无效果返空瓶
+        int(RecipeRegistry::AshWartId),        // 灰烬疣：水瓶 → 粗制的基础材料；第一轮创造专属（无下界）
+        int(RecipeRegistry::AwkwardPotionId),  // 粗制药水：水瓶 + 灰烬疣酿成；可饮无效果
+        int(RecipeRegistry::SpeedPotionId),    // 迅捷药水：粗制 + 糖；饮用 +20%/级移速 180s
+        int(RecipeRegistry::StrengthPotionId), // 力量药水：粗制 + 燃烬粉；饮用 +130%/级近战 180s
+        int(RecipeRegistry::SugarId)           // 糖：1 甘蔗 → 1 糖；迅捷药水原料
     };
 }
 
@@ -883,6 +896,10 @@ QVariantList Hotbar::creativeBlocks() const
              // t477 铁砧（机制等价 MC 1.0 anvil；右键铁砧开铁砧 UI）。铁块 t654④ 挪到下方矿物块组
              //   （与煤/青金/钻石/金/红石块同组——用户「铁块没跟下面的块放一起」）。
              int(BlockRegistry::Anvil),                                       // 铁砧（右键开铁砧 UI 修复/合并/重命名；配方 3 铁块+4 铁锭；微损/重损不进调色板）
+             // t1097 酿造台（机制等价 MC 1.0 brewing stand——右键开酿造 UI；燃烬粉燃料驱动酿造，瓶原位变换）。
+             //   归方块 tab 功能方块组（铁砧之后）。配方 1 燃烬棒 + 底行 3 圆石（MC 同料——燃烬棒 = t726
+             //   烈焰链既有 → 生存可达）。
+             int(BlockRegistry::BrewingStand),                                // 酿造台（右键开酿造 UI；燃烬粉燃料酿造）
              // t482/t483 防御造物方块（机制等价 MC 1.0 雪傀儡 / 铁傀儡搭建材料；南瓜放好 + 下方排列 → 造物）。
              int(BlockRegistry::Pumpkin),                                     // 南瓜（造物头部方块；雪傀儡/铁傀儡搭建触发物）
              int(BlockRegistry::Snow),                                        // 雪块（造物身体方块；雪傀儡 = 南瓜 + 雪块×2 竖直）
@@ -1242,6 +1259,14 @@ QString Hotbar::nameForBlock(int blockId) const
         // t1096 蕴辉瓶（材料段 0x263；机制等价 MC 1.0 投掷释经验玻璃瓶）：右键投掷 → 碎裂释放经验球
         //   （3..11 XP）。零 MC 专名（§9：MC 官方名「附魔之瓶」不采用，原创名「蕴辉瓶」）。
         if (blockId == RecipeRegistry::GlimmerBottleId) return QStringLiteral("蕴辉瓶"); // 右键投掷 → 碎裂释经验球（t1096）
+        // t1097 酿造链物品族（材料段 0x264..0x26A）：名面七件（通用词 / §9 原创名「灰烬疣」；零 MC 专名）。
+        if (blockId == RecipeRegistry::GlassBottleId)    return QStringLiteral("玻璃瓶"); // 玻璃 3 V → 3 瓶；水瓶载体
+        if (blockId == RecipeRegistry::WaterBottleId)    return QStringLiteral("水瓶");   // 瓶 + 水；可饮无效果
+        if (blockId == RecipeRegistry::AshWartId)        return QStringLiteral("灰烬疣"); // 水瓶→粗制基础材料；第一轮创造专属
+        if (blockId == RecipeRegistry::AwkwardPotionId)  return QStringLiteral("粗制药水"); // 水瓶 + 灰烬疣酿成
+        if (blockId == RecipeRegistry::SpeedPotionId)    return QStringLiteral("迅捷药水"); // 粗制 + 糖；移速 +20%/级
+        if (blockId == RecipeRegistry::StrengthPotionId) return QStringLiteral("力量药水"); // 粗制 + 燃烬粉；近战 +130%/级
+        if (blockId == RecipeRegistry::SugarId)          return QStringLiteral("糖");     // 1 甘蔗 → 1 糖；迅捷原料
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落；打火石配方原料。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::FlintId) return QStringLiteral("燧石"); // 挖沙砾概率掉落；打火石配方原料
         // t891② 烈焰弹（材料段 0x25C；机制等价 MC fire charge）：燃烬粉+煤/炭+火药合成 3 发；右键发射火球

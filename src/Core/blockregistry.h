@@ -1222,7 +1222,23 @@ public:
         //                                           随 state 落盘无害——重载后续算幂等；无运行期侧表 =
         //                                           「重置契约」教训的零登记面）。
         Repeater         = 147, // 红石中继器：延迟四档 + 二极管整流 + 输出强充能 15（续距）；贴地薄板；右键调档
-        Count           = 148, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t1097 酿造台（BrewingStand）：酿造系统载体方块（机制等价 MC 1.0 brewing stand，Beta 1.9 pre
+        //   系列引入、1.0.0 正式版沿用；MC 1.0 存在 id 117）。**四语义**（wiki 2026 实读口径）：
+        //   ① 右键开酿造 UI（同熔炉 / 箱子家族：placeBlock 酿造台分支发 brewingStandOpened，不放置）；
+        //   ② 燃料 = 燃烬粉（机制等价 blaze powder；1 粉 20 次酿造 / 单次 20s / 一次转换所有合格瓶位，
+        //     瓶原位变换非炉式独立输出槽——BrewingStore 头注核实三元组）；
+        //   ③ 内容面 = BrewingStore（per-block 5 槽：3 瓶 + 原料 + 燃料）；机制 tick =
+        //     PlayerController::scanBrewingStands（Game 层，scanHoppers 同门，dt 累积直调面）；
+        //   ④ 形态 = 异形（solid=false / ShapeBrewingStand——底座板 + 中柱两盒，brewingStandShapeBoxes
+        //     单一权威；MC 酿造台非全格）。无朝向语义（MC 1.0 酿造台无 facing metadata，state 仅 bit0
+        //     亮标）→ 放置零 state 写入。
+        //   §9 区隔：「酿造」「brewing」为通用词（酿酒/酿造是先于 MC 的通用工艺词）；贴图程序生成原创
+        //   自绘 §9a（tools/build_brewing_stand.py：tile 193 idle / 194 lit，尾追加不插中间）。
+        //   hardness=0.5（MC brewing stand 同档）/ NoTool（空手可采且掉落，requiresTool=false——MC
+        //   「Any tool」口径）/ dropId=自身、dropCount=1、maxStack=64。音色 GroupStone。进创造调色板
+        //   （方块 tab 功能方块组，铁砧之后）。配方（recipe.cpp）：1 燃烬棒 + 底行 3 圆石 → 1 台（MC 同料）。
+        BrewingStand     = 148, // 酿造台：右键开酿造 UI；燃烬粉燃料 + 瓶原位变换（机制等价 MC 1.0 brewing stand id 117）
+        Count           = 149, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -1697,6 +1713,15 @@ public:
                             //   （2/16 薄板 auto-step 跨越语义同压力板）；支撑须完整立方顶面 + 失撑掉落同压力板
                             //   族钩子（checkPressurePlateOnEdit 扩展）。渲染双焰标 + 档位滑标凸出碰撞板（纯视觉
                             //   凸出，床头板同先例）。
+        ShapeBrewingStand = 13, // t1097 酿造台：两盒异形（底座板满格 footprint 内缩 1px y[0,2]/16 可踩 +
+                            //   中柱 6..10/16 见方 × y[2,10]/16 可站顶——brewingStandShapeBoxes 单一权威，
+                            //   碰撞 / 选中 / 射线 / 列顶 / 渲染五处同源，hopperShapeBoxes 同门）。solid=false
+                            //   （非整立方 → 邻居不剔面；lightOpacity 默认全透，机制等价 MC 酿造台非满格透光）；
+                            //   isCollidable 走 default true（可站可挡）；isFullCube 自动 false（落体分支同漏斗
+                            //   「不完整方块」语义）。无朝向语义（MC 1.0 酿造台无 facing metadata）→ state 仅
+                            //   bit0 亮标（ BrewingStandStateLitFlag，scanBrewingStands 酿造进行中置位 → 渲染
+                            //   切 lit 贴图，熔炉 frontTile 承载亮态同门）。渲染 = PartialBlockGeometry
+                            //   BrewingStand case（底座 + 中柱 + 双臂横杆三盒，双臂纯视觉凸出不进碰撞）。
     };
 
     // t505 积雪层（SnowLayer）层数上界（state 0..7 = 8 级高度）。机制等价 MC 1.0 snow layer 8 层
@@ -1727,6 +1752,18 @@ public:
     //   shapeBoxes 薄壳）/ collisionTopY·solidTopOffset（列顶）/ PartialBlockGeometry Hopper case（渲染，
     //   World→Core 向下合法，anvilShapeBoxes/bedHalfBoxes 单一权威同门）。
     static int hopperShapeBoxes(quint8 state, BlockAABB *out, int cap);
+
+    // t1097 酿造台两盒几何单一权威（ShapeBrewingStand；声明见上 hopperShapeBoxes 注——碰撞 / 选中 /
+    //   射线 / 列顶 / 渲染五处同源）。两盒（16 像素格 → /16，与贴图 footprint 同源）：
+    //   ① 底座板 1..15/16 见方 footprint × y[0,2]/16（可踩面 2/16 < auto-step 门槛）；
+    //   ② 中柱 6..10/16 见方 × y[2,10]/16（顶面 10/16 = 可站面，同漏斗 0.625 口径）。
+    //   state 不参与盒形（朝向语义不存在；亮标 bit0 是渲染面非几何面——双臂横杆纯视觉凸出不进碰撞）。
+    //   返回写入数（恒 2；防御 cap<2 → 返 0 + 调用方兜底）。
+    static int brewingStandShapeBoxes(quint8 state, BlockAABB *out, int cap);
+
+    // t1097 酿造台 state bit0 亮标（酿造进行中置位 → 渲染切 lit 贴图；熔炉 frontTile 承载亮态同门）。
+    //   scanBrewingStands 跨 0 边界写（置位 / 清位 setBlock 同 id 不同 state，不发 broken/placed）。
+    static constexpr quint8 BrewingStandStateLitFlag = 0x01;
 
     // 方块定义（每方块一项；单一权威数据源）。改方块任何属性只改 kDefs 一行，全工程生效。
     // 行索引 == 方块 id（air 行同时作越界 / 不可挖掘 / 不掉落兜底）。
@@ -1990,7 +2027,7 @@ public:
     // t1095：191..192=红石中继器两张（191=repeater_off 熄态底板 / 192=repeater_on 亮态底板；
     //   tools/build_repeater.py 程序生成原创像素图 §9a；Repeater 恒走 PartialBlockGeometry 异形段，
     //   state bit4 选 191/192——同红石粉亮度档选瓦的呈现层选择模式）。
-    static constexpr int AtlasTileCount = 193; // t1095 起 191→193（中继器 tile 191 off / 192 on 尾部追加，不插中间存档契约）
+    static constexpr int AtlasTileCount = 195; // t1097 起 193→195（酿造台 tile 193 idle / 194 lit 尾部追加，不插中间存档契约）
 
     // t668 图集瓦片像素边长（HD 图集：16→64）。**单一权威**：tools/build_atlas.py TILE（打包像素大小）/
     //   ResourcePackManager::kTile（运行期包内贴图缩放目标）与 mesher 半纹素内缩（chunkgeometry hx/hy、

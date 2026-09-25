@@ -424,6 +424,11 @@ TILES = [
     #   tools/build_repeater.py 程序生成原创像素图（§9 override (a)）。
     "default_repeater_off",          # 191 repeater_off（熄态底板：石灰底板 + 暗红双焰标 + 近黑中缝槽）
     "default_repeater_on",           # 192 repeater_on（亮态底板：底板略提亮 + 亮红焰标 + 中缝滑标亮线）
+    # t1097 酿造台两张（机制等价 MC 1.0 brewing stand 的酿造载体方块）。名称 / 贴图纯原创自绘
+    #   （§9 区隔）：石底座 + 中柱 + 双臂「炼金蒸馏台」读感，双态（idle / lit 酿造中，state bit0 分派）。
+    #   tools/build_brewing_stand.py 程序生成原创像素图（§9 override (a)）。
+    "default_brewing_stand",         # 193 brewing_stand（静置态：石灰底座 + 中柱 + 双臂横杆暗槽 + 三瓶位暗点）
+    "default_brewing_stand_lit",     # 194 brewing_stand_lit（酿造态：底纹提亮 + 柱身炉心橙辉光带 + 臂端亮斑）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

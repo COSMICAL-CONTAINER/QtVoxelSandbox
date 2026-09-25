@@ -1170,6 +1170,33 @@ int PartialBlockGeometry::append(
                 tileMouth, light, tileW, hx, hy, v0, v1);
         break;
     }
+    case BlockRegistry::BrewingStand: {
+        // t1097 酿造台异形渲染（机制等价 MC 酿造台体：石底座板 + 中柱 + 双臂横杆）：盒布局**直接消费
+        //   BlockRegistry::brewingStandShapeBoxes 单一权威**（World→Core 向下合法；碰撞 / 选中 / 射线 /
+        //   列顶同源同盒——hopperShapeBoxes 单一权威同门），渲染轮廓 = 碰撞轮廓 + 双臂横杆纯视觉凸出
+        //   （不进碰撞，床头板 / 中继器焰标同先例）。solid=false → 邻居不剔面；不做邻居剔除（异形小体
+        //   约定，同漏斗 / 铁砧）。贴图 per-state（呈现层选择，红石粉亮度档 / 中继器亮灭同模式）：
+        //   idle = brewing_stand(193) / lit（酿造进行中，state bit0 BrewingStandStateLitFlag）=
+        //   brewing_stand_lit(194，frontTile 字段复用承载亮态瓦片——熔炉 / 中继器同门)。
+        const bool lit = (state & BlockRegistry::BrewingStandStateLitFlag) != 0;
+        const int tileBody = lit ? BlockRegistry::def(blockId).frontTile  // 194 亮态
+                                 : tile;                                   // 193 idle（append 头部 PosX 权威）
+        BlockRegistry::BlockAABB hb[2];
+        if (BlockRegistry::brewingStandShapeBoxes(state, hb, 2) != 2) break; // 权威失效兜底（不应发生）
+        const float s = 1.0f / 16.0f;
+        // ① 底座板（全 193/194 态瓦）。
+        pushBox(verts, idx, lx, ly, lz, hb[0].minX, hb[0].maxX, hb[0].minY, hb[0].maxY, hb[0].minZ, hb[0].maxZ,
+                tileBody, light, tileW, hx, hy, v0, v1);
+        // ② 中柱（全态瓦；顶面 10/16 = 可站面）。
+        pushBox(verts, idx, lx, ly, lz, hb[1].minX, hb[1].maxX, hb[1].minY, hb[1].maxY, hb[1].minZ, hb[1].maxZ,
+                tileBody, light, tileW, hx, hy, v0, v1);
+        // ③ 双臂横杆（纯视觉凸出）：从柱身向 ±X 张出的横杆 y[6,8]/16 厚 2/16——酿造时「持瓶双臂」观感。
+        //   沿 X 向贯穿 3..13/16、Z 向 6..10/16（与柱身 z 同宽）。不进任何碰撞盒（brewingStandShapeBoxes
+        //   不含本盒）——纯视觉凸出，同中继器焰标 / 床头板先例。
+        pushBox(verts, idx, lx, ly, lz, 3.f * s, 13.f * s, 6.f * s, 8.f * s, 6.f * s, 10.f * s,
+                tileBody, light, tileW, hx, hy, v0, v1);
+        break;
+    }
     case BlockRegistry::Repeater: {
         // t1095 中继器贴地薄板异形渲染（机制等价 MC repeater：石质底板 + 双焰标 + 档位滑标）。
         //   底板 = 2/16 厚满格 footprint（与 ShapeRepeater 碰撞 / 选中 / 射线同高同源——t639 四消费者

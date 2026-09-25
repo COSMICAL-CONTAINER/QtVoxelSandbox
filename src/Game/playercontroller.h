@@ -21,6 +21,7 @@
 #include "cheststore.h"         // t1013 箱子矿车内容键存储（进世界转正登记 / 回生扫描 / 挖毁清键）
 #include "hopperstore.h"        // t1080 漏斗 per-block 5 槽容腔（机制 tick 读写 + 破块清孤儿掉内容）
 #include "furnacestore.h"       // t1080 漏斗挂接容器族（熔炉抽取只认 out / 推入按面定向 in/fuel）
+#include "brewingstore.h"       // t1097 酿造台 per-block 5 槽（机制 tick 读写 + 破块清孤儿掉内容）
 #include "entitymanager.h"      // 统一实体管理器（t95 测试生物 / 玩家推动）
 #include "hotbar.h"             // Hotbar VM（t36 拾取 addStack / 丢弃 takeStack）
 #include "itementitymanager.h"  // 掉落实体管理器（t36 拾取扫描 / removeAt）
@@ -102,6 +103,11 @@ class PlayerController : public QQuickItem
     Q_PROPERTY(HopperStore *hopperStore READ hopperStore WRITE setHopperStore NOTIFY hopperStoreChanged)
     // t1080 熔炉内容存储（同族注入）：漏斗挂接熔炉容器面（抽取只认 out 产物槽 / 推入按面定向）。
     Q_PROPERTY(FurnaceStore *furnaceStore READ furnaceStore WRITE setFurnaceStore NOTIFY furnaceStoreChanged)
+    // t1097 酿造内容存储（同族注入）：scanBrewingStands 机制面读写酿造台 5 槽（3 瓶 + 原料 + 燃料）
+    //   + 酿造进度 / 燃料计量；finishMiningAt 破酿造台清孤儿掉内容（Main.qml onBlockBroken 桥接）。
+    //   null 防御：酿造机制整体跳过（方块仍在、酿造静默——同 hopperStore null 降级口径）。
+    //   分层：BrewingStore 属 Game/ViewModel 纯存储，PlayerController 同层直调，无向上依赖。
+    Q_PROPERTY(BrewingStore *brewingStore READ brewingStore WRITE setBrewingStore NOTIFY brewingStoreChanged)
     Q_PROPERTY(QVector3D position READ position NOTIFY positionChanged) // 眼睛位置（相机绑它）
     Q_PROPERTY(float yaw READ yaw NOTIFY yawChanged)
     Q_PROPERTY(float pitch READ pitch NOTIFY pitchChanged)
@@ -361,6 +367,14 @@ public:
     void setHopperStore(HopperStore *s);
     FurnaceStore *furnaceStore() const { return m_furnaceStore; }
     void setFurnaceStore(FurnaceStore *s);
+    // t1097 酿造存储注入面（同 hopperStore 模式）：getter / setter + brewingStoreChanged 信号。
+    BrewingStore *brewingStore() const { return m_brewingStore; }
+    void setBrewingStore(BrewingStore *s);
+    // t1097 酿造机制 tick（scanHoppers / tickJukeboxes 机关扫描族同门；C++ 直调）：每帧按 dt 推进每台
+    //   酿造台进度（原料合格判定 + 燃烬粉燃料计量 + 瓶原位转换 + state 亮标跨 0 边界写）。public 暴露 =
+    //   scanHoppers 同门（矩阵探针直调等价驱动；UI 面只读 store 不推进——t177 三轮「tick 直读 store」
+    //   教训的 C++ 侧终局形态）。
+    void scanBrewingStands(float dt);
     // t1080 漏斗机制 tick（scanDispenserTraps 机关扫描族同门；C++ 直调）：每帧按 dt 推进每漏斗冷却，
     //   冷却到点跑一轮「输出 → 抽取 → 收集」；红石锁停（isReceivingPower）本轮全停。public 暴露 =
     //   scanDispenserTraps review24 #9 先例（矩阵探针直调等价递减驱动——探针无 16ms 定时器，须直调推进）。
@@ -567,6 +581,16 @@ public:
     //   （原 private 仅 updateEating 内用）：矩阵探针直调锁熟鱼 +4 / 生鱼 +2 口径（零实例依赖；同 World::
     //   hashVoxel 升 public 的「纯函数开放」先例）。非食物 → 0。
     static int foodHungerAmount(int itemId);
+    // t1097 饮用品判定（纯静态谓词，单一权威；foodHungerAmount 姊妹面）：水瓶 / 粗制药水 / 迅捷 /
+    //   力量药水可饮（MC 1.0 口径——水瓶可饮无效果；粗制可饮无效果）。供 eventFilter / beginEating /
+    //   updateEating / finishEating 统一判「是否饮用品」（新增药水只改本方法一处）。纯函数于 itemId。
+    static bool isDrinkableItem(int itemId);
+    // t1097 药水效果常量（机制等价 MC 1.0 药水 I 级，wiki 2026 实读口径；public = 矩阵探针直读面，
+    //   foodHungerAmount 升 public 同门先例）：迅捷 = +20%/级移速；力量 = +130%/级近战伤害（1.0 旧
+    //   口径乘算，1.9 起才改 +3 平坦加成）；时长 = 3:00 = 180s（I 级基础时长）。
+    static constexpr float kSpeedBoostPerLevel = 0.20f;      // 迅捷每级移速增幅（×(1+0.2×L)）
+    static constexpr float kStrengthBonusPerLevel = 1.30f;   // 力量每级近战伤害增幅（×(1+1.3×L)）
+    static constexpr float kPotionDurationSec = 180.0f;      // 药水 I 级时长（MC 1.0 swiftness/strength 3:00）
     // 中键拾取方块（t37 pick block）：取当前射线命中格的方块 id → 装入 hotbar。仅指针捕获时生效
     // （与破/放同窗口级 MouseButtonPress 路径）。
     // spec：「无论背包开关」—— captured=true 蕴含背包已关，故等价于「游戏内中键」；命中空气 / 无
@@ -743,6 +767,7 @@ signals:
     void chestStoreChanged();      // t1013 箱子矿车内容键存储注入变更
     void hopperStoreChanged();     // t1080 漏斗内容存储注入变更
     void furnaceStoreChanged();    // t1080 熔炉内容存储注入变更
+    void brewingStoreChanged();    // t1097 酿造内容存储注入变更
     void positionChanged();
     // t567 出生点 / 重生点变更（睡床设床位后 emit；初值 kSpawn 常量 → 启动不发）。HUD 指南针据此重算指针。
     void spawnPointChanged();
@@ -954,6 +979,11 @@ signals:
     //   呈现层只消费（PLAN §2 分层；t1080 关单登记的 UI 候选授权面兑现——Main.qml 单向消费增量）。
     //   遮挡判定从简：无「上方压盖不开」门（dev-spec 明示从简，同发射器族「任意姿态可开」口径）。
     void hopperOpened(int x, int y, int z);
+    // t1097 右键酿造台（brewing stand）：placeBlock 分支发本信号（不放置；携命中格世界坐标）→ 呈现层
+    //   Connections 打开 BrewingUI（释放指针）。机制等价 MC 1.0 右键酿造台开酿造界面（5 槽 + 酿造进度）。
+    //   同 hopperOpened 模式：Game 层发语义事件（携坐标供 BrewingStore 寻址该台的 5 槽），呈现层只消费
+    //   （PLAN §2 分层；QML 单向消费增量，零 QML 玩法路径迁移）。
+    void brewingStandOpened(int x, int y, int z);
     // 火把放置（t125 朝向修正）：placeBlock 成功放置 Torch 后发，携带玩家点击面的外法线（指向玩家侧，
     //   = m_hitNx/Ny/Nz）。呈现层（torchHost）据此把火把定向为「柄嵌玩家所点墙面」——替代旧 recomputeOrient
     //   固定优先级（下>-X>+X>-Z>+Z）：旧逻辑在「墙+地并存」（墙插火把下方恰有地面）时误判垂直立柱，
@@ -1458,6 +1488,7 @@ private:
     ChestStore *m_chestStore = nullptr;           // t1013 箱子矿车内容键存储（转正 / 回生 / 挖毁清键，Q_PROPERTY 绑定）
     HopperStore *m_hopperStore = nullptr;         // t1080 漏斗 per-block 5 槽容腔（机制 tick 读写 + 破块清孤儿，Q_PROPERTY 绑定）
     FurnaceStore *m_furnaceStore = nullptr;       // t1080 漏斗挂接容器族（熔炉抽取/推入，Q_PROPERTY 绑定）
+    BrewingStore *m_brewingStore = nullptr;       // t1097 酿造台 per-block 5 槽（机制 tick 读写 + 破块清孤儿，Q_PROPERTY 绑定）
     // t1083 唱片机播放状态机表（运行期，不进存档——存档只保「盘在机+盘号」state 位）：坐标键
     //   （x/z 21 位偏移打包 + y 10 位，同 m_dispenserCooldowns 编码）→ 剩余音轨秒数。写入点 =
     //   useBlock 放入 / 续播沿；消亡点 = tickJukeboxes 到期吐盘 / useBlock 吐盘 / finishMiningAt
@@ -1670,7 +1701,16 @@ private:
     //   快照（activeEffectsChanged 深比较缓存，真变才发信号，免每帧 emit）。
     float m_slowTimer = 0.0f;
     int m_slowLevel = 0;
-    QVariantList m_lastEffectSigCache; // t715 上一帧活跃效果快照（发信号去抖缓存）
+    // t1097 药水效果态（StatusEffect::EffectSpeed / EffectStrength 的时序源；m_slowTimer 同门）：
+    //   m_speedTimer 迅捷剩余秒（>0 激活；step() 走路 +20%/级，机制等价 MC 1.0 swiftness）+
+    //   m_strengthTimer 力量剩余秒（>0 激活；attackMob 伤害 +130%/级旧口径，机制等价 MC 1.0 strength）。
+    //   饮用入口 = finishEating 药水分支（长按右键喝，eat 链复用；时长 kPotionDurationSec=180s）。
+    //   仅 Survival 生效（applyStatusEffect 模式门）。
+    float m_speedTimer = 0.0f;
+    int m_speedLevel = 0;
+    float m_strengthTimer = 0.0f;
+    int m_strengthLevel = 0;
+    QVariantList m_lastEffectSigCache; // t715 上一帧活跃效果真实快照缓存
     // t394 仙人掌接触伤害累积（玩家 AABB 接触 Cactus 方块时累加，每 EntityManager::kCactusDamageInterval 扣 1HP；
     //   离开即归零）。机制等价 MC 1.0 仙人掌触碰即伤。仅 Survival（Creative/Spectator 无敌不累）。
     float m_cactusDmgTimer = 0.0f;

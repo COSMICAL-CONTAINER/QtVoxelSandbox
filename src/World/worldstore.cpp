@@ -207,6 +207,19 @@ bool WorldStore::initSchema()
         qCCritical(lcSave) << "create hoppers failed:" << q.lastError().text();
         return false;
     }
+    // t1097 酿造内容表：同 hoppers 模式 —— 每台酿造台（按方块世界坐标键控）一行，data 列存
+    //   {slots, progress, fuelOps} 的 JSON 文本（自描述）。纯加表 —— 旧库 IF NOT EXISTS 幂等补建，
+    //   无迁移负担；schema 版本不 bump（纯加表对老库向前兼容）。
+    if (!q.exec(QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS brewing ("
+            "  x INTEGER NOT NULL,"
+            "  y INTEGER NOT NULL,"
+            "  z INTEGER NOT NULL,"
+            "  data TEXT NOT NULL,"
+            "  PRIMARY KEY (x, y, z))"))) {
+        qCCritical(lcSave) << "create brewing failed:" << q.lastError().text();
+        return false;
+    }
     // progress 表（progress 新系统）：玩家进度（统计 + 成就）单行表，key 固定 'main'，data 存 PlayerProgress::toVariant()
     //   的 JSON。IF NOT EXISTS 幂等补建（schema 版本不 bump，同 chests/furnaces，纯加表对老库向前兼容）。
     if (!q.exec(QStringLiteral(
@@ -456,7 +469,8 @@ void WorldStore::closeWorld()
 }
 
 bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const QVariantList &furnaces, const QVariantList &dispensers,
-                         const QVariantMap &worldTime, const QVariantMap &bedSpawn, const QVariantList &hoppers)
+                         const QVariantMap &worldTime, const QVariantMap &bedSpawn, const QVariantList &hoppers,
+                         const QVariantList &brewingStands)
 {
     if (!m_open || !m_world) {
         qCWarning(lcSave) << "saveAll: no open db or world";
@@ -570,6 +584,11 @@ bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const 
     }
     // t1080 漏斗内容同事务落盘（hoppers 表 DELETE 全量 + INSERT；与 chunks / meta / 前述容器表原子提交）。
     if (!writeHoppers(hoppers)) {
+        db.rollback();
+        return false;
+    }
+    // t1097 酿造内容同事务落盘（brewing 表 DELETE 全量 + INSERT；与 chunks / meta / 前述容器表原子提交）。
+    if (!writeBrewing(brewingStands)) {
         db.rollback();
         return false;
     }
@@ -866,6 +885,70 @@ QVariantList WorldStore::loadHoppers() const
         hm.insert(QStringLiteral("z"), q.value(2).toInt());
         const QJsonDocument doc = QJsonDocument::fromJson(q.value(3).toString().toUtf8());
         hm.insert(QStringLiteral("slots"), doc.toVariant());
+        out.append(hm);
+    }
+    return out;
+}
+
+// t1097 酿造落盘：DELETE 全量 + INSERT 每台酿造台（坐标列 + data JSON 文本）。调用方（saveAll）已开事务，
+//   本方法不 BEGIN/COMMIT（同事务原子）。brewing 形状 = BrewingStore::allBrewingStands() 产物：每项
+//   {x,y,z,slots:[{id,count}×5],progress,fuelOps}。坐标缺 / 非法 → 跳过该台（不写残条目）。
+bool WorldStore::writeBrewing(const QVariantList &stands)
+{
+    QSqlDatabase db = QSqlDatabase::database(kConn);
+    QSqlQuery del(db);
+    if (!del.exec(QStringLiteral("DELETE FROM brewing"))) {
+        qCCritical(lcSave) << "saveAll: brewing delete failed:" << del.lastError().text();
+        return false;
+    }
+    QSqlQuery iq(db);
+    iq.prepare(QStringLiteral("INSERT INTO brewing (x, y, z, data) VALUES (?, ?, ?, ?)"));
+    for (const QVariant &v : stands) {
+        const QVariantMap hm = v.toMap();
+        bool okx = false, oky = false, okz = false;
+        const int x = hm.value(QStringLiteral("x")).toInt(&okx);
+        const int y = hm.value(QStringLiteral("y")).toInt(&oky);
+        const int z = hm.value(QStringLiteral("z")).toInt(&okz);
+        if (!okx || !oky || !okz) continue;
+        QVariantMap data;
+        data.insert(QStringLiteral("slots"), hm.value(QStringLiteral("slots")));
+        data.insert(QStringLiteral("progress"), hm.value(QStringLiteral("progress")));
+        data.insert(QStringLiteral("fuelOps"), hm.value(QStringLiteral("fuelOps")));
+        const QJsonDocument doc = QJsonDocument::fromVariant(data);
+        iq.addBindValue(x);
+        iq.addBindValue(y);
+        iq.addBindValue(z);
+        iq.addBindValue(QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
+        if (!iq.exec()) {
+            qCCritical(lcSave) << "saveAll: brewing insert failed at" << x << y << z
+                               << ":" << iq.lastError().text();
+            return false;
+        }
+    }
+    return true;
+}
+
+// t1097 读 brewing 表为 QVariantList（形状同 writeBrewing 入参 = allBrewingStands 产物形）。未打开 →
+//   空列表。caller（Main.qml.enterWorld）转交 brewingStore.loadAll 整体替换内存（清旧世界残留 + 填本世界）。
+QVariantList WorldStore::loadBrewingStands() const
+{
+    QVariantList out;
+    if (!m_open) return out;
+    QSqlQuery q(QSqlDatabase::database(kConn));
+    if (!q.exec(QStringLiteral("SELECT x, y, z, data FROM brewing"))) {
+        qCWarning(lcSave) << "loadBrewingStands: select failed:" << q.lastError().text();
+        return out;
+    }
+    while (q.next()) {
+        QVariantMap hm;
+        hm.insert(QStringLiteral("x"), q.value(0).toInt());
+        hm.insert(QStringLiteral("y"), q.value(1).toInt());
+        hm.insert(QStringLiteral("z"), q.value(2).toInt());
+        const QJsonDocument doc = QJsonDocument::fromJson(q.value(3).toString().toUtf8());
+        const QVariantMap data = doc.toVariant().toMap();
+        hm.insert(QStringLiteral("slots"), data.value(QStringLiteral("slots")));
+        hm.insert(QStringLiteral("progress"), data.value(QStringLiteral("progress")));
+        hm.insert(QStringLiteral("fuelOps"), data.value(QStringLiteral("fuelOps")));
         out.append(hm);
     }
     return out;

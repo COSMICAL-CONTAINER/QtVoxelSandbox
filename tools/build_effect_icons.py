@@ -205,7 +205,78 @@ def draw_fire():
     finish(px, "icon_effect_fire.png")
 
 
+def draw_speed():
+    """疾风双箭（迅捷）：右向双箭头（浅蓝→青渐变 + 白高光），读作「加速」。像素原创。"""
+    px = new_canvas()
+    TOP = (168, 216, 255, 255)   # 箭身浅蓝
+    MID = (110, 178, 246, 255)   # 箭身中蓝
+    DEEP = (58, 120, 204, 255)   # 箭身深蓝（描边）
+    WHT = (240, 250, 255, 255)   # 高光
+    # 后箭（x2..9，y6..9）：菱形箭身 + 右向三角箭头。
+    for y in range(6, 10):
+        for x in range(2, 8):
+            put(px, x, y, TOP if y <= 7 else MID)
+    for x in range(8, 10):
+        half = (x - 7)  # 1,2
+        for y in range(8 - half, 8 + half):
+            put(px, x, y, MID)
+    # 前箭（x5..13，y9..12）：同构右下错位，压后箭尾（速度叠影读感）。
+    for y in range(9, 13):
+        for x in range(5, 11):
+            put(px, x, y, TOP if y <= 10 else MID)
+    for x in range(11, 14):
+        half = (x - 10)  # 1,2,3
+        for y in range(11 - half, 11 + half):
+            put(px, x, y, DEEP)
+    # 描边（箭头上缘 1px 深蓝 + 后箭尾 1px）。
+    for y in range(6, 10):
+        put(px, 2, y, DEEP)
+    for y in range(9, 13):
+        put(px, 5, y, DEEP)
+    # 高光两粒。
+    put(px, 3, 6, WHT)
+    put(px, 6, 9, WHT)
+    finish(px, "icon_effect_speed.png")
+
+
+def draw_strength():
+    """握拳剪影（力量）：暖棕握拳 + 指节亮缘 + 白高光，读作「发力」。像素原创。"""
+    px = new_canvas()
+    FIST = (196, 132, 76, 255)    # 拳面暖棕
+    FIST_D = (150, 94, 50, 255)   # 拳底暗棕
+    FIST_E = (104, 62, 34, 255)   # 描边深棕
+    WHT = (255, 244, 214, 255)    # 高光
+    # 拳体（x4..12，y5..13 圆角矩形）。
+    for y in range(5, 14):
+        for x in range(4, 13):
+            put(px, x, y, FIST)
+    # 圆角削角（四角 1px 挖空 + 描边）。
+    for (x, y) in [(4, 5), (12, 5), (4, 13), (12, 13)]:
+        put(px, x, y, (0, 0, 0, 0))
+    # 指节横纹（y7 / y9 / y11 三道，隔列亮点 = 指节读感）。
+    for y in (7, 9, 11):
+        for x in range(5, 12):
+            put(px, x, y, FIST_D)
+        put(px, 6, y - 1, FIST_E)
+    # 拇指贴边（右侧竖条 2px）。
+    for y in range(8, 13):
+        put(px, 12, y, FIST_D)
+        put(px, 13, y, FIST_E)
+    # 描边（拳体外圈 1px）。
+    for x in range(4, 13):
+        put(px, x, 5, FIST_E)
+        put(px, x, 13, FIST_E)
+    for y in range(5, 14):
+        put(px, 4, y, FIST_E)
+    # 高光（左上 2×2）。
+    put(px, 5, 6, WHT)
+    put(px, 6, 6, WHT)
+    finish(px, "icon_effect_strength.png")
+
+
 if __name__ == "__main__":
     draw_poison()
     draw_slowness()
     draw_fire()
+    draw_speed()
+    draw_strength()
