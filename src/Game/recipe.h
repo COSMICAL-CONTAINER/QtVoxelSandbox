@@ -463,6 +463,20 @@ public:
     //   自绘可可豆三粒斜置堆（drawCocoaBean，§9 原创）；无 pack 映射（mcMaterialId 越表界 >0x22E → -1 →
     //   资源包回退自绘，同音乐盘模式）；创造调色板补全（hotbar creativeMaterials 盘区尾）。
     static constexpr int CocoaBeanId = 0x262; // 可可豆：地牢战利品（1.0 基准内）；1:1 转换棕色染料（t1092）
+    // t1096 蕴辉瓶（glimmer bottle：材料段 0x263，可可豆之上首个空闲号；段尾追加不插中间 = 存档安全铁律，
+    //   数值方块 id 零改动）。机制等价 MC 1.0「投掷后碎裂释放经验球的玻璃瓶」（Java 1.0.0，2011-11 正式版
+    //   内物品）：右键投掷 → 抛物弹丸（同蛋 / 雪球家族）→ 触碰方块 / mob 即碎 → 释放经验球，总量
+    //   3 + rand(5) + rand(5) ∈ [3,11]（均值 7；wiki「3–11 experience」口径），按 canonical XP 分割链
+    //   拆球（XpOrbManager::spawnOrbsForTotal）。§9 命名区隔：MC 官方名「附魔之瓶」/ 内部名
+    //   experience_bottle 均**不采用**，取原创名「蕴辉瓶」（GlimmerBottle）。
+    //   **生存获取面纪元裁定（核实留痕）**：①Java 1.0.0 无合成配方（本工程配方表零新增行 = 同口径）；
+    //   ②村民交易（牧师售瓶）= Java 1.3.1（12w21a，2012-06）机制 → **非 1.0 基准**，且本工程无村民
+    //   系统 → 无对应获得面可建。故 1.0 口径下本物品即「无生存获取」（当年仅创造 / 指令可得）——
+    //   如实登记**创造专属**（创造调色板行 = 唯一获取面），不虚构合成 / 战利品来源。
+    //   可堆叠 64（材料段默认，Hotbar / Core maxStackSize 双默认均 64，零特判）；非方块（材料段）→
+    //   右键在 selectedBlock Air 守卫之前分流走投掷分支（同雪球 / 蛋 / 珠族）。图标：MaterialIcon 自绘
+    //   玻璃瓶盛辉光液（drawGlimmerBottle，§9 原创）；无 pack 映射（资源包回退自绘，同可可豆 / 音乐盘模式）。
+    static constexpr int GlimmerBottleId = 0x263; // 蕴辉瓶：右键投掷 → 碎裂释放经验球（3..11 XP）；创造专属（t1096）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

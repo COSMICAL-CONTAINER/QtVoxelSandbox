@@ -4337,6 +4337,31 @@ void PlayerController::placeBlock()
         emit swingArm(); // 掷珠也是一次「使用」动作 → 挥手（t29）
         return; // 暗渊珠（抛出成功）不再走方块放置路径
     }
+    // t1096 蕴辉瓶投掷（机制等价 MC 1.0「投掷释经验玻璃瓶」右键投掷）：手持 GlimmerBottleId（0x263，
+    //   材料段）右键 → spawnGlimmerBottle 从眼位沿视线方向以 kPlayerGlimmerBottleSpeed 抛出（抛物弹丸，
+    //   同雪球 / 蛋 / 珠投掷家族——无蓄力右键即抛）。任意方块 / 活体 mob 触碰即碎 → EntityManager emit
+    //   glimmerBottleBreak(命中格, 总XP) → 呈现层路由 XpOrbManager::spawnOrbsForTotal 拆球（3..11 XP，
+    //   canonical split）。**未击中任何实体也照碎**（触地即碎，MC 口径）。**不要求 m_hasHit**（瞄准的是
+    //   抛物弹道非方块命中格）；瓶非方块（材料段）→ selectedBlock 归 Air，须在 `m_selectedBlock == Air`
+    //   守卫之前分流（同雪球 / 蛋 / 珠分支模式）。spectator 已被入口 canPlace() 守卫拦截；Creative /
+    //   Survival 均可掷。生存消耗 1 瓶 / 创造不耗（同投掷族统一口径）。分层（PLAN §2）：掷出属
+    //   Game/Physics（读视线 + 调 EntityManager），不改栅格语义。
+    if (m_hotbar && m_world && m_entityManager && heldItemId == RecipeRegistry::GlimmerBottleId) {
+        // vel = 视线方向 × kPlayerGlimmerBottleSpeed。速度取 12（同 kPlayerSnowballSpeed / kPlayerEggSpeed
+        //   —— 瓶与蛋 / 雪球同为轻抛物弹丸，机制等价 MC 1.0 投掷物初速同档）。本地常量（Entities 层速度
+        //   常量 private 不跨层读，同 kPlayerSnowballSpeed 模式）。
+        constexpr float kPlayerGlimmerBottleSpeed = 12.0f; // 玩家掷蕴辉瓶速度（blocks/s）
+        const QVector3D eye = position();
+        const QVector3D look = lookDirection();
+        // origin = 眼位 + 视线前移 0.5（防贴墙 spawn 入墙即被 tick 判方块命中，同雪球 / 蛋 / 珠模式）。
+        const QVector3D origin = eye + look * 0.5f;
+        m_entityManager->spawnGlimmerBottle(origin, look * kPlayerGlimmerBottleSpeed);
+        if (m_mode != Creative)
+            m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 瓶（创造不耗）
+        m_lastPlaceMs = now;
+        emit swingArm(); // 掷瓶也是一次「使用」动作 → 挥手（t29）
+        return; // 蕴辉瓶（抛出成功）不再走方块放置路径
+    }
     // t400 繁殖喂食 useBlock（spec「喂对应食物 → 求偶 → 同种配对产幼崽」；机制等价 MC 1.0 breeding）：
     //   手持繁殖食物（小麦 WheatId / 胡萝卜 CarrotId / 马铃薯 PotatoId / 种子 SeedId）右键 → 在主选体射线之外
     //   **独立**跑一条「mob 命中射线」（findMobHit，同剪刀剪羊 / 攻击路径）；命中可繁殖 mob 且食物匹配该物种

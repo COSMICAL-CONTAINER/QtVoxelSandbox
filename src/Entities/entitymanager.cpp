@@ -881,6 +881,40 @@ int EntityManager::spawnEgg(const QVector3D &origin, const QVector3D &vel)
     return slot;
 }
 
+// t1096 蕴辉瓶经验总量 roll（MC 1.0 onImpact 公式逐字，见头文件注释）：显式种子确定性——局部
+//   QRandomGenerator(seed)（LootTable::roll seed 重载同门，PLAN §2-K 确定性精神），两掷 nextInt(5)
+//   后与 3 相加。值域 [3,11]、均值 7。
+int EntityManager::glimmerBottleXpTotal(quint32 seed)
+{
+    QRandomGenerator g(seed);
+    return 3 + int(g.bounded(5)) + int(g.bounded(5));
+}
+
+// t1096 生成蕴辉瓶投射物（玩家右键投掷；见头文件注释）：存 origin + 3D 速度 vel（含 vy 抛物）+
+//   kind=GlimmerBottle + pushable=false + 寿命。halfW/halfH=0.10（小瓶视觉 + 碰撞最小；命中检测走
+//   点-in-AABB 不读 halfW）。bump revision → QML Repeater 追加 delegate（GlimmerBottle 分支瓶图标
+//   billboard）。达 kCap → 跳过 + 告警（防溢出）。返新瓶槽索引（调试用）；达 kCap → -1。
+int EntityManager::spawnGlimmerBottle(const QVector3D &origin, const QVector3D &vel)
+{
+    if (m_liveCount >= kCap) {
+        qCWarning(lcEnt) << "entity cap reached (" << kCap << "); glimmer bottle spawn skipped at" << origin;
+        return -1;
+    }
+    Entity e;
+    e.pos = origin;
+    e.halfW = 0.10f; // 蕴辉瓶小瓶视觉 + 碰撞最小（同蛋 / 雪球家族）
+    e.halfH = 0.10f;
+    e.pushable = false; // 玩家走碰不推（同箭 / 雪球 / 蛋）
+    e.kind = GlimmerBottle;
+    e.vx = vel.x(); // 复用 vx/vy/vz 作 3D 速度（GlimmerBottle 不走 Mob 击退衰减分支，无冲突）
+    e.vy = vel.y();
+    e.vz = vel.z();
+    e.arrowLife = kGlimmerBottleLifetime;
+    const int slot = acquireSlot(std::move(e)); // t256：slot 复用（保 count 单调不降 → Repeater delegate 不泄漏）
+    notifyEntitiesChanged();
+    return slot;
+}
+
 // t728 生成火球投射物（燃烬者 aiEmberling 远程攻击；见头文件注释）：存 origin + 3D 速度 vel（blocks/s，直线弹道，
 //   重力 ~0）+ kind=Fireball + pushable=false + 寿命。halfW/halfH=0.15（橙黄火球小体视觉 + 碰撞最小；命中检测走
 //   点-in-AABB 不读 halfW）。entity.mobType 设 MobEmberling（火球命中玩家时 mobAttackedPlayer 携它在 QML 映射死因
@@ -6809,6 +6843,75 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 dirty = true;
             }
             continue; // Egg 不走 Mob AI / resting / 击退衰减
+        }
+
+        // --- GlimmerBottle（t1096 蕴辉瓶投射物）：抛物 + 方块 / 活体 mob 触碰即碎（释放经验球）+ 寿命兜底 ---
+        //   机制等价 MC 1.0 投掷释经验玻璃瓶：移动对象被方块 / 实体截停即 onImpact 释经验——**未击中任何
+        //   实体也照碎**（触地即碎）。**命中 mob 0 伤害 0 击退**（MC onImpact 只释经验不攻击，区别于雪球 /
+        //   蛋的击退分支；经验球自身是拾取面，无需战斗反馈）。判定序同蛋：先 mob 后方块（贴墙 mob 不被撞墙
+        //   吞掉）。碎裂经验总量 = glimmerBottleXpTotal（运行期以全局 RNG 一枚随机种子驱动确定性公式）→
+        //   emit glimmerBottleBreak(命中格, 总量) → 呈现层路由 XpOrbManager::spawnOrbsForTotal 拆球
+        //   （单向事件流，同 abyssEyeBecameItem → spawnItem 模式）。
+        if (e.kind == GlimmerBottle) {
+            e.arrowLife -= float(dt); // 复用 arrowLife 作寿命倒计时
+            e.vy -= kGravity * float(dt); // 抛物：重力改 vy（同蛋 / 雪球共用世界重力 → 弧自然）
+            const QVector3D next = e.pos + QVector3D(e.vx, e.vy, e.vz) * float(dt);
+            bool remove = false;
+            bool hitMob = false; // mob 触碰（与方块命中同结算：碎 + 释经验；仅诊断记录）
+            // 寿命到 → 移除（飞行未命中兜底，防永久滞留堆积；不碎裂不释经验）。
+            if (e.arrowLife <= 0.0f) remove = true;
+            // 活体 mob 触碰（先于方块判定，同蛋）：瓶（点）落入任一活体 mob 的 AABB（外扩
+            //   kGlimmerBottleHitHalfW）→ 碎裂移除 + 0 伤害 0 击退（MC 该弹丸无攻击语义）。
+            if (!remove) {
+                for (int mi = 0; mi < int(m_entities.size()); ++mi) {
+                    const Entity &m = m_entities[size_t(mi)];
+                    if (!m.alive || m.kind != Mob || m.dead) continue; // 所有活体 mob；玩家非 Mob 穿过
+                    const float gx2 = m.pos.x() - m.halfW - kGlimmerBottleHitHalfW;
+                    const float gy2 = m.pos.y() - m.halfH - kGlimmerBottleHitHalfW;
+                    const float gz2 = m.pos.z() - m.halfW - kGlimmerBottleHitHalfW;
+                    if (next.x() >= gx2 && next.x() <= m.pos.x() + m.halfW + kGlimmerBottleHitHalfW
+                        && next.y() >= gy2 && next.y() <= m.pos.y() + m.halfH + kGlimmerBottleHitHalfW
+                        && next.z() >= gz2 && next.z() <= m.pos.z() + m.halfW + kGlimmerBottleHitHalfW) {
+                        hitMob = true;
+                        qCInfo(lcEnt) << "glimmer bottle hit mob" << mi << "(no damage, xp release only)";
+                        remove = true;
+                        break; // 命中首个即止（瓶消失，不穿透）
+                    }
+                }
+            }
+            // 方块触碰 → 碎裂移除（机制等价 MC 触地即碎）。mob 命中已早退。
+            if (!remove) {
+                const int bx = qFloor(next.x()), by = qFloor(next.y()), bz = qFloor(next.z());
+                if (by >= 0 && world->isSolid(bx, by, bz)) remove = true;
+            }
+            // 越界兜底（飞出世界 XZ 边界 / 跌出底部）→ 移除（防永久飞行堆积；不碎裂不释经验——同珍珠
+            //   越界白耗口径）。
+            if (!remove) {
+                if (next.x() < 0.0f || next.z() < 0.0f
+                    || next.x() > worldW || next.z() > worldD || next.y() < 0.0f) {
+                    remove = true;
+                }
+            }
+            // 触碰（mob / 方块）→ roll 经验总量 + emit glimmerBottleBreak（碎裂释经验；呈现层路由拆球）。
+            //   寿命到 / 越界不触发（无命中点）。命中格先拷局部（防 spawn 悬垂——本分支无 spawn，仍守
+            //   t583 终审 L1 纪律：emit 参数一律局部量）。
+            if (remove && e.arrowLife > 0.0f && next.y() >= 0.0f
+                && next.x() >= 0.0f && next.z() >= 0.0f
+                && next.x() <= worldW && next.z() <= worldD) {
+                const int cellX = qFloor(next.x()), cellY = qFloor(next.y()), cellZ = qFloor(next.z());
+                const int totalXp = glimmerBottleXpTotal(QRandomGenerator::global()->generate());
+                emit glimmerBottleBreak(cellX, cellY, cellZ, totalXp);
+                qCInfo(lcEnt) << "glimmer bottle broke at" << cellX << cellY << cellZ
+                              << "hitMob=" << hitMob << "xp=" << totalXp;
+            }
+            if (remove) {
+                toRemove.push_back(idx);
+                dirty = true;
+            } else {
+                e.pos = next; // 继续飞行
+                dirty = true;
+            }
+            continue; // GlimmerBottle 不走 Mob AI / resting / 击退衰减
         }
 
         // --- Fireball（t728 燃烬者火球）：直线弹道（重力 0）+ 方块命中（消失 + 20% 点燃邻可燃）+ 玩家命中

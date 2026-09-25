@@ -1986,6 +1986,27 @@ Item {
                 R(5, 17, 5, 1, ridge)
             }
 
+            // t1096 蕴辉瓶（0x263）：右键投掷 → 碎裂释放经验球。原创玻璃瓶形 = 细颈瓶（软木塞顶 +
+            //   透明玻璃壁 + 瓶内辉光液面 + 高光），辉光液取经验球同族青绿辉光（§9 原创配色，非 MC
+            //   美术）。纯原创自绘（§9a）；pack 无映射（mcMaterialId 越表界 -1 → ResourcePackManager
+            //   无映射回退本自绘）。
+            const drawGlimmerBottle = () => {
+                const cork = "#8a6a3c", glass = "#c8dce0", glassLite = "#e8f4f6", liquid = "#7fe8c8", liquidLite = "#b8f4e4", glow = "#d8fff0"
+                R(8, 2, 4, 1, cork)               // 软木塞
+                R(8, 3, 4, 2, glass)              // 细颈
+                R(8, 5, 4, 1, glassLite)          // 颈部受光
+                R(6, 6, 8, 1, glass)              // 瓶肩
+                R(5, 7, 10, 10, glass)            // 瓶体外壁（rows 7..16）
+                R(6, 8, 8, 8, liquid)             // 瓶内液体（液面 row 8 起）
+                R(6, 8, 8, 1, liquidLite)         // 液面受光
+                R(6, 8, 2, 2, glow)               // 辉光高光
+                R(9, 10, 2, 2, glow)              // 辉光核心
+                R(6, 15, 8, 1, liquid)            // 瓶底液
+                R(5, 7, 1, 10, glassLite)         // 左缘受光
+                R(14, 7, 1, 10, glass)            // 右缘壁
+                R(5, 16, 10, 1, glass)            // 瓶底壁
+            }
+
             switch (root.materialId) {
             case 0x200: drawStick();        break
             case 0x201: drawCoal();         break
@@ -2071,6 +2092,7 @@ Item {
             case 0x260: drawDiscEcho();  break // 音乐盘（深巷回声）：唱片机曲目 1；矿井战利品
             case 0x261: drawDiscNight(); break // 音乐盘（夜航曲）：唱片机曲目 2；战利品/创造
             case 0x262: drawCocoaBean(); break // t1092 可可豆（地牢战利品；1:1 转换棕染料——染料链最后一环）
+            case 0x263: drawGlimmerBottle(); break // t1096 蕴辉瓶（右键投掷 → 碎裂释经验球；创造专属）
             // t788 染料 16 色（0x24B..0x25A，白→黑羊毛色序；三色参数取 build_wool.py 同源色板）
             case 0x24B: drawDye("#f0f0ee", "#f9f9f8", "#959594"); break // 白色染料（白花破坏掉落；染白羊毛/白床）
             case 0x24C: drawDye("#de781e", "#ee9f69", "#8a4a13"); break // 橙色染料

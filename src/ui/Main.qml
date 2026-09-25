@@ -3346,6 +3346,13 @@ Window {
         function onEggBreak(x, y, z) {
             if (particleLoader.item) particleLoader.item.burstEgg(x, y, z)
         }
+        // t1096 蕴辉瓶碎裂释经验（EntityManager GlimmerBottle tick 触方块 / mob 碎裂发
+        //   glimmerBottleBreak(格, 总XP)）：一行转发 XpOrbManager.spawnOrbsForTotal（canonical XP split
+        //   拆球逻辑收口在 Entities 层，呈现层只路由——同 onAbyssPearlLanded 单行转发先例）。单向事件流
+        //   （PLAN §2 分层：Entities 发语义事件、呈现层只消费路由）。坐标 = 命中格（整数格，球落格中心 +0.5）。
+        function onGlimmerBottleBreak(x, y, z, totalXp) {
+            xpOrbs.spawnOrbsForTotal(x, y, z, totalXp)
+        }
     }
 
     // t89 / t118 / t177 音效（Core/Platform 层，miniaudio 封装）：破 / 放 / 挖 / 脚步 / 拾取 / 门开关 /
@@ -10660,6 +10667,38 @@ Window {
                                 baseColorMap: Texture {
                                     flipV: false
                                     sourceItem: MaterialIcon { materialId: 0x243; width: 64; height: 64 }
+                                }
+                            }
+                        }
+                    }
+                    // t1096 蕴辉瓶（GlimmerBottle；机制等价 MC 1.0 投掷释经验玻璃瓶——玩家右键 GlimmerBottleId
+                    //   0x263 掷出受重力抛物飞行，触方块 / mob 即碎释放经验球；§9 区隔 + 原创视觉）。t807
+                    //   掉落物式贴图同门：BillboardQuad 单面 billboard 恒正对相机铺 item 图标（MaterialIcon
+                    //   0x263，内部两级：pack 无映射回退 drawGlimmerBottle 自绘透明底——同暗渊珠/可可豆两级
+                    //   模式），以 item 图标替代纯色小体（与掉落物 Repeater 材料段同源同图，渲染语义统一）。
+                    //   飞行自旋走面内 roll（绕 billboard 自身 Z；瓶形细长 → 自旋读作「翻滚的瓶子」）。
+                    //   触碰（方块 / mob）→ C++ emit glimmerBottleBreak → 呈现层路由 xpOrbs.spawnOrbsForTotal
+                    //   释放经验球（槽即时释放无碎裂动画，同珠落即传口径）。alpha 契约沿掉落物材料段：
+                    //   alphaCutoff 0.5 + opacity 0.99（透明底像素丢弃）；baseColor 乘 terrainLight 夜间变暗。
+                    //   NoLighting（红线：可见 Model 必须 NoLighting）。
+                    Node {
+                        id: glimmerBottleNode
+                        visible: { const _r = mon.revision; return _r >= 0 ? (entKind === EntityManager.GlimmerBottle) : false }
+                        // 飞行翻滚（面内 roll：billboard 恒正对相机，瓶图标绕自身 Z 打转）。
+                        property real spin: 0
+                        NumberAnimation on spin { from: 0; to: 360; duration: 900; loops: Animation.Infinite; running: glimmerBottleNode.visible }
+                        Model {
+                            geometry: BillboardQuad {}
+                            scale: Qt.vector3d(0.30, 0.30, 0.30) // 同掉落物材料段 billboard 统一尺寸
+                            eulerRotation: Qt.vector3d(cam.eulerRotation.x, cam.eulerRotation.y, glimmerBottleNode.spin)
+                            materials: PrincipledMaterial {
+                                lighting: PrincipledMaterial.NoLighting
+                                alphaCutoff: 0.5
+                                opacity: 0.99   // <1 强制走透明通道 → 贴图 alpha 被尊重（透明底不渲染）
+                                baseColor: terrainLight(worldClock.skyLight)
+                                baseColorMap: Texture {
+                                    flipV: false
+                                    sourceItem: MaterialIcon { materialId: 0x263; width: 64; height: 64 }
                                 }
                             }
                         }

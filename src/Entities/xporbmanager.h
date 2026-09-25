@@ -65,6 +65,14 @@ public:
     //   追加 delegate。
     Q_INVOKABLE void spawnOrb(int x, int y, int z, int amount);
 
+    // t1096 蕴辉瓶碎裂释经验拆球链（canonical XP split）：把总量 total 按 MC 1.0 EntityXPOrb.getXPSplit
+    //   分割阈值链（≥247→247 / ≥123→123 / ≥63→63 / ≥31→31 / ≥15→15 / ≥7→7 / ≥3→3 / else 1）逐段拆成
+    //   若干经验球（while (i>0) { j=split(i); i-=j; spawn(j) }，机制等价 MC ThrownExpBottle.onImpact 的
+    //   spawn 循环），逐球 spawnOrb(x,y,z,j)（格中心 +0.5 同门）。total<=0 防御 no-op（while 自然不进）。
+    //   **纯确定性**（同总量 → 同分割序列；随机性只存在于上游 roll glimmerBottleXpTotal）——矩阵行为级
+    //   验收面。Q_INVOKABLE 供呈现层路由（Main.qml onGlimmerBottleBreak 一行转发，拆球逻辑收口本层）。
+    Q_INVOKABLE void spawnOrbsForTotal(int x, int y, int z, int total);
+
     // 第 i 个球的世界坐标（呈现层 delegate 摆位绑它）。越界返回 (0,0,0)。
     Q_INVOKABLE QVector3D posAt(int i) const;
     // 第 i 个球携带的 XP 数量（呈现层据此调色 / 大小：大球更显眼）。越界返回 0。
