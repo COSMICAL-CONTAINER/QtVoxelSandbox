@@ -20,9 +20,9 @@ last_completed_task: t1093 漏斗降级四件批（2026-09-25 闭环；矩阵 78
 last_completed_task_prev: t1092 棕色染料生存源（2026-09-25 闭环，矩阵 782→786 16/16 全色生存可达收口；详录 = dev-plan t1092 关单条目）
 last_completed_task_commits: fix(t1093)（1998cf5：ShapeHopper 三盒几何权威+UI 信号路由+爆炸语义事件，Core/World/Entities/Game/QML 七文件）+ test(t1093)（06f471f：section63 r2063a-d 四腿 + r2052d 三处 lawful 钉面修订）
 last_verified_commit: test(t1093)（矩阵 **790 PASS / 0 FAIL ×2**：matrix_t1093_{pos,final}.log EXIT=0；新基线腿集合 md5[规范配方 grep -a -oE "^PASS \| [a-z0-9]+ " | sort | md5sum]三日志全等 4a48413b09916efa4056df2f8af933ad；NEG-1 恰红 {r2063b} / NEG-2 恰红 {r2063c} 双还原 4/4 绿；冒烟 tail20 回填 logs/voxelsandbox_t1093_tail20.log[129,797 B 横幅+root objects 齐]；主控独立脱离式复跑 790/0 同 md5 三方恒等 matrix_orch_t1093_verify.log）
-last_governance_review: 2026-09-25（audit #19 GREEN——窗口 429bf73..6d9fa83 11 提交/t1084-t1088 五闭环证据链全实核[三代码单三方 md5 全等 29d2fbe4/3b232c04/3d672867 + NEG 六份恰红面+六份还原逐日志吻合 + 相邻族十二份 reg 零污染 + 两裁定单零代码核实（grindstone 全仓 0 命中/observer 唯一命中 miniaudio 第三方头）]；账本三方一致/腿数链 750→762 无断；11 提交零署名；1 LOW 发现 F1[t1088 中断链过程注缺档——dev-plan 已补录同体例过程注]批内清偿 + 3 INFO 无需动作；详见 governance-audit-2026-09-25.md）
+last_governance_review: 2026-09-25（audit #20 GREEN——窗口 da82e54..9079f74 15 提交/t1089-t1093 五闭环证据链全实核[五单三方 md5 全等 f0c7de88/55e63ca6/38c77b86/77a122b1/4a48413b + NEG 十份恰红面十份还原逐日志吻合 + t1089 md5 配方勘误留痕核实 + 留池台账问询实答（辅助门五处实为 t1091 全清）]；账本三方一致/腿数链 762→790 无断；15 提交零署名；**F1[MEDIUM] 治理计数字段五闭环失更**[counter 恒 0/due 恒 false/Workspace Guard HEAD 恒 t1088——本批回填并恢复按单递增惯例，若 #21 窗口仍失更降 YELLOW]清偿 + F2[LOW 候选池重复条目]清偿 + 2 INFO 无需动作；详见 governance-audit-2026-09-25-b.md）
 governance_review_due: false
-completed_tasks_since_governance_review: 0（审计 #19 GREEN 于 2026-09-25）
+completed_tasks_since_governance_review: 0（审计 #20 GREEN 于 2026-09-25）
 next_task: **t1094 写门残面批（候选池，在飞）→ 之后顺延（红石家族纪元标注审计/removeDatabase 卫生单/性能类…；比较器本体已列候选）**；用户侧并行 = P5 实机清单（累计待实机确认汇总 + t1073-t1093 各单新增）+ §30.6/§31 设计决策 + 择机 push（本地领先远端 60+ 笔）
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
@@ -33,7 +33,7 @@ needs_human: false
 
 ## Workspace Guard
 
-- HEAD = t1088 甘蔗口径归一代码终态（fix(t1088) 8eac8db + test(t1088) d923625 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 762 腿满绿（58 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**禁并发构建/并发跑矩阵**（t813 build_stamps 每次构建强制全目标重链——两进程并发构建可产出损坏 exe，2026-09-21 三崩留痕；并发跑共享夹具面同理存疑，验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075 过程日志落仓库根 + t1081 复跑双进程事故两教训——cwd 相对路径在跨命令持久化下不可靠）。**冒烟证据每闭环回填 tail20**（审计 #16-F4/#17-F1 两现 + t1088 三现——回填件须含启动横幅与 root objects 实文，主控验收时核对）。
+- HEAD = t1093 漏斗降级四件批代码终态（fix(t1093) 1998cf5 + test(t1093) 06f471f 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 790 腿满绿（63 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（current_task/last_completed_*/counter 按单递增/Workspace Guard HEAD 行同步终态——审计 #20 F1 教训：t1089-t1093 五闭环漏更 counter 与 HEAD 行，逐单递增惯例恢复）。**禁并发构建/并发跑矩阵**（t813 build_stamps 每次构建强制全目标重链——两进程并发构建可产出损坏 exe，2026-09-21 三崩留痕；并发跑共享夹具面同理存疑，验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075 过程日志落仓库根 + t1081 复跑双进程事故两教训——cwd 相对路径在跨命令持久化下不可靠）。**冒烟证据每闭环回填 tail20**（审计 #16-F4/#17-F1 两现 + t1088 三现——回填件须含启动横幅与 root objects 实文，主控验收时核对）。
 - 纪律①-⑨全在案；**大 TU 编译一律 -j 1**（09-13 蓝屏教训；分段后单段增量 -j 4 实测安全）。**矩阵测试为 tools/matrix/ 分层结构**：改探针只重编对应段 TU（秒级）+ `--filter <substring>` 只跑本任务腿；新腿落对应段文件，新段置尾 runAll 末执行、须 ≤500KB；section11 起「自建 fresh 小世界」先例（48×48×96 seed 82 + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)）。
 - **R20.06 起值类型纪律**：src/Core/ 新值类型一律 result.h QObjectFree 编译期钉 + 头内 static_assert；命令/事件队列满载拒绝与快照队列覆盖最老是两域容量策略分化，勿「统一」。
 - **R20.07 起编排壳纪律**：GameSession 只做编排（命令 → 整 tick 边界 → World::setBlock 权威），禁复制游戏逻辑；**QML 现行玩法路径零变化是 R20 主线不变量**（Main.qml 含 "GameSession" 即违零迁移阴性钉 r2007b）。
