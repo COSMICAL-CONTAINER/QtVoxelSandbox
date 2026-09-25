@@ -299,9 +299,9 @@ void MatrixRun::section65_repeater()
         ok = ok && d1;
         if (!d1) diag += QStringLiteral("[d1]");
         // (2) id / kMcBlockId 行 / 图集容量（t691 一行一条目纪律的行为级对齐）。
-        const bool d2 = int(BR::Repeater) == 147 && int(BR::Count) == 148
+        const bool d2 = int(BR::Repeater) == 147 && int(BR::Count) == 149 // t1097 lawful 前移：148→149（BrewingStand=148 尾部追加）
             && BR::mcBlockId(quint8(BR::Repeater)) == 93
-            && BR::AtlasTileCount == 193;
+            && BR::AtlasTileCount == 195; // t1097 lawful 前移：193→195（酿造台 tile 193..194 追加）
         ok = ok && d2;
         if (!d2) diag += QStringLiteral("[d2 id=%1 mc=%2 atlas=%3]")
                              .arg(int(BR::Repeater)).arg(BR::mcBlockId(quint8(BR::Repeater)))
