@@ -1071,6 +1071,13 @@ add_executable(redstone_matrix_test
     tools/matrix/section62_cocoa_bean_dye.cpp
     tools/matrix/section63_hopper_degraded.cpp
     tools/matrix/section64_write_gate_residual2.cpp
+    # t1095 红石中继器探针段（置尾先例沿用：runAll 末执行，filter 词 r2065；5 腿 r2065a-e = 延迟档位
+    #   语义[同构双电路 delay=1/4 精确时序差 + 挂起计数 state 直读] / 整流单向[侧向不灌 + 背靠背反灌拒绝
+    #   + 链上正控制] / 续距 15 + 端到端[负坐标 + 核心双域 17 格电路，无中继器必暗的强判据] / 结构钉
+    #   [def 行 + id/图集/state 编解码 + 调档循环 + 全链源钉族] / 域门收口复钉 + 相邻族零污染[r2059-r2064
+    #   计数钉 + 既有红石族回归柱 + 负坐标墙复钉 + 惰性编辑零重算]。sparse 构造缝 + loadChunkAt 物化
+    #   （r2053c/r2059-r2064 同门），rig 世界零接触，无新增 .cpp）。
+    tools/matrix/section65_repeater.cpp
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
     #   确定性等价承重墙[8 形态快照 worker ≡ 同步直调逐位恒等：顶点/索引/统计三面]/队列纪律
     #   [容量压小满载 kErrQueueFull 可见拒绝 + 拒绝项不入账 + 接受项恰一产出按 requestId 对账]/

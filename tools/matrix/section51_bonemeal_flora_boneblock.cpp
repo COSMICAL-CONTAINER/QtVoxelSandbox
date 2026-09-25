@@ -299,16 +299,20 @@ void MatrixRun::section51_bonemeal_flora_boneblock()
             // t1080 钉面同变更修订（追加不插中间先例——现值随新方块/新瓦片尾部追加 lawful 前移：
             //   145→146 / 186→189；钉语义 = 「哨兵存在」而非冻结数值，历史值见 git 与 blockregistry 注）：
             //   t1083 二次同门修订：Jukebox=146 尾部追加 → 146→147 / 189→191。
-            SrcPin("Count sentinel", "Count           = 147", 1),
-            SrcPin("atlas tile count", "AtlasTileCount = 191", 1)});
+            //   t1095 三次同门修订：Repeater=147 尾部追加 → 147→148 / 191→193。
+            SrcPin("Count sentinel", "Count           = 148", 1),
+            SrcPin("atlas tile count", "AtlasTileCount = 193", 1)});
         ok = ok && missBrH.isEmpty();
         if (!missBrH.isEmpty()) diag += QStringLiteral("[br.h %1] ").arg(missBrH.join(QLatin1Char(',')));
         // kMcBlockId 双行（音符盒对齐补行 25 + 骨块行 0）——行注释后缀形态 → 裸读文件口径（raw contains）。
         //   t1083 三次同门修订：骨块后尾部追加唱片机行（MC 1.0 jukebox id 84）→ 骨块行不再是表尾
         //   「*/ 0,\n};」，表尾现为「*/ 84,\n};」；骨块行本体（*/ 0,）钉存在性不钉「最末」位。
+        //   t1095 四次同门修订：唱片机后尾部追加中继器行（MC 1.0 repeater id 93）→ 表尾现为
+        //   「*/ 93,\n};」；唱片机行本体（*/ 84,）钉存在性不钉「最末」位。
         const bool brCppRows = brCppTxt.contains(QLatin1String("*/ 25,")) // note_block 行（音符盒 MC 1.0 id 25）
             && brCppTxt.contains(QLatin1String("*/ 0,"))
-            && brCppTxt.contains(QLatin1String("*/ 84,\n};")); // 唱片机行（表尾最后一条目，t1083）
+            && brCppTxt.contains(QLatin1String("*/ 84,"))
+            && brCppTxt.contains(QLatin1String("*/ 93,\n};")); // 中继器行（表尾最后一条目，t1095）
         ok = ok && brCppRows;
         if (!brCppRows) diag += QStringLiteral("[br.cpp rows] ");
         // 配方两行 / 调色板 / 图标 / pack 映射 / 派生链工具表。
