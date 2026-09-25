@@ -471,7 +471,7 @@ void MatrixRun::section56_paper_book_bookshelf()
         const QString bSrc = bf.open(QIODevice::ReadOnly)
             ? QString::fromUtf8(bf.readAll()) : QString();
         const bool d2 = BR::mcBlockId(BR::Bookshelf) == 47
-            && BR::AtlasTileCount == 191 && d.frontTile < BR::AtlasTileCount
+            && BR::AtlasTileCount == 193 && d.frontTile < BR::AtlasTileCount // t1095 lawful 前移：191→193
             && bSrc.count(QStringLiteral("/* bookshelf               */ 47")) == 1;
         ok = ok && d2;
         if (!d2) diag += QStringLiteral("[d2 mc=%1 atlas=%2 row=%3]")
