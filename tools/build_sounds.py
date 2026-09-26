@@ -1138,6 +1138,69 @@ def gen_note_piano(n):
     return finalize(out, target_peak=0.9)
 
 
+def gen_drink_gulp():
+    """饮用节拍咕嘟音（t1100 药水呈现层小件；机制等价 MC 1.0 drinking 周期音，§9 原创程序合成）。
+
+    合成参数留痕：三连下行「咕嘟」blorp，每声 = 正弦扫频 620→~260 Hz（0.075s 指数滑频）+
+    轻气泡噪声（高通白噪 12ms 突发）+ 快指数衰减（τ=25ms）；声间静默 40ms，总长 ~0.35s。
+    mono s16 44.1k，峰值归一 0.9。播放端 AudioManager::playDrinkGulp（Game 层进食节拍权威驱动，
+    每 ~0.4s 一声；seek 重发截断不堆叠，同其他单件模式）。三声逐声降调（×1.8^-gi）= 咕嘟下行观感。
+    """
+    dur = 0.35
+    n_s = int(SR * 0.35)
+    out = [0.0] * n_s
+    gulp_starts = [0.0, 0.115, 0.23]
+    for gi, gs in enumerate(gulp_starts):
+        f0 = 620.0 * (1.8 ** -gi)  # 三声逐声降调（咕嘟下行观感）
+        n_g = int(SR * 0.075)
+        base = int(gs * SR)
+        for i in range(n_g):
+            t = i / SR
+            sweep = f0 * (0.42 ** t)  # 620→~260Hz 指数滑频
+            env = math.exp(-t / 0.025)
+            s = math.sin(2 * math.pi * (0.5 * sweep + f0) * t)
+            # 气泡噪声（前 12ms 白噪突发，模拟液体破裂点；线性淡出）
+            if i < int(SR * 0.012):
+                noise = (random.random() * 2.0 - 1.0) * 0.22 * (1.0 - i / int(SR * 0.012))
+            else:
+                noise = 0.0
+            out[base + i] += s * env + noise * env
+    # 末尾 10ms 线性收口防爆音
+    fade = int(SR * 0.010)
+    for j in range(fade):
+        out[n_s - 1 - j] *= j / fade
+    return finalize(out, target_peak=0.9)
+
+
+def gen_burp():
+    """饮毕 burp 音（t1100；机制等价 MC 1.0 饮毕随机 burp，§9 原创程序合成）。
+
+    合成参数留痕：低频短哼 0.30s——基频 105→68Hz 线性扫频 × 谐波列 k=1..5（幅 ~1/k^1.2，锯齿感）+
+    慢振颤（5Hz，频偏 ±8%）+ 0.30s 指数衰减 + 轻噪声呼吸床（幅 0.05）；播放端随机 ±8% 播放速率
+    抖动（AudioManager::playBurp set_pitch 0.92..1.08 ≈ MC 随机音高口径）。mono s16 44.1k，
+    峰值归一 0.8。
+    """
+    dur = 0.30
+    n_s = int(SR * dur)
+    out = [0.0] * n_s
+    phase = 0.0
+    for i in range(n_s):
+        t = i / SR
+        frac = t / dur
+        f0 = 105.0 - 37.0 * frac          # 105→68Hz 线性扫频
+        f0 *= 1.0 + 0.08 * math.sin(2 * math.pi * 5.0 * t)  # 5Hz 慢振颤 ±8%
+        phase += 2 * math.pi * f0 / SR
+        s = sum(amp * math.sin(phase * k) for k, amp in
+                [(1, 1.0), (2, 0.43), (3, 0.25), (4, 0.15), (5, 0.09)])
+        s += (random.random() * 2.0 - 1.0) * 0.05          # 呼吸噪声床
+        out[i] = s * math.exp(-t / 0.30)
+    # 末尾 10ms 线性收口防爆音
+    fade = int(SR * 0.010)
+    for j in range(fade):
+        out[n_s - 1 - j] *= j / fade
+    return finalize(out, target_peak=0.8)
+
+
 def main():
     root = Path(__file__).resolve().parent.parent
     out_dir = root / "sounds"
@@ -1184,6 +1247,9 @@ def main():
              ("achievement", gen_achievement),
              ("chest_open", gen_chest_open),
              ("chest_close", gen_chest_close)]
+    # t1100 饮用面两单件（咕嘟节拍音 + 饮毕 burp；gen_drink_gulp / gen_burp 参数留痕见函数头注）。
+    clips.append(("drink_gulp", gen_drink_gulp))
+    clips.append(("burp", gen_burp))
     # t1083 唱片机曲目（disc_track_00..02.wav，两位编号同 makeDiscPath %02d 口径）：--only 支持
     #   "disc" 全组 / 单轨名。
     for i in range(3):

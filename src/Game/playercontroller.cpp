@@ -129,8 +129,23 @@ int PlayerController::foodHungerAmount(int itemId)
 // t1097 饮用品判定（单一权威；foodHungerAmount 姊妹面，头注释见 .h）：水瓶 / 粗制药水 / 迅捷 /
 //   力量药水可饮。水瓶 / 粗制可饮无效果（MC 1.0 口径——水瓶饮用零效果；粗制是无效果载体）；
 //   迅捷 / 力量在 finishEating 据持物挂效果。新增可饮药水只改本方法一处。
+// t1100 延长药水族（0x275..0x27A）并入可饮面：早退 switch 独立面在**前**（基础链 return 原句逐字
+//   不动——r2069d 源钉「drinkable tail」零修订纪律，t1100 零 lawful 钉修订目标）。
 bool PlayerController::isDrinkableItem(int itemId)
 {
+    // t1100 延长药水族六件：二级酿造产物 = 成品药水，饮用面与基础版同门（时长走延长常量，见
+    //   finishEating 分流；NEG 面登记：finishEating 延长分流链 = NEG-2 触达面，本面不触达）。
+    switch (itemId) {
+    case RecipeRegistry::ExtendedSpeedPotionId:
+    case RecipeRegistry::ExtendedStrengthPotionId:
+    case RecipeRegistry::ExtendedFireResistancePotionId:
+    case RecipeRegistry::ExtendedRegenerationPotionId:
+    case RecipeRegistry::ExtendedPoisonPotionId:
+    case RecipeRegistry::ExtendedWeaknessPotionId:
+        return true;
+    default:
+        break;
+    }
     return itemId == RecipeRegistry::WaterBottleId
         || itemId == RecipeRegistry::AwkwardPotionId
         || itemId == RecipeRegistry::SpeedPotionId
@@ -2987,6 +3002,25 @@ void PlayerController::finishEating()
             applyStatusEffect(PlayerState::EffectWeakness, kWeaknessDurationSec, 1);
         else if (eatenId == RecipeRegistry::InstantHealthPotionId && m_mode == Survival)
             emit healed(kInstantHealthHealHp);
+        // t1100 延长药水分流（同门追加；时长 = MC 1.0 extended 原值，常量族见 .h 逐链核实留痕）：
+        //   效果 / 等级 / 门控与基础版完全同门，仅时长换延长值。NEG-2 触达面 = 本分流块（摘除后
+        //   编译仍绿——isDrinkableItem 已含延长 id，饮用仍消耗/返瓶/发 potionDrunk，唯效果与
+        //   时长面失）→ 恰红 r2070b 的延长时长断言，其余腿不受影响。
+        else if (eatenId == RecipeRegistry::ExtendedSpeedPotionId)
+            applyStatusEffect(PlayerState::EffectSpeed, kExtPotionDurationSec, 1);
+        else if (eatenId == RecipeRegistry::ExtendedStrengthPotionId)
+            applyStatusEffect(PlayerState::EffectStrength, kExtPotionDurationSec, 1);
+        else if (eatenId == RecipeRegistry::ExtendedFireResistancePotionId)
+            applyStatusEffect(PlayerState::EffectFireResistance, kExtPotionDurationSec, 1);
+        else if (eatenId == RecipeRegistry::ExtendedRegenerationPotionId)
+            applyStatusEffect(PlayerState::EffectRegeneration, kRegenExtPotionDurationSec, 1);
+        else if (eatenId == RecipeRegistry::ExtendedPoisonPotionId)
+            applyStatusEffect(PlayerState::EffectPoison, kPoisonExtPotionDurationSec, 1);
+        else if (eatenId == RecipeRegistry::ExtendedWeaknessPotionId)
+            applyStatusEffect(PlayerState::EffectWeakness, kWeaknessExtDurationSec, 1);
+        // t1100 饮毕信号（可饮面统一沿：水瓶 / 粗制 / 基础 / 延长药水饮毕各发一次）→ 呈现层
+        //   playBurp（机制等价 MC 饮毕随机 burp；食物完成面不发——登记简化见 .h 信号注）。
+        emit potionDrunk(eatenId);
         if (m_mode == Survival) {
             m_hotbar->addStack(int(RecipeRegistry::GlassBottleId), 1); // 喝完留空瓶（MC 口径）
         }
@@ -3054,8 +3088,13 @@ void PlayerController::updateEating(float dt)
     const int beat = std::clamp(int(m_eatingProgress * float(kEatBeats)), 0, kEatBeats);
     if (beat != m_eatBeat) {
         m_eatBeat = beat;
-        const QVector3D mouth = position(); // 眼位 ≈ 嘴部（屑粒从嘴迸发）
-        emit eatingParticle(mouth.x(), mouth.y(), mouth.z(), m_hotbar->selectedItemId());
+        const QVector3D mouth = position(); // 眼位 ≈ 嘴部（屑粒 / 饮用音从嘴迸发）
+        // t1100 饮/食节拍分流：可饮面（水瓶 / 药水族）→ drinkGulp（饮用咕嘟音，无屑粒——MC 口径
+        //   饮无屑粒）；食面维持 eatingParticle（屑粒不变）。节拍机制 / 进度累积完全复用既有链。
+        if (isDrinkableItem(m_hotbar->selectedItemId()))
+            emit drinkGulp(mouth.x(), mouth.y(), mouth.z(), m_hotbar->selectedItemId());
+        else
+            emit eatingParticle(mouth.x(), mouth.y(), mouth.z(), m_hotbar->selectedItemId());
     }
     emit eatingProgressChanged();
 
@@ -3726,6 +3765,7 @@ void PlayerController::clearStatusEffects()
     m_regenPotionLevel = 0;
     m_weakTimer = 0.0f;
     m_weakLevel = 0;
+    m_effectParticleAccum = 0.0f; // t1100 效果粒子累积器同步清（效果全清 → 零串味，家族口径一致）
     if (m_burning) { m_burning = false; emit burningChanged(); } // t344 火焰叠层同步隐
 }
 
@@ -9314,6 +9354,35 @@ void PlayerController::step(qreal dt)
             m_weakTimer -= float(dt);
             if (m_weakTimer <= 0.0f) { m_weakTimer = 0.0f; m_weakLevel = 0; } // 定时解除
         }
+        // t1100 效果粒子发射（药水旋涡粒子近似面；信号契约见 .h）：任一效果激活期每
+        //   kEffectParticleIntervalSec 秒发一次 effectParticle（玩家位置 + 主效果类型）→ 呈现层
+        //   BlockParticles.burstEffect 按类型取色迸发。主效果 = 活跃效果中枚举序最小者（与快照序
+        //   同源 = StatusEffect 枚举序；多效果同显仅主效果粒子 = 简化口径登记）。全效果灭 → 累积器
+        //   归零（下次效果从零起算，节奏稳定不串）。
+        {
+            const bool fxActive = m_poisonTimer > 0.0f || m_slowTimer > 0.0f || m_fireTimer > 0.0f
+                || m_speedTimer > 0.0f || m_strengthTimer > 0.0f || m_fireResTimer > 0.0f
+                || m_regenPotionTimer > 0.0f || m_weakTimer > 0.0f;
+            if (fxActive) {
+                m_effectParticleAccum += float(dt);
+                if (m_effectParticleAccum >= kEffectParticleIntervalSec) {
+                    m_effectParticleAccum -= kEffectParticleIntervalSec;
+                    int primary = 0; // 主效果选取：枚举序扫描（Poison→…→Weakness 首个活跃者）
+                    if (m_poisonTimer > 0.0f)               primary = int(PlayerState::EffectPoison);
+                    else if (m_slowTimer > 0.0f)            primary = int(PlayerState::EffectSlowness);
+                    else if (m_fireTimer > 0.0f)            primary = int(PlayerState::EffectFire);
+                    else if (m_speedTimer > 0.0f)           primary = int(PlayerState::EffectSpeed);
+                    else if (m_strengthTimer > 0.0f)        primary = int(PlayerState::EffectStrength);
+                    else if (m_fireResTimer > 0.0f)         primary = int(PlayerState::EffectFireResistance);
+                    else if (m_regenPotionTimer > 0.0f)     primary = int(PlayerState::EffectRegeneration);
+                    else if (m_weakTimer > 0.0f)            primary = int(PlayerState::EffectWeakness);
+                    const QVector3D pp = position();
+                    emit effectParticle(pp.x(), pp.y(), pp.z(), primary);
+                }
+            } else {
+                m_effectParticleAccum = 0.0f;
+            }
+        }
     } else {
         m_speedTimer = 0.0f;
         m_speedLevel = 0;
@@ -9325,6 +9394,7 @@ void PlayerController::step(qreal dt)
         m_regenPotionLevel = 0;
         m_weakTimer = 0.0f;
         m_weakLevel = 0;
+        m_effectParticleAccum = 0.0f; // t1100 效果粒子累积器同步归零（非 Survival 无效果粒子面）
     }
 
     // t715 状态效果快照广播（效果框架 v1 收编口）：组装当前活跃效果（中毒 m_poisonTimer / 缓慢 m_slowTimer /

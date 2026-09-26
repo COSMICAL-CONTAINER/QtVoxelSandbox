@@ -598,6 +598,16 @@ public:
     static constexpr float kWeaknessDurationSec = 90.0f;     // 虚弱时长（MC 1.0 weakness 1:30）
     static constexpr float kWeaknessMeleePenaltyPerLevel = 4.0f; // 虚弱近战减伤（MC 1.0 近战伤害 -4/级）
     static constexpr int   kInstantHealthHealHp = 4;         // 瞬间治疗饮毕即回血量（MC 1.0 instant health I = 2 心 = 4HP）
+    // t1100 延长药水时长常量族（MC 1.0 extended 原值，wiki 2026 实读逐链留痕；public = 矩阵探针直读面，
+    //   t1099 同门）。红石延长口径：3:00 基础 → 8:00（迅捷 / 力量 / 火抗）；0:45 基础 → 1:30（再生 /
+    //   中毒）；1:30 基础 → 4:00（虚弱）；瞬间治疗无延长变体（即时效果，红石无作用——brewingstore.cpp
+    //   映射小表 default 面登记）。
+    static constexpr float kExtPotionDurationSec = 480.0f;       // 延长版三件时长（MC 1.0 extended swiftness/strength/fire resistance 8:00）
+    static constexpr float kRegenExtPotionDurationSec = 90.0f;   // 再生延长时长（MC 1.0 extended regeneration 1:30）
+    static constexpr float kPoisonExtPotionDurationSec = 90.0f;  // 中毒延长时长（MC 1.0 extended poison 1:30）
+    static constexpr float kWeaknessExtDurationSec = 240.0f;     // 虚弱延长时长（MC 1.0 extended weakness 4:00）
+    // t1100 效果粒子发射周期（机制等价 MC 药水旋涡粒子近似节奏；简化口径登记见 tickImpl 发射点注释）。
+    static constexpr float kEffectParticleIntervalSec = 0.5f;
     // 中键拾取方块（t37 pick block）：取当前射线命中格的方块 id → 装入 hotbar。仅指针捕获时生效
     // （与破/放同窗口级 MouseButtonPress 路径）。
     // spec：「无论背包开关」—— captured=true 蕴含背包已关，故等价于「游戏内中键」；命中空气 / 无
@@ -897,6 +907,22 @@ signals:
     //   t513：增携 itemId（正在吃的食物）→ QML 据此按食物取屑粒色（甜浆果=暗红 / 胡萝卜=橙 / 土豆=土黄 /
     //   面包=金黄 / 蘑菇汤=棕），替换旧固定面包色占位（spec「吃甜浆果吐橙色方块」→ 各食物本色屑粒）。
     void eatingParticle(float x, float y, float z, int itemId);
+    // t1100 饮用节拍音信号（eatingParticle 姊妹面）：长按饮用（可饮面）每跨进食节拍发一次，携嘴部
+    //   世界坐标 + 持物 id。可饮面节拍走本信号（呈现层 → AudioManager.playDrinkGulp 咕嘟短音），**替代**
+    //   eatingParticle（MC 口径：饮无屑粒、食有屑粒——药水饮用不发进食屑粒，改发饮用音）。机制等价
+    //   MC 1.0 drinking 周期音（饮用中周期咕嘟；饮毕另有 potionDrunk → burp 音，两段分离）。
+    //   分层（PLAN §2）：Game/Physics 层发语义事件，呈现层只消费（同 eatingParticle 模式）。
+    void drinkGulp(float x, float y, float z, int itemId);
+    // t1100 饮毕信号：可饮面进食链完成沿发一次（finishEating 可饮分支末），携饮毕持物 id。呈现层
+    //   → AudioManager.playBurp（饮毕 burp 音，每次播放随机 ±8% 播放速率抖动 ≈ MC 随机音高）。
+    //   机制等价 MC 1.0 饮毕 burp（食物进食完成面不发本信号——登记简化：burp 仅药水/可饮面，食物
+    //   完成面维持既有静默，候选池登记）。
+    void potionDrunk(int itemId);
+    // t1100 效果粒子信号（药水旋涡粒子近似面）：任一效果激活期（Survival）每 kEffectParticleIntervalSec
+    //   秒发一次，携玩家位置 + **主效果**类型（活跃效果取枚举序最小者作色源；多效果同显时仅主效果
+    //   粒子 = 简化口径登记，非 MC 每效果各自粒子面）。呈现层 → BlockParticles.burstEffect 按效果类型
+    //   取色迸发 2 粒缓升淡出粒子。分层（PLAN §2）：Game/Physics 层发语义事件，呈现层只消费。
+    void effectParticle(float x, float y, float z, int effectType);
     // 拾取掉落实体（t118 / t120）：pickupScan 把实体入背包（addToAny 成功入栈，无论全 / 部分）时发；
     // id = 物品 id、count = 本次实际拾取数（have - leftover；spec「拾取后销毁」的「拾取」语义事件）。
     // 全满装不下（leftover == have）不发（无拾取发生）。t118 据此 → AudioManager.playPickup（拾取音）；
@@ -1729,6 +1755,10 @@ private:
     float m_regenPotionAccum = 0.0f;
     float m_weakTimer = 0.0f;
     int   m_weakLevel = 0;
+    // t1100 效果粒子发射累积器（任一效果激活期 += dt，满 kEffectParticleIntervalSec 发 effectParticle
+    //   并归零；效果全灭 / 非 Survival 归零面见 tickImpl 推进段——半途清效果时累积器随推进段 else 支
+    //   归零，跨生命周期零串味）。
+    float m_effectParticleAccum = 0.0f;
     QVariantList m_lastEffectSigCache; // t715 上一帧活跃效果真实快照缓存
     // t394 仙人掌接触伤害累积（玩家 AABB 接触 Cactus 方块时累加，每 EntityManager::kCactusDamageInterval 扣 1HP；
     //   离开即归零）。机制等价 MC 1.0 仙人掌触碰即伤。仅 Survival（Creative/Spectator 无敌不累）。

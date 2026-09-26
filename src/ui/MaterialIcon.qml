@@ -2241,6 +2241,14 @@ Item {
             case 0x272: drawPotion("#3a7a28", "#68b050", "#b0e0a0"); break // 中毒药水（粗制 + 蜘蛛眼；每 1.25s 扣 1HP 45s 不致死）
             case 0x273: drawPotion("#5a5a6a", "#9090a5", "#c8c8d8"); break // 虚弱药水（粗制 + 发酵蛛眼；近战 -4/级 90s）
             case 0x274: drawPotion("#e8c8d8", "#f8e0ec", "#fff4f8"); break // 瞬间治疗药水（粗制 + 闪烁西瓜；饮毕即回 4HP）
+            // t1100 延长药水族六件（0x275..0x27A，段尾追加）：drawPotion 同构异色（延长版 = 基础版
+            //   液色深一档 / 偏暗——「同一味但更浓」读感；原创自绘 §9a，零 MC 资产）。
+            case 0x275: drawPotion("#2a78c8", "#60b0e8", "#b0e0f8"); break // 迅捷药水（延长）：迅捷 + 红石；8:00
+            case 0x276: drawPotion("#a84e1a", "#e08840", "#f8c890"); break // 力量药水（延长）：力量 + 红石；8:00
+            case 0x277: drawPotion("#b85a0c", "#e89030", "#f8c880"); break // 火抗药水（延长）：火抗 + 红石；8:00
+            case 0x278: drawPotion("#b04060", "#e080a0", "#f8b8d0"); break // 再生药水（延长）：再生 + 红石；1:30
+            case 0x279: drawPotion("#2a5a1c", "#508e3c", "#90c884"); break // 中毒药水（延长）：中毒 + 红石；1:30
+            case 0x27A: drawPotion("#44444f", "#74748a", "#a8a8c0"); break // 虚弱药水（延长）：虚弱 + 红石；4:00
             // t788 染料 16 色（0x24B..0x25A，白→黑羊毛色序；三色参数取 build_wool.py 同源色板）
             case 0x24B: drawDye("#f0f0ee", "#f9f9f8", "#959594"); break // 白色染料（白花破坏掉落；染白羊毛/白床）
             case 0x24C: drawDye("#de781e", "#ee9f69", "#8a4a13"); break // 橙色染料

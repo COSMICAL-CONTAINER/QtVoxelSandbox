@@ -15,6 +15,12 @@
 //   延长/强化二级链（红石 / 辉光岩）、喷溅药水。
 int BrewingStore::brewResult(int ingredientId, int bottleId)
 {
+    // t1100 二级酿造门行（MC 1.0 redstone modifier）：红石粉只作用于**成品效果药水** → 对应延长版。
+    //   水 / 粗制 / 瞬间治疗（1.0 口径：即时效果不可延长）/ 非瓶 → extendedPotionResult 答零 = 无映射。
+    //   NEG 面登记：本门行 + extendedPotionResult 本体 = t1100 二级酿造 NEG-1 恰红触达面（摘除后
+    //   编译仍绿——函数仅此一处调用、声明在 .h 幸存——行为柱 r2070a 恰红，其余腿不受影响）。
+    if (ingredientId == RecipeRegistry::RedstoneId)
+        return extendedPotionResult(bottleId);
     if (bottleId == RecipeRegistry::WaterBottleId)
         return ingredientId == RecipeRegistry::AshWartId ? RecipeRegistry::AwkwardPotionId : 0;
     if (bottleId == RecipeRegistry::AwkwardPotionId)
@@ -42,6 +48,25 @@ int BrewingStore::brewResult(int ingredientId, int bottleId)
 int BrewingStore::fuelOpsFor(int itemId)
 {
     return itemId == RecipeRegistry::BlazePowderId ? kPowderFuelOps : 0;
+}
+
+// ── t1100 二级酿造映射小表（成品效果药水 → 延长版产物；头注见 brewingstore.h）──────────────────
+// MC 1.0 redstone modifier 口径核实（wiki 2026 实读三元组留痕，机制等价实现）：红石粉作用在**成品
+//   效果药水**上 = 延长效果时长（延长值逐链见 playercontroller.h 延长常量族）；水瓶 + 红石 / 粗制 +
+//   红石 = 无映射（1.0 基准水瓶直酿行不在本单交付面，候选池登记）；瞬间治疗 + 红石 = 无映射（即时
+//   效果无时长可延长，MC 1.0 无 extended healing 变体）。表形态留痕：6 行成对映射取独立 switch 小表
+//   （非 brewResult if 链平铺——if 链已 8 行，平铺损可读性；小表 = 映射单一权威 + 负例面集中）。
+int BrewingStore::extendedPotionResult(int potionId)
+{
+    switch (potionId) {
+    case RecipeRegistry::SpeedPotionId:          return RecipeRegistry::ExtendedSpeedPotionId;
+    case RecipeRegistry::StrengthPotionId:       return RecipeRegistry::ExtendedStrengthPotionId;
+    case RecipeRegistry::FireResistancePotionId: return RecipeRegistry::ExtendedFireResistancePotionId;
+    case RecipeRegistry::RegenerationPotionId:   return RecipeRegistry::ExtendedRegenerationPotionId;
+    case RecipeRegistry::PoisonPotionId:         return RecipeRegistry::ExtendedPoisonPotionId;
+    case RecipeRegistry::WeaknessPotionId:       return RecipeRegistry::ExtendedWeaknessPotionId;
+    default: return 0; // 水 / 粗制 / 瞬间治疗 / 非瓶 / 延长版再酿（延长版 + 红石 = 无二级映射，MC 口径）
+    }
 }
 
 BrewingStore::BrewingStore(QObject *parent) : QObject(parent) {}

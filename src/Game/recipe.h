@@ -525,6 +525,18 @@ public:
     static constexpr int PoisonPotionId         = 0x272; // 中毒药水：粗制 + 蜘蛛眼；每 1.25s 扣 1HP 45s 不致死（MC 1.0 poison 0:45）
     static constexpr int WeaknessPotionId       = 0x273; // 虚弱药水：粗制 + 发酵蛛眼；近战 -4/级 90s（MC 1.0 weakness 1:30）
     static constexpr int InstantHealthPotionId  = 0x274; // 瞬间治疗药水：粗制 + 闪烁西瓜；饮毕即回 4HP（2 心，I 级）无持续
+    // t1100 延长药水族（材料段 0x275..0x27A，瞬间治疗 0x274 之上**段尾追加**不插中间 = 存档安全铁律）：
+    //   机制等价 MC 1.0 红石 modifier 二级酿造——成品效果药水 + 红石粉 → 对应延长版（时长 ×8/3 档原值，
+    //   见 playercontroller.h 延长常量族逐链 wiki 核实留痕）。映射单一权威 = BrewingStore::extendedPotion
+    //   Result（brewingstore.cpp 小表；红石只作用于成品效果药水，水 / 粗制 / 瞬间治疗无映射——1.0 口径
+    //   即时效果不可延长，红石对瞬间治疗无效）。命名 = 基础名 +「（延长）」后缀（通用描述词，§9 合法）；
+    //   可堆叠 64（材料段默认，同基础药水族零特判）；无 pack 映射（越表界 → -1 → 资源包回退自绘，同族）。
+    static constexpr int ExtendedSpeedPotionId          = 0x275; // 迅捷药水（延长）：迅捷 + 红石；移速 +20%/级 8:00（MC 1.0 extended 480s）
+    static constexpr int ExtendedStrengthPotionId       = 0x276; // 力量药水（延长）：力量 + 红石；近战 +130%/级 8:00（MC 1.0 extended 480s）
+    static constexpr int ExtendedFireResistancePotionId = 0x277; // 火抗药水（延长）：火抗 + 红石；火/岩浆免疫 8:00（MC 1.0 extended 480s）
+    static constexpr int ExtendedRegenerationPotionId   = 0x278; // 再生药水（延长）：再生 + 红石；每 2.5s 回 1HP 1:30（MC 1.0 extended 90s）
+    static constexpr int ExtendedPoisonPotionId         = 0x279; // 中毒药水（延长）：中毒 + 红石；每 1.25s 扣 1HP 1:30 不致死（MC 1.0 extended 90s）
+    static constexpr int ExtendedWeaknessPotionId       = 0x27A; // 虚弱药水（延长）：虚弱 + 红石；近战 -4/级 4:00（MC 1.0 extended 240s）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。
