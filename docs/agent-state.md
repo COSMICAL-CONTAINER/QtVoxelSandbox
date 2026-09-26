@@ -14,16 +14,16 @@
 ```yaml
 project: QtMinecraft
 state: IN_PROGRESS
-current_task: **t1101 IN_PROGRESS（喷溅型药水——1.0 酿造机制最后一面）**：火药+任意药水（基础/延长）→喷溅版二级酿造 + 投掷实体[蕴辉瓶 t1096 同门] + 命中范围效果结算（radius 原值 wiki 核实；mob 效果系统现状核实，无则玩家-only 降级登记）；喷溅版 id 段位选型（12 新 id vs 编码）权在核实。串行 voxel-dev，filter 词 r2071。
+current_task: **t1102 IN_PROGRESS（残项小批合集二：酿造残面 + parity 债清偿）**：件一水瓶直酿行（1.0 口径实读核实按引证交付）+ 件二压力板 kMc 71/72 标注/映射更正（t1098 件三审计发现，weighted 板 1.5 纪元三元组）+ 件三激活铁轨台账行（docs-only 主控落档）+ 件四食物 burp 微件（t1100 简化①补全）。串行 voxel-dev，filter 词 r2072。
 current_task_status: IN_PROGRESS
-last_completed_task: t1100 酿造第三轮合集（2026-09-26 闭环；矩阵 816→820——件一红石延长二级酿造[0x275..0x27A 六件 + extendedPotionResult 小表单调用面 NEG 设计 + 延长时长原值族 480/90/90/240 + 饮面早退 switch 前置=基础链源钉零修订零 lawful] + 件二呈现层无降级[gulp 节拍音/burp ±8% 随机音高/效果粒子每效果一色，audio 三面补齐 t1046 教训同门]；NEG 四件终名落盘[t1099 教训应用]；登记简化三处。详录 = dev-plan t1100 关单条目）
-last_completed_task_prev: t1099 药水效果链扩展·第二酿造轮（2026-09-26 闭环，矩阵 812→816；详录 = dev-plan t1099 关单条目）
-last_completed_task_commits: fix(t1100)（3cced3b：延长六 id+小表+门行+饮面分流+audio 两单件+粒子信号面，16 文件 +336/−4 含 2 新 wav）+ test(t1100)（0127265：r2070a-d 四腿含对照柱与 NEG 豁免面设计，+443）
-last_verified_commit: test(t1100)（矩阵 **820 PASS / 0 FAIL ×2**：matrix_t1100_{pos,final}.log；腿集合 md5[规范配方]三方恒等 95da1b5a789fcc5fe676ffe5f3e88f8c；NEG-1 恰红 {r2070a} / NEG-2 恰红 {r2070b} 双还原四件终名在盘；冒烟 tail20 logs/voxelsandbox_t1100_tail20.log[横幅+root objects 实文；stderr 硬杀缓冲丢失改用应用自写 log 组合=同源同面留痕]；主控独立脱离式复跑 820/0 同 md5 三方恒等 matrix_orch_t1100_verify.log）
+last_completed_task: t1101 喷溅型药水——1.0 酿造机制全面收官（2026-09-26 闭环；矩阵 820→824——火药二级酿造 12 id 段尾追加[否决 flag 编码留痕] + SplashBottle 投掷实体 + applySplashPotion 范围结算[半径 4 硬界+邻近线性衰减 d1+onImpact 原式秒化；mob 面如实降级玩家-only] + 饮面回归 12 id 不可饮 + splash_break 程序合成；**NEG-1 意外全量跑=恰红单腿全局归因最强形态**；lawful=零。详录 = dev-plan t1101 关单条目）
+last_completed_task_prev: t1100 酿造第三轮合集（2026-09-26 闭环，矩阵 816→820；详录 = dev-plan t1100 关单条目）
+last_completed_task_commits: fix(t1101)（d578e89：12 id+小表+门行+Kind+范围结算+投掷分支+audio+呈现面，多文件）+ test(t1101)（ed27200：r2071a-d 四腿含真 rig 与直调柱，section67 置尾）
+last_verified_commit: test(t1101)（矩阵 **824 PASS / 0 FAIL ×2**：matrix_t1101_{pos,final}.log；腿集合 md5[规范配方]三方恒等 31196e9270b24aa8a3d83e797a612cde；NEG-1 全量恰红 {r2071a} / NEG-2 恰红 {r2071b,c} 双还原四件终名在盘；冒烟 tail20 logs/voxelsandbox_t1101_tail20.log[横幅+root objects 实文]；主控独立脱离式复跑 824/0 同 md5 三方恒等 matrix_orch_t1101_verify.log）
 last_governance_review: 2026-09-26（audit #21 GREEN——窗口 9079f74..7353eb8 18 提交/t1094-t1098 五闭环证据链全实核[五单 md5 三方恒等 7416b136/a2f3eb64/9b493da5/d2360c45/6aa9a595 + NEG 十份恰红十份还原吻合 + t1097 md5 不变性机理独立复现 + 控制块全字段纪律五单逐单递增守住=#20 YELLOW 升级条件未触发]；**F1[MEDIUM] t1096 两笔提交带 Co-Authored-By 尾注**[9774062/e33d257——规则此前仅在用户记忆层与派工简报层，t1096 简报未复述、agent 沿 harness 默认；清偿=不改写历史+Workspace Guard 补明文+派工简报恒带] + F2-F4 INFO 落档；详见 governance-audit-2026-09-26.md）
 governance_review_due: false（审计 #21 GREEN 落档清零）
-completed_tasks_since_governance_review: 2（t1099 + t1100 闭环；审计 #21 GREEN 于 2026-09-26——下一审计窗口 = t1101 起再 3 闭环 → 审计 #22）
-next_task: **t1101 喷溅型药水（在飞）→ 之后顺延：水瓶直酿行 + 闪烁西瓜整链 + 压力板纪元标注更正（kMc 71/72 疑义复核）+ 激活铁轨台账行 + 食物 burp 微件 + 用户侧并行 P5 实机清单/§30.6/§31/择机 push（本地领先远端 80+ 笔）**
+completed_tasks_since_governance_review: 3（t1099 + t1100 + t1101 闭环；审计 #21 GREEN 于 2026-09-26——下一审计窗口 = t1102 起再 2 闭环 → 审计 #22）
+next_task: **t1102 残项小批合集二（在飞）→ 之后顺延：闪烁西瓜整链一组 + 时空残项盘点（§14-④ 重新盘点备援）+ 用户侧并行 P5 实机清单/§30.6/§31/择机 push（本地领先远端 80+ 笔）**
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -33,7 +33,7 @@ needs_human: false
 
 ## Workspace Guard
 
-- HEAD = t1100 酿造第三轮合集代码终态（fix(t1100) 3cced3b + test(t1100) 0127265 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 820 腿满绿（67 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（current_task/last_completed_*/counter 按单递增/Workspace Guard HEAD 行同步终态——t1097/t1098/t1099/t1100 四单全过）。**git 提交禁任何 AI 署名尾注**（审计 #21 F1 入档纪律——派工简报恒带此句）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（横幅+root objects 实文，主控核对）。**NEG 四件终名日志必须落盘**（t1099 件教训——申报恰红面而无在盘终名件=证据链缺口）。
+- HEAD = t1101 喷溅型药水代码终态（fix(t1101) d578e89 + test(t1101) ed27200 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 824 腿满绿（67 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（t1097-t1101 五单全过）。**git 提交禁任何 AI 署名尾注**（审计 #21 F1 入档纪律——派工简报恒带此句）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（横幅+root objects 实文，主控核对；stderr 硬杀缓冲丢失可用应用自写 log 组合同源同面）。**NEG 四件终名日志必须落盘**（t1099 件教训）。
 - 纪律①-⑨全在案；**大 TU 编译一律 -j 1**（09-13 蓝屏教训；分段后单段增量 -j 4 实测安全）。**矩阵测试为 tools/matrix/ 分层结构**：改探针只重编对应段 TU（秒级）+ `--filter <substring>` 只跑本任务腿；新腿落对应段文件，新段置尾 runAll 末执行、须 ≤500KB；section11 起「自建 fresh 小世界」先例（48×48×96 seed 82 + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)）。
 - **R20.06 起值类型纪律**：src/Core/ 新值类型一律 result.h QObjectFree 编译期钉 + 头内 static_assert；命令/事件队列满载拒绝与快照队列覆盖最老是两域容量策略分化，勿「统一」。
 - **R20.07 起编排壳纪律**：GameSession 只做编排（命令 → 整 tick 边界 → World::setBlock 权威），禁复制游戏逻辑；**QML 现行玩法路径零变化是 R20 主线不变量**（Main.qml 含 "GameSession" 即违零迁移阴性钉 r2007b）。
@@ -50,6 +50,7 @@ needs_human: false
 
 ## Recovery Point
 
+- 2026-09-26（五）：t1101 喷溅型药水闭环——1.0 酿造机制全面收官（矩阵 820→824，md5 31196e92 三方恒等；d578e89/ed27200；三轮 modifiers 齐；NEG-1 意外全量跑=全局归因最强形态）。恢复点 = 本条；在飞 = t1102 残项小批合集二（r2072）。
 - 2026-09-26（四）：t1100 酿造第三轮合集闭环（矩阵 816→820，md5 95da1b5a 三方恒等；3cced3b/0127265；红石延长二级酿造+呈现层无降级；NEG 终名落盘纪律首例应用）。恢复点 = 本条；在飞 = t1101 喷溅型药水（r2071）。
 - 2026-09-26（三）：t1099 第二酿造轮闭环（矩阵 812→816，md5 fe383860 三方恒等；344b6f6/290e059；五链裁定三创造专属两生存可达；NEG 四件终名日志补证流程首例——主控验收抓证据缺口回传补跑）。恢复点 = 本条；在飞 = t1100 酿造第三轮（r2070）。
 - 2026-09-26（二）：t1098 残项小批合集闭环（矩阵 810→812，md5 6aa9a595 三方恒等；ef140da/c3f0556；四件合集两代码两核实；翻案一 = smelt 石材链缺席连补；chunkstore 写入截断两次 agent 自纠）。恢复点 = 本条；在飞 = t1099 酿造效果链（r2069）+ 治理审计 #21（只读）。
