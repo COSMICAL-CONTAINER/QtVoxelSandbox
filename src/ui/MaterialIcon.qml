@@ -2068,6 +2068,74 @@ Item {
                 R(8, 6, 1, 1, shine)              // 闪点
             }
 
+            // t1099 岩浆膏（0x26B）：炽热膏体团（橙红渐变团块 + 亮芯 + 暗边；炽热黏膏读感）。原创自绘（§9a）。
+            const drawMagmaCream = () => {
+                const hot = "#e86420", hotDk = "#a83a14", core = "#ffc84a", dark = "#701e0a"
+                R(5, 7, 6, 6, hot)                // 膏体主体
+                R(4, 8, 8, 4, hot)                // 膏体横展
+                R(6, 5, 4, 2, hot)                // 膏体上凸
+                R(6, 8, 3, 3, core)               // 亮芯（热核）
+                R(7, 12, 3, 1, hotDk)             // 底部暗带
+                R(4, 8, 1, 4, dark)               // 左缘暗
+                R(11, 8, 1, 4, dark)              // 右缘暗
+                R(5, 13, 6, 1, dark)              // 底缘暗
+                R(6, 6, 2, 1, core)               // 上凸受光
+            }
+
+            // t1099 幽灵泪（0x26C）：苍白泪滴（青白渐变泪珠 + 高光；飘浮幽魂之泪读感）。原创自绘（§9a）。
+            const drawGhastTear = () => {
+                const tear = "#dceef0", tearDk = "#a8ccd4", deep = "#78a8b4", shine = "#f4feff"
+                R(7, 4, 2, 2, tear)               // 泪尖
+                R(6, 6, 4, 3, tear)               // 泪颈
+                R(5, 9, 6, 4, tear)               // 泪体
+                R(6, 13, 4, 1, tearDk)            // 泪底
+                R(6, 9, 2, 4, tearDk)             // 左侧阴影
+                R(9, 9, 1, 3, deep)               // 右缘深色
+                R(6, 6, 1, 2, shine)              // 高光
+                R(7, 10, 2, 2, deep)              // 内部深色芯（泪核）
+            }
+
+            // t1099 蜘蛛眼（0x26D）：暗红竖瞳眼球（红体 + 黑竖瞳 + 白高光；毒蛛之眼读感）。原创自绘（§9a）。
+            const drawSpiderEye = () => {
+                const eye = "#b42020", eyeDk = "#7a1010", pup = "#2a0808", shine = "#f0d0d0"
+                R(5, 6, 6, 7, eye)                // 眼球主体
+                R(4, 7, 1, 5, eyeDk)              // 左缘暗
+                R(11, 7, 1, 5, eyeDk)             // 右缘暗
+                R(6, 5, 4, 1, eyeDk)              // 顶缘暗
+                R(6, 13, 4, 1, eyeDk)             // 底缘暗
+                R(7, 7, 2, 5, pup)                // 竖瞳
+                R(5, 7, 2, 2, shine)              // 左上高光
+                R(9, 11, 1, 1, shine)             // 右下微光
+            }
+
+            // t1099 发酵蛛眼（0x26E）：褐紫浊瞳（蛛眼同构异色——褐体 + 紫黑瞳；发酵浊化读感）。原创自绘（§9a）。
+            const drawFermentedSpiderEye = () => {
+                const eye = "#8a6a4a", eyeDk = "#5a4028", pup = "#2a1a30", shine = "#d8c8b0"
+                R(5, 6, 6, 7, eye)                // 眼球主体（褐浊）
+                R(4, 7, 1, 5, eyeDk)              // 左缘暗
+                R(11, 7, 1, 5, eyeDk)             // 右缘暗
+                R(6, 5, 4, 1, eyeDk)              // 顶缘暗
+                R(6, 13, 4, 1, eyeDk)             // 底缘暗
+                R(7, 7, 2, 5, pup)                // 紫黑竖瞳
+                R(5, 7, 2, 2, shine)              // 左上高光
+                R(9, 11, 1, 1, shine)             // 右下微光
+            }
+
+            // t1099 闪烁西瓜（0x26F）：翠瓜金斑（绿瓜体 + 金色闪斑；金粒腌渍瓜球读感）。原创自绘（§9a）。
+            const drawGlisteringMelon = () => {
+                const melon = "#3a8a2a", melonDk = "#256018", lite = "#5ab04a", gold = "#f0c030"
+                R(5, 6, 6, 8, melon)              // 瓜体主体
+                R(4, 7, 1, 6, melonDk)            // 左缘暗
+                R(11, 7, 1, 6, melonDk)           // 右缘暗
+                R(6, 5, 4, 1, melonDk)            // 顶缘暗
+                R(6, 14, 4, 1, melonDk)           // 底缘暗
+                R(5, 7, 2, 3, lite)               // 左上受光
+                R(7, 7, 1, 1, gold)               // 金斑 1
+                R(9, 9, 1, 1, gold)               // 金斑 2
+                R(6, 11, 1, 1, gold)              // 金斑 3
+                R(9, 12, 1, 1, gold)              // 金斑 4
+            }
+
             switch (root.materialId) {
             case 0x200: drawStick();        break
             case 0x201: drawCoal();         break
@@ -2162,6 +2230,17 @@ Item {
             case 0x268: drawPotion("#3aa0e8", "#7fd0f8", "#d0f0ff"); break // 迅捷药水（粗制 + 糖；移速 +20%/级 180s）
             case 0x269: drawPotion("#c86a2a", "#f0a860", "#ffd8b0"); break // 力量药水（粗制 + 燃烬粉；近战 +130%/级 180s）
             case 0x26A: drawSugar(); break // 糖（1 甘蔗 → 1 糖；迅捷药水原料）
+            // t1099 药水第二轮十件（0x26B..0x274，段尾追加）：五原料自绘 + 五药水同构异色（drawPotion 色参）。
+            case 0x26B: drawMagmaCream(); break // 岩浆膏（粗制 → 火抗原料；创造专属裁定）
+            case 0x26C: drawGhastTear(); break // 幽灵泪（粗制 → 再生原料；创造专属裁定）
+            case 0x26D: drawSpiderEye(); break // 蜘蛛眼（粗制 → 中毒原料；蜘蛛/洞蛛 1/3 掉落）
+            case 0x26E: drawFermentedSpiderEye(); break // 发酵蛛眼（粗制 → 虚弱原料；蛛眼+褐菇+糖 无序）
+            case 0x26F: drawGlisteringMelon(); break // 闪烁西瓜（粗制 → 瞬间治疗原料；创造专属裁定）
+            case 0x270: drawPotion("#d87018", "#f0a850", "#ffd8a0"); break // 火抗药水（粗制 + 岩浆膏；火免疫 180s）
+            case 0x271: drawPotion("#d05a7a", "#f0a0b8", "#ffd0e0"); break // 再生药水（粗制 + 幽灵泪；每 2.5s 回 1HP 45s）
+            case 0x272: drawPotion("#3a7a28", "#68b050", "#b0e0a0"); break // 中毒药水（粗制 + 蜘蛛眼；每 1.25s 扣 1HP 45s 不致死）
+            case 0x273: drawPotion("#5a5a6a", "#9090a5", "#c8c8d8"); break // 虚弱药水（粗制 + 发酵蛛眼；近战 -4/级 90s）
+            case 0x274: drawPotion("#e8c8d8", "#f8e0ec", "#fff4f8"); break // 瞬间治疗药水（粗制 + 闪烁西瓜；饮毕即回 4HP）
             // t788 染料 16 色（0x24B..0x25A，白→黑羊毛色序；三色参数取 build_wool.py 同源色板）
             case 0x24B: drawDye("#f0f0ee", "#f9f9f8", "#959594"); break // 白色染料（白花破坏掉落；染白羊毛/白床）
             case 0x24C: drawDye("#de781e", "#ee9f69", "#8a4a13"); break // 橙色染料

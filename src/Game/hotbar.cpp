@@ -713,7 +713,21 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::AwkwardPotionId),  // 粗制药水：水瓶 + 灰烬疣酿成；可饮无效果
         int(RecipeRegistry::SpeedPotionId),    // 迅捷药水：粗制 + 糖；饮用 +20%/级移速 180s
         int(RecipeRegistry::StrengthPotionId), // 力量药水：粗制 + 燃烬粉；饮用 +130%/级近战 180s
-        int(RecipeRegistry::SugarId)           // 糖：1 甘蔗 → 1 糖；迅捷药水原料
+        int(RecipeRegistry::SugarId),          // 糖：1 甘蔗 → 1 糖；迅捷药水原料
+        // t1099 药水第二轮物品族十件（材料段 0x26B..0x274，糖 0x26A 之上段尾追加不插中间 = 存档安全铁律）。
+        //   岩浆膏 / 幽灵泪 / 闪烁西瓜创造专属（获取链裁定见 recipe.h 注）；蜘蛛眼（蜘蛛/洞蛛 1/3 掉落）/
+        //   发酵蛛眼（无序合成）生存可达。全员可堆叠 64（材料段默认）；五药水右键长按饮用（isDrinkableItem
+        //   面）；MaterialIcon 自绘膏团 / 泪滴 / 眼珠 / 瓜球 / 色液瓶族（§9 原创）。
+        int(RecipeRegistry::MagmaCreamId),           // 岩浆膏：粗制 → 火抗原料
+        int(RecipeRegistry::GhastTearId),            // 幽灵泪：粗制 → 再生原料
+        int(RecipeRegistry::SpiderEyeId),            // 蜘蛛眼：粗制 → 中毒原料
+        int(RecipeRegistry::FermentedSpiderEyeId),   // 发酵蛛眼：粗制 → 虚弱原料
+        int(RecipeRegistry::GlisteringMelonId),      // 闪烁西瓜：粗制 → 瞬间治疗原料
+        int(RecipeRegistry::FireResistancePotionId), // 火抗药水：火/岩浆免疫 180s
+        int(RecipeRegistry::RegenerationPotionId),   // 再生药水：每 2.5s 回 1HP 45s
+        int(RecipeRegistry::PoisonPotionId),         // 中毒药水：每 1.25s 扣 1HP 45s 不致死
+        int(RecipeRegistry::WeaknessPotionId),       // 虚弱药水：近战 -4/级 90s
+        int(RecipeRegistry::InstantHealthPotionId)   // 瞬间治疗药水：饮毕即回 4HP（无持续）
     };
 }
 
@@ -1267,6 +1281,17 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::SpeedPotionId)    return QStringLiteral("迅捷药水"); // 粗制 + 糖；移速 +20%/级
         if (blockId == RecipeRegistry::StrengthPotionId) return QStringLiteral("力量药水"); // 粗制 + 燃烬粉；近战 +130%/级
         if (blockId == RecipeRegistry::SugarId)          return QStringLiteral("糖");     // 1 甘蔗 → 1 糖；迅捷原料
+        // t1099 药水第二轮物品族（材料段 0x26B..0x274）：名面十件（通用词 / §9 原创名；零 MC 专名）。
+        if (blockId == RecipeRegistry::MagmaCreamId)           return QStringLiteral("岩浆膏");     // 粗制→火抗原料；创造专属（岩浆怪缺席裁定）
+        if (blockId == RecipeRegistry::GhastTearId)            return QStringLiteral("幽灵泪");     // 粗制→再生原料；创造专属（恶魂缺席裁定）
+        if (blockId == RecipeRegistry::SpiderEyeId)            return QStringLiteral("蜘蛛眼");     // 粗制→中毒原料；蜘蛛/洞蛛 1/3 掉落
+        if (blockId == RecipeRegistry::FermentedSpiderEyeId)   return QStringLiteral("发酵蛛眼");   // 蛛眼+褐菇+糖；粗制→虚弱原料
+        if (blockId == RecipeRegistry::GlisteringMelonId)      return QStringLiteral("闪烁西瓜");   // 粗制→瞬间治疗原料；创造专属（西瓜链裁定）
+        if (blockId == RecipeRegistry::FireResistancePotionId) return QStringLiteral("火抗药水");   // 粗制+岩浆膏；火免疫 180s
+        if (blockId == RecipeRegistry::RegenerationPotionId)   return QStringLiteral("再生药水");   // 粗制+幽灵泪；每 2.5s 回 1HP 45s
+        if (blockId == RecipeRegistry::PoisonPotionId)         return QStringLiteral("中毒药水");   // 粗制+蜘蛛眼；每 1.25s 扣 1HP 45s
+        if (blockId == RecipeRegistry::WeaknessPotionId)       return QStringLiteral("虚弱药水");   // 粗制+发酵蛛眼；近战 -4/级 90s
+        if (blockId == RecipeRegistry::InstantHealthPotionId)  return QStringLiteral("瞬间治疗药水"); // 粗制+闪烁西瓜；饮毕即回 4HP
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落；打火石配方原料。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::FlintId) return QStringLiteral("燧石"); // 挖沙砾概率掉落；打火石配方原料
         // t891② 烈焰弹（材料段 0x25C；机制等价 MC fire charge）：燃烬粉+煤/炭+火药合成 3 发；右键发射火球

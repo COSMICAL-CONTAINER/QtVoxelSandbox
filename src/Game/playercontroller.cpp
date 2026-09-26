@@ -134,7 +134,12 @@ bool PlayerController::isDrinkableItem(int itemId)
     return itemId == RecipeRegistry::WaterBottleId
         || itemId == RecipeRegistry::AwkwardPotionId
         || itemId == RecipeRegistry::SpeedPotionId
-        || itemId == RecipeRegistry::StrengthPotionId;
+        || itemId == RecipeRegistry::StrengthPotionId
+        || itemId == RecipeRegistry::FireResistancePotionId
+        || itemId == RecipeRegistry::RegenerationPotionId
+        || itemId == RecipeRegistry::PoisonPotionId
+        || itemId == RecipeRegistry::WeaknessPotionId
+        || itemId == RecipeRegistry::InstantHealthPotionId;
 }
 
 PlayerController::PlayerController(QQuickItem *parent) : QQuickItem(parent)
@@ -704,6 +709,13 @@ void PlayerController::respawn()
     m_slowTimer = 0.0f;
     m_slowLevel = 0;
     m_lastEffectSigCache.clear();
+    // t1099：重生清第二轮药水效果态（同 t690/t715 漏清教训——防免疫 / 再生 / 虚弱跨生命周期串入）。
+    m_fireResTimer = 0.0f;
+    m_regenPotionTimer = 0.0f;
+    m_regenPotionAccum = 0.0f;
+    m_regenPotionLevel = 0;
+    m_weakTimer = 0.0f;
+    m_weakLevel = 0;
     m_pos = m_spawnPos; // t388：回当前重生点（初值=kSpawn；睡床后=床位）。Y 由 snapSpawnToGround 贴地表。
     m_vel = QVector3D(0, 0, 0);
     m_knockback = QVector3D(0, 0, 0); // t296：清受击击退冲量（重生不继承死亡点的击退）
@@ -756,6 +768,13 @@ void PlayerController::loadSavedState(float x, float y, float z, float yaw, floa
     m_slowTimer = 0.0f;
     m_slowLevel = 0;
     m_lastEffectSigCache.clear();
+    // t1099：存档加载清第二轮药水效果态（同上——效果瞬态不持久化，防跨世界串入）。
+    m_fireResTimer = 0.0f;
+    m_regenPotionTimer = 0.0f;
+    m_regenPotionAccum = 0.0f;
+    m_regenPotionLevel = 0;
+    m_weakTimer = 0.0f;
+    m_weakLevel = 0;
     if (m_flying) { m_flying = false; emit flyingChanged(); }
     if (m_moveState != Walk) setMoveState(Walk, true); // t574/t575 存档加载强制站（位姿已灌新位，闸门无意义）
     const Mode target = (mode == int(Survival)) ? Survival
@@ -2489,6 +2508,11 @@ void PlayerController::attackMob(int entityIndex)
     //   暴击 ×1.5 之前叠入，与 MC「力量作用于基础伤害」口径一致）。仅 Survival 有药水效果（门控）。
     if (m_strengthTimer > 0.0f)
         dmg *= (1.0f + kStrengthBonusPerLevel * float(m_strengthLevel > 0 ? m_strengthLevel : 1));
+    // t1099 虚弱效果（EffectWeakness，机制等价 MC 1.0 weakness 近战 -4/级平坦减伤）：与力量同门反向，
+    //   乘算力量之后、暴击 ×1.5 之前叠入；**无下限保护（可减到 0）** —— 下游既有 `std::max(1, ...)`
+    //   兜底至少 1 HP（工程口径：徒手/武器攻击恒 ≥1，MC 允许 0 的差异如实登记）。
+    if (m_weakTimer > 0.0f)
+        dmg = std::max(0.0f, dmg - kWeaknessMeleePenaltyPerLevel * float(m_weakLevel > 0 ? m_weakLevel : 1));
     if (m_hotbar) {
         // review0830 #26：亡灵族目标门改单一权威谓词（t476 裸清单漏 t952 幼体 → 亡灵杀手对幼体不生效，
         //   且 t961 显示面 (+M) 无条件显示 = 显示与实战劈叉）。isUndeadFamily 与 undeadBurnsInDaylight
@@ -2950,6 +2974,19 @@ void PlayerController::finishEating()
             applyStatusEffect(PlayerState::EffectSpeed, kPotionDurationSec, 1);
         else if (eatenId == RecipeRegistry::StrengthPotionId)
             applyStatusEffect(PlayerState::EffectStrength, kPotionDurationSec, 1);
+        // t1099 第二轮药水分流（同门追加；时长 / 数值 = MC 1.0 原值，常量族见 .h）：火抗 / 再生 /
+        //   中毒 / 虚弱走 applyStatusEffect（Survival 门内置）；瞬间治疗即时回血——**无 timer 不挂快照**
+        //   （MC 口径即时效果，effectList 面不显持续项），Survival 门内联（创造无敌满血不回）。
+        else if (eatenId == RecipeRegistry::FireResistancePotionId)
+            applyStatusEffect(PlayerState::EffectFireResistance, kPotionDurationSec, 1);
+        else if (eatenId == RecipeRegistry::RegenerationPotionId)
+            applyStatusEffect(PlayerState::EffectRegeneration, kRegenPotionDurationSec, 1);
+        else if (eatenId == RecipeRegistry::PoisonPotionId)
+            applyStatusEffect(PlayerState::EffectPoison, kPoisonPotionDurationSec, 1);
+        else if (eatenId == RecipeRegistry::WeaknessPotionId)
+            applyStatusEffect(PlayerState::EffectWeakness, kWeaknessDurationSec, 1);
+        else if (eatenId == RecipeRegistry::InstantHealthPotionId && m_mode == Survival)
+            emit healed(kInstantHealthHealHp);
         if (m_mode == Survival) {
             m_hotbar->addStack(int(RecipeRegistry::GlassBottleId), 1); // 喝完留空瓶（MC 口径）
         }
@@ -3646,6 +3683,23 @@ void PlayerController::applyStatusEffect(int effect, float seconds, int level)
         m_strengthTimer = secs;
         m_strengthLevel = (secs > 0.0f) ? lvl : 0;
         break;
+    case PlayerState::EffectFireResistance:
+        // t1099 火抗（药水饮用入口）：m_fireResTimer（点燃门 + 火伤 emit 门双面免疫，见火烧段两处门）。
+        //   不持级（MC 各级火抗免疫同值；快照 level 恒 1）。
+        m_fireResTimer = secs;
+        break;
+    case PlayerState::EffectRegeneration:
+        // t1099 再生（药水饮用入口）：m_regenPotionTimer + 脉冲累积器（tick 每 2.5s emit healed(1)）。
+        //   累积器随新一次施加同步重置（同 m_poisonDmgAccum 语义——新周期起算）。
+        m_regenPotionTimer = secs;
+        m_regenPotionAccum = 0.0f;
+        m_regenPotionLevel = (secs > 0.0f) ? lvl : 0;
+        break;
+    case PlayerState::EffectWeakness:
+        // t1099 虚弱（药水饮用入口）：m_weakTimer（attackMob 伤害 -4/级，机制等价 MC weakness）。
+        m_weakTimer = secs;
+        m_weakLevel = (secs > 0.0f) ? lvl : 0;
+        break;
     default:
         break; // EffectNone / 未知 → 忽略
     }
@@ -3665,6 +3719,13 @@ void PlayerController::clearStatusEffects()
     m_speedLevel = 0;
     m_strengthTimer = 0.0f;
     m_strengthLevel = 0;
+    // t1099 第二轮同步清（家族口径一致——漏清则重生 / 读档后火抗免疫 / 再生脉冲 / 虚弱减伤跨生命周期串入）。
+    m_fireResTimer = 0.0f;
+    m_regenPotionTimer = 0.0f;
+    m_regenPotionAccum = 0.0f;
+    m_regenPotionLevel = 0;
+    m_weakTimer = 0.0f;
+    m_weakLevel = 0;
     if (m_burning) { m_burning = false; emit burningChanged(); } // t344 火焰叠层同步隐
 }
 
@@ -3710,6 +3771,29 @@ QVariantList PlayerController::buildActiveEffects() const
             m.insert(QStringLiteral("type"), int(PlayerState::EffectStrength));
             m.insert(QStringLiteral("seconds"), int(std::ceil(m_strengthTimer)));
             m.insert(QStringLiteral("level"), m_strengthLevel > 0 ? m_strengthLevel : 1);
+            list.append(m);
+        }
+        // t1099 第二轮快照尾（固定序扩展尾：.../Fire/Speed/Strength/FireResistance/Regeneration/Weakness；
+        //   HUD 图标路由 Main.qml 同步扩展；瞬间治疗无 timer 不入快照）。
+        if (m_fireResTimer > 0.0f) {
+            QVariantMap m;
+            m.insert(QStringLiteral("type"), int(PlayerState::EffectFireResistance));
+            m.insert(QStringLiteral("seconds"), int(std::ceil(m_fireResTimer)));
+            m.insert(QStringLiteral("level"), 1); // 火抗不持级（MC 各级免疫同值），快照恒 1
+            list.append(m);
+        }
+        if (m_regenPotionTimer > 0.0f) {
+            QVariantMap m;
+            m.insert(QStringLiteral("type"), int(PlayerState::EffectRegeneration));
+            m.insert(QStringLiteral("seconds"), int(std::ceil(m_regenPotionTimer)));
+            m.insert(QStringLiteral("level"), m_regenPotionLevel > 0 ? m_regenPotionLevel : 1);
+            list.append(m);
+        }
+        if (m_weakTimer > 0.0f) {
+            QVariantMap m;
+            m.insert(QStringLiteral("type"), int(PlayerState::EffectWeakness));
+            m.insert(QStringLiteral("seconds"), int(std::ceil(m_weakTimer)));
+            m.insert(QStringLiteral("level"), m_weakLevel > 0 ? m_weakLevel : 1);
             list.append(m);
         }
     }
@@ -8986,7 +9070,9 @@ void PlayerController::step(qreal dt)
             && m_world->isBurningAt(fx, footY - 1, fz)) touchingLava = true;
         if (!touchingLava && footY >= 0 && m_world->isBurningAt(fx, footY, fz)) touchingLava = true;
         if (!touchingLava && eyeY >= 0 && m_world->isBurningAt(fx, eyeY, fz)) touchingLava = true;
-        if (touchingLava) {
+        if (touchingLava && m_fireResTimer <= 0.0f) {
+            // t1099 火抗免疫门：m_fireResTimer>0 时不点燃（MC 1.0 fire resistance 火免疫——不入火烧链
+            //   则火伤 / 燃烧叠层全不发生；外壁火焰视觉 MC 有、本工程简化不显，机制面同归零）。
             m_fireTimer = EntityManager::kFireDuration; // 持续重燃（离开前 fireTimer 不衰减）；不动 m_fireDmgTimer（t351）
         }
         // review27 #11 玩家侧水灭 / 雨灭（MC 1.0 语义：着火实体浸水 / 淋雨立即熄灭——t888 拿掉随机
@@ -9019,7 +9105,9 @@ void PlayerController::step(qreal dt)
                         m_fireDmgTimer = 0.0f;
                     }
                 }
-                if (!earlyExtinguished)
+                // t1099 火抗火伤门：免疫期内外部点燃（/effect EffectFire / 免疫开启前的余焰）也不掉血
+                //   （MC 1.0 fire resistance 免疫期火伤全免；点燃门挡新火，本门挡余焰 / 外部施加）。
+                if (!earlyExtinguished && m_fireResTimer <= 0.0f)
                     emit fallDamageTaken(1, PlayerState::Fire); // t311 死因=燃烧（复用 takeDamage→damaged 链）
             }
             if (m_fireTimer <= 0.0f) { m_fireTimer = 0.0f; m_fireDmgTimer = 0.0f; } // 定时熄灭
@@ -9197,6 +9285,9 @@ void PlayerController::step(qreal dt)
     // t1097 药水效果推进（EffectSpeed / EffectStrength 时序源；来源 = finishEating 饮用结算 / applyStatusEffect）。
     //   仅 Survival 生效（同缓慢门控）；归零解除 + 等级清位（防切回 Survival 陈旧串入）。迅捷的应用不在本段
     //   —— step() 走路分支读 m_speedTimer 乘增幅（见该处注释）；力量在 attackMob 伤害段读 m_strengthTimer。
+    //   t1099 第二轮推进并入同门：火抗 timer 递减（无累积器——免疫是纯门面）+ 再生 timer / 脉冲累积器
+    //   （每 kRegenPotionIntervalSec 秒 emit healed(1) → 呈现层 PlayerState.heal，同 t238 饥饿回血路由）
+    //   + 虚弱 timer 递减（应用在 attackMob 伤害段 -4/级）。
     if (m_mode == Survival) {
         if (m_speedTimer > 0.0f) {
             m_speedTimer -= float(dt);
@@ -9206,11 +9297,34 @@ void PlayerController::step(qreal dt)
             m_strengthTimer -= float(dt);
             if (m_strengthTimer <= 0.0f) { m_strengthTimer = 0.0f; m_strengthLevel = 0; } // 定时解除
         }
+        if (m_fireResTimer > 0.0f) {
+            m_fireResTimer -= float(dt);
+            if (m_fireResTimer <= 0.0f) m_fireResTimer = 0.0f; // 定时解除
+        }
+        if (m_regenPotionTimer > 0.0f) {
+            m_regenPotionTimer -= float(dt);
+            m_regenPotionAccum += float(dt);
+            if (m_regenPotionAccum >= kRegenPotionIntervalSec) {
+                m_regenPotionAccum -= kRegenPotionIntervalSec;
+                emit healed(1); // 再生脉冲：每 2.5s 回 1HP（MC 1.0 regen I；healed → PlayerState.heal 既有路由）
+            }
+            if (m_regenPotionTimer <= 0.0f) { m_regenPotionTimer = 0.0f; m_regenPotionAccum = 0.0f; m_regenPotionLevel = 0; } // 定时解除
+        }
+        if (m_weakTimer > 0.0f) {
+            m_weakTimer -= float(dt);
+            if (m_weakTimer <= 0.0f) { m_weakTimer = 0.0f; m_weakLevel = 0; } // 定时解除
+        }
     } else {
         m_speedTimer = 0.0f;
         m_speedLevel = 0;
         m_strengthTimer = 0.0f;
         m_strengthLevel = 0;
+        m_fireResTimer = 0.0f;
+        m_regenPotionTimer = 0.0f;
+        m_regenPotionAccum = 0.0f;
+        m_regenPotionLevel = 0;
+        m_weakTimer = 0.0f;
+        m_weakLevel = 0;
     }
 
     // t715 状态效果快照广播（效果框架 v1 收编口）：组装当前活跃效果（中毒 m_poisonTimer / 缓慢 m_slowTimer /

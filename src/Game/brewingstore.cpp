@@ -8,7 +8,11 @@
 // ── 酿造配方表（静态纯数据 = Game 层单一权威；机制 tick / 矩阵探针同源调用）──────────────────────
 // MC 1.0 酿造链核实（wiki 2026 实读；机制等价实现，§9 原创名：地狱疣→灰烬疣 / 烈焰粉→燃烬粉）：
 //   水瓶 + 灰烬疣 → 粗制药水（基础链）；粗制 + 糖 → 迅捷药水；粗制 + 燃烬粉 → 力量药水。
-//   其余 1.0 效果（火抗 / 再生 / 中毒 / 虚弱 / 瞬间治疗）登记后续轮（候选池；本表尾追加扩展位）。
+//   t1099 第二轮（粗制 + 效果原料 → 效果药水五链，wiki 口径与获取链裁定见 recipe.h 0x26B..0x274 注）：
+//   粗制 + 岩浆膏 → 火抗（3:00）/ 粗制 + 幽灵泪 → 再生（0:45）/ 粗制 + 蜘蛛眼 → 中毒（0:45）/
+//   粗制 + 发酵蛛眼 → 虚弱（1:30）/ 粗制 + 闪烁西瓜 → 瞬间治疗（即时）。
+//   候选池登记（本表尾追加扩展位）：水瓶直酿行（1.0 水瓶+发酵蛛眼 → 虚弱 / +其余原料 → 凡庸药水）、
+//   延长/强化二级链（红石 / 辉光岩）、喷溅药水。
 int BrewingStore::brewResult(int ingredientId, int bottleId)
 {
     if (bottleId == RecipeRegistry::WaterBottleId)
@@ -19,6 +23,17 @@ int BrewingStore::brewResult(int ingredientId, int bottleId)
             return RecipeRegistry::SpeedPotionId;
         if (ingredientId == RecipeRegistry::BlazePowderId)
             return RecipeRegistry::StrengthPotionId;
+        // t1099 第二轮五链（效果原料各自唯一 → if 链平铺，同上两行形态）。
+        if (ingredientId == RecipeRegistry::MagmaCreamId)
+            return RecipeRegistry::FireResistancePotionId;
+        if (ingredientId == RecipeRegistry::GhastTearId)
+            return RecipeRegistry::RegenerationPotionId;
+        if (ingredientId == RecipeRegistry::SpiderEyeId)
+            return RecipeRegistry::PoisonPotionId;
+        if (ingredientId == RecipeRegistry::FermentedSpiderEyeId)
+            return RecipeRegistry::WeaknessPotionId;
+        if (ingredientId == RecipeRegistry::GlisteringMelonId)
+            return RecipeRegistry::InstantHealthPotionId;
     }
     return 0;
 }

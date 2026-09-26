@@ -495,6 +495,36 @@ public:
     static constexpr int SpeedPotionId    = 0x268; // 迅捷药水：粗制 + 糖（MC 1.0 swiftness 3:00，移速 +20%/级）
     static constexpr int StrengthPotionId = 0x269; // 力量药水：粗制 + 燃烬粉（MC 1.0 strength 3:00，近战 +130%/级旧口径）
     static constexpr int SugarId          = 0x26A; // 糖：1 甘蔗 → 1 糖（MC 1.0 同料；迅捷药水原料）
+    // t1099 药水效果链第二轮（材料段 0x26B..0x274，糖 0x26A 之上段尾追加不插中间 = 存档安全铁律；机制
+    //   等价 MC 1.0 酿造效果药水第二组）。五链逐一核实裁定（wiki 2026 实读口径，行注引证；§9 原创名）：
+    //
+    //   **岩浆膏获取链裁定（核实留痕，分层交付）**：MC 1.0 岩浆膏（magma cream）唯一获取 = 杀岩浆怪掉落
+    //   （合成配方 燃烬粉+黏液球 为 1.1 追加，越 1.0 基准不取）。本工程岩浆怪缺席（全 src grep magma /
+    //   岩浆怪零命中）且黏液球/史莱姆同样缺席 → 生存链两端断，创造专属（调色板行 = 唯一获取面，同灰烬疣
+    //   t1097 先例）；效果链（粗制 → 火抗）交付即用，岩浆怪维度/生物载体候选池登记。
+    //   **幽灵泪获取链裁定（核实留痕，分层交付）**：MC 1.0 幽灵泪（ghast tear）唯一获取 = 杀恶魂掉落。
+    //   本工程恶魂缺席（全 src grep ghast / 恶魂零命中，无下界维度同灰烬疣根因）→ 创造专属（同上先例）；
+    //   效果链（粗制 → 再生）交付即用，恶魂载体候选池登记。
+    //   **蜘蛛眼 / 发酵蛛眼（生存链双闭合）**：蜘蛛（MobSpider）+ 洞穴蜘蛛（MobCaveSpider）在场（t285 /
+    //   t1012）；MC 1.0 蜘蛛掉 0-1 蜘蛛眼（1/3 独立掷，cave spider 同率）→ 蜘蛛眼掉落行入 onMobDied
+    //   蜘蛛 / 洞蛛两分支（Main.qml 字面量约定）；发酵蛛眼 = 蜘蛛眼+褐菇+糖 无序（MC 1.0 同料，2×2 可容；
+    //   褐菇 BrownMushroom=115 沼泽 worldgen 在场、糖 = 甘蔗既有）→ 两件生存可达。
+    //   **闪烁西瓜获取链裁定（核实留痕，分层交付）**：MC 1.0 闪烁西瓜（glistering melon）= 瓣 1 + 金粒 8
+    //   环形（金粒 = 1 金锭 → 9 粒）；西瓜瓣唯一获取 = 收西瓜方块（西瓜子 = 地牢 / 废弃矿道箱战利品 →
+    //   瓜茎农田）。本工程西瓜方块 / 瓜茎作物 / 西瓜子 / 金粒全缺席（grep melon / nugget 零命中）→ 生存
+    //   链整根缺三环，其中瓜茎是新作物原型（工程无茎类 crop，成本超本单）→ 整条链候选池登记（西瓜子
+    //   地牢池行 + 瓜茎瓜块 + 瓣 + 金粒 + 环形配方一组回收），闪烁西瓜本体创造专属（灰烬疣先例）；效果
+    //   链（粗制 → 瞬间治疗）交付即用。
+    static constexpr int MagmaCreamId       = 0x26B; // 岩浆膏：粗制 → 火抗原料（MC 1.0 magma cream）；创造专属（岩浆怪缺席裁定）
+    static constexpr int GhastTearId        = 0x26C; // 幽灵泪：粗制 → 再生原料（MC 1.0 ghast tear）；创造专属（恶魂缺席裁定）
+    static constexpr int SpiderEyeId        = 0x26D; // 蜘蛛眼：粗制 → 中毒原料；蜘蛛/洞蛛 1/3 掉落（生存可达）
+    static constexpr int FermentedSpiderEyeId = 0x26E; // 发酵蛛眼：蛛眼+褐菇+糖 无序；粗制 → 虚弱原料（生存可达）
+    static constexpr int GlisteringMelonId  = 0x26F; // 闪烁西瓜：粗制 → 瞬间治疗原料；创造专属（西瓜链缺席裁定）
+    static constexpr int FireResistancePotionId = 0x270; // 火抗药水：粗制 + 岩浆膏；火/岩浆免疫 180s（MC 1.0 fire resistance 3:00）
+    static constexpr int RegenerationPotionId   = 0x271; // 再生药水：粗制 + 幽灵泪；每 2.5s 回 1HP 45s（MC 1.0 regeneration 0:45）
+    static constexpr int PoisonPotionId         = 0x272; // 中毒药水：粗制 + 蜘蛛眼；每 1.25s 扣 1HP 45s 不致死（MC 1.0 poison 0:45）
+    static constexpr int WeaknessPotionId       = 0x273; // 虚弱药水：粗制 + 发酵蛛眼；近战 -4/级 90s（MC 1.0 weakness 1:30）
+    static constexpr int InstantHealthPotionId  = 0x274; // 瞬间治疗药水：粗制 + 闪烁西瓜；饮毕即回 4HP（2 心，I 级）无持续
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

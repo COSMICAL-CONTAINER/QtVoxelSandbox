@@ -3188,10 +3188,15 @@ Window {
                 // t299 敌对掉落：蜘蛛 → 线 ×1-2（机制等价 MC 1.0 蜘蛛掉线；弓 / 钓竿原料，t304 弓配方用）。
                 itemEntities.spawnItem(x, y, z, 0x219, 1)   // 线 ×1-2
                 itemEntities.spawnItem(x, y, z, 0x219, 1)
+                // t1099 蜘蛛眼掉落（1/3 独立掷；机制等价 MC 1.0 蜘蛛 0-1 spider eye @1/3——中毒药水原料，
+                //   蜘蛛眼生存唯一获取源）。0x26D = RecipeRegistry::SpiderEyeId（⚠️ QML 字面量约定同上）。
+                if (Math.random() < 1 / 3) itemEntities.spawnItem(x, y, z, 0x26D, 1)
             } else if (mobType === EntityManager.MobCaveSpider) {
                 // t1012③ 洞穴蜘蛛掉落：线 ×0-1（机制等价 MC 1.0 cave spider 掉 0-1 string——
                 //   小体型低收益口径，区别成体蜘蛛恒 1-2；线 id 0x219 = RecipeRegistry::StringId 同上字面量约定）。
+                //   t1099 蜘蛛眼 1/3 并入（MC 1.0 cave spider 同掉 0-1 spider eye @1/3；0x26D 同上）。
                 if (Math.random() < 0.5) itemEntities.spawnItem(x, y, z, 0x219, 1)
+                if (Math.random() < 1 / 3) itemEntities.spawnItem(x, y, z, 0x26D, 1)
             } else if (mobType === EntityManager.MobStalker) {
                 // t485 潜行者（苦力怕）掉落：火药 ×1-2（机制等价 MC 1.0 苦力怕掉火药 gunpowder）。
                 //   0x239 = RecipeRegistry::GunpowderId（材料段火药；⚠️ QML 不 import C++ 静态类故用字面量，同 onMobDied
@@ -15492,6 +15497,9 @@ Window {
                                 : modelData.type === PlayerState.EffectSlowness ? "qrc:/textures/icon_effect_slowness.png"
                                 : modelData.type === PlayerState.EffectSpeed ? "qrc:/textures/icon_effect_speed.png"
                                 : modelData.type === PlayerState.EffectStrength ? "qrc:/textures/icon_effect_strength.png"
+                                : modelData.type === PlayerState.EffectFireResistance ? "qrc:/textures/icon_effect_fireresistance.png"
+                                : modelData.type === PlayerState.EffectRegeneration ? "qrc:/textures/icon_effect_regeneration.png"
+                                : modelData.type === PlayerState.EffectWeakness ? "qrc:/textures/icon_effect_weakness.png"
                                 : "qrc:/textures/icon_effect_fire.png")
                         }
                     }
