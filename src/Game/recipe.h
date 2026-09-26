@@ -537,6 +537,37 @@ public:
     static constexpr int ExtendedRegenerationPotionId   = 0x278; // 再生药水（延长）：再生 + 红石；每 2.5s 回 1HP 1:30（MC 1.0 extended 90s）
     static constexpr int ExtendedPoisonPotionId         = 0x279; // 中毒药水（延长）：中毒 + 红石；每 1.25s 扣 1HP 1:30 不致死（MC 1.0 extended 90s）
     static constexpr int ExtendedWeaknessPotionId       = 0x27A; // 虚弱药水（延长）：虚弱 + 红石；近战 -4/级 4:00（MC 1.0 extended 240s）
+    // t1101 喷溅药水族（材料段 0x27B..0x286，延长族 0x27A 之上**段尾追加**不插中间 = 存档安全铁律）：
+    //   机制等价 MC 1.0 火药 modifier 二级酿造——成品药水 + 火药 → 对应喷溅版（右键投掷弹丸，落地碎裂
+    //   范围结算）。**段位选型留痕**：单 id + flag 编码（喷溅位=基础 id|0x...）会侵入全部既有 id 消费面
+    //   （名面 / 调色板 / 图标 / 饮面 / 酿造表逐处解 flag），家族既有模式是 id 段尾追加（0x263..0x27A
+    //   三轮先例）→ 取段尾追加 12 连段（基础 6 + 延长 6），既有 id 数值零扰动。
+    //   **范围结算口径核实（wiki 2026 实读 + 1.0 源码口径，机制等价实现）**：触地点为心、半径 4 格
+    //   （dSq<16）内全体实体吃效果；邻近线性衰减系数 d1 = 1 − dist/4（中心 1.0 → 边缘 0）；持续效果
+    //   时长 = d1 × 基础时长 + 1 tick（int(durationTicks × d1) + 1 ticks 原式秒化）——**喷溅版时长不等于
+    //   饮用版**（有邻近系数），常量族与结算面见 playercontroller.h kSplashRadiusBlocks / kSplashTick
+    //   FloorSec + splashBaseSeconds 映射。即时效果喷溅（瞬间治疗）按邻近系数衰减**效能**（幅度非时长）
+    //   ——本单**不交付瞬间治疗喷溅**（任务范围 = 基础 6 + 延长 6；火药 × 瞬间治疗 = 无映射负例，
+    //   候选池登记「即时效果喷溅 + 效能衰减面」）。
+    //   **获取链裁定（核实留痕）**：火药（GunpowderId 0x239）生存可达（杀潜行者掉落 + t485 TNT 产业
+    //   链既有）→ 喷溅酿造链入口生存可达；各效果药水获取面沿基础 / 延长链既有裁定（中毒 / 虚弱链生存
+    //   端到端可达；其余创造专属原料沿 t1099 留痕）。红石对喷溅版无二级映射（喷溅版不可再延长，
+    //   MC 1.0 modifier 对喷溅面本单不取——候选池登记）；喷溅版不可饮（饮用面排除，见 isDrinkableItem
+    //   负例）亦不可再酿（火药 × 喷溅版 = 无映射）。
+    //   命名 = 基础名 +「（喷溅）」/「（喷溅·延长）」后缀（通用描述词，§9 合法）；可堆叠 64（材料段
+    //   默认，同药水族零特判）；无 pack 映射（越表界 → -1 → 资源包回退自绘，同族）。
+    static constexpr int SplashSpeedPotionId                = 0x27B; // 喷溅迅捷药水：迅捷 + 火药；掷出范围移速 +20%/级（时长邻近衰减）
+    static constexpr int SplashStrengthPotionId             = 0x27C; // 喷溅力量药水：力量 + 火药；范围近战 +130%/级
+    static constexpr int SplashFireResistancePotionId       = 0x27D; // 喷溅火抗药水：火抗 + 火药；范围火/岩浆免疫
+    static constexpr int SplashRegenerationPotionId         = 0x27E; // 喷溅再生药水：再生 + 火药；范围每 2.5s 回 1HP
+    static constexpr int SplashPoisonPotionId               = 0x27F; // 喷溅中毒药水：中毒 + 火药；范围每 1.25s 扣 1HP 不致死
+    static constexpr int SplashWeaknessPotionId             = 0x280; // 喷溅虚弱药水：虚弱 + 火药；范围近战 -4/级
+    static constexpr int SplashExtendedSpeedPotionId        = 0x281; // 喷溅迅捷药水（喷溅·延长）：延长迅捷 + 火药；基础时长 8:00 档
+    static constexpr int SplashExtendedStrengthPotionId     = 0x282; // 喷溅力量药水（喷溅·延长）：延长力量 + 火药；8:00 档
+    static constexpr int SplashExtendedFireResistancePotionId = 0x283; // 喷溅火抗药水（喷溅·延长）：延长火抗 + 火药；8:00 档
+    static constexpr int SplashExtendedRegenerationPotionId = 0x284; // 喷溅再生药水（喷溅·延长）：延长再生 + 火药；1:30 档
+    static constexpr int SplashExtendedPoisonPotionId       = 0x285; // 喷溅中毒药水（喷溅·延长）：延长中毒 + 火药；1:30 档
+    static constexpr int SplashExtendedWeaknessPotionId     = 0x286; // 喷溅虚弱药水（喷溅·延长）：延长虚弱 + 火药；4:00 档
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

@@ -2249,6 +2249,21 @@ Item {
             case 0x278: drawPotion("#b04060", "#e080a0", "#f8b8d0"); break // 再生药水（延长）：再生 + 红石；1:30
             case 0x279: drawPotion("#2a5a1c", "#508e3c", "#90c884"); break // 中毒药水（延长）：中毒 + 红石；1:30
             case 0x27A: drawPotion("#44444f", "#74748a", "#a8a8c0"); break // 虚弱药水（延长）：虚弱 + 红石；4:00
+            // t1101 喷溅药水族十二件（0x27B..0x286，段尾追加）：drawPotion 同构异色（喷溅版 = 基础版
+            //   液色浅一档 / 偏亮——「同味稀释」读感，与延长版「同味更浓」的深一档相对；原创自绘 §9a，
+            //   零 MC 资产）。飞行 billboard 亦复用本 case（entity delegate 读 blockIdAt=喷溅 id）。
+            case 0x27B: drawPotion("#7fc4f4", "#a8dcfa", "#d8f2ff"); break // 喷溅迅捷药水：迅捷 + 火药；掷出范围效果
+            case 0x27C: drawPotion("#e8a878", "#f8cca8", "#ffe4cc"); break // 喷溅力量药水：力量 + 火药
+            case 0x27D: drawPotion("#f4b878", "#fccfa8", "#ffe8d0"); break // 喷溅火抗药水：火抗 + 火药
+            case 0x27E: drawPotion("#f0a8c0", "#f8ccdc", "#ffe8f0"); break // 喷溅再生药水：再生 + 火药
+            case 0x27F: drawPotion("#88c474", "#b0dc9c", "#d8f0c8"); break // 喷溅中毒药水：中毒 + 火药
+            case 0x280: drawPotion("#a8a8b8", "#c8c8d8", "#e8e8f0"); break // 喷溅虚弱药水：虚弱 + 火药
+            case 0x281: drawPotion("#68aee4", "#98cefa", "#c8e6ff"); break // 喷溅迅捷药水（延长）：延长迅捷 + 火药
+            case 0x282: drawPotion("#d88a4a", "#f0b488", "#fcd8bc"); break // 喷溅力量药水（延长）：延长力量 + 火药
+            case 0x283: drawPotion("#e09450", "#f4bc88", "#fcdcc0"); break // 喷溅火抗药水（延长）：延长火抗 + 火药
+            case 0x284: drawPotion("#e07898", "#f4a8c0", "#fcd4e2"); break // 喷溅再生药水（延长）：延长再生 + 火药
+            case 0x285: drawPotion("#68a458", "#94c484", "#c4e4b4"); break // 喷溅中毒药水（延长）：延长中毒 + 火药
+            case 0x286: drawPotion("#9090a4", "#b4b4c8", "#d8d8e8"); break // 喷溅虚弱药水（延长）：延长虚弱 + 火药
             // t788 染料 16 色（0x24B..0x25A，白→黑羊毛色序；三色参数取 build_wool.py 同源色板）
             case 0x24B: drawDye("#f0f0ee", "#f9f9f8", "#959594"); break // 白色染料（白花破坏掉落；染白羊毛/白床）
             case 0x24C: drawDye("#de781e", "#ee9f69", "#8a4a13"); break // 橙色染料

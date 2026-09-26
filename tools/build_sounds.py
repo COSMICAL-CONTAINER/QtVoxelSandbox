@@ -1201,6 +1201,45 @@ def gen_burp():
     return finalize(out, target_peak=0.8)
 
 
+def gen_splash_break():
+    """喷溅瓶碎裂音（t1101 喷溅药水投掷链触地碎裂；机制等价 MC 1.0 splash potion 碎裂，§9 原创程序合成）。
+
+    合成参数留痕：~0.28s「玻璃碎 + 泼洒」两段——①玻璃碎 = 四枚高频「叮」簇（正弦 2.6/2.2/1.8/1.4kHz
+    逐枚降调，每枚 28ms 快指数衰减 τ=8ms，起始时刻错开 0/24/52/86ms，模拟碎片连环触地）；②泼洒床 =
+    中低通噪声突发（白噪 → 二阶单极低通 ~1.2kHz，80ms 快衰减 τ=30ms，模拟液体泼地）；末尾 10ms 线性
+    收口防爆音。mono s16 44.1k，峰值归一 0.9。播放端 AudioManager::playSplashBreak（固定音高——宽频
+    瞬态自带随机感，登记简化）。
+    """
+    dur = 0.28
+    n_s = int(SR * dur)
+    out = [0.0] * n_s
+    # ① 玻璃碎「叮」簇：四枚高频正弦逐枚降调 + 快指数衰减（碎片连环触地观感）。
+    tink_starts = [0.0, 0.024, 0.052, 0.086]
+    tink_freqs = [2600.0, 2200.0, 1800.0, 1400.0]
+    for ts, f0 in zip(tink_starts, tink_freqs):
+        base = int(ts * SR)
+        n_t = int(SR * 0.028)
+        for i in range(n_t):
+            t = i / SR
+            out[base + i] += math.sin(2 * math.pi * f0 * t) * math.exp(-t / 0.008) * 0.55
+    # ② 泼洒床：白噪 → 二阶单极低通 ~1.2kHz（去嘶哑保「液体泼地」质感，t366 裸高通教训同门规避）。
+    base = int(0.0 * SR)
+    n_p = int(SR * 0.080)
+    lp = 0.0
+    lp2 = 0.0
+    for i in range(n_p):
+        t = i / SR
+        x = (random.random() * 2.0 - 1.0)
+        lp += 0.30 * (x - lp)       # 单极低通一阶
+        lp2 += 0.30 * (lp - lp2)    # 级联二阶（~1.2kHz 截止 @44.1k）
+        out[base + i] += lp2 * math.exp(-t / 0.030) * 1.6
+    # 末尾 10ms 线性收口防爆音
+    fade = int(SR * 0.010)
+    for j in range(fade):
+        out[n_s - 1 - j] *= j / fade
+    return finalize(out, target_peak=0.9)
+
+
 def main():
     root = Path(__file__).resolve().parent.parent
     out_dir = root / "sounds"
@@ -1250,6 +1289,8 @@ def main():
     # t1100 饮用面两单件（咕嘟节拍音 + 饮毕 burp；gen_drink_gulp / gen_burp 参数留痕见函数头注）。
     clips.append(("drink_gulp", gen_drink_gulp))
     clips.append(("burp", gen_burp))
+    # t1101 喷溅瓶碎裂音（玻璃碎 + 泼洒；gen_splash_break 参数留痕见函数头注）。
+    clips.append(("splash_break", gen_splash_break))
     # t1083 唱片机曲目（disc_track_00..02.wav，两位编号同 makeDiscPath %02d 口径）：--only 支持
     #   "disc" 全组 / 单轨名。
     for i in range(3):

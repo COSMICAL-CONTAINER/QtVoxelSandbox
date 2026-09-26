@@ -36,7 +36,11 @@
 //   虚弱 4:00；wiki 逐链核实留痕见 recipe.h 0x275..0x27A 注 + playercontroller.h 延长常量族）。映射 =
 //   extendedPotionResult 小表（成品→延长成对映射，表规模 6 行故取独立函数面而非 if 链平铺——留痕：
 //   if 链已 8 行，再平铺 6 行可读性崩；小表 + 单 gate 行 = 映射单一权威 + 负例面集中）。
-//   其余 1.0 面（水瓶直酿 / 辉光强化 / 喷溅）**登记后续轮**（候选池）。
+//   t1101：三级酿造面 = 成品药水（基础 6 + 延长 6）+ 火药 → 对应喷溅版 ×12（右键投掷弹丸，落地碎裂
+//   范围结算；口径留痕见 recipe.h 0x27B..0x286 注 + playercontroller.h 喷溅常量族）。映射 =
+//   splashPotionResult 小表（extendedPotionResult 同门：12 行成对映射 + 单 gate 行；水 / 粗制 /
+//   瞬间治疗 / 喷溅版再酿 / 非瓶 = 无映射负例面）。
+//   其余 1.0 面（水瓶直酿 / 辉光强化 / 即时效果喷溅 / modifier 对喷溅再酿）**登记后续轮**（候选池）。
 //
 // 设计（对齐 HopperStore / FurnaceStore）：纯存储，不持光 / 不依赖 World/Renderer（PLAN §2 分层：本层属
 // Game/ViewModel，机制 tick = PlayerController::scanBrewingStands（Game 层直调 Q_INVOKABLE 读族 + 引擎
@@ -110,6 +114,12 @@ public:
     //   对外承接转换——调用面唯一 = brewingstore.cpp 内 gate 行；矩阵探针也只经 brewResult 断言，
     //   保 NEG 恰红单腿归因：摘映射 = gate 行 + 本体一并摘除，编译仍绿、行为柱恰红）。
     static int extendedPotionResult(int potionId);
+    // t1101 三级酿造映射（火药 modifier）：成品药水（基础 6 + 延长 6）→ 喷溅版产物 id（水 / 粗制 /
+    //   瞬间治疗 / 喷溅版再酿 / 非瓶 → 0）。**仅经 brewResult 的火药门行接入**（机制 tick / 探针统一走
+    //   brewResult 单一入口，本函数不单独对外承接转换——调用面唯一 = brewingstore.cpp 内 gate 行；
+    //   矩阵探针也只经 brewResult 断言，保 NEG 恰红单腿归因：摘映射 = gate 行 + 本体一并摘除，编译
+    //   仍绿、行为柱恰红。extendedPotionResult 同门先例）。
+    static int splashPotionResult(int potionId);
     // 燃料燃烧值：itemId 可燃 → 剩余可酿次数（燃烬粉 20）；非燃料 → 0。
     static int fuelOpsFor(int itemId);
 

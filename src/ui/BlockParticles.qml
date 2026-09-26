@@ -63,6 +63,13 @@ Node {
     function burstEffect(x, y, z, effectType) {
         burstFloat(x, y, z, 2, effectColor(effectType), 0.05, 0.6, 0.4, 0.5, 0.9, -1.2)
     }
+    // t1101 喷溅碎裂迸发（机制等价 MC 1.0 splash potion 落地药水云迸发；EntityManager splashBottleBreak
+    //   → Main.qml 路由）：碎裂点迸发上浮消散粒子，色按喷溅药水对应效果取色（splashEffectType 同源
+    //   映射——Game 层单一权威，呈现层不重抄效果表）；非喷溅 id / 未知 → 白兜底。坐标 = 命中格
+    //   （整数格，同 burstEffect 世界坐标口径）。
+    function burstSplashPotion(x, y, z, effectType) {
+        burstFloat(x, y, z, 3, effectColor(effectType), 0.05, 0.8, 0.5, 0.6, 0.8, -1.2)
+    }
     // t1100 效果类型 → 粒子色（每效果一色；Poison 绿 / Slowness 灰蓝 / Fire 橙 / Speed 青 /
     //   Strength 深橙 / FireResistance 琥珀 / Regen 粉 / Weakness 灰；EffectNone / 未知 → 白兜底）。
     function effectColor(type) {

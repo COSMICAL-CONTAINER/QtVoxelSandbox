@@ -915,6 +915,33 @@ int EntityManager::spawnGlimmerBottle(const QVector3D &origin, const QVector3D &
     return slot;
 }
 
+// t1101 生成喷溅药水投射物（玩家右键投掷；见头文件注释）：存 origin + 3D 速度 vel（含 vy 抛物）+
+//   kind=SplashBottle + pushable=false + 寿命 + **itemId 载荷骑 blockId 字段**（t117 字段 per-kind 复用
+//   先例；SplashBottle 不走 FallingBlock 分支零冲突）。halfW/halfH=0.10（小瓶视觉 + 碰撞最小，同蕴辉瓶 /
+//   蛋 / 雪球家族）。bump revision → QML Repeater 追加 delegate（SplashBottle 分支药水图标 billboard，
+//   MaterialIcon 读 blockIdAt=喷溅 id）。达 kCap → 跳过 + 告警（防溢出）。返槽索引（调试用）；达 kCap → -1。
+int EntityManager::spawnSplashBottle(const QVector3D &origin, const QVector3D &vel, int itemId)
+{
+    if (m_liveCount >= kCap) {
+        qCWarning(lcEnt) << "entity cap reached (" << kCap << "); splash bottle spawn skipped at" << origin;
+        return -1;
+    }
+    Entity e;
+    e.pos = origin;
+    e.halfW = 0.10f; // 喷溅瓶小瓶视觉 + 碰撞最小（同蕴辉瓶 / 蛋 / 雪球家族）
+    e.halfH = 0.10f;
+    e.pushable = false; // 玩家走碰不推（同箭 / 雪球 / 蛋 / 蕴辉瓶）
+    e.kind = SplashBottle;
+    e.blockId = itemId; // 载荷：喷溅药水物品 id（t117 FallingBlock 字段 per-kind 复用；本分支独读）
+    e.vx = vel.x(); // 复用 vx/vy/vz 作 3D 速度（SplashBottle 不走 Mob 击退衰减分支，无冲突）
+    e.vy = vel.y();
+    e.vz = vel.z();
+    e.arrowLife = kSplashBottleLifetime;
+    const int slot = acquireSlot(std::move(e)); // t256：slot 复用（同上）
+    notifyEntitiesChanged();
+    return slot;
+}
+
 // t728 生成火球投射物（燃烬者 aiEmberling 远程攻击；见头文件注释）：存 origin + 3D 速度 vel（blocks/s，直线弹道，
 //   重力 ~0）+ kind=Fireball + pushable=false + 寿命。halfW/halfH=0.15（橙黄火球小体视觉 + 碰撞最小；命中检测走
 //   点-in-AABB 不读 halfW）。entity.mobType 设 MobEmberling（火球命中玩家时 mobAttackedPlayer 携它在 QML 映射死因
@@ -6912,6 +6939,74 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                 dirty = true;
             }
             continue; // GlimmerBottle 不走 Mob AI / resting / 击退衰减
+        }
+
+        // --- SplashBottle（t1101 喷溅药水投射物）：抛物 + 方块 / 活体 mob 触碰即碎（发范围效果结算信号）
+        //     + 寿命兜底。机制等价 MC 1.0 splash potion：移动对象被方块 / 实体截停即 onImpact —— **未击中
+        //     任何实体也照碎**（触地即碎）。**命中 mob 0 伤害 0 击退**（MC 喷溅弹丸 onImpact 无攻击语义，
+        //     同蕴辉瓶）。判定序同蕴辉瓶：先 mob 后方块（贴墙 mob 不被撞墙吞掉）。碎裂载荷 = itemId
+        //     （blockId 字段，spawnSplashBottle 写入）→ emit splashBottleBreak(命中格, itemId) → 呈现层
+        //     路由 Game 层 applySplashPotion（半径 / 邻近衰减 / 效果注入单一权威，Entities 不向上依赖——
+        //     PLAN §2 分层）。**范围效果只对玩家结算**（本工程 mob 无通用效果注入系统，仅 slowTimer /
+        //     fireTimer 硬编码面——mob 范围面如实降级候选池登记，任务核实裁定）。
+        if (e.kind == SplashBottle) {
+            e.arrowLife -= float(dt); // 复用 arrowLife 作寿命倒计时
+            e.vy -= kGravity * float(dt); // 抛物：重力改 vy（同蕴辉瓶 / 蛋 / 雪球共用世界重力 → 弧自然）
+            const QVector3D next = e.pos + QVector3D(e.vx, e.vy, e.vz) * float(dt);
+            bool remove = false;
+            // 寿命到 → 移除（飞行未命中兜底，防永久滞留堆积；不碎裂不发信号——同蕴辉瓶兜底口径）。
+            if (e.arrowLife <= 0.0f) remove = true;
+            // 活体 mob 触碰（先于方块判定，同蕴辉瓶）：瓶（点）落入任一活体 mob 的 AABB（外扩
+            //   kSplashBottleHitHalfW）→ 碎裂移除 + 0 伤害 0 击退（MC 喷溅弹丸无攻击语义）。
+            if (!remove) {
+                for (int mi = 0; mi < int(m_entities.size()); ++mi) {
+                    const Entity &m = m_entities[size_t(mi)];
+                    if (!m.alive || m.kind != Mob || m.dead) continue; // 所有活体 mob；玩家非 Mob 穿过
+                    const float gx2 = m.pos.x() - m.halfW - kSplashBottleHitHalfW;
+                    const float gy2 = m.pos.y() - m.halfH - kSplashBottleHitHalfW;
+                    const float gz2 = m.pos.z() - m.halfW - kSplashBottleHitHalfW;
+                    if (next.x() >= gx2 && next.x() <= m.pos.x() + m.halfW + kSplashBottleHitHalfW
+                        && next.y() >= gy2 && next.y() <= m.pos.y() + m.halfH + kSplashBottleHitHalfW
+                        && next.z() >= gz2 && next.z() <= m.pos.z() + m.halfW + kSplashBottleHitHalfW) {
+                        qCInfo(lcEnt) << "splash bottle hit mob" << mi << "(no damage, area effect only)";
+                        remove = true;
+                        break; // 命中首个即止（瓶消失，不穿透）
+                    }
+                }
+            }
+            // 方块触碰 → 碎裂移除（机制等价 MC 触地即碎）。mob 命中已早退。
+            if (!remove) {
+                const int bx = qFloor(next.x()), by = qFloor(next.y()), bz = qFloor(next.z());
+                if (by >= 0 && world->isSolid(bx, by, bz)) remove = true;
+            }
+            // 越界兜底（飞出世界 XZ 边界 / 跌出底部）→ 移除（防永久飞行堆积；不碎裂不发信号——同蕴辉瓶
+            //   越界白耗口径）。
+            if (!remove) {
+                if (next.x() < 0.0f || next.z() < 0.0f
+                    || next.x() > worldW || next.z() > worldD || next.y() < 0.0f) {
+                    remove = true;
+                }
+            }
+            // 触碰（mob / 方块）→ emit splashBottleBreak（范围效果结算信号；呈现层路由 Game 层）。
+            //   寿命到 / 越界不触发（无命中点）。命中格先拷局部（防 spawn 悬垂——本分支无 spawn，仍守
+            //   t583 终审 L1 纪律：emit 参数一律局部量；itemId 同为局部拷贝，不持容器引用跨 emit）。
+            if (remove && e.arrowLife > 0.0f && next.y() >= 0.0f
+                && next.x() >= 0.0f && next.z() >= 0.0f
+                && next.x() <= worldW && next.z() <= worldD) {
+                const int cellX = qFloor(next.x()), cellY = qFloor(next.y()), cellZ = qFloor(next.z());
+                const int bottleItemId = e.blockId; // 载荷快照（emit 边界 = 重入边界，不持引用跨 emit）
+                emit splashBottleBreak(cellX, cellY, cellZ, bottleItemId);
+                qCInfo(lcEnt) << "splash bottle broke at" << cellX << cellY << cellZ
+                              << "item=" << bottleItemId;
+            }
+            if (remove) {
+                toRemove.push_back(idx);
+                dirty = true;
+            } else {
+                e.pos = next; // 继续飞行
+                dirty = true;
+            }
+            continue; // SplashBottle 不走 Mob AI / resting / 击退衰减
         }
 
         // --- Fireball（t728 燃烬者火球）：直线弹道（重力 0）+ 方块命中（消失 + 20% 点燃邻可燃）+ 玩家命中
