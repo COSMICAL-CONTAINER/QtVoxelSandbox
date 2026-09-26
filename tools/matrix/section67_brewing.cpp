@@ -2,6 +2,9 @@
 
 // t1097 酿造台 + 药水系统探针段（4 腿；filter 词 r2067；矩阵 806→810）。置尾先例沿用（接 section66，
 // runAll 末执行，rig 世界零接触——各腿自建 fresh 小世界 / 真链 pc rig）。
+// t1099 药水效果链第二轮（+4 腿 r2069a-d，置尾追加；矩阵 812→816）：五链核实裁定与 NEG 豁免面设计
+//   见各腿头注——NEG-1（摘发酵蛛眼 brew 行）恰红 {r2069a} / NEG-2（摘 finishEating 分流块）恰红 {r2069b}，
+//   r2069c 直调效果机制面（两 NEG 均不触达）、r2069d 结构钉（不钉两 NEG 触达面 = 豁免设计）。
 //
 // 任务契约：§14 池底重盘压轴大件第一轮（机制等价 MC 1.0 brewing stand + 药水基础链；wiki 2026 实读
 //   口径：燃料 = 烈焰粉 1 粉 20 次 / 单次 400 ticks = 20s / 一次转换所有合格瓶位、瓶原位变换；基础链 =
@@ -638,6 +641,472 @@ void MatrixRun::section67_brewing()
                " 64 hold on both layers, the full wiring source pin family holds across the open"
                " signal and the tick entry and the store and the QML routing, the epoch ruling anchor"
                " is present, and the neighbouring glimmer and cocoa and hopper faces are untouched)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── r2069a：第二轮酿造转换行为柱（静态表五链 + 负例 + 真驱一条；NEG-1 敏感面）─────────────────
+    //   NEG-1（摘 brewingstore.cpp 发酵蛛眼 brew 行两行）→ 恰红 = {r2069a}：本腿静态表中毒链断言 +
+    //   真驱转换断言全失；b（不经 brewResult——瓶直入 hotbar）/ c（applyStatusEffect 直调）/
+    //   d（源钉不钉发酵蛛眼行——NEG-1 豁免面）均不受影响。
+    runLeg("r2069a round-two brewing conversion behavior column (the brew result table maps awkward"
+        " plus magma cream to fire resistance and awkward plus ghast tear to regeneration and"
+        " awkward plus spider eye to poison and awkward plus fermented spider eye to weakness and"
+        " awkward plus glistering melon to instant health with every wrong-ingredient or"
+        " potion-bottle or zero pair answering zero, the fermented spider eye crafting row matches"
+        " from a shapeless two-by-two of spider eye brown mushroom and sugar, and a placed brewing"
+        " stand driven through a full twenty-second cycle converts an awkward bottle to the weakness"
+        " potion on the ember powder fuel meter)", [&]() {
+        bool ok = true;
+        QString diag;
+        // (1) 静态表五链 + 负例（错料 / 药水瓶作瓶 / 零 id 对 → 0）。
+        const bool t1 =
+            BrewingStore::brewResult(RecipeRegistry::MagmaCreamId, RecipeRegistry::AwkwardPotionId) == RecipeRegistry::FireResistancePotionId
+            && BrewingStore::brewResult(RecipeRegistry::GhastTearId, RecipeRegistry::AwkwardPotionId) == RecipeRegistry::RegenerationPotionId
+            && BrewingStore::brewResult(RecipeRegistry::SpiderEyeId, RecipeRegistry::AwkwardPotionId) == RecipeRegistry::PoisonPotionId
+            && BrewingStore::brewResult(RecipeRegistry::FermentedSpiderEyeId, RecipeRegistry::AwkwardPotionId) == RecipeRegistry::WeaknessPotionId
+            && BrewingStore::brewResult(RecipeRegistry::GlisteringMelonId, RecipeRegistry::AwkwardPotionId) == RecipeRegistry::InstantHealthPotionId;
+        const bool t2 =
+            BrewingStore::brewResult(RecipeRegistry::MagmaCreamId, RecipeRegistry::WaterBottleId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::SpiderEyeId, RecipeRegistry::WaterBottleId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::SugarId, RecipeRegistry::PoisonPotionId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::MagmaCreamId, RecipeRegistry::WeaknessPotionId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::SpiderEyeId, RecipeRegistry::FireResistancePotionId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::AshWartId, RecipeRegistry::InstantHealthPotionId) == 0
+            && BrewingStore::brewResult(0, RecipeRegistry::AwkwardPotionId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::MagmaCreamId, 0) == 0;
+        ok = ok && t1 && t2;
+        if (!(t1 && t2)) diag += QStringLiteral("[table t1=%1 t2=%2]").arg(t1).arg(t2);
+        // (2) 发酵蛛眼合成行行为命中（shapeless 2×2 {蛛眼, 褐菇(方块115), 糖} → 发酵蛛眼）。
+        bool rFermOk = false;
+        {
+            const int g2[4] = { RecipeRegistry::SpiderEyeId, int(BR::BrownMushroom), RecipeRegistry::SugarId, 0 };
+            const int g3[9] = { 0, RecipeRegistry::SpiderEyeId, 0,
+                                int(BR::BrownMushroom), RecipeRegistry::SugarId, 0,
+                                0, 0, 0 };
+            const auto *r2 = RecipeRegistry::match(g2, 2);
+            const auto *r3 = RecipeRegistry::match(g3, 3);
+            rFermOk = r2 && r2->outputId == RecipeRegistry::FermentedSpiderEyeId && r2->outputCount == 1
+                      && r3 && r3->outputId == RecipeRegistry::FermentedSpiderEyeId;
+        }
+        ok = ok && rFermOk;
+        if (!rFermOk) diag += QStringLiteral("[fermented r2=%1]").arg(rFermOk);
+        // (3) 真驱转换：粗制瓶 + 发酵蛛眼 + 燃烬粉 → 20s 一轮 → 虚弱药水（表行接线到 scanBrewingStands）。
+        World w;
+        initFixedBrewWorld(w);
+        layBrewPlatform(w, 20, 30, 20, 30);
+        PlayerController pc;
+        pc.setWorld(&w);
+        BrewingStore store;
+        pc.setBrewingStore(&store);
+        const int bxp = 24, byp = 81, bzp = 24;
+        w.setBlock(bxp, byp, bzp, BR::BrewingStand, 0);
+        store.setSlot(bxp, byp, bzp, BrewingStore::kSlotPotion0, RecipeRegistry::AwkwardPotionId, 1);
+        store.setSlot(bxp, byp, bzp, BrewingStore::kSlotIngredient, RecipeRegistry::FermentedSpiderEyeId, 1);
+        store.setSlot(bxp, byp, bzp, BrewingStore::kSlotFuel, RecipeRegistry::BlazePowderId, 1);
+        const int steps = int(20.6 / 0.05);
+        for (int i = 0; i < steps; ++i) pc.scanBrewingStands(0.05f);
+        const bool driven = store.slotIdAt(bxp, byp, bzp, BrewingStore::kSlotPotion0) == RecipeRegistry::WeaknessPotionId
+                            && store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotIngredient) == 0
+                            && store.fuelOpsAt(bxp, byp, bzp) == BrewingStore::kPowderFuelOps - 1;
+        ok = ok && driven;
+        if (!driven) diag += QStringLiteral("[driven id=%1 ing=%2 ops=%3]")
+                                  .arg(store.slotIdAt(bxp, byp, bzp, BrewingStore::kSlotPotion0))
+                                  .arg(store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotIngredient))
+                                  .arg(store.fuelOpsAt(bxp, byp, bzp));
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2069a round-two brewing conversion behavior column (the brew result table maps awkward"
+               " plus magma cream to fire resistance and awkward plus ghast tear to regeneration and"
+               " awkward plus spider eye to poison and awkward plus fermented spider eye to weakness and"
+               " awkward plus glistering melon to instant health with every wrong-ingredient or"
+               " potion-bottle or zero pair answering zero, the fermented spider eye crafting row matches"
+               " from a shapeless two-by-two of spider eye brown mushroom and sugar, and a placed brewing"
+               " stand driven through a full twenty-second cycle converts an awkward bottle to the weakness"
+               " potion on the ember powder fuel meter)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── r2069b：第二轮饮用链行为柱（finishEating 真链；NEG-2 敏感面）─────────────────────────────
+    //   NEG-2（摘 finishEating t1099 else-if 分流块）→ 恰红 = {r2069b}：虚弱快照 + 瞬间治疗回血断言
+    //   全失；a（静态表 / 真驱，不经 finishEating）/ c（applyStatusEffect 直调）/ d（源钉不钉分流块——
+    //   NEG-2 豁免面）均不受影响。
+    runLeg("r2069b round-two drink chain behavior column (a real survival player drinking the instant"
+        " health potion through the full eat chain emits exactly one four-point heal with no"
+        " persistent effect entry left in the snapshot and one empty bottle returned, and drinking"
+        " the weakness potion raises the weakness effect on the active-effects snapshot at level one"
+        " with the ninety-second caliber while consuming one potion)", [&]() {
+        bool ok = true;
+        QString diag;
+        World w;
+        initFixedBrewWorld(w);
+        layBrewPlatform(w, 18, 44, 18, 30);
+        EntityManager ents;
+        Hotbar hb;
+        PlayerController pc;
+        pc.setWorld(&w);
+        pc.setEntityManager(&ents);
+        pc.setHotbar(&hb);
+        QQuickWindow probeWin;
+        pc.setParentItem(probeWin.contentItem());
+        pc.grab();
+        pc.setSelectedBlock(int(BR::Air));
+        // 快照 / 回血捕获（链间累积——按分段窗口断言，见各链内局部基线）。
+        int healedSum = 0, healedCount = 0;
+        QObject::connect(&pc, &PlayerController::healed, &pc, [&](int hp) {
+            ++healedCount; healedSum += hp;
+        });
+        int lastSize = -1;
+        bool weaknessSeen = false;
+        int weaknessLevel = -1;
+        QObject::connect(&pc, &PlayerController::activeEffectsChanged, &pc, [&](const QVariantList &l) {
+            lastSize = l.size();
+            for (const QVariant &v : l) {
+                const QVariantMap m = v.toMap();
+                if (m.value(QStringLiteral("type")).toInt() == int(PlayerState::EffectWeakness)) {
+                    weaknessSeen = true;
+                    weaknessLevel = m.value(QStringLiteral("level")).toInt();
+                }
+            }
+        });
+        const auto pump = [](int ms) {
+            QElapsedTimer t; t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        // 链 A：瞬间治疗药水（生存）——真链喝满 → healed(4) 恰一次 + 快照零持续项 + 返 1 空瓶。
+        hb.setStack(0, RecipeRegistry::InstantHealthPotionId, 2, 0);
+        pc.loadSavedState(24.5, 81.0, 24.5, 0.0, 0.0, 2 /* Survival */);
+        pump(320); // 越过放置 CD
+        pc.tick();
+        const int healedBase = healedCount;
+        pc.beginEating();
+        const bool eatingStarted = pc.eating();
+        for (int i = 0; i < 44; ++i) {
+            QThread::msleep(60);
+            pc.tick();
+        }
+        pc.endEating();
+        int bottlesA = 0;
+        for (int i = 0; i < hb.slotCount(); ++i)
+            if (hb.blockIdAt(i) == RecipeRegistry::GlassBottleId) bottlesA += hb.countAt(i);
+        lastSize = -1;
+        pc.tick(); // 一帧推进 → 快照刷新（瞬间治疗不应产生任何持续项）
+        const bool instantOk = eatingStarted
+                               && healedCount - healedBase == 1 && healedSum == 4 // 恰一次 4HP
+                               && lastSize <= 0 // 无 timer → 快照恒空（空→空不发信号，lastSize 留 -1 同过）
+                               && bottlesA == 1; // 返 1 空瓶
+        ok = ok && instantOk;
+        if (!instantOk) diag += QStringLiteral("[instant eat=%1 hc=%2 hs=%3 size=%4 b=%5]")
+                                    .arg(eatingStarted).arg(healedCount - healedBase).arg(healedSum)
+                                    .arg(lastSize).arg(bottlesA);
+        // 链 B：虚弱药水（生存）——真链喝满 → EffectWeakness 快照挂上（level 1）+ 耗 1。
+        hb.setStack(0, RecipeRegistry::WeaknessPotionId, 2, 0); // 选中槽仍 0（链 A 未换槽）
+        pump(320); // 越过 finishEating 冷却 / eat CD
+        pc.tick();
+        pc.beginEating();
+        for (int i = 0; i < 44; ++i) {
+            QThread::msleep(60);
+            pc.tick();
+        }
+        pc.endEating();
+        pc.tick();
+        const bool weakOk = weaknessSeen && weaknessLevel == 1
+                            && hb.blockIdAt(0) == RecipeRegistry::WeaknessPotionId
+                            && hb.countAt(0) == 1; // 耗 1（剩 1）
+        ok = ok && weakOk;
+        if (!weakOk) diag += QStringLiteral("[weak seen=%1 lvl=%2 n0=%3]")
+                                  .arg(weaknessSeen).arg(weaknessLevel).arg(hb.countAt(0));
+
+        probeWin.deleteLater();
+        pc.release();
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2069b round-two drink chain behavior column (a real survival player drinking the instant"
+               " health potion through the full eat chain emits exactly one four-point heal with no"
+               " persistent effect entry left in the snapshot and one empty bottle returned, and drinking"
+               " the weakness potion raises the weakness effect on the active-effects snapshot at level one"
+               " with the ninety-second caliber while consuming one potion)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── r2069c：第二轮效果机制柱（applyStatusEffect 直调：火抗两相免疫 / 再生脉冲 / 中毒复用 / 到期）──
+    //   双 pc 隔离设计：pc1 专跑火抗柱（真岩浆点燃基线）；pc2 专跑再生 / 中毒 / 虚弱柱。隔离根因 =
+    //   t238 饥饿回血面在饱腹态每 4s 也 emit healed(1)（同信号异源）——再生脉冲断言窗口必须整个落在
+    //   pc2 累计 4.0s 之前，否则饥饿回血脉冲混入无法归因（pc2 再生段在累计 ~3.4s 内收口，安全边际）。
+    //   另：loadSavedState 会清全部效果态（t1099 复位面）→ 火抗各相不可借读档重摆位——pc1 一次摆位，
+    //   岩浆格点燃后落坪余焰续烧（kFireDuration=8s 余量覆盖全程），免疫面用「余焰 + 外部 EffectFire」双门。
+    runLeg("r2069c round-two effect mechanics column (fire resistance first proves the burn baseline"
+        " by taking fire damage standing in lava then grants full immunity against both residual and"
+        " externally applied flame with zero further fire damage events and a clean snapshot entry,"
+        " and the burn returns once the resistance has expired, while on a fresh controller"
+        " regeneration pulses exactly one hit point per two and a half seconds and clears on expiry,"
+        " the poison potion rides the existing poison damage face at the one-point-two-five second"
+        " caliber, and the weakness snapshot carries the applied level)", [&]() {
+        bool ok = true;
+        QString diag;
+        const auto pumpTicks = [](PlayerController &p, int iters) {
+            for (int i = 0; i < iters; ++i) { QThread::msleep(60); p.tick(); } // 每拍 0.05s 模拟时（dt 钳制上界）
+        };
+        // (1) 火抗柱（pc1）：基线烧伤 → 免疫（余焰 + 外部点燃双门）→ 到期复燃。
+        World w1;
+        initFixedBrewWorld(w1);
+        layBrewPlatform(w1, 20, 30, 20, 30);
+        w1.setBlock(24, 81, 24, BR::Lava, 0); // 岩浆格（坪顶上空一格；玩家沉落坪顶后余焰续烧 ~8s）
+        PlayerController pc1;
+        pc1.setWorld(&w1);
+        int fireEvents = 0;
+        QObject::connect(&pc1, &PlayerController::fallDamageTaken, &pc1, [&](int hp, int cause) {
+            if (cause == int(PlayerState::Fire)) fireEvents += hp; // 火伤事件（hp 恒 1/次）
+        });
+        int fireResSeen = 0, fireResLevel = -1;
+        QObject::connect(&pc1, &PlayerController::activeEffectsChanged, &pc1, [&](const QVariantList &l) {
+            for (const QVariant &v : l) {
+                const QVariantMap m = v.toMap();
+                if (m.value(QStringLiteral("type")).toInt() == int(PlayerState::EffectFireResistance)) {
+                    ++fireResSeen;
+                    fireResLevel = m.value(QStringLiteral("level")).toInt();
+                }
+            }
+        });
+        pc1.loadSavedState(24.5, 81.0, 24.5, 0.0, 0.0, 2 /* Survival */); // 脚位 81 = 岩浆格（非固体 → 首拍点燃后落坪）
+        // 相 0（基线）：无免疫 → 点燃 + 1s 周期火伤 ≥1（火烧面真值前置自证）。
+        pumpTicks(pc1, 40); // 2.0s
+        const int baseline = fireEvents;
+        ok = ok && baseline >= 1;
+        if (baseline < 1) diag += QStringLiteral("[baseline=%1]").arg(baseline);
+        // 相 1（免疫双门）：火抗 60s → 余焰火伤归零 + 外部施加 EffectFire 亦零火伤 + 快照 level 1。
+        pc1.applyStatusEffect(PlayerState::EffectFireResistance, 60.0f, 1);
+        pc1.tick();
+        ok = ok && fireResSeen >= 1 && fireResLevel == 1;
+        if (!(fireResSeen >= 1 && fireResLevel == 1))
+            diag += QStringLiteral("[snap seen=%1 lvl=%2]").arg(fireResSeen).arg(fireResLevel);
+        pumpTicks(pc1, 30); // 1.5s：余焰火伤被火伤门全挡
+        pc1.applyStatusEffect(PlayerState::EffectFire, 8.0f, 1); // 外部点燃（免疫期 → 火伤门挡）
+        pumpTicks(pc1, 30); // 1.5s
+        const int duringImmunity = fireEvents - baseline;
+        ok = ok && duringImmunity == 0;
+        if (duringImmunity != 0) diag += QStringLiteral("[immune delta=%1]").arg(duringImmunity);
+        // 相 2（到期复燃）：免疫缩到 0.15s → 泵 0.5s 到期 → 再施加 EffectFire → 火伤回归 ≥1。
+        pc1.applyStatusEffect(PlayerState::EffectFireResistance, 0.15f, 1);
+        pumpTicks(pc1, 10); // 0.5s > 0.15s：免疫到期
+        pc1.applyStatusEffect(PlayerState::EffectFire, 8.0f, 1); // 免疫已过 → 火伤恢复
+        fireEvents = 0; // 段基线重开
+        pumpTicks(pc1, 30); // 1.5s：≥1 次 1s 周期火伤
+        ok = ok && fireEvents >= 1;
+        if (fireEvents < 1) diag += QStringLiteral("[reignite=%1]").arg(fireEvents);
+        // (2) 再生 / 中毒 / 虚弱柱（pc2 fresh——饥饿回血 4s 边界避让，见腿头注）。
+        World w2;
+        initFixedBrewWorld(w2);
+        layBrewPlatform(w2, 20, 30, 20, 30);
+        PlayerController pc2;
+        pc2.setWorld(&w2);
+        int regenPulses = 0, regenSum = 0;
+        int regenSeenCount = 0;
+        int weakLvl = -1;
+        QObject::connect(&pc2, &PlayerController::healed, &pc2, [&](int hp) { ++regenPulses; regenSum += hp; });
+        QObject::connect(&pc2, &PlayerController::activeEffectsChanged, &pc2, [&](const QVariantList &l) {
+            bool hasRegen = false;
+            for (const QVariant &v : l) {
+                const QVariantMap m = v.toMap();
+                if (m.value(QStringLiteral("type")).toInt() == int(PlayerState::EffectRegeneration)) hasRegen = true;
+                if (m.value(QStringLiteral("type")).toInt() == int(PlayerState::EffectWeakness))
+                    weakLvl = m.value(QStringLiteral("level")).toInt();
+            }
+            if (hasRegen) ++regenSeenCount;
+        });
+        pc2.loadSavedState(24.5, 81.0, 24.5, 0.0, 0.0, 2 /* Survival */);
+        pc2.tick();
+        // (2a) 再生脉冲：3.0s 再生 → 窗口内恰 1 次 healed(1)（2.5s 脉冲；窗口收在累计 ~3.4s < 4.0s
+        //      饥饿回血边界——纯药水源零混入）+ 到期后快照不再含再生项。
+        const int healedBase = regenPulses;
+        pc2.applyStatusEffect(PlayerState::EffectRegeneration, 3.0f, 1);
+        pumpTicks(pc2, 60); // 3.0s
+        ok = ok && regenPulses - healedBase == 1 && regenSum - healedBase == 1;
+        if (!(regenPulses - healedBase == 1 && regenSum - healedBase == 1))
+            diag += QStringLiteral("[regen pulses=%1 sum=%2]").arg(regenPulses - healedBase).arg(regenSum - healedBase);
+        regenSeenCount = 0;
+        pc2.tick(); // 到期后（timer 已清）→ 快照刷新无再生项
+        ok = ok && regenSeenCount == 0;
+        if (regenSeenCount != 0) diag += QStringLiteral("[regen expired still visible]");
+        // (2b) 中毒复用面：中毒药水走既有 m_poisonTimer 毒面（1.25s 周期扣血信号真值）。
+        int poisonHits = 0;
+        QObject::connect(&pc2, &PlayerController::poisonDamageTaken, &pc2, [&](int) { ++poisonHits; });
+        pc2.applyStatusEffect(PlayerState::EffectPoison, 2.0f, 1);
+        pumpTicks(pc2, 34); // 1.7s → ≥1 次 1.25s 周期扣血
+        ok = ok && poisonHits >= 1;
+        if (poisonHits < 1) diag += QStringLiteral("[poison hits=%1]").arg(poisonHits);
+        // (2c) 虚弱等级快照：applyStatusEffect 挂 II 级 → 快照 level 2。
+        pc2.applyStatusEffect(PlayerState::EffectWeakness, 0.4f, 2);
+        pc2.tick();
+        ok = ok && weakLvl == 2;
+        if (weakLvl != 2) diag += QStringLiteral("[weak lvl=%1]").arg(weakLvl);
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2069c round-two effect mechanics column (fire resistance first proves the burn baseline"
+               " by taking fire damage standing in lava then grants full immunity against both residual and"
+               " externally applied flame with zero further fire damage events and a clean snapshot entry,"
+               " and the burn returns once the resistance has expired, while on a fresh controller"
+               " regeneration pulses exactly one hit point per two and a half seconds and clears on expiry,"
+               " the poison potion rides the existing poison damage face at the one-point-two-five second"
+               " caliber, and the weakness snapshot carries the applied level)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── r2069d：第二轮结构钉（id 段位 + 枚举 + 常量族 + 呈现三面 + 源钉族 + 相邻族零污染）──────────
+    //   源钉 NEG 豁免面：不钉 finishEating 分流块（NEG-2 触达面）与发酵蛛眼 brew 行（NEG-1 触达面），
+    //   保「恰红」单腿归因（r2067d 同款设计）。
+    runLeg("r2069d structure pins (the ten round-two brewing items sit at 0x26B through 0x274 as a"
+        " tail append right after SugarId 0x26A with glimmer 0x263 and the awkward-speed-strength"
+        " trio untouched, the status effect enum appends fire resistance then regeneration then"
+        " weakness after strength, the round-two duration and interval and penalty and heal"
+        " constants hold at the MC 1.0 caliber, the brew table round-two rows and the fermented"
+        " eye crafting row and the round-two source pin family hold across the drinkable face"
+        " and the effect application cases and the fire immunity gates and the snapshot tail and"
+        " the icon routing and the spider eye drops, and the neighbouring glimmer and sugar and"
+        " ember-powder faces are untouched)", [&]() {
+        bool ok = true;
+        QString diag;
+        // (1) id 段位（十连段尾追加 + 邻接族原值）。
+        const bool ids = RecipeRegistry::MagmaCreamId == 0x26B
+                         && RecipeRegistry::GhastTearId == 0x26C
+                         && RecipeRegistry::SpiderEyeId == 0x26D
+                         && RecipeRegistry::FermentedSpiderEyeId == 0x26E
+                         && RecipeRegistry::GlisteringMelonId == 0x26F
+                         && RecipeRegistry::FireResistancePotionId == 0x270
+                         && RecipeRegistry::RegenerationPotionId == 0x271
+                         && RecipeRegistry::PoisonPotionId == 0x272
+                         && RecipeRegistry::WeaknessPotionId == 0x273
+                         && RecipeRegistry::InstantHealthPotionId == 0x274
+                         && RecipeRegistry::SugarId == 0x26A
+                         && RecipeRegistry::GlimmerBottleId == 0x263
+                         && int(BR::BrewingStand) == 148
+                         && int(BR::Count) == 149;
+        ok = ok && ids;
+        if (!ids) diag += QStringLiteral("[ids]");
+        // (2) 枚举尾追加序（t1097 序不变 + t1099 三连）。
+        const bool enumOk = int(PlayerState::EffectStrength) == int(PlayerState::EffectFire) + 2
+                            && int(PlayerState::EffectFireResistance) == int(PlayerState::EffectStrength) + 1
+                            && int(PlayerState::EffectRegeneration) == int(PlayerState::EffectStrength) + 2
+                            && int(PlayerState::EffectWeakness) == int(PlayerState::EffectStrength) + 3;
+        ok = ok && enumOk;
+        if (!enumOk) diag += QStringLiteral("[enum]");
+        // (3) 常量族（t1099 六新 + t1097 三旧不动）。
+        const bool consts = PlayerController::kRegenPotionDurationSec == 45.0f
+                            && PlayerController::kRegenPotionIntervalSec == 2.5f
+                            && PlayerController::kPoisonPotionDurationSec == 45.0f
+                            && PlayerController::kWeaknessDurationSec == 90.0f
+                            && PlayerController::kWeaknessMeleePenaltyPerLevel == 4.0f
+                            && PlayerController::kInstantHealthHealHp == 4
+                            && PlayerController::kPotionDurationSec == 180.0f
+                            && PlayerController::kSpeedBoostPerLevel == 0.20f
+                            && PlayerController::kStrengthBonusPerLevel == 1.30f
+                            && BrewingStore::kPowderFuelOps == 20
+                            && BrewingStore::kBrewSecs == 20.0;
+        ok = ok && consts;
+        if (!consts) diag += QStringLiteral("[consts]");
+        // (4) 呈现面：名面十件 + 调色板尾十连（糖 0x26A 后连续）+ maxStack 64。
+        Hotbar hb;
+        const bool nameOk = hb.nameForBlock(RecipeRegistry::MagmaCreamId) == QStringLiteral("岩浆膏")
+                            && hb.nameForBlock(RecipeRegistry::GhastTearId) == QStringLiteral("幽灵泪")
+                            && hb.nameForBlock(RecipeRegistry::SpiderEyeId) == QStringLiteral("蜘蛛眼")
+                            && hb.nameForBlock(RecipeRegistry::FermentedSpiderEyeId) == QStringLiteral("发酵蛛眼")
+                            && hb.nameForBlock(RecipeRegistry::GlisteringMelonId) == QStringLiteral("闪烁西瓜")
+                            && hb.nameForBlock(RecipeRegistry::FireResistancePotionId) == QStringLiteral("火抗药水")
+                            && hb.nameForBlock(RecipeRegistry::RegenerationPotionId) == QStringLiteral("再生药水")
+                            && hb.nameForBlock(RecipeRegistry::PoisonPotionId) == QStringLiteral("中毒药水")
+                            && hb.nameForBlock(RecipeRegistry::WeaknessPotionId) == QStringLiteral("虚弱药水")
+                            && hb.nameForBlock(RecipeRegistry::InstantHealthPotionId) == QStringLiteral("瞬间治疗药水");
+        const QVariantList mats = hb.creativeMaterials();
+        int sugarIdx = -1, firstR2 = -1, lastR2 = -1;
+        for (int i = 0; i < mats.size(); ++i) {
+            const int v = mats.at(i).toInt();
+            if (v == RecipeRegistry::SugarId) sugarIdx = i;
+            if (v == RecipeRegistry::MagmaCreamId) firstR2 = i;
+            if (v == RecipeRegistry::InstantHealthPotionId) lastR2 = i;
+        }
+        const bool paletteOk = sugarIdx >= 0 && firstR2 == sugarIdx + 1 && lastR2 == firstR2 + 9;
+        const bool stackOk = hb.maxStackSize(RecipeRegistry::MagmaCreamId) == 64
+                             && hb.maxStackSize(RecipeRegistry::InstantHealthPotionId) == 64
+                             && hb.isMaterial(RecipeRegistry::SpiderEyeId);
+        ok = ok && nameOk && paletteOk && stackOk;
+        if (!(nameOk && paletteOk && stackOk))
+            diag += QStringLiteral("[face name=%1 palette=%2/%3/%4 stack=%5]")
+                        .arg(nameOk).arg(sugarIdx).arg(firstR2).arg(lastR2).arg(stackOk);
+        // (5) 全链源钉族（NEG 豁免面外；剥注释 pinSet 锚真实语句）。
+        const QString srcRoot = QDir(QCoreApplication::applicationDirPath()
+            + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src"));
+        const QStringList missRh = pinSet(srcRoot + QStringLiteral("/Game/recipe.h"), {
+            SrcPin("magma row", "static constexpr int MagmaCreamId       = 0x26B;", 1),
+            SrcPin("melon potion row", "static constexpr int InstantHealthPotionId  = 0x274;", 1),
+            SrcPin("spider eye row", "static constexpr int SpiderEyeId        = 0x26D;", 1)});
+        const QStringList missRc = pinSet(srcRoot + QStringLiteral("/Game/recipe.cpp"), {
+            SrcPin("assert tail", "static_assert(RecipeRegistry::InstantHealthPotionId  == 0x274,", 1),
+            SrcPin("fermented row", "\"fermented_spider_eye\"", 1)});
+        const QStringList missBs = pinSet(srcRoot + QStringLiteral("/Game/brewingstore.cpp"), {
+            SrcPin("table fire res", "return RecipeRegistry::FireResistancePotionId;", 1),
+            SrcPin("table instant", "return RecipeRegistry::InstantHealthPotionId;", 1)});
+        const QStringList missPs = pinSet(srcRoot + QStringLiteral("/Game/playerstate.h"), {
+            SrcPin("enum tail", "EffectSpeed, EffectStrength, EffectFireResistance, EffectRegeneration, EffectWeakness", 1)});
+        const QStringList missPcH = pinSet(srcRoot + QStringLiteral("/Game/playercontroller.h"), {
+            SrcPin("regen interval", "static constexpr float kRegenPotionIntervalSec = 2.5f;", 1),
+            SrcPin("weak penalty", "static constexpr float kWeaknessMeleePenaltyPerLevel = 4.0f;", 1),
+            SrcPin("instant heal", "static constexpr int   kInstantHealthHealHp = 4;", 1),
+            SrcPin("fire res member", "float m_fireResTimer = 0.0f;", 1),
+            SrcPin("regen member", "float m_regenPotionTimer = 0.0f;", 1)});
+        const QStringList missPc = pinSet(srcRoot + QStringLiteral("/Game/playercontroller.cpp"), {
+            SrcPin("drinkable tail", "|| itemId == RecipeRegistry::InstantHealthPotionId;", 1),
+            SrcPin("apply fire res", "case PlayerState::EffectFireResistance:", 1),
+            SrcPin("apply weak", "case PlayerState::EffectWeakness:", 1),
+            SrcPin("ignition gate", "if (touchingLava && m_fireResTimer <= 0.0f) {", 1),
+            SrcPin("damage gate", "if (!earlyExtinguished && m_fireResTimer <= 0.0f)", 1),
+            SrcPin("snapshot tail", "if (m_weakTimer > 0.0f) {", 1),
+            SrcPin("weak hook", "dmg = std::max(0.0f, dmg - kWeaknessMeleePenaltyPerLevel", 1),
+            SrcPin("clear tail", "m_weakTimer = 0.0f;", 1)});
+        const QStringList missMq = pinSet(srcRoot + QStringLiteral("/ui/Main.qml"), {
+            SrcPin("fire res icon", "qrc:/textures/icon_effect_fireresistance.png", 1),
+            SrcPin("weakness icon", "qrc:/textures/icon_effect_weakness.png", 1),
+            SrcPin("spider eye drop", "if (Math.random() < 1 / 3) itemEntities.spawnItem(x, y, z, 0x26D, 1)", 2)});
+        const QStringList missMi = pinSet(srcRoot + QStringLiteral("/ui/MaterialIcon.qml"), {
+            SrcPin("magma case", "case 0x26B: drawMagmaCream(); break", 1),
+            SrcPin("weak potion case", "case 0x273: drawPotion(", 1)});
+        const QStringList missHb = pinSet(srcRoot + QStringLiteral("/Game/hotbar.cpp"), {
+            SrcPin("name row", "return QStringLiteral(\"岩浆膏\")", 1),
+            SrcPin("palette row", "int(RecipeRegistry::InstantHealthPotionId)", 1)});
+        const bool d5 = missRh.isEmpty() && missRc.isEmpty() && missBs.isEmpty() && missPs.isEmpty()
+            && missPcH.isEmpty() && missPc.isEmpty() && missMq.isEmpty() && missMi.isEmpty()
+            && missHb.isEmpty();
+        ok = ok && d5;
+        if (!d5) {
+            const QStringList allMiss = QStringList()
+                << missRh << missRc << missBs << missPs << missPcH << missPc << missMq << missMi << missHb;
+            diag += QStringLiteral("[d5 %1]").arg(allMiss.join(QLatin1Char(',')));
+        }
+        // (6) 相邻族零污染（蕴辉瓶投掷 / 糖名面 / 燃烬粉 brew 行 / 洞蛛线掉落原样）。
+        const QStringList missNb = pinSet(srcRoot + QStringLiteral("/Game/brewingstore.cpp"), {
+            SrcPin("ember powder row untouched", "return RecipeRegistry::StrengthPotionId;", 1)});
+        const bool sugarName = pinSet(srcRoot + QStringLiteral("/Game/hotbar.cpp"), {
+            SrcPin("sugar name untouched", "return QStringLiteral(\"糖\")", 1)}).isEmpty();
+        const bool caveString = pinSet(srcRoot + QStringLiteral("/ui/Main.qml"), {
+            SrcPin("cave spider string untouched", "if (Math.random() < 0.5) itemEntities.spawnItem(x, y, z, 0x219, 1)", 1)}).isEmpty();
+        const bool nb = missNb.isEmpty() && sugarName && caveString;
+        ok = ok && nb;
+        if (!nb) diag += QStringLiteral("[nb ember=%1 sugar=%2 cave=%3]")
+                             .arg(missNb.isEmpty()).arg(sugarName).arg(caveString);
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2069d structure pins (the ten round-two brewing items sit at 0x26B through 0x274 as a"
+               " tail append right after SugarId 0x26A with glimmer 0x263 and the awkward-speed-strength"
+               " trio untouched, the status effect enum appends fire resistance then regeneration then"
+               " weakness after strength, the round-two duration and interval and penalty and heal"
+               " constants hold at the MC 1.0 caliber, the brew table round-two rows and the fermented"
+               " eye crafting row and the round-two source pin family hold across the drinkable face"
+               " and the effect application cases and the fire immunity gates and the snapshot tail and"
+               " the icon routing and the spider eye drops, and the neighbouring glimmer and sugar and"
+               " ember-powder faces are untouched)"
             << (ok ? QString() : diag);
     });
 }
