@@ -3557,6 +3557,21 @@ Window {
         function onEatingParticle(x, y, z, itemId) {
             if (particleLoader.item) particleLoader.item.burstEat(x, y, z, itemId)
         }
+        // t1100 饮用节拍音路由（Game 层可饮面节拍沿 drinkGulp → AudioManager.playDrinkGulp 咕嘟短音；
+        //   可饮面节拍不再发 eatingParticle（饮无屑粒），本 handler 与 onEatingParticle 互斥分流）。
+        function onDrinkGulp(x, y, z, itemId) {
+            audio.playDrinkGulp()
+        }
+        // t1100 饮毕 burp 路由（可饮面完成沿 potionDrunk → playBurp；AudioManager 内随机 ±8% 音高抖动
+        //   ≈ MC 随机 burp；坐标 / id 参数语义保留对未来 3D 音 / 按物品分流扩展）。
+        function onPotionDrunk(itemId) {
+            audio.playBurp()
+        }
+        // t1100 效果粒子路由（效果激活期效果粒子沿 effectParticle → BlockParticles.burstEffect 按效果
+        //   类型取色迸发；坐标 = 玩家位置，类型 = 主效果枚举）。
+        function onEffectParticle(x, y, z, effectType) {
+            if (particleLoader.item) particleLoader.item.burstEffect(x, y, z, effectType)
+        }
         // t165：挖掘击打音（每节拍一响）—— player 发 miningSound（被挖方块 id），**含不可挖基岩**的
         //   hold-mine 音反馈（spec「生存基岩可持续挖 ... 保持 mining 态挥臂+音」；机制等价 MC 镐撞基岩响）。
         //   id 给 AudioManager 按材质组选 mining clip。音与碎屑解耦：音对所有被挖方块，碎屑仅可挖。

@@ -206,6 +206,11 @@ struct AudioManager::Data
     static constexpr float kDiscBaseVol = 0.55f;
     // t1083 当前活动曲目号（-1 = 无活动曲；playDisc 记录 / stopDisc 早退守卫面）。
     int activeDisc = -1;
+    // t1100 饮用面两单件 clip（咕嘟节拍音 + 饮毕 burp；短 SFX 默认 2s maxFrames 远大于其长度、安全）。
+    //   触发源：PlayerController::drinkGulp（节拍沿）/ potionDrunk（饮毕沿）→ Main.qml 路由。
+    //   burp 随机音高 = 播放时 set_pitch 抖动（NO_PITCH 优化未开故直接生效，同 noteClips 面）。
+    Clip drinkGulpClip{":/sounds/drink_gulp.wav"};
+    Clip burpClip{":/sounds/burp.wav"};
 
     static constexpr ma_uint32 kChannels = 1;     // mono（合成时即 mono，省一半带宽）
     // t328：合成升到 44100 Hz（更多高频细节 / 更短瞬态分辨 → 音色清晰，详见 build_sounds.py）。
@@ -398,6 +403,9 @@ AudioManager::AudioManager(QObject *parent)
     d->loadClip(d->achievementClip);
     d->loadClip(d->chestOpenClip);
     d->loadClip(d->chestCloseClip);
+    // t1100 饮用面两单件（咕嘟节拍音 + 饮毕 burp；短 SFX 默认 maxFrames 安全）。
+    d->loadClip(d->drinkGulpClip);
+    d->loadClip(d->burpClip);
     // t1028 音符盒 25 档音高 clip 池（0.85s 短 SFX，默认 2s maxFrames 安全；路径 makeNotePath 长寿命化）。
     for (int n = 0; n < Data::kNotePitchCount; ++n) {
         d->noteClips[size_t(n)].qrcPath = d->makeNotePath(n);
@@ -433,6 +441,9 @@ AudioManager::AudioManager(QObject *parent)
     d->initSound(d->achievementClip);
     d->initSound(d->chestOpenClip);
     d->initSound(d->chestCloseClip);
+    // t1100 饮用面两单件 sound init（NO_SPATIALIZATION；失败仅自身静默降级 §2-E）。
+    d->initSound(d->drinkGulpClip);
+    d->initSound(d->burpClip);
     // t1028 音符盒 25 档音高 sound init（NO_SPATIALIZATION，随 Clip 池逐个降级）。
     for (int n = 0; n < Data::kNotePitchCount; ++n)
         d->initSound(d->noteClips[size_t(n)]);
@@ -547,6 +558,9 @@ AudioManager::~AudioManager()
     if (d->achievementClip.ok) ma_sound_uninit(&d->achievementClip.sound);
     if (d->chestOpenClip.ok) ma_sound_uninit(&d->chestOpenClip.sound);
     if (d->chestCloseClip.ok) ma_sound_uninit(&d->chestCloseClip.sound);
+    // t1100 饮用面两单件析构补齐（t1046 noteClips 漏析构教训同门：新 clip 必入本表）。
+    if (d->drinkGulpClip.ok) ma_sound_uninit(&d->drinkGulpClip.sound);
+    if (d->burpClip.ok) ma_sound_uninit(&d->burpClip.sound);
     // t1046 noteClips 池析构补齐（用户 0912 评审 #4）：t1028 新增 25 档音符盒 clip 池当年漏出本表——
     //   旧版析构只 uninit 旧音效池后直接 ma_engine_uninit，noteClips 的 ma_sound 挂着对 engine 内部
     //   data_source 的引用被连带拆解（未定义行为面；对齐上方 groupClips / 单件池逐个释放模式）。
@@ -921,6 +935,30 @@ void AudioManager::stopDisc()
         if (c.ok)
             ma_sound_stop(&c.sound);
     }
+}
+
+// ── t1100 药水饮用面两音（契约面见 audiomanager.h playDrinkGulp / playBurp 声明处注释）──
+// 咕嘟节拍音（~0.35s 三连下行咕嘟）：0.9 前景交互级（同 chest 量级——饮用是玩家主动前台动作，
+//   每 0.4s 一声不刺耳即可）；seek 重发截断不堆叠（同其他单件模式——节拍节奏由 Game 层节拍
+//   权威驱动，音频面只管响）。
+void AudioManager::playDrinkGulp()
+{
+    d->replay(d->drinkGulpClip, m_volume * 0.9f);
+}
+
+// 饮毕 burp（~0.30s 低频短哼）：0.85 前景级；**随机音高** = 每次播放 set_pitch 均匀随机 ±8%
+//   （0.92..1.08；≈ MC 随机音高 burp，ma_sound_set_pitch 直接生效——NO_PITCH 优化未开）。
+//   seek 重发截断不堆叠。区间抖动为呈现层随机性（非 worldgen 确定性范畴，同 t1021 滴水抖动口径）。
+void AudioManager::playBurp()
+{
+    const float jitter = float(QRandomGenerator::global()->generateDouble()) * 0.16f + 0.92f;
+    auto &c = d->burpClip;
+    if (!d->engineOk || !c.ok) return;
+    ma_sound_stop(&c.sound);
+    ma_sound_seek_to_pcm_frame(&c.sound, 0);
+    ma_sound_set_pitch(&c.sound, jitter);
+    ma_sound_set_volume(&c.sound, m_volume * 0.85f);
+    ma_sound_start(&c.sound);
 }
 
 void AudioManager::setVolume(float v)

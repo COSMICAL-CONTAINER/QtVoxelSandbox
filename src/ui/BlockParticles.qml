@@ -55,6 +55,29 @@ Node {
     function burstEat(x, y, z, foodId) {
         burstFloat(x, y, z, 3, foodColor(foodId), 0.07, 1.5, 0.8, 1.0, 0.5)
     }
+    // t1100 效果粒子（药水旋涡粒子近似面；Game 层效果激活期 effectParticle → Main.qml 路由）：
+    //   每沿 2 粒按效果类型取色，轻浮力上飘（gravity -1.2，同 deathSmoke 浮力档）+ 慢速 + 长寿命渐隐
+    //   = 旋涡粒子观感（MC swirl 近似；非 MC 原生粒子贴图/轨迹，登记简化）。原点 = 玩家位置 float
+    //   世界坐标（不加 +0.5，同 burstEat 模式）。effectColor 按效果类型映射（PlayerState.StatusEffect
+    //   枚举值；未知 → 白色兜底）。
+    function burstEffect(x, y, z, effectType) {
+        burstFloat(x, y, z, 2, effectColor(effectType), 0.05, 0.6, 0.4, 0.5, 0.9, -1.2)
+    }
+    // t1100 效果类型 → 粒子色（每效果一色；Poison 绿 / Slowness 灰蓝 / Fire 橙 / Speed 青 /
+    //   Strength 深橙 / FireResistance 琥珀 / Regen 粉 / Weakness 灰；EffectNone / 未知 → 白兜底）。
+    function effectColor(type) {
+        switch (type) {
+        case 1: return "#68b050" // Poison 绿
+        case 2: return "#8a9ab0" // Slowness 灰蓝
+        case 3: return "#e07820" // Fire 橙
+        case 4: return "#50c8e8" // Speed 青
+        case 5: return "#d8862a" // Strength 深橙
+        case 6: return "#e0a030" // FireResistance 琥珀
+        case 7: return "#f080a8" // Regeneration 粉
+        case 8: return "#9a9aae" // Weakness 灰
+        default: return "#ffffff"
+        }
+    }
     // 爆炸迸发（Stalker/苦力怕自爆；EntityManager::explosion → Main.qml 路由）：大迸发 + 横向四散 +
     //   强上抛（爆炸冲击波 → 非碎屑的横向炸开）。色 = 白/灰烟光（呈现层视觉约定色），数量多（20 > 破块 8）。
     function burstExplosion(x, y, z) {

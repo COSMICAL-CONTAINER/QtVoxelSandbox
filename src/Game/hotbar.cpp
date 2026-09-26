@@ -727,7 +727,15 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::RegenerationPotionId),   // 再生药水：每 2.5s 回 1HP 45s
         int(RecipeRegistry::PoisonPotionId),         // 中毒药水：每 1.25s 扣 1HP 45s 不致死
         int(RecipeRegistry::WeaknessPotionId),       // 虚弱药水：近战 -4/级 90s
-        int(RecipeRegistry::InstantHealthPotionId)   // 瞬间治疗药水：饮毕即回 4HP（无持续）
+        int(RecipeRegistry::InstantHealthPotionId),  // 瞬间治疗药水：饮毕即回 4HP（无持续）
+        // t1100 延长药水族六件（0x275..0x27A，瞬间治疗之上段尾追加不插中间 = 存档安全铁律）：
+        //   延长版获取面 = 二级酿造（成品药水 + 红石粉），创造调色板行为唯一兜底获取面（同族口径）。
+        int(RecipeRegistry::ExtendedSpeedPotionId),          // 迅捷药水（延长）：迅捷 + 红石；8:00
+        int(RecipeRegistry::ExtendedStrengthPotionId),       // 力量药水（延长）：力量 + 红石；8:00
+        int(RecipeRegistry::ExtendedFireResistancePotionId), // 火抗药水（延长）：火抗 + 红石；8:00
+        int(RecipeRegistry::ExtendedRegenerationPotionId),   // 再生药水（延长）：再生 + 红石；1:30
+        int(RecipeRegistry::ExtendedPoisonPotionId),         // 中毒药水（延长）：中毒 + 红石；1:30
+        int(RecipeRegistry::ExtendedWeaknessPotionId)        // 虚弱药水（延长）：虚弱 + 红石；4:00
     };
 }
 
@@ -1292,6 +1300,13 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::PoisonPotionId)         return QStringLiteral("中毒药水");   // 粗制+蜘蛛眼；每 1.25s 扣 1HP 45s
         if (blockId == RecipeRegistry::WeaknessPotionId)       return QStringLiteral("虚弱药水");   // 粗制+发酵蛛眼；近战 -4/级 90s
         if (blockId == RecipeRegistry::InstantHealthPotionId)  return QStringLiteral("瞬间治疗药水"); // 粗制+闪烁西瓜；饮毕即回 4HP
+        // t1100 延长药水族（0x275..0x27A）：名面六件 = 基础名 +「（延长）」后缀（通用描述词，§9 合法）。
+        if (blockId == RecipeRegistry::ExtendedSpeedPotionId)          return QStringLiteral("迅捷药水（延长）");
+        if (blockId == RecipeRegistry::ExtendedStrengthPotionId)       return QStringLiteral("力量药水（延长）");
+        if (blockId == RecipeRegistry::ExtendedFireResistancePotionId) return QStringLiteral("火抗药水（延长）");
+        if (blockId == RecipeRegistry::ExtendedRegenerationPotionId)   return QStringLiteral("再生药水（延长）");
+        if (blockId == RecipeRegistry::ExtendedPoisonPotionId)         return QStringLiteral("中毒药水（延长）");
+        if (blockId == RecipeRegistry::ExtendedWeaknessPotionId)       return QStringLiteral("虚弱药水（延长）");
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落；打火石配方原料。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::FlintId) return QStringLiteral("燧石"); // 挖沙砾概率掉落；打火石配方原料
         // t891② 烈焰弹（材料段 0x25C；机制等价 MC fire charge）：燃烬粉+煤/炭+火药合成 3 发；右键发射火球

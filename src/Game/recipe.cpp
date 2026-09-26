@@ -1361,6 +1361,14 @@ static_assert(RecipeRegistry::RegenerationPotionId   == 0x271, "RegenerationPoti
 static_assert(RecipeRegistry::PoisonPotionId         == 0x272, "PoisonPotionId 须为材料段 0x272");
 static_assert(RecipeRegistry::WeaknessPotionId       == 0x273, "WeaknessPotionId 须为材料段 0x273");
 static_assert(RecipeRegistry::InstantHealthPotionId  == 0x274, "InstantHealthPotionId 须为材料段 0x274（药水第二轮段末位）");
+// t1100 延长药水族段位钉（工程惯例）：0x275..0x27A = 瞬间治疗 0x274 之上**段尾连续追加**（不插中间 =
+//   存档安全铁律）；QML MaterialIcon case 与 hotbar 名面 / 调色板用同字面量互钉。
+static_assert(RecipeRegistry::ExtendedSpeedPotionId          == 0x275, "ExtendedSpeedPotionId 须为材料段 0x275（瞬间治疗 0x274 之上段尾追加，t1100）");
+static_assert(RecipeRegistry::ExtendedStrengthPotionId       == 0x276, "ExtendedStrengthPotionId 须为材料段 0x276");
+static_assert(RecipeRegistry::ExtendedFireResistancePotionId == 0x277, "ExtendedFireResistancePotionId 须为材料段 0x277");
+static_assert(RecipeRegistry::ExtendedRegenerationPotionId   == 0x278, "ExtendedRegenerationPotionId 须为材料段 0x278");
+static_assert(RecipeRegistry::ExtendedPoisonPotionId         == 0x279, "ExtendedPotionIds 须为材料段 0x279");
+static_assert(RecipeRegistry::ExtendedWeaknessPotionId       == 0x27A, "ExtendedWeaknessPotionId 须为材料段 0x27A（延长族段末位）");
 // t788 染料跨层契约（同 Coal/Lapis 模式）：Core 层 blockregistry.cpp 四花的 dropId 用字面量（Core 不 include
 //   Game 头）：红花→0x259 / 黄花→0x24F / 蓝花→0x256 / 白花→0x24B；本处钉死 recipe.h 染料常量 == 字面量，
 //   任一处改动忘了同步另一处 → 编译失败（防「破花掉落断裂 / 染色链丢原料」）。另钉 DyeIdBase / DyeBlackId

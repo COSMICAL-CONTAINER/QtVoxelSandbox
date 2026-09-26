@@ -884,6 +884,8 @@ qt_add_resources(voxelsandbox "voxel_sounds"
         sounds/disc_track_00.wav                   # t1083 唱片机盘曲三轨（build_sounds.py gen_disc_track
         sounds/disc_track_01.wav                   #   程序合成 §9 原创乐曲；30/36/42s；AudioManager.discClips
         sounds/disc_track_02.wav                   #   按曲目号选播；音色与音符盒钢琴族同源（登记取舍）。
+        sounds/drink_gulp.wav                      # t1100 药水饮用节拍咕嘟音（build_sounds.py gen_drink_gulp 程序合成 §9 原创；drinkGulp → playDrinkGulp）
+        sounds/burp.wav                            # t1100 饮毕 burp 音（build_sounds.py gen_burp 程序合成 §9 原创；potionDrunk → playBurp 随机音高）
 )
 
 # miniaudio 是 vendored 第三方单头库（src/Audio/miniaudio.h）。

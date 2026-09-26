@@ -204,6 +204,17 @@ public:
     //   退世界清理（Main.qml 退菜单 / 退世界显式调用，同 stopAmbient 族——播放表已随 setWorld 清，
     //   本调用兜底音频面静音）。engine / clip 失败静默早退（§2-E）。
     Q_INVOKABLE void stopDisc();
+    // t1100 药水饮用节拍音（咕嘟短音族）：长按饮用每跨进食节拍响一声（PlayerController::drinkGulp
+    //   → Main.qml 路由）。机制等价 MC 1.0 drinking 周期音（原创程序合成，§9；三连下行「咕嘟」正弦
+    //   扫频 + 气泡噪声，参数留痕 tools/build_sounds.py gen_drink_gulp）。单件 clip；seek 重发截断
+    //   不堆叠（同其他单件模式）；engine / clip 失败静默早退（§2-E，不崩）。
+    Q_INVOKABLE void playDrinkGulp();
+    // t1100 饮毕 burp 音：可饮面进食链完成沿响（PlayerController::potionDrunk → Main.qml 路由）。
+    //   机制等价 MC 1.0 饮毕随机 burp（原创程序合成，§9；低频短哼扫频 + 慢振颤，参数留痕
+    //   tools/build_sounds.py gen_burp）。**随机音高口径**：每次播放 set_pitch 随机 ±8% 抖动
+    //   （≈ MC random pitch burp；ma_sound_set_pitch，NO_PITCH 优化未开故直接生效）。单件 clip；
+    //   seek 重发截断不堆叠；engine / clip 失败静默早退（§2-E，不崩）。
+    Q_INVOKABLE void playBurp();
 
     float volume() const { return m_volume; }
     void setVolume(float v);
