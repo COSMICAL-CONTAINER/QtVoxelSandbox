@@ -157,7 +157,7 @@ public:
     // 实体外观种类（Q_ENUM 供 QML 渲染分流：Mob=纯色立方 / Item=掉落物（vestigial，实际由 ItemEntityManager
     // 管）/ FallingBlock=贴图方块 / Arrow=箭矢投射物（t283 骷髅弓箭手远程射出，细长杆定向 Model）/
     // Snowball=雪球投射物（t482 雪傀儡远程攻击，白色小球定向 Model，低伤害 + 减速））。
-    enum Kind { Mob, Item, FallingBlock, Arrow, Snowball, Egg, Fireball, AbyssEye, AbyssPearl, Bobber, GlimmerBottle }; // t583 加 Egg（鸡蛋投掷物，QML 卵形 Model 分流）；t728 加 Fireball（燃烬者火球，直线弹道 + 点燃，QML 橙黄火球 Model 分流）；t729 加 AbyssEye（暗渊之眼，玩家右键掷出寻路要塞，QML 小绿瞳珠 Model + 碎裂动画）；t758 加 AbyssPearl（暗渊珠，玩家右键掷出受重力抛物飞行，落点把玩家传送过去，QML 深绿小珠 Model 分流）；t836 加 Bobber（钓鱼浮标投射物，玩家右键甩竿抛出，轻重力抛物 → 落水浮定 / 落陆静止 / 飞行段可钩 mob，渲染走 Main.qml player.fishing 专属 delegate 非本 Repeater）；t1096 加 GlimmerBottle（蕴辉瓶投射物，玩家右键掷出受重力抛物飞行，触方块 / mob 即碎释放经验球，QML 瓶图标 billboard 分流——**枚举尾追加不插中间**：QML / 探针的既存 kind 数值零扰动）
+    enum Kind { Mob, Item, FallingBlock, Arrow, Snowball, Egg, Fireball, AbyssEye, AbyssPearl, Bobber, GlimmerBottle, SplashBottle }; // t583 加 Egg（鸡蛋投掷物，QML 卵形 Model 分流）；t728 加 Fireball（燃烬者火球，直线弹道 + 点燃，QML 橙黄火球 Model 分流）；t729 加 AbyssEye（暗渊之眼，玩家右键掷出寻路要塞，QML 小绿瞳珠 Model + 碎裂动画）；t758 加 AbyssPearl（暗渊珠，玩家右键掷出受重力抛物飞行，落点把玩家传送过去，QML 深绿小珠 Model 分流）；t836 加 Bobber（钓鱼浮标投射物，玩家右键甩竿抛出，轻重力抛物 → 落水浮定 / 落陆静止 / 飞行段可钩 mob，渲染走 Main.qml player.fishing 专属 delegate 非本 Repeater）；t1096 加 GlimmerBottle（蕴辉瓶投射物，玩家右键掷出受重力抛物飞行，触方块 / mob 即碎释放经验球，QML 瓶图标 billboard 分流——**枚举尾追加不插中间**：QML / 探针的既存 kind 数值零扰动）；t1101 加 SplashBottle（喷溅药水投射物，玩家右键掷出受重力抛物飞行，触方块 / mob 即碎发范围效果结算信号，QML 药水图标 billboard 分流——同门尾追加）
     Q_ENUM(Kind)
 
     // t240 mob 子类 id（与 Entity.mobType 同值；Q_ENUM 供 QML 据 mobTypeAt 选 MobModel 比例 + 贴图）。
@@ -423,6 +423,21 @@ public:
     //   kindAt==GlimmerBottle 走瓶图标 billboard（MaterialIcon 0x263，t807 同门）。达 kCap → 跳过 + 告警
     //   （防溢出）。返槽索引（调试用）；达 kCap → -1。
     Q_INVOKABLE int spawnGlimmerBottle(const QVector3D &origin, const QVector3D &vel);
+    // t1101 喷溅药水投射物（玩家右键 SplashSpeedPotionId 0x27B..0x286 掷出；机制等价 MC 1.0 splash
+    //   potion —— 右键掷出受重力抛物飞行，触碰方块 / 活体 mob 即碎发范围效果结算）：在 origin 处生成
+    //   携带初速度 vel（blocks/s，含 vy 抛物）的喷溅瓶实体。kind=SplashBottle、pushable=false（玩家走
+    //   碰不推）、halfW/halfH=0.10（小瓶视觉 + 碰撞最小；命中检测走点-in-AABB 不读 halfW）。**载荷 =
+    //   itemId 骑 blockId 字段**（t117 FallingBlock 专用字段的 per-kind 复用先例同 vx/vy/vz / arrowLife
+    //   ——SplashBottle 不走 FallingBlock 分支零冲突；命中检测走点-in-AABB 不读 blockId）。tick 内
+    //   SplashBottle 分支：重力改 vy（抛物，同蕴辉瓶 / 蛋 / 雪球共用世界重力 kGravity）+ 速度位移 +
+    //   方块 / 活体 mob 命中即碎 → emit splashBottleBreak(格, itemId) + 移除。**命中 mob 0 伤害 0 击退**
+    //   （MC 喷溅弹丸 onImpact 无攻击语义，同蕴辉瓶）；**未击中任何实体也照碎**（触地即碎）。范围效果
+    //   结算（半径 / 邻近衰减 / applyStatusEffect）= Game 层 applySplashPotion 单一权威（Entities 层发
+    //   语义事件、Game 层结算——PLAN §2 分层，glimmerBottleBreak→XpOrbManager 同门）。QML delegate 据
+    //   kindAt==SplashBottle 走药水图标 billboard（MaterialIcon 读 blockIdAt=喷溅 id，t807 同门）。
+    //   寿命 / 越界兜底移除**不发信号**（无命中点，瓶白耗——同蕴辉瓶 / 珍珠兜底口径）。达 kCap → 跳过
+    //   + 告警（防溢出）。返槽索引（调试用）；达 kCap → -1。
+    Q_INVOKABLE int spawnSplashBottle(const QVector3D &origin, const QVector3D &vel, int itemId);
     // t1096 蕴辉瓶经验总量 roll（MC 1.0 onImpact 公式逐字：i = 3 + rand.nextInt(5) + rand.nextInt(5)）：
     //   **显式种子 → 确定性**（QRandomGenerator(seed) 局部生成器，LootTable::roll seed 重载同门）——运行期
     //   以全局生成器一枚随机种子调用（生产随机性），矩阵以固定种子复算（确定性验收面）。值域 [3,11]，
@@ -1270,6 +1285,13 @@ signals:
     //   分割链拆球；单向事件流，PLAN §2 分层：Entities 发语义事件、呈现层只消费路由，同 abyssEyeBecameItem
     //   → spawnItem 模式）。寿命 / 越界兜底移除不发本信号（无命中点，瓶白耗——同珍珠兜底口径）。
     void glimmerBottleBreak(int x, int y, int z, int totalXp);
+    // t1101 喷溅瓶碎裂（机制等价 MC 1.0 splash potion 触地碎发范围效果）：SplashBottle 命中（方块 / 活体
+    //   mob）移除时发。坐标 = 命中点**整数格**（floor；glimmerBottleBreak 同约定），itemId = 本瓶携带的
+    //   喷溅药水物品 id（blockId 字段载荷）。呈现层（Main.qml）Connections 据它路由 Game 层
+    //   PlayerController.applySplashPotion（半径 / 邻近衰减 / 效果注入单一权威）+ 粒子 / 碎裂音（单向
+    //   事件流，PLAN §2 分层：Entities 发语义事件、呈现层只消费路由）。寿命 / 越界兜底移除不发本信号
+    //   （无命中点，瓶白耗——同蕴辉瓶 / 珍珠兜底口径）。
+    void splashBottleBreak(int x, int y, int z, int itemId);
     // t729 暗渊之眼飞行判定结算「变掉落物」（机制等价 MC 1.0 暗渊之眼飞距后落地变掉落物可捡回）：AbyssEye tick
     //   飞行距（abyssEyeDistLeft）归零且掷中 80% 掉落分支时发 —— 坐标 = floor(pos)（与 spawnItem 整数格约定一致，
     //   便于 ItemEntityManager 落在眼睛落点）。呈现层（Main.qml）Connections 据它转发 ItemEntityManager.spawnItem
@@ -2638,6 +2660,8 @@ private:
     static constexpr float kEggHitHalfW            = 0.3f;  // 鸡蛋 vs mob 命中盒 XZ/Y 外扩（blocks；同雪球）
     static constexpr float kGlimmerBottleLifetime  = 5.0f;  // t1096 蕴辉瓶最长存活（秒；同蛋 / 雪球家族兜底口径）
     static constexpr float kGlimmerBottleHitHalfW  = 0.3f;  // t1096 蕴辉瓶 vs mob 命中盒 XZ/Y 外扩（blocks；同蛋）
+    static constexpr float kSplashBottleLifetime   = 5.0f;  // t1101 喷溅瓶最长存活（秒；同蕴辉瓶 / 蛋 / 雪球家族兜底口径）
+    static constexpr float kSplashBottleHitHalfW   = 0.3f;  // t1101 喷溅瓶 vs mob 命中盒 XZ/Y 外扩（blocks；同蛋 / 蕴辉瓶）
     static constexpr float kEggHatchDenominator    = 8.0f;  // 孵化概率分母（1/8；机制等价 MC 1.0 鸡蛋 1/8 出鸡）
     // t728 燃烬者火球投射物常量（机制等价 MC 1.0 烈焰人火球：直线弹道 + 命中点燃 + 消失）。
     //   - kFireballLifetime：火球最长存活（秒；直线飞行未命中兜底移除，防永久滞留堆积，同箭/雪球）。

@@ -3744,6 +3744,97 @@ void PlayerController::applyStatusEffect(int effect, float seconds, int level)
     }
 }
 
+// ── t1101 喷溅药水静态映射族 + 范围结算（单一权威；头注释见 playercontroller.h）──────────────────
+// 喷溅族判定（isDrinkableItem 姊妹面）：12 喷溅 id（recipe.h 0x27B..0x286 段尾追加）→ true。
+//   NEG 面登记：isDrinkableItem **不含**喷溅 id（喷溅版不可饮——饮面回归负例，矩阵 r2071a/b 断言）；
+//   本谓词与 isDrinkableItem 恒互斥（喷溅瓶持物右键走投掷分流，不进进食链）。
+bool PlayerController::isSplashPotionItem(int itemId)
+{
+    switch (itemId) {
+    case RecipeRegistry::SplashSpeedPotionId:
+    case RecipeRegistry::SplashStrengthPotionId:
+    case RecipeRegistry::SplashFireResistancePotionId:
+    case RecipeRegistry::SplashRegenerationPotionId:
+    case RecipeRegistry::SplashPoisonPotionId:
+    case RecipeRegistry::SplashWeaknessPotionId:
+    case RecipeRegistry::SplashExtendedSpeedPotionId:
+    case RecipeRegistry::SplashExtendedStrengthPotionId:
+    case RecipeRegistry::SplashExtendedFireResistancePotionId:
+    case RecipeRegistry::SplashExtendedRegenerationPotionId:
+    case RecipeRegistry::SplashExtendedPoisonPotionId:
+    case RecipeRegistry::SplashExtendedWeaknessPotionId:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// 喷溅药水 → 效果枚举映射（12 行；非喷溅 id → 0 = EffectNone）。Q_INVOKABLE 暴露 = 呈现层碎裂粒子
+//   取色同源调用（Main.qml onSplashBottleBreak → burstSplashPotion 色参），Game 层单一权威不 QML 重抄。
+int PlayerController::splashEffectType(int itemId)
+{
+    switch (itemId) {
+    case RecipeRegistry::SplashSpeedPotionId:                return PlayerState::EffectSpeed;
+    case RecipeRegistry::SplashStrengthPotionId:             return PlayerState::EffectStrength;
+    case RecipeRegistry::SplashFireResistancePotionId:       return PlayerState::EffectFireResistance;
+    case RecipeRegistry::SplashRegenerationPotionId:         return PlayerState::EffectRegeneration;
+    case RecipeRegistry::SplashPoisonPotionId:               return PlayerState::EffectPoison;
+    case RecipeRegistry::SplashWeaknessPotionId:             return PlayerState::EffectWeakness;
+    case RecipeRegistry::SplashExtendedSpeedPotionId:        return PlayerState::EffectSpeed;
+    case RecipeRegistry::SplashExtendedStrengthPotionId:     return PlayerState::EffectStrength;
+    case RecipeRegistry::SplashExtendedFireResistancePotionId: return PlayerState::EffectFireResistance;
+    case RecipeRegistry::SplashExtendedRegenerationPotionId: return PlayerState::EffectRegeneration;
+    case RecipeRegistry::SplashExtendedPoisonPotionId:       return PlayerState::EffectPoison;
+    case RecipeRegistry::SplashExtendedWeaknessPotionId:     return PlayerState::EffectWeakness;
+    default: return 0; // EffectNone（非喷溅 id）
+    }
+}
+
+// 喷溅药水基础时长映射（d1=1 满档口径；对应饮用版时长常量逐行同源——非喷溅 id → 0）。
+float PlayerController::splashBaseSeconds(int itemId)
+{
+    switch (itemId) {
+    case RecipeRegistry::SplashSpeedPotionId:                return kPotionDurationSec;            // 180s
+    case RecipeRegistry::SplashStrengthPotionId:             return kPotionDurationSec;            // 180s
+    case RecipeRegistry::SplashFireResistancePotionId:       return kPotionDurationSec;            // 180s
+    case RecipeRegistry::SplashRegenerationPotionId:         return kRegenPotionDurationSec;       // 45s
+    case RecipeRegistry::SplashPoisonPotionId:               return kPoisonPotionDurationSec;      // 45s
+    case RecipeRegistry::SplashWeaknessPotionId:             return kWeaknessDurationSec;          // 90s
+    case RecipeRegistry::SplashExtendedSpeedPotionId:        return kExtPotionDurationSec;         // 480s
+    case RecipeRegistry::SplashExtendedStrengthPotionId:     return kExtPotionDurationSec;         // 480s
+    case RecipeRegistry::SplashExtendedFireResistancePotionId: return kExtPotionDurationSec;       // 480s
+    case RecipeRegistry::SplashExtendedRegenerationPotionId: return kRegenExtPotionDurationSec;    // 90s
+    case RecipeRegistry::SplashExtendedPoisonPotionId:       return kPoisonExtPotionDurationSec;   // 90s
+    case RecipeRegistry::SplashExtendedWeaknessPotionId:     return kWeaknessExtDurationSec;       // 240s
+    default: return 0.0f; // 非喷溅 id
+    }
+}
+
+// t1101 喷溅范围结算（玩家侧；机制等价 MC 1.0 splash potion onImpact，头注释见 .h）：
+//   dist = 玩家脚位（m_pos）到命中格中心的欧氏距；dist < kSplashRadiusBlocks（4.0，dSq<16 原值口径）
+//   → 邻近系数 d1 = 1 − dist/4 → 注入时长 = d1 × splashBaseSeconds + kSplashTickFloorSec（MC 1.0
+//   int(durationTicks × d1) + 1 原式秒化）→ applyStatusEffect（Survival 门内置 / 快照广播 / 粒子节律
+//   全走既有链）。出圈 / 非喷溅 id / 无世界 → 静默 no-op。
+//   NEG 面登记：本函数体的半径判定 + applyStatusEffect 结算尾段 = t1101 范围结算 NEG-2 恰红触达面
+//   （摘除后编译仍绿——Q_INVOKABLE 声明 / 静态映射族幸存——行为柱 r2071b / r2071c 恰红，其余腿不受
+//   影响）。
+void PlayerController::applySplashPotion(int cx, int cy, int cz, int itemId)
+{
+    if (!m_world) return;
+    const int eff = splashEffectType(itemId);
+    if (eff == 0 || !isSplashPotionItem(itemId)) return; // 非喷溅 id（双重防御：表与谓词同源 12 id）
+    const float baseSecs = splashBaseSeconds(itemId);
+    // 命中格中心（Entities 层 floor 口径 +0.5）到玩家脚位的欧氏距（MC getDistanceSqToEntity 口径，
+    //   玩家 pos = 脚底中心——lessons「pos 存脚底中心」契约）。
+    const float dx = m_pos.x() - (float(cx) + 0.5f);
+    const float dy = m_pos.y() - (float(cy) + 0.5f);
+    const float dz = m_pos.z() - (float(cz) + 0.5f);
+    const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (dist >= kSplashRadiusBlocks) return; // 出圈（d1 ≤ 0）→ 无效果（MC 半径 4 格硬界）
+    const float d1 = 1.0f - dist / kSplashRadiusBlocks; // 邻近线性衰减（中心 1.0 → 边缘 0）
+    applyStatusEffect(eff, d1 * baseSecs + kSplashTickFloorSec, 1);
+}
+
 // t715 清全部状态效果（/effect clear；重生 / 存档加载同源调内部字段清，见各处注释）。
 void PlayerController::clearStatusEffects()
 {
@@ -4587,6 +4678,34 @@ void PlayerController::placeBlock()
         m_lastPlaceMs = now;
         emit swingArm(); // 掷瓶也是一次「使用」动作 → 挥手（t29）
         return; // 蕴辉瓶（抛出成功）不再走方块放置路径
+    }
+    // t1101 喷溅药水投掷（机制等价 MC 1.0 splash potion 右键投掷）：手持喷溅族 id（0x27B..0x286，
+    //   isSplashPotionItem 单一权威谓词）右键 → spawnSplashBottle 从眼位沿视线方向以 kPlayerSplash
+    //   BottleSpeed 抛出（抛物弹丸，同蕴辉瓶 / 雪 / 蛋投掷家族——无蓄力右键即抛；载荷 itemId 骑
+    //   blockId 字段由 spawn 入口写入）。任意方块 / 活体 mob 触碰即碎 → EntityManager emit
+    //   splashBottleBreak(命中格, itemId) → 呈现层路由 applySplashPotion（半径 / 邻近衰减 / 效果注入，
+    //   Game 层单一权威）+ 粒子 / 碎裂音。**不要求 m_hasHit**（瞄准的是抛物弹道非方块命中格）；
+    //   喷溅瓶非方块（材料段）→ selectedBlock 归 Air，须在 `m_selectedBlock == Air` 守卫之前分流
+    //   （同雪球 / 蛋 / 珠 / 蕴辉瓶分支模式；t1096 归一教训）。**喷溅版不可饮**（isDrinkableItem 不含
+    //   喷溅 id → eventFilter 进食门不触发，右键自然落到本分支）。spectator 已被入口 canPlace() 守卫
+    //   拦截；Creative / Survival 均可掷。生存消耗 1 瓶 / 创造不耗（同投掷族统一口径）。分层（PLAN §2）：
+    //   掷出属 Game/Physics（读视线 + 调 EntityManager），不改栅格语义。
+    if (m_hotbar && m_world && m_entityManager && isSplashPotionItem(heldItemId)) {
+        // vel = 视线方向 × kPlayerSplashBottleSpeed。速度取 12（同 kPlayerGlimmerBottleSpeed /
+        //   kPlayerSnowballSpeed / kPlayerEggSpeed——瓶族轻抛物弹丸同档初速，MC 1.0 投掷物同量级）。
+        //   本地常量（Entities 层速度常量 private 不跨层读，同 kPlayerGlimmerBottleSpeed 模式；矩阵探针
+        //   以镜像常量同步，改值须两处同步）。
+        constexpr float kPlayerSplashBottleSpeed = 12.0f; // 玩家掷喷溅瓶速度（blocks/s）
+        const QVector3D eye = position();
+        const QVector3D look = lookDirection();
+        // origin = 眼位 + 视线前移 0.5（防贴墙 spawn 入墙即被 tick 判方块命中，同雪球 / 蛋 / 珠 / 蕴辉瓶模式）。
+        const QVector3D origin = eye + look * 0.5f;
+        m_entityManager->spawnSplashBottle(origin, look * kPlayerSplashBottleSpeed, heldItemId);
+        if (m_mode != Creative)
+            m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 生存消耗 1 瓶（创造不耗）
+        m_lastPlaceMs = now;
+        emit swingArm(); // 掷瓶也是一次「使用」动作 → 挥手（t29）
+        return; // 喷溅瓶（抛出成功）不再走方块放置路径
     }
     // t400 繁殖喂食 useBlock（spec「喂对应食物 → 求偶 → 同种配对产幼崽」；机制等价 MC 1.0 breeding）：
     //   手持繁殖食物（小麦 WheatId / 胡萝卜 CarrotId / 马铃薯 PotatoId / 种子 SeedId）右键 → 在主选体射线之外

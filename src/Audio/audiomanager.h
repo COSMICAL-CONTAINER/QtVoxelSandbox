@@ -215,6 +215,11 @@ public:
     //   （≈ MC random pitch burp；ma_sound_set_pitch，NO_PITCH 优化未开故直接生效）。单件 clip；
     //   seek 重发截断不堆叠；engine / clip 失败静默早退（§2-E，不崩）。
     Q_INVOKABLE void playBurp();
+    // t1101 喷溅瓶碎裂音：喷溅药水投掷链触地碎裂沿响（EntityManager::splashBottleBreak → Main.qml
+    //   路由）。机制等价 MC 1.0 splash potion 碎裂（原创程序合成，§9；高频「叮」簇玻璃碎 + 短噪声
+    //   泼洒床，参数留痕 tools/build_sounds.py gen_splash_break）。单件 clip；固定音高（碎裂宽频
+    //   瞬态自带随机感，登记简化）；seek 重发截断不堆叠；engine / clip 失败静默早退（§2-E，不崩）。
+    Q_INVOKABLE void playSplashBreak();
 
     float volume() const { return m_volume; }
     void setVolume(float v);

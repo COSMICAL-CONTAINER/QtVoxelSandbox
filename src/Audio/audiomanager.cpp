@@ -211,6 +211,9 @@ struct AudioManager::Data
     //   burp 随机音高 = 播放时 set_pitch 抖动（NO_PITCH 优化未开故直接生效，同 noteClips 面）。
     Clip drinkGulpClip{":/sounds/drink_gulp.wav"};
     Clip burpClip{":/sounds/burp.wav"};
+    // t1101 喷溅瓶碎裂音（玻璃碎 + 药水泼洒；短 SFX 默认 2s maxFrames 安全）。
+    //   触发源：EntityManager::splashBottleBreak（碎裂沿）→ Main.qml 路由。
+    Clip splashBreakClip{":/sounds/splash_break.wav"};
 
     static constexpr ma_uint32 kChannels = 1;     // mono（合成时即 mono，省一半带宽）
     // t328：合成升到 44100 Hz（更多高频细节 / 更短瞬态分辨 → 音色清晰，详见 build_sounds.py）。
@@ -406,6 +409,8 @@ AudioManager::AudioManager(QObject *parent)
     // t1100 饮用面两单件（咕嘟节拍音 + 饮毕 burp；短 SFX 默认 maxFrames 安全）。
     d->loadClip(d->drinkGulpClip);
     d->loadClip(d->burpClip);
+    // t1101 喷溅瓶碎裂音（短 SFX 默认 maxFrames 安全）。
+    d->loadClip(d->splashBreakClip);
     // t1028 音符盒 25 档音高 clip 池（0.85s 短 SFX，默认 2s maxFrames 安全；路径 makeNotePath 长寿命化）。
     for (int n = 0; n < Data::kNotePitchCount; ++n) {
         d->noteClips[size_t(n)].qrcPath = d->makeNotePath(n);
@@ -444,6 +449,8 @@ AudioManager::AudioManager(QObject *parent)
     // t1100 饮用面两单件 sound init（NO_SPATIALIZATION；失败仅自身静默降级 §2-E）。
     d->initSound(d->drinkGulpClip);
     d->initSound(d->burpClip);
+    // t1101 喷溅瓶碎裂音 sound init（同门）。
+    d->initSound(d->splashBreakClip);
     // t1028 音符盒 25 档音高 sound init（NO_SPATIALIZATION，随 Clip 池逐个降级）。
     for (int n = 0; n < Data::kNotePitchCount; ++n)
         d->initSound(d->noteClips[size_t(n)]);
@@ -561,6 +568,8 @@ AudioManager::~AudioManager()
     // t1100 饮用面两单件析构补齐（t1046 noteClips 漏析构教训同门：新 clip 必入本表）。
     if (d->drinkGulpClip.ok) ma_sound_uninit(&d->drinkGulpClip.sound);
     if (d->burpClip.ok) ma_sound_uninit(&d->burpClip.sound);
+    // t1101 喷溅瓶碎裂音析构补齐（同门：新 clip 必入本表）。
+    if (d->splashBreakClip.ok) ma_sound_uninit(&d->splashBreakClip.sound);
     // t1046 noteClips 池析构补齐（用户 0912 评审 #4）：t1028 新增 25 档音符盒 clip 池当年漏出本表——
     //   旧版析构只 uninit 旧音效池后直接 ma_engine_uninit，noteClips 的 ma_sound 挂着对 engine 内部
     //   data_source 的引用被连带拆解（未定义行为面；对齐上方 groupClips / 单件池逐个释放模式）。
@@ -959,6 +968,14 @@ void AudioManager::playBurp()
     ma_sound_set_pitch(&c.sound, jitter);
     ma_sound_set_volume(&c.sound, m_volume * 0.85f);
     ma_sound_start(&c.sound);
+}
+
+// t1101 喷溅瓶碎裂音（~0.28s 玻璃碎 + 泼洒）：0.9 前景交互级（同 drinkGulp 量级——碎裂是投掷链
+//   终点反馈）；固定音高（碎裂音本身的宽频瞬态已携带随机感，不再叠播放抖动——登记简化）。
+//   seek 重发截断不堆叠（同其他单件模式）。
+void AudioManager::playSplashBreak()
+{
+    d->replay(d->splashBreakClip, m_volume * 0.9f);
 }
 
 void AudioManager::setVolume(float v)

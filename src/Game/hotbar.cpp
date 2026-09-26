@@ -735,7 +735,21 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::ExtendedFireResistancePotionId), // 火抗药水（延长）：火抗 + 红石；8:00
         int(RecipeRegistry::ExtendedRegenerationPotionId),   // 再生药水（延长）：再生 + 红石；1:30
         int(RecipeRegistry::ExtendedPoisonPotionId),         // 中毒药水（延长）：中毒 + 红石；1:30
-        int(RecipeRegistry::ExtendedWeaknessPotionId)        // 虚弱药水（延长）：虚弱 + 红石；4:00
+        int(RecipeRegistry::ExtendedWeaknessPotionId),       // 虚弱药水（延长）：虚弱 + 红石；4:00
+        // t1101 喷溅药水族十二件（0x27B..0x286，延长族之上段尾追加不插中间 = 存档安全铁律）：
+        //   获取面 = 三级酿造（成品药水 + 火药）+ 右键投掷，创造调色板行为唯一兜底获取面（同族口径）。
+        int(RecipeRegistry::SplashSpeedPotionId),                  // 喷溅迅捷药水：迅捷 + 火药；掷出范围效果
+        int(RecipeRegistry::SplashStrengthPotionId),               // 喷溅力量药水：力量 + 火药
+        int(RecipeRegistry::SplashFireResistancePotionId),         // 喷溅火抗药水：火抗 + 火药
+        int(RecipeRegistry::SplashRegenerationPotionId),           // 喷溅再生药水：再生 + 火药
+        int(RecipeRegistry::SplashPoisonPotionId),                 // 喷溅中毒药水：中毒 + 火药
+        int(RecipeRegistry::SplashWeaknessPotionId),               // 喷溅虚弱药水：虚弱 + 火药
+        int(RecipeRegistry::SplashExtendedSpeedPotionId),          // 喷溅迅捷药水（喷溅·延长）：延长迅捷 + 火药
+        int(RecipeRegistry::SplashExtendedStrengthPotionId),       // 喷溅力量药水（喷溅·延长）：延长力量 + 火药
+        int(RecipeRegistry::SplashExtendedFireResistancePotionId), // 喷溅火抗药水（喷溅·延长）：延长火抗 + 火药
+        int(RecipeRegistry::SplashExtendedRegenerationPotionId),   // 喷溅再生药水（喷溅·延长）：延长再生 + 火药
+        int(RecipeRegistry::SplashExtendedPoisonPotionId),         // 喷溅中毒药水（喷溅·延长）：延长中毒 + 火药
+        int(RecipeRegistry::SplashExtendedWeaknessPotionId)        // 喷溅虚弱药水（喷溅·延长）：延长虚弱 + 火药
     };
 }
 
@@ -1307,6 +1321,20 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::ExtendedRegenerationPotionId)   return QStringLiteral("再生药水（延长）");
         if (blockId == RecipeRegistry::ExtendedPoisonPotionId)         return QStringLiteral("中毒药水（延长）");
         if (blockId == RecipeRegistry::ExtendedWeaknessPotionId)       return QStringLiteral("虚弱药水（延长）");
+        // t1101 喷溅药水族（0x27B..0x286）：名面十二件 = 基础名 +「（喷溅）」/「（喷溅·延长）」后缀
+        //   （通用描述词，§9 合法；喷溅版不可饮、右键投掷——hotbar 提示名与饮用版区隔）。
+        if (blockId == RecipeRegistry::SplashSpeedPotionId)                  return QStringLiteral("喷溅迅捷药水");
+        if (blockId == RecipeRegistry::SplashStrengthPotionId)               return QStringLiteral("喷溅力量药水");
+        if (blockId == RecipeRegistry::SplashFireResistancePotionId)         return QStringLiteral("喷溅火抗药水");
+        if (blockId == RecipeRegistry::SplashRegenerationPotionId)           return QStringLiteral("喷溅再生药水");
+        if (blockId == RecipeRegistry::SplashPoisonPotionId)                 return QStringLiteral("喷溅中毒药水");
+        if (blockId == RecipeRegistry::SplashWeaknessPotionId)               return QStringLiteral("喷溅虚弱药水");
+        if (blockId == RecipeRegistry::SplashExtendedSpeedPotionId)          return QStringLiteral("喷溅迅捷药水（延长）");
+        if (blockId == RecipeRegistry::SplashExtendedStrengthPotionId)       return QStringLiteral("喷溅力量药水（延长）");
+        if (blockId == RecipeRegistry::SplashExtendedFireResistancePotionId) return QStringLiteral("喷溅火抗药水（延长）");
+        if (blockId == RecipeRegistry::SplashExtendedRegenerationPotionId)   return QStringLiteral("喷溅再生药水（延长）");
+        if (blockId == RecipeRegistry::SplashExtendedPoisonPotionId)         return QStringLiteral("喷溅中毒药水（延长）");
+        if (blockId == RecipeRegistry::SplashExtendedWeaknessPotionId)       return QStringLiteral("喷溅虚弱药水（延长）");
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落；打火石配方原料。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::FlintId) return QStringLiteral("燧石"); // 挖沙砾概率掉落；打火石配方原料
         // t891② 烈焰弹（材料段 0x25C；机制等价 MC fire charge）：燃烬粉+煤/炭+火药合成 3 发；右键发射火球

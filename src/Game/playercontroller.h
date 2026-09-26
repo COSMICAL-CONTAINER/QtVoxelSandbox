@@ -534,6 +534,14 @@ public:
     Q_INVOKABLE void applyStatusEffect(int effect, float seconds, int level);
     // t715 清全部状态效果（/effect clear；重生 / 存档加载内部亦同源清）。
     Q_INVOKABLE void clearStatusEffects();
+    // t1101 喷溅范围结算（机制等价 MC 1.0 splash potion onImpact，玩家侧）：EntityManager splashBottle
+    //   Break(x,y,z,itemId)（Entities 层语义事件）经 Main.qml Connections 路由调本方法（同 abyssPearl
+    //   Landed→applyAbyssPearlTeleport 模式）。结算口径：命中格中心为心，玩家脚位距 ≤ kSplashRadius
+    //   Blocks 时按邻近系数 d1 = 1 − dist/4 衰减基础时长（splashBaseSeconds 表）+ 1 tick 底数 →
+    //   applyStatusEffect（Survival 门内置；level 1，喷溅版无等级增益面）。出圈 / 非喷溅 id → 静默
+    //   no-op。**mob 侧范围面降级候选池**（本工程 mob 无通用效果注入系统，任务核实裁定——见
+    //   recipe.h 0x27B..0x286 注）。坐标 = 命中整数格（Entities 层 floor 口径）。
+    Q_INVOKABLE void applySplashPotion(int cx, int cy, int cz, int itemId);
 
     Q_INVOKABLE void setKey(int key, bool pressed);
     Q_INVOKABLE void cycleMode();
@@ -585,6 +593,19 @@ public:
     //   力量药水可饮（MC 1.0 口径——水瓶可饮无效果；粗制可饮无效果）。供 eventFilter / beginEating /
     //   updateEating / finishEating 统一判「是否饮用品」（新增药水只改本方法一处）。纯函数于 itemId。
     static bool isDrinkableItem(int itemId);
+    // t1101 喷溅药水判定（isDrinkableItem 姊妹面，单一权威谓词）：喷溅族 12 id（0x27B..0x286，
+    //   recipe.h 段位注）→ true；其余 → false。供 placeBlock 投掷分流判「持物是否喷溅瓶」——**喷溅版
+    //   不可饮**（本谓词与 isDrinkableItem 互斥即饮面回归：isDrinkableItem 不含喷溅 id，负例钉于矩阵
+    //   r2071a/b）。纯函数于 itemId。
+    static bool isSplashPotionItem(int itemId);
+    // t1101 喷溅药水 → 状态效果映射（纯静态表，单一权威；applySplashPotion 结算面 + 呈现层碎裂粒子
+    //   取色同源调用——粒子路由经 Q_INVOKABLE 暴露）：12 喷溅 id → PlayerState::StatusEffect 枚举值
+    //   （迅捷 / 力量 / 火抗 / 再生 / 中毒 / 虚弱 × 基础 / 延长）；非喷溅 id → 0（EffectNone）。
+    Q_INVOKABLE static int splashEffectType(int itemId);
+    // t1101 喷溅药水基础时长（纯静态表，单一权威）：12 喷溅 id → 落地中心（d1=1）口径的基础秒数
+    //   （= 对应饮用版时长常量：180 / 45 / 45 / 90 / 480 / 90 / 90 / 240）；非喷溅 id → 0。实际注入
+    //   时长 = 邻近系数衰减（MC 1.0 口径，见 kSplashRadiusBlocks 注），本表只给「d1=1 满档」基础值。
+    static float splashBaseSeconds(int itemId);
     // t1097 药水效果常量（机制等价 MC 1.0 药水 I 级，wiki 2026 实读口径；public = 矩阵探针直读面，
     //   foodHungerAmount 升 public 同门先例）：迅捷 = +20%/级移速；力量 = +130%/级近战伤害（1.0 旧
     //   口径乘算，1.9 起才改 +3 平坦加成）；时长 = 3:00 = 180s（I 级基础时长）。
@@ -606,6 +627,14 @@ public:
     static constexpr float kRegenExtPotionDurationSec = 90.0f;   // 再生延长时长（MC 1.0 extended regeneration 1:30）
     static constexpr float kPoisonExtPotionDurationSec = 90.0f;  // 中毒延长时长（MC 1.0 extended poison 1:30）
     static constexpr float kWeaknessExtDurationSec = 240.0f;     // 虚弱延长时长（MC 1.0 extended weakness 4:00）
+    // t1101 喷溅范围结算常量（MC 1.0 splash 口径，wiki 2026 实读 + 1.0 onImpact 源码口径留痕）：
+    //   触地点为心半径 4 格（getDistanceSqToEntity < 16 → dist < 4.0）内实体吃效果；邻近线性衰减
+    //   d1 = 1 − dist/4（中心 1.0 → 边缘 0）；持续效果注入时长 = d1 × 基础时长 + 1 tick
+    //   （int(durationTicks × d1) + 1 原式秒化 → +kSplashTickFloorSec）——**喷溅时长 ≠ 饮用时长**
+    //   （有邻近系数，快照 ceil 口径中心命中也只 ≈ base+0.05s）。即时效果喷溅（效能衰减面）本单
+    //   不交付（recipe.h 0x27B..0x286 注候选池登记）。
+    static constexpr float kSplashRadiusBlocks  = 4.0f;  // 喷溅效果半径（blocks；MC 1.0 dSq<16 原值）
+    static constexpr float kSplashTickFloorSec  = 0.05f; // 喷溅时长 +1 tick 底数（MC 1.0 int(d×d1)+1 秒化）
     // t1100 效果粒子发射周期（机制等价 MC 药水旋涡粒子近似节奏；简化口径登记见 tickImpl 发射点注释）。
     static constexpr float kEffectParticleIntervalSec = 0.5f;
     // 中键拾取方块（t37 pick block）：取当前射线命中格的方块 id → 装入 hotbar。仅指针捕获时生效
