@@ -14,6 +14,24 @@
 //   NEG-2 = 摘 finishEating 延长分流链（t1100 六行 else-if）→ 恰红 = {r2070b}（延长秒数断言全失；
 //     isDrinkableItem 早退面不在摘除面 → 饮用仍消耗/返瓶/发 potionDrunk，唯效果时长面失）；a / c /
 //     d（源钉不钉分流链 = 豁免面）均不受影响。
+// t1101 喷溅药水（+4 腿 r2071a-d，置尾追加；矩阵 820→824）：火药三级酿造 + 投掷弹丸 + 范围效果结算。
+//   NEG 面与豁免设计（恰红归因先于腿文）：
+//   NEG-1 = 摘火药映射（brewingstore.cpp brewResult 火药门行 + splashPotionResult 本体一并摘——函数仅
+//     gate 行一处调用、.h 声明幸存 → 编译仍绿）→ 恰红 = {r2071a}（静态表火药对 + 真驱转换断言全失；
+//     摘面不含 isDrinkableItem / isSplashPotionItem → 饮面回归断言幸存绿）；b（投掷/半径，不经酿造）/
+//     c（applySplashPotion 直调，静态映射族不在摘面）/ d（源钉不钉 gate 行与小表体 = 豁免面，只钉
+//     .h 声明）均不受影响。
+//   NEG-2 = 摘范围结算面（playercontroller.cpp applySplashPotion 本体的半径判定 + applyStatusEffect
+//     结算尾段摘除——Q_INVOKABLE 声明 / splashEffectType / splashBaseSeconds 静态映射族幸存 → 编译
+//     仍绿）→ 恰红 = {r2071b, r2071c}（b 真链半径注入断言 + c 直调注入断言全失；两腿的碎裂/信号/
+//     静态映射断言不在摘面、各自部分幸存但腿体判 FAIL）；a / d（源钉不钉函数体 = 豁免面）均不受
+//     影响。
+//
+// 任务契约：§14 池底重盘压轴大件最后一轮（机制等价 MC 1.0 splash potion；wiki 2026 实读口径：火药 +
+//   成品药水 → 喷溅版（基础 6 + 延长 6 = 12 id 段尾追加 0x27B..0x286）；触地点半径 4 格（dSq<16）+
+//   邻近线性衰减 d1 = 1 − dist/4 + 时长 int(ticks×d1)+1（秒化 = d1×base + 0.05）——喷溅时长 ≠ 饮用时长；
+//   喷溅版不可饮不可再酿；即时效果喷溅 / modifier 对喷溅再酿候选池登记）。mob 侧范围面如实降级
+//   候选池（核实裁定：本工程 mob 无通用效果注入系统，仅 slowTimer/fireTimer 硬编码面——禁硬造）。
 //
 // 任务契约：§14 池底重盘压轴大件第一轮（机制等价 MC 1.0 brewing stand + 药水基础链；wiki 2026 实读
 //   口径：燃料 = 烈焰粉 1 粉 20 次 / 单次 400 ticks = 20s / 一次转换所有合格瓶位、瓶原位变换；基础链 =
@@ -1548,8 +1566,571 @@ void MatrixRun::section67_brewing()
                " extended calibers with the round-one and round-two families intact, the name face palette"
                " tail and icon cases and max stack 64 hold, the secondary table declaration and the"
                " drinkable extension face and the presentation signal family hold at source, the audio"
-               " clips and the qml routing face hold, and the neighbouring round-two instant-health row"
-               " and the ember strength row and the magma name are untouched)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── r2071a：火药三级酿造转换行为柱（静态表 12 对 + 负例族 + 真驱一条 + 饮面回归；NEG-1 敏感面）──
+    //   NEG-1（摘 brewingstore.cpp 火药门行 + splashPotionResult 本体）→ 恰红 = {r2071a}：静态表
+    //   12 对断言 + 真驱转换断言全失（饮面回归断言 isDrinkableItem 面不在摘面 → 幸存绿；本腿以
+    //   t1/t3 两段失 FAIL）；b / c（不经酿造转换）/ d（源钉豁免面）均不受影响。
+    runLeg("r2071a gunpowder tertiary brewing conversion behavior column (the brew table maps"
+        " gunpowder acting on each of the six finished effect potions to its splash variant and on"
+        " each of the six extended potions to its extended splash variant, gunpowder on a water"
+        " bottle or an awkward potion or the instant health potion or an already splash potion or a"
+        " zero bottle answers zero with redstone and every other ingredient on splash potions"
+        " answering zero too, a placed brewing stand driven through a full twenty-second cycle"
+        " converts a speed potion to its splash variant on the ember powder fuel meter, and none of"
+        " the twelve splash ids is a drinkable item while all twelve answer the splash predicate)",
+        [&]() {
+        bool ok = true;
+        QString diag;
+        // (1) 静态表：火药 × 12 成品 → 喷溅版（统一经 brewResult 单一入口）。
+        const bool t1 =
+            BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::SpeedPotionId) == RecipeRegistry::SplashSpeedPotionId
+            && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::StrengthPotionId) == RecipeRegistry::SplashStrengthPotionId
+            && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::FireResistancePotionId) == RecipeRegistry::SplashFireResistancePotionId
+            && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::RegenerationPotionId) == RecipeRegistry::SplashRegenerationPotionId
+            && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::PoisonPotionId) == RecipeRegistry::SplashPoisonPotionId
+            && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::WeaknessPotionId) == RecipeRegistry::SplashWeaknessPotionId
+            && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::ExtendedSpeedPotionId) == RecipeRegistry::SplashExtendedSpeedPotionId
+            && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::ExtendedStrengthPotionId) == RecipeRegistry::SplashExtendedStrengthPotionId
+            && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::ExtendedFireResistancePotionId) == RecipeRegistry::SplashExtendedFireResistancePotionId
+            && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::ExtendedRegenerationPotionId) == RecipeRegistry::SplashExtendedRegenerationPotionId
+            && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::ExtendedPoisonPotionId) == RecipeRegistry::SplashExtendedPoisonPotionId
+            && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::ExtendedWeaknessPotionId) == RecipeRegistry::SplashExtendedWeaknessPotionId;
+        // (2) 负例族：火药 × {水 / 粗制 / 瞬间治疗 / 喷溅再酿 / 零瓶} → 0；红石 / 他料 × 喷溅版 → 0。
+        const bool t2 =
+            BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::WaterBottleId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::AwkwardPotionId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::InstantHealthPotionId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::SplashSpeedPotionId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::SplashExtendedWeaknessPotionId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::GunpowderId, 0) == 0
+            && BrewingStore::brewResult(RecipeRegistry::RedstoneId, RecipeRegistry::SplashSpeedPotionId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::RedstoneId, RecipeRegistry::SplashExtendedFireResistancePotionId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::SugarId, RecipeRegistry::SplashWeaknessPotionId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::AshWartId, RecipeRegistry::SplashExtendedSpeedPotionId) == 0;
+        ok = ok && t1 && t2;
+        if (!(t1 && t2)) diag += QStringLiteral("[table t1=%1 t2=%2]").arg(t1).arg(t2);
+        // (3) 真驱转换：迅捷药水 + 火药 + 燃烬粉 → 20s 一轮 → 喷溅迅捷 + 耗 1 原料 + 计量 -1。
+        World w;
+        initFixedBrewWorld(w);
+        layBrewPlatform(w, 20, 30, 20, 30);
+        PlayerController pc;
+        pc.setWorld(&w);
+        BrewingStore store;
+        pc.setBrewingStore(&store);
+        const int bxp = 24, byp = 81, bzp = 24;
+        w.setBlock(bxp, byp, bzp, BR::BrewingStand, 0);
+        store.setSlot(bxp, byp, bzp, BrewingStore::kSlotPotion0, RecipeRegistry::SpeedPotionId, 1);
+        store.setSlot(bxp, byp, bzp, BrewingStore::kSlotIngredient, RecipeRegistry::GunpowderId, 1);
+        store.setSlot(bxp, byp, bzp, BrewingStore::kSlotFuel, RecipeRegistry::BlazePowderId, 1);
+        const int steps = int(20.6 / 0.05);
+        for (int i = 0; i < steps; ++i) pc.scanBrewingStands(0.05f);
+        const bool driven = store.slotIdAt(bxp, byp, bzp, BrewingStore::kSlotPotion0) == RecipeRegistry::SplashSpeedPotionId
+                            && store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotIngredient) == 0
+                            && store.fuelOpsAt(bxp, byp, bzp) == BrewingStore::kPowderFuelOps - 1;
+        ok = ok && driven;
+        if (!driven) diag += QStringLiteral("[driven id=%1 ing=%2 ops=%3]")
+                                  .arg(store.slotIdAt(bxp, byp, bzp, BrewingStore::kSlotPotion0))
+                                  .arg(store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotIngredient))
+                                  .arg(store.fuelOpsAt(bxp, byp, bzp));
+        // (4) 饮面回归（NEG-1 幸存面）：12 喷溅 id 全部不可饮 + 全部命中喷溅谓词（互斥即饮面回归）。
+        const int splashIds[12] = {
+            RecipeRegistry::SplashSpeedPotionId, RecipeRegistry::SplashStrengthPotionId,
+            RecipeRegistry::SplashFireResistancePotionId, RecipeRegistry::SplashRegenerationPotionId,
+            RecipeRegistry::SplashPoisonPotionId, RecipeRegistry::SplashWeaknessPotionId,
+            RecipeRegistry::SplashExtendedSpeedPotionId, RecipeRegistry::SplashExtendedStrengthPotionId,
+            RecipeRegistry::SplashExtendedFireResistancePotionId, RecipeRegistry::SplashExtendedRegenerationPotionId,
+            RecipeRegistry::SplashExtendedPoisonPotionId, RecipeRegistry::SplashExtendedWeaknessPotionId };
+        bool drinkNeg = true, predPos = true;
+        for (int i = 0; i < 12; ++i) {
+            if (PlayerController::isDrinkableItem(splashIds[i])) drinkNeg = false;
+            if (!PlayerController::isSplashPotionItem(splashIds[i])) predPos = false;
+        }
+        ok = ok && drinkNeg && predPos;
+        if (!(drinkNeg && predPos))
+            diag += QStringLiteral("[drink drinkNeg=%1 predPos=%2]").arg(drinkNeg).arg(predPos);
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2071a gunpowder tertiary brewing conversion behavior column (the brew table maps"
+               " gunpowder acting on each of the six finished effect potions to its splash variant and on"
+               " each of the six extended potions to its extended splash variant, gunpowder on a water"
+               " bottle or an awkward potion or the instant health potion or an already splash potion or a"
+               " zero bottle answers zero with redstone and every other ingredient on splash potions"
+               " answering zero too, a placed brewing stand driven through a full twenty-second cycle"
+               " converts a speed potion to its splash variant on the ember powder fuel meter, and none of"
+               " the twelve splash ids is a drinkable item while all twelve answer the splash predicate)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── r2071b：投掷链真 rig + 范围注入柱（NEG-2 敏感面：真链半径注入断言）────────────────────────
+    //   NEG-2（摘 applySplashPotion 本体半径判定 + 结算尾段）→ 恰红 = {r2071b, r2071c}：本腿链 C
+    //   近距注入断言全失（链 A 投掷 / 碎裂信号 / 消耗断言不在摘面 → 幸存，唯效果面失 → 腿体 FAIL）。
+    //   链 B 出圈无注入（NEG-2 下恒绿——无效果即断言面）。a / d 不受影响。
+    runLeg("r2071b splash bottle throw chain and radius injection column (a real creative throw"
+        " spawns a SplashBottle entity carrying the splash speed potion id whose shatter on the"
+        " stone platform emits exactly one splashBottleBreak signal with the carried item id, the"
+        " follow-up survival throw consumes exactly one bottle, a survival player standing at the"
+        " impact cell receives the speed effect through the mirrored presentation routing at the"
+        " proximity-decayed caliber while a survival player four-plus blocks away receives nothing,"
+        " and a zero-item throw entry is impossible because the hotbar held item gates the branch)",
+        [&]() {
+        bool ok = true;
+        QString diag;
+        World w;
+        initFixedBrewWorld(w);
+        layBrewPlatform(w, 18, 44, 18, 30);
+        EntityManager ents;
+        Hotbar hb;
+        PlayerController pc;
+        const QVector3D farL(-1000.0f, 10.0f, -1000.0f);
+        const auto pumpFor = [](int ms) {
+            QElapsedTimer t; t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        pc.setWorld(&w);
+        pc.setEntityManager(&ents);
+        pc.setHotbar(&hb);
+        QQuickWindow probeWin;
+        pc.setParentItem(probeWin.contentItem());
+        pc.grab();
+        pc.setSelectedBlock(int(BR::Air)); // 材料段物品真实接线（t1030 rig 纪律）
+        // 呈现层消费端镜像（t799 教训：真链语义由消费端动作完成——Main.qml onSplashBottleBreak 三面
+        //   中机制面 = applySplashPotion；粒子 / 音频为呈现侧 rig 无消费面）。
+        int breakCount = 0, breakX = -1, breakY = -1, breakZ = -1, breakItem = -1;
+        int snapSpeedCount = 0, snapSpeedSecs = -1, snapSpeedLvl = -1;
+        QObject::connect(&ents, &EntityManager::splashBottleBreak, &pc,
+                         [&](int x, int y, int z, int itemId) {
+                             ++breakCount; breakX = x; breakY = y; breakZ = z; breakItem = itemId;
+                             pc.applySplashPotion(x, y, z, itemId); // 镜像 Main.qml 路由（Game 层结算）
+                         });
+        QObject::connect(&pc, &PlayerController::activeEffectsChanged, &pc,
+                         [&](const QVariantList &l) {
+                             for (const QVariant &v : l) {
+                                 const QVariantMap m = v.toMap();
+                                 if (m.value(QStringLiteral("type")).toInt() == int(PlayerState::EffectSpeed)) {
+                                     ++snapSpeedCount;
+                                     if (snapSpeedSecs < 0) {
+                                         snapSpeedSecs = m.value(QStringLiteral("seconds")).toInt();
+                                         snapSpeedLvl = m.value(QStringLiteral("level")).toInt();
+                                     }
+                                 }
+                             }
+                         });
+        // 链 A：创造投掷（真 placeBlock 入口）——实体 + 载荷 + 挥手 + 创造不耗。
+        hb.setStack(0, RecipeRegistry::SplashSpeedPotionId, 5, 0);
+        hb.setSelectedSlot(0);
+        const QVector3D feet(24.5f, 81.0f, 24.5f);
+        const QVector3D look(1.0f, 0.0f, 0.0f);
+        pc.loadSavedState(feet.x(), feet.y(), feet.z(),
+                          qRadiansToDegrees(std::atan2(-look.x(), -look.z())), 0.0f, 1 /* Creative */);
+        pumpFor(17);
+        pc.tick();
+        int swingSeen = 0;
+        QObject::connect(&pc, &PlayerController::swingArm, &pc, [&]() { ++swingSeen; });
+        pc.placeBlock(); // 右键投掷（创造）
+        int slot = -1;
+        for (int i = 0; i < ents.count(); ++i)
+            if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::SplashBottle)) { slot = i; break; }
+        const bool thrownOk = slot >= 0
+                              && ents.blockIdAt(slot) == RecipeRegistry::SplashSpeedPotionId // 载荷 = 喷溅 id
+                              && hb.blockIdAt(0) == RecipeRegistry::SplashSpeedPotionId
+                              && hb.countAt(0) == 5 /* 创造不耗 */ && swingSeen >= 1;
+        ok = ok && thrownOk;
+        if (!thrownOk)
+            diag += QStringLiteral("[throw slot=%1 payload=%2 id=%3 n=%4 swing=%5]")
+                        .arg(slot).arg(slot >= 0 ? ents.blockIdAt(slot) : -1)
+                        .arg(hb.blockIdAt(0)).arg(hb.countAt(0)).arg(swingSeen);
+        // 端到端触地碎（创造链这枚，水平掷出 ~7 tick 触坪）：恰一次 + 载荷原样 + 命中行 = 坪行。
+        bool brokeOk = false;
+        for (int t = 0; t < 40 && !brokeOk; ++t) {
+            ents.tick(0.05f, &w, farL, 0.3f, 1.8f, false);
+            brokeOk = breakCount == 1;
+        }
+        const bool shatterOk = brokeOk && breakItem == RecipeRegistry::SplashSpeedPotionId
+                               && breakY == 80 && !ents.aliveAt(slot);
+        ok = ok && shatterOk;
+        if (!shatterOk)
+            diag += QStringLiteral("[shatter n=%1 item=%2 y=%3 alive=%4]")
+                        .arg(breakCount).arg(breakItem).arg(breakY)
+                        .arg(slot >= 0 ? ents.aliveAt(slot) : false);
+        // 链 A2：生存重掷（越过放置 CD）——消耗 1 瓶 + 新瓶存在（t256 slot-reuse：不可按 count 断言）。
+        hb.setStack(0, RecipeRegistry::SplashSpeedPotionId, 5, 0);
+        pc.loadSavedState(feet.x(), feet.y(), feet.z(),
+                          qRadiansToDegrees(std::atan2(-look.x(), -look.z())), 0.0f, 2 /* Survival */);
+        pumpFor(320);
+        pc.tick();
+        pc.placeBlock();
+        int slot2 = -1;
+        for (int i = 0; i < ents.count(); ++i)
+            if (ents.aliveAt(i) && ents.kindAt(i) == int(EntityManager::SplashBottle)) { slot2 = i; break; }
+        const bool survivalConsumed = hb.blockIdAt(0) == RecipeRegistry::SplashSpeedPotionId
+                                      && hb.countAt(0) == 4 && slot2 >= 0;
+        ok = ok && survivalConsumed;
+        if (!survivalConsumed)
+            diag += QStringLiteral("[surv cnt=%1 slot=%2]").arg(hb.countAt(0)).arg(slot2);
+        // A2 瓶清场驱动（链间隔离：在飞瓶不驱尽会抢先撞坪发碎裂信号污染链 B 的「下一碎」归因——
+        //   实测 A2 水平瓶落 (29,80,24) 先于链 B 直落瓶；其镜像 applySplashPotion 距 5.02 出圈 no-op，
+        //   不污染效果快照）。
+        const int breakAfterA2 = breakCount;
+        for (int t = 0; t < 100 && breakCount == breakAfterA2; ++t)
+            ents.tick(0.05f, &w, farL, 0.3f, 1.8f, false);
+        // 链 B（生存近距注入）：玩家坪心（脚位 24.5,81,24.5），瓶直落 (24.5,85,24.5) → 碎于
+        //   (24,80,24)，命中格中心距脚位 0.5 → d1=0.875 → 秒 = 0.875×180+0.05 = 157.55 → 快照 ceil
+        //   158（首拍闩存带 ±1 容差防 dt 相位毛刺）。镜像路由已挂（链 A 创造态 no-op 不污染）。
+        hb.setStack(0, RecipeRegistry::SplashSpeedPotionId, 5, 0);
+        pc.loadSavedState(feet.x(), feet.y(), feet.z(),
+                          qRadiansToDegrees(std::atan2(-look.x(), -look.z())), 0.0f, 2 /* Survival */);
+        pumpFor(320);
+        pc.tick();
+        const int b3 = ents.spawnSplashBottle(QVector3D(24.5f, 85.0f, 24.5f), QVector3D(0.0f, -6.0f, 0.0f),
+                                              RecipeRegistry::SplashSpeedPotionId);
+        const int breakBase = breakCount;
+        for (int t = 0; t < 100 && breakCount == breakBase; ++t)
+            ents.tick(0.05f, &w, farL, 0.3f, 1.8f, false);
+        pc.tick(); // 一帧推进 → 快照发出（速度 157.55 → ceil 158）
+        const bool closeInject = b3 >= 0 && breakCount == breakBase + 1
+                                 && breakX == 24 && breakY == 80 && breakZ == 24
+                                 && snapSpeedSecs >= 157 && snapSpeedSecs <= 159
+                                 && snapSpeedLvl == 1;
+        ok = ok && closeInject;
+        if (!closeInject)
+            diag += QStringLiteral("[close b=%1 n=%2 cell=%3,%4,%5 secs=%6 lvl=%7]")
+                        .arg(b3).arg(breakCount - breakBase).arg(breakX).arg(breakY).arg(breakZ)
+                        .arg(snapSpeedSecs).arg(snapSpeedLvl);
+
+        probeWin.deleteLater();
+        pc.release();
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2071b splash bottle throw chain and radius injection column (a real creative throw"
+               " spawns a SplashBottle entity carrying the splash speed potion id whose shatter on the"
+               " stone platform emits exactly one splashBottleBreak signal with the carried item id, the"
+               " follow-up survival throw consumes exactly one bottle, a survival player standing at the"
+               " impact cell receives the speed effect through the mirrored presentation routing at the"
+               " proximity-decayed caliber while a survival player four-plus blocks away receives nothing,"
+               " and a zero-item throw entry is impossible because the hotbar held item gates the branch)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── r2071c：范围结算直调柱（静态映射 12 对 + 半径 / 衰减 / 出圈 + 创造门；NEG-2 敏感面）─────────
+    //   NEG-2（摘 applySplashPotion 结算尾段）→ 恰红 = {r2071c, r2071b}：注入断言全失；静态映射
+    //   （splashEffectType / splashBaseSeconds）不在摘面 → 幸存绿（腿体因注入段 FAIL）。
+    //   时长口径（dist=0.5 → d1=0.875）：speed 157.55→ceil 158 / regen 39.425→40 / weakness 78.8→79 /
+    //   ext poison 78.8→79（dt≤0.05 窗内恒定，快照首拍闩存）；ext speed 420.05 落整数边界 → 带宽
+    //   [420..421]。中距（dist=√9.25≈3.04 → d1≈0.240）：43.19→44。出圈（dist≥4.03）→ 零注入。
+    runLeg("r2071c splash resolution direct-drive column (the effect type map sends each of the"
+        " twelve splash ids to its status effect and the base seconds map holds the drinkable"
+        " calibers one-eighty forty-five forty-five ninety and the extended four-eighty ninety"
+        " ninety two-forty, a survival player at half a block from the impact cell receives the"
+        " proximity-decayed speed regeneration weakness and extended poison calibers and the"
+        " extended speed band, a mid-distance impact decays to the forty-four-second band, impacts"
+        " at and beyond the four-block radius inject nothing, and a creative controller receives"
+        " nothing at point-blank)", [&]() {
+        bool ok = true;
+        QString diag;
+        // (1) 静态映射 12 对（effect 枚举 + 基础秒数；NEG-2 幸存面）。
+        const bool typeMap =
+            PlayerController::splashEffectType(RecipeRegistry::SplashSpeedPotionId) == int(PlayerState::EffectSpeed)
+            && PlayerController::splashEffectType(RecipeRegistry::SplashStrengthPotionId) == int(PlayerState::EffectStrength)
+            && PlayerController::splashEffectType(RecipeRegistry::SplashFireResistancePotionId) == int(PlayerState::EffectFireResistance)
+            && PlayerController::splashEffectType(RecipeRegistry::SplashRegenerationPotionId) == int(PlayerState::EffectRegeneration)
+            && PlayerController::splashEffectType(RecipeRegistry::SplashPoisonPotionId) == int(PlayerState::EffectPoison)
+            && PlayerController::splashEffectType(RecipeRegistry::SplashWeaknessPotionId) == int(PlayerState::EffectWeakness)
+            && PlayerController::splashEffectType(RecipeRegistry::SplashExtendedSpeedPotionId) == int(PlayerState::EffectSpeed)
+            && PlayerController::splashEffectType(RecipeRegistry::SplashExtendedStrengthPotionId) == int(PlayerState::EffectStrength)
+            && PlayerController::splashEffectType(RecipeRegistry::SplashExtendedFireResistancePotionId) == int(PlayerState::EffectFireResistance)
+            && PlayerController::splashEffectType(RecipeRegistry::SplashExtendedRegenerationPotionId) == int(PlayerState::EffectRegeneration)
+            && PlayerController::splashEffectType(RecipeRegistry::SplashExtendedPoisonPotionId) == int(PlayerState::EffectPoison)
+            && PlayerController::splashEffectType(RecipeRegistry::SplashExtendedWeaknessPotionId) == int(PlayerState::EffectWeakness)
+            && PlayerController::splashEffectType(RecipeRegistry::SpeedPotionId) == 0; // 非喷溅 id → 0
+        const bool secsMap =
+            PlayerController::splashBaseSeconds(RecipeRegistry::SplashSpeedPotionId) == 180.0f
+            && PlayerController::splashBaseSeconds(RecipeRegistry::SplashStrengthPotionId) == 180.0f
+            && PlayerController::splashBaseSeconds(RecipeRegistry::SplashFireResistancePotionId) == 180.0f
+            && PlayerController::splashBaseSeconds(RecipeRegistry::SplashRegenerationPotionId) == 45.0f
+            && PlayerController::splashBaseSeconds(RecipeRegistry::SplashPoisonPotionId) == 45.0f
+            && PlayerController::splashBaseSeconds(RecipeRegistry::SplashWeaknessPotionId) == 90.0f
+            && PlayerController::splashBaseSeconds(RecipeRegistry::SplashExtendedSpeedPotionId) == 480.0f
+            && PlayerController::splashBaseSeconds(RecipeRegistry::SplashExtendedStrengthPotionId) == 480.0f
+            && PlayerController::splashBaseSeconds(RecipeRegistry::SplashExtendedFireResistancePotionId) == 480.0f
+            && PlayerController::splashBaseSeconds(RecipeRegistry::SplashExtendedRegenerationPotionId) == 90.0f
+            && PlayerController::splashBaseSeconds(RecipeRegistry::SplashExtendedPoisonPotionId) == 90.0f
+            && PlayerController::splashBaseSeconds(RecipeRegistry::SplashExtendedWeaknessPotionId) == 240.0f
+            && PlayerController::splashBaseSeconds(RecipeRegistry::WeaknessPotionId) == 0.0f; // 非喷溅 id → 0
+        ok = ok && typeMap && secsMap;
+        if (!(typeMap && secsMap)) diag += QStringLiteral("[map type=%1 secs=%2]").arg(typeMap).arg(secsMap);
+        // (2) 直调注入 rig：玩家坪心 (24.5,81,24.5)（脚位），命中格 (24,80,24) 中心 = 脚下 0.5。
+        World w;
+        initFixedBrewWorld(w);
+        layBrewPlatform(w, 18, 44, 18, 30);
+        PlayerController pc;
+        pc.setWorld(&w);
+        int spdSecs = -1, spdLvl = -1, regSecs = -1, regLvl = -1;
+        int wkSecs = -1, wkLvl = -1, poSecs = -1, poLvl = -1, spd2Secs = -1;
+        QObject::connect(&pc, &PlayerController::activeEffectsChanged, &pc, [&](const QVariantList &l) {
+            for (const QVariant &v : l) {
+                const QVariantMap m = v.toMap();
+                const int ty = m.value(QStringLiteral("type")).toInt();
+                const int sc = m.value(QStringLiteral("seconds")).toInt();
+                const int lv = m.value(QStringLiteral("level")).toInt();
+                // 速度快照逐次闩存（链间 clearStatusEffects 置空快照 → 速度项仅在各自注入沿出现）：
+                //   第 1 次 = 近距迅捷（158），第 2 次 = 延长迅捷带（420..421）；中距第 3 次不再闩。
+                if (ty == int(PlayerState::EffectSpeed)) {
+                    if (spdSecs < 0) { spdSecs = sc; spdLvl = lv; }
+                    else if (spd2Secs < 0) spd2Secs = sc;
+                }
+                if (ty == int(PlayerState::EffectRegeneration) && regSecs < 0) { regSecs = sc; regLvl = lv; }
+                if (ty == int(PlayerState::EffectWeakness) && wkSecs < 0) { wkSecs = sc; wkLvl = lv; }
+                if (ty == int(PlayerState::EffectPoison) && poSecs < 0) { poSecs = sc; poLvl = lv; }
+            }
+        });
+        pc.loadSavedState(24.5, 81.0, 24.5, 0.0, 0.0, 2 /* Survival */);
+        pc.tick(); // 基线拍（空快照基线建立）
+        // 逐例驱动：applySplashPotion → tick 出快照 → 闩存 → 清效果 → tick 归零（链间隔离）。
+        const auto driveCase = [&](int itemId, int cx, int cy, int cz) {
+            pc.applySplashPotion(cx, cy, cz, itemId);
+            pc.tick();
+            pc.clearStatusEffects();
+            pc.tick();
+        };
+        // 近距 0.5（d1=0.875）：迅捷 158 / 再生 40 / 虚弱 79 / 延长中毒 79 / 延长迅捷带 [420..421]。
+        driveCase(RecipeRegistry::SplashSpeedPotionId, 24, 80, 24);
+        driveCase(RecipeRegistry::SplashRegenerationPotionId, 24, 80, 24);
+        driveCase(RecipeRegistry::SplashWeaknessPotionId, 24, 80, 24);
+        driveCase(RecipeRegistry::SplashExtendedPoisonPotionId, 24, 80, 24);
+        driveCase(RecipeRegistry::SplashExtendedSpeedPotionId, 24, 80, 24);
+        // 中距（格 (27,80,24) 中心距脚位 √9.25≈3.04 → d1≈0.240 → 43.19 → ceil 44）。
+        driveCase(RecipeRegistry::SplashSpeedPotionId, 27, 80, 24);
+        const bool calibers = spdSecs == 158 && spdLvl == 1
+                              && regSecs == 40 && regLvl == 1
+                              && wkSecs == 79 && wkLvl == 1
+                              && poSecs == 79 && poLvl == 1
+                              && spd2Secs >= 420 && spd2Secs <= 421;
+        ok = ok && calibers;
+        if (!calibers)
+            diag += QStringLiteral("[cal spd=%1/%2 reg=%3/%4 wk=%5/%6 po=%7/%8 spd2=%9]")
+                        .arg(spdSecs).arg(spdLvl).arg(regSecs).arg(regLvl)
+                        .arg(wkSecs).arg(wkLvl).arg(poSecs).arg(poLvl).arg(spd2Secs);
+        // (3) 出圈负例（dist ≥ 4.03 ≥ 半径 4.0）：近圈外沿 (28,80,24)（dist=√16.25≈4.03）与远圈
+        //   (30,80,24)（dist≈6.02）→ 零注入（fresh pc2 隔离，防链间闩存串扰）。
+        World w2;
+        initFixedBrewWorld(w2);
+        layBrewPlatform(w2, 18, 44, 18, 30);
+        PlayerController pc2;
+        pc2.setWorld(&w2);
+        bool pc2Seen = false;
+        QObject::connect(&pc2, &PlayerController::activeEffectsChanged, &pc2, [&](const QVariantList &l) {
+            for (const QVariant &v : l)
+                if (v.toMap().value(QStringLiteral("type")).toInt() == int(PlayerState::EffectSpeed))
+                    pc2Seen = true;
+        });
+        pc2.loadSavedState(24.5, 81.0, 24.5, 0.0, 0.0, 2 /* Survival */);
+        pc2.tick();
+        pc2.applySplashPotion(28, 80, 24, RecipeRegistry::SplashSpeedPotionId);
+        pc2.tick();
+        pc2.applySplashPotion(30, 80, 24, RecipeRegistry::SplashExtendedStrengthPotionId);
+        pc2.tick();
+        ok = ok && !pc2Seen;
+        if (pc2Seen) diag += QStringLiteral("[outrange seen=1]");
+        // (4) 创造门（点脸命中 → 无效果；applyStatusEffect Survival 门内置同源）。
+        pc2.setMode(PlayerController::Creative);
+        pc2.applySplashPotion(24, 80, 24, RecipeRegistry::SplashSpeedPotionId);
+        pc2.tick();
+        ok = ok && !pc2Seen;
+        if (pc2Seen) diag += QStringLiteral("[creative seen=1]");
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2071c splash resolution direct-drive column (the effect type map sends each of the"
+               " twelve splash ids to its status effect and the base seconds map holds the drinkable"
+               " calibers one-eighty forty-five forty-five ninety and the extended four-eighty ninety"
+               " ninety two-forty, a survival player at half a block from the impact cell receives the"
+               " proximity-decayed speed regeneration weakness and extended poison calibers and the"
+               " extended speed band, a mid-distance impact decays to the forty-four-second band, impacts"
+               " at and beyond the four-block radius inject nothing, and a creative controller receives"
+               " nothing at point-blank)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── r2071d：喷溅族结构钉（id 段位 + Kind 尾追加 + 常量 + 呈现三面 + 源钉族 + 相邻族零污染）──────
+    //   源钉 NEG 豁免面（t1100 同款设计）：不钉 brewResult 火药门行 / splashPotionResult 小表体
+    //   （NEG-1 触达面）与 applySplashPotion 本体（NEG-2 触达面），保「恰红」单腿归因；映射 / 结算
+    //   只钉声明与常量面（摘体不摘声明 → 编译仍绿、钉面幸存）。
+    runLeg("r2071d structure pins (the twelve splash potions sit at 0x27B through 0x286 as a tail"
+        " append right after ExtendedWeaknessPotionId 0x27A with the round-two family and the instant"
+        " health potion untouched, the SplashBottle kind appends after GlimmerBottle, the splash"
+        " radius and tick-floor constants hold at the MC 1.0 calibers with the drinkable duration"
+        " families intact, the name face palette tail and icon cases and max stack 64 on both layers"
+        " hold, the full wiring source pin family holds across the brewing mapping declaration and"
+        " the entity spawn and break emission and the throw entry and the qml routing and delegate"
+        " and icon cases and the particle burst and the audio declaration and the sound asset and"
+        " generator rows, and the neighbouring glimmer emission and extended table row and 0x27A icon"
+        " and drinkable tail are untouched)", [&]() {
+        bool ok = true;
+        QString diag;
+        // (1) id 段位（12 连段尾追加 + 邻接族原值）+ Kind 尾追加。
+        const bool ids = RecipeRegistry::SplashSpeedPotionId == 0x27B
+                         && RecipeRegistry::SplashStrengthPotionId == 0x27C
+                         && RecipeRegistry::SplashFireResistancePotionId == 0x27D
+                         && RecipeRegistry::SplashRegenerationPotionId == 0x27E
+                         && RecipeRegistry::SplashPoisonPotionId == 0x27F
+                         && RecipeRegistry::SplashWeaknessPotionId == 0x280
+                         && RecipeRegistry::SplashExtendedSpeedPotionId == 0x281
+                         && RecipeRegistry::SplashExtendedStrengthPotionId == 0x282
+                         && RecipeRegistry::SplashExtendedFireResistancePotionId == 0x283
+                         && RecipeRegistry::SplashExtendedRegenerationPotionId == 0x284
+                         && RecipeRegistry::SplashExtendedPoisonPotionId == 0x285
+                         && RecipeRegistry::SplashExtendedWeaknessPotionId == 0x286
+                         && RecipeRegistry::ExtendedWeaknessPotionId == 0x27A
+                         && RecipeRegistry::InstantHealthPotionId == 0x274
+                         && RecipeRegistry::SugarId == 0x26A
+                         && RecipeRegistry::GlimmerBottleId == 0x263
+                         && int(EntityManager::SplashBottle) == int(EntityManager::GlimmerBottle) + 1;
+        ok = ok && ids;
+        if (!ids) diag += QStringLiteral("[ids]");
+        // (2) 常量族（t1101 两新 + 既有饮用时长族 / 酿造常量族不动）。
+        const bool consts = PlayerController::kSplashRadiusBlocks == 4.0f
+                            && PlayerController::kSplashTickFloorSec == 0.05f
+                            && PlayerController::kPotionDurationSec == 180.0f
+                            && PlayerController::kRegenPotionDurationSec == 45.0f
+                            && PlayerController::kPoisonPotionDurationSec == 45.0f
+                            && PlayerController::kWeaknessDurationSec == 90.0f
+                            && PlayerController::kExtPotionDurationSec == 480.0f
+                            && PlayerController::kRegenExtPotionDurationSec == 90.0f
+                            && PlayerController::kPoisonExtPotionDurationSec == 90.0f
+                            && PlayerController::kWeaknessExtDurationSec == 240.0f
+                            && PlayerController::kInstantHealthHealHp == 4
+                            && BrewingStore::kPowderFuelOps == 20
+                            && BrewingStore::kBrewSecs == 20.0;
+        ok = ok && consts;
+        if (!consts) diag += QStringLiteral("[consts]");
+        // (3) 呈现面：名面十二件 + 调色板尾十二连（延长族 0x27A 后连续）+ maxStack 双层面 64 + 材料段判定。
+        Hotbar hb;
+        const bool nameOk = hb.nameForBlock(RecipeRegistry::SplashSpeedPotionId) == QStringLiteral("喷溅迅捷药水")
+                            && hb.nameForBlock(RecipeRegistry::SplashStrengthPotionId) == QStringLiteral("喷溅力量药水")
+                            && hb.nameForBlock(RecipeRegistry::SplashFireResistancePotionId) == QStringLiteral("喷溅火抗药水")
+                            && hb.nameForBlock(RecipeRegistry::SplashRegenerationPotionId) == QStringLiteral("喷溅再生药水")
+                            && hb.nameForBlock(RecipeRegistry::SplashPoisonPotionId) == QStringLiteral("喷溅中毒药水")
+                            && hb.nameForBlock(RecipeRegistry::SplashWeaknessPotionId) == QStringLiteral("喷溅虚弱药水")
+                            && hb.nameForBlock(RecipeRegistry::SplashExtendedSpeedPotionId) == QStringLiteral("喷溅迅捷药水（延长）")
+                            && hb.nameForBlock(RecipeRegistry::SplashExtendedStrengthPotionId) == QStringLiteral("喷溅力量药水（延长）")
+                            && hb.nameForBlock(RecipeRegistry::SplashExtendedFireResistancePotionId) == QStringLiteral("喷溅火抗药水（延长）")
+                            && hb.nameForBlock(RecipeRegistry::SplashExtendedRegenerationPotionId) == QStringLiteral("喷溅再生药水（延长）")
+                            && hb.nameForBlock(RecipeRegistry::SplashExtendedPoisonPotionId) == QStringLiteral("喷溅中毒药水（延长）")
+                            && hb.nameForBlock(RecipeRegistry::SplashExtendedWeaknessPotionId) == QStringLiteral("喷溅虚弱药水（延长）");
+        const QVariantList mats = hb.creativeMaterials();
+        int lastExt = -1, firstSplash = -1, lastSplash = -1;
+        for (int i = 0; i < mats.size(); ++i) {
+            const int v = mats.at(i).toInt();
+            if (v == RecipeRegistry::ExtendedWeaknessPotionId) lastExt = i;
+            if (v == RecipeRegistry::SplashSpeedPotionId) firstSplash = i;
+            if (v == RecipeRegistry::SplashExtendedWeaknessPotionId) lastSplash = i;
+        }
+        const bool paletteOk = lastExt >= 0 && firstSplash == lastExt + 1 && lastSplash == firstSplash + 11;
+        const bool stackOk = hb.maxStackSize(RecipeRegistry::SplashSpeedPotionId) == 64
+                             && BR::maxStackSize(RecipeRegistry::SplashExtendedWeaknessPotionId) == 64
+                             && hb.isMaterial(RecipeRegistry::SplashRegenerationPotionId);
+        ok = ok && nameOk && paletteOk && stackOk;
+        if (!(nameOk && paletteOk && stackOk))
+            diag += QStringLiteral("[face name=%1 palette=%2/%3/%4 stack=%5]")
+                        .arg(nameOk).arg(lastExt).arg(firstSplash).arg(lastSplash).arg(stackOk);
+        // (4) 全链源钉族（剥注释 pinSet 锚真实语句；NEG 触达面全豁免）。
+        const QString srcRoot = QDir(QCoreApplication::applicationDirPath()
+            + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src"));
+        const QString rootDir = QDir(QCoreApplication::applicationDirPath()
+            + QStringLiteral("/..")).absolutePath();
+        const QStringList missRh = pinSet(srcRoot + QStringLiteral("/Game/recipe.h"), {
+            SrcPin("splash speed row", "static constexpr int SplashSpeedPotionId                = 0x27B;", 1),
+            SrcPin("splash ext weak row", "static constexpr int SplashExtendedWeaknessPotionId     = 0x286;", 1)});
+        const QStringList missRc = pinSet(srcRoot + QStringLiteral("/Game/recipe.cpp"), {
+            SrcPin("assert tail", "static_assert(RecipeRegistry::SplashSpeedPotionId                == 0x27B,", 1)});
+        const QStringList missBsH = pinSet(srcRoot + QStringLiteral("/Game/brewingstore.h"), {
+            SrcPin("splash decl", "static int splashPotionResult(int potionId);", 1)});
+        const QStringList missEmH = pinSet(srcRoot + QStringLiteral("/Entities/entitymanager.h"), {
+            SrcPin("spawn decl", "Q_INVOKABLE int spawnSplashBottle(const QVector3D &origin, const QVector3D &vel, int itemId);", 1),
+            SrcPin("kind enum tail append", "AbyssPearl, Bobber, GlimmerBottle, SplashBottle", 1),
+            SrcPin("break signal decl", "void splashBottleBreak(int x, int y, int z, int itemId);", 1),
+            SrcPin("lifetime const", "static constexpr float kSplashBottleLifetime   = 5.0f;", 1)});
+        const QStringList missEm = pinSet(srcRoot + QStringLiteral("/Entities/entitymanager.cpp"), {
+            SrcPin("spawn def unique", "int EntityManager::spawnSplashBottle(const QVector3D &origin, const QVector3D &vel, int itemId)", 1),
+            SrcPin("kind assignment", "e.kind = SplashBottle;", 1),
+            SrcPin("payload store", "e.blockId = itemId;", 1),
+            SrcPin("break emission", "emit splashBottleBreak(cellX, cellY, cellZ, bottleItemId);", 1)});
+        const QStringList missPcH = pinSet(srcRoot + QStringLiteral("/Game/playercontroller.h"), {
+            SrcPin("apply decl", "Q_INVOKABLE void applySplashPotion(int cx, int cy, int cz, int itemId);", 1),
+            SrcPin("predicate decl", "static bool isSplashPotionItem(int itemId);", 1),
+            SrcPin("type map decl", "Q_INVOKABLE static int splashEffectType(int itemId);", 1),
+            SrcPin("radius const", "static constexpr float kSplashRadiusBlocks  = 4.0f;", 1),
+            SrcPin("tickfloor const", "static constexpr float kSplashTickFloorSec  = 0.05f;", 1)});
+        const QStringList missPc = pinSet(srcRoot + QStringLiteral("/Game/playercontroller.cpp"), {
+            SrcPin("throw entry gate", "isSplashPotionItem(heldItemId)", 1),
+            SrcPin("throw spawn call", "spawnSplashBottle(origin, look * kPlayerSplashBottleSpeed, heldItemId)", 1),
+            SrcPin("throw speed constant", "constexpr float kPlayerSplashBottleSpeed = 12.0f;", 1)});
+        const QStringList missMq = pinSet(srcRoot + QStringLiteral("/ui/Main.qml"), {
+            SrcPin("break route", "function onSplashBottleBreak(x, y, z, itemId)", 1),
+            SrcPin("apply route", "player.applySplashPotion(x, y, z, itemId)", 1),
+            SrcPin("delegate kind gate", "entKind === EntityManager.SplashBottle", 1),
+            SrcPin("delegate icon id", "entityManager.blockIdAt(index)", 1)});
+        const QStringList missMi = pinSet(srcRoot + QStringLiteral("/ui/MaterialIcon.qml"), {
+            SrcPin("icon 27B", "case 0x27B: drawPotion(", 1),
+            SrcPin("icon 280", "case 0x280: drawPotion(", 1),
+            SrcPin("icon 286", "case 0x286: drawPotion(", 1)});
+        const QStringList missBp = pinSet(srcRoot + QStringLiteral("/ui/BlockParticles.qml"), {
+            SrcPin("splash burst fn", "function burstSplashPotion(x, y, z, effectType) {", 1)});
+        const QStringList missAmH = pinSet(srcRoot + QStringLiteral("/Audio/audiomanager.h"), {
+            SrcPin("break sound decl", "Q_INVOKABLE void playSplashBreak();", 1)});
+        const QStringList missHb = pinSet(srcRoot + QStringLiteral("/Game/hotbar.cpp"), {
+            SrcPin("name row", "return QStringLiteral(\"喷溅迅捷药水\")", 1),
+            SrcPin("palette row", "int(RecipeRegistry::SplashExtendedWeaknessPotionId)", 1)});
+        const bool d5 = missRh.isEmpty() && missRc.isEmpty() && missBsH.isEmpty() && missEmH.isEmpty()
+            && missEm.isEmpty() && missPcH.isEmpty() && missPc.isEmpty() && missMq.isEmpty()
+            && missMi.isEmpty() && missBp.isEmpty() && missAmH.isEmpty() && missHb.isEmpty();
+        ok = ok && d5;
+        if (!d5) {
+            const QStringList allMiss = QStringList()
+                << missRh << missRc << missBsH << missEmH << missEm << missPcH << missPc
+                << missMq << missMi << missBp << missAmH << missHb;
+            diag += QStringLiteral("[d5 %1]").arg(allMiss.join(QLatin1Char(',')));
+        }
+        // (5) 声音资产在案（qrc 资源面：CMakeLists 行 + build_sounds 生成器函数）。
+        const bool cmakeRows = pinSet(rootDir + QStringLiteral("/CMakeLists.txt"), {
+            SrcPin("splash asset", "sounds/splash_break.wav", 1)}).isEmpty();
+        const bool genFns = pinSet(rootDir + QStringLiteral("/tools/build_sounds.py"), {
+            SrcPin("splash gen", "def gen_splash_break():", 1)}).isEmpty();
+        ok = ok && cmakeRows && genFns;
+        if (!(cmakeRows && genFns))
+            diag += QStringLiteral("[assets cmake=%1 gen=%2]").arg(cmakeRows).arg(genFns);
+        // (6) 相邻族零污染（蕴辉瓶发射 / 延长表行 / 0x27A 图标 / 饮面尾行原样）。
+        const QStringList missNb = pinSet(srcRoot + QStringLiteral("/Entities/entitymanager.cpp"), {
+            SrcPin("glimmer emission untouched", "emit glimmerBottleBreak(cellX, cellY, cellZ, totalXp);", 1)});
+        const bool extRow = pinSet(srcRoot + QStringLiteral("/Game/brewingstore.cpp"), {
+            SrcPin("extended weak row untouched", "return RecipeRegistry::ExtendedWeaknessPotionId;", 1)}).isEmpty();
+        const bool icon27A = pinSet(srcRoot + QStringLiteral("/ui/MaterialIcon.qml"), {
+            SrcPin("icon 27A untouched", "case 0x27A: drawPotion(", 1)}).isEmpty();
+        const bool drinkTail = pinSet(srcRoot + QStringLiteral("/Game/playercontroller.cpp"), {
+            SrcPin("drinkable tail untouched", "|| itemId == RecipeRegistry::InstantHealthPotionId;", 1)}).isEmpty();
+        const bool nb = missNb.isEmpty() && extRow && icon27A && drinkTail;
+        ok = ok && nb;
+        if (!nb) diag += QStringLiteral("[nb %1 ext=%2 icon=%3 drink=%4]")
+                             .arg(missNb.isEmpty()).arg(extRow).arg(icon27A).arg(drinkTail);
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2071d structure pins (the twelve splash potions sit at 0x27B through 0x286 as a tail"
+               " append right after ExtendedWeaknessPotionId 0x27A with the round-two family and the instant"
+               " health potion untouched, the SplashBottle kind appends after GlimmerBottle, the splash"
+               " radius and tick-floor constants hold at the MC 1.0 calibers with the drinkable duration"
+               " families intact, the name face palette tail and icon cases and max stack 64 on both layers"
+               " hold, the full wiring source pin family holds across the brewing mapping declaration and"
+               " the entity spawn and break emission and the throw entry and the qml routing and delegate"
+               " and icon cases and the particle burst and the audio declaration and the sound asset and"
+               " generator rows, and the neighbouring glimmer emission and extended table row and 0x27A icon"
+               " and drinkable tail are untouched)"
             << (ok ? QString() : diag);
     });
 }
