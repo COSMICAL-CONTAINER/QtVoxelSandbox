@@ -591,6 +591,13 @@ public:
     static constexpr float kSpeedBoostPerLevel = 0.20f;      // 迅捷每级移速增幅（×(1+0.2×L)）
     static constexpr float kStrengthBonusPerLevel = 1.30f;   // 力量每级近战伤害增幅（×(1+1.3×L)）
     static constexpr float kPotionDurationSec = 180.0f;      // 药水 I 级时长（MC 1.0 swiftness/strength 3:00）
+    // t1099 第二轮药水效果常量（MC 1.0 原值，wiki 2026 实读留痕；public = 矩阵探针直读面，t1097 同门）：
+    static constexpr float kRegenPotionDurationSec = 45.0f;  // 再生药水时长（MC 1.0 regeneration 0:45）
+    static constexpr float kRegenPotionIntervalSec = 2.5f;   // 再生回血脉冲间隔（MC 1.0 regen I 每 2.5s 回 1HP）
+    static constexpr float kPoisonPotionDurationSec = 45.0f; // 中毒药水时长（MC 1.0 poison 0:45）
+    static constexpr float kWeaknessDurationSec = 90.0f;     // 虚弱时长（MC 1.0 weakness 1:30）
+    static constexpr float kWeaknessMeleePenaltyPerLevel = 4.0f; // 虚弱近战减伤（MC 1.0 近战伤害 -4/级）
+    static constexpr int   kInstantHealthHealHp = 4;         // 瞬间治疗饮毕即回血量（MC 1.0 instant health I = 2 心 = 4HP）
     // 中键拾取方块（t37 pick block）：取当前射线命中格的方块 id → 装入 hotbar。仅指针捕获时生效
     // （与破/放同窗口级 MouseButtonPress 路径）。
     // spec：「无论背包开关」—— captured=true 蕴含背包已关，故等价于「游戏内中键」；命中空气 / 无
@@ -1710,6 +1717,18 @@ private:
     int m_speedLevel = 0;
     float m_strengthTimer = 0.0f;
     int m_strengthLevel = 0;
+    // t1099 第二轮药水效果态（m_slowTimer / m_speedTimer 同门）：m_fireResTimer 火抗剩余秒（>0 = 火 /
+    //   岩浆伤害免疫——点燃门 + 火伤 emit 门双面，EmberGate 门灼烧不免疫：那是门传送伤降级语义非火伤）/
+    //   m_regenPotionTimer 再生剩余秒 + m_regenPotionAccum 回血脉冲累积器（每 kRegenPotionIntervalSec 秒
+    //   emit healed(1)）+ m_weakTimer 虚弱剩余秒（attackMob 伤害段 -4/级）。等级面：火抗恒 1（MC 各级
+    //   免疫同值不持级）；再生 / 虚弱持级（快照 level 面用）。命名避让注：**m_regenTimer 已被 t238 饥饿
+    //   回血占用**（同文件既有，不可复用——快照 / 复位 / 推进三面都会串味），药水再生另名 m_regenPotion*。
+    float m_fireResTimer = 0.0f;
+    float m_regenPotionTimer = 0.0f;
+    int   m_regenPotionLevel = 0;
+    float m_regenPotionAccum = 0.0f;
+    float m_weakTimer = 0.0f;
+    int   m_weakLevel = 0;
     QVariantList m_lastEffectSigCache; // t715 上一帧活跃效果真实快照缓存
     // t394 仙人掌接触伤害累积（玩家 AABB 接触 Cactus 方块时累加，每 EntityManager::kCactusDamageInterval 扣 1HP；
     //   离开即归零）。机制等价 MC 1.0 仙人掌触碰即伤。仅 Survival（Creative/Spectator 无敌不累）。

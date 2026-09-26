@@ -1309,6 +1309,14 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         0, 0, 0,
         int(BlockRegistry::Cobble), int(BlockRegistry::Cobble), int(BlockRegistry::Cobble) },
       int(BlockRegistry::BrewingStand), 1, 1, "brewing_stand" },
+    // t1099 发酵蛛眼：蜘蛛眼 + 褐菇 + 糖 → 1（无序 2×2 可容，机制等价 MC 1.0 fermented spider eye 同料
+    //   同产率；虚弱药水原料，三条原料全生存可达：蛛眼 = 蜘蛛/洞蛛 1/3 掉落、褐菇 = 沼泽 worldgen
+    //   BrownMushroom=115、糖 = 甘蔗 1:1）。多重集 {SpiderEye:1, BrownMushroom:1, Sugar:1} 唯一
+    //   （t802 全表自匹配回归自动覆盖）；无序 → 2×2 / 3×3 任意格命中。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::SpiderEyeId, int(BlockRegistry::BrownMushroom), RecipeRegistry::SugarId,
+        0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::FermentedSpiderEyeId, 1, 1, "fermented_spider_eye" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。
@@ -1343,6 +1351,16 @@ static_assert(RecipeRegistry::AwkwardPotionId  == 0x267, "AwkwardPotionId 须为
 static_assert(RecipeRegistry::SpeedPotionId    == 0x268, "SpeedPotionId 须为材料段 0x268");
 static_assert(RecipeRegistry::StrengthPotionId == 0x269, "StrengthPotionId 须为材料段 0x269");
 static_assert(RecipeRegistry::SugarId          == 0x26A, "SugarId 须为材料段 0x26A");
+static_assert(RecipeRegistry::MagmaCreamId           == 0x26B, "MagmaCreamId 须为材料段 0x26B（糖 0x26A 之上段尾追加，t1099）");
+static_assert(RecipeRegistry::GhastTearId            == 0x26C, "GhastTearId 须为材料段 0x26C");
+static_assert(RecipeRegistry::SpiderEyeId            == 0x26D, "SpiderEyeId 须为材料段 0x26D");
+static_assert(RecipeRegistry::FermentedSpiderEyeId   == 0x26E, "FermentedSpiderEyeId 须为材料段 0x26E");
+static_assert(RecipeRegistry::GlisteringMelonId      == 0x26F, "GlisteringMelonId 须为材料段 0x26F");
+static_assert(RecipeRegistry::FireResistancePotionId == 0x270, "FireResistancePotionId 须为材料段 0x270");
+static_assert(RecipeRegistry::RegenerationPotionId   == 0x271, "RegenerationPotionId 须为材料段 0x271");
+static_assert(RecipeRegistry::PoisonPotionId         == 0x272, "PoisonPotionId 须为材料段 0x272");
+static_assert(RecipeRegistry::WeaknessPotionId       == 0x273, "WeaknessPotionId 须为材料段 0x273");
+static_assert(RecipeRegistry::InstantHealthPotionId  == 0x274, "InstantHealthPotionId 须为材料段 0x274（药水第二轮段末位）");
 // t788 染料跨层契约（同 Coal/Lapis 模式）：Core 层 blockregistry.cpp 四花的 dropId 用字面量（Core 不 include
 //   Game 头）：红花→0x259 / 黄花→0x24F / 蓝花→0x256 / 白花→0x24B；本处钉死 recipe.h 染料常量 == 字面量，
 //   任一处改动忘了同步另一处 → 编译失败（防「破花掉落断裂 / 染色链丢原料」）。另钉 DyeIdBase / DyeBlackId

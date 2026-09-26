@@ -89,7 +89,11 @@ public:
     //   **追加在末尾**（既有消费者按序 switch，追加不破坏；同 DeathCause 纪律）。
     //   t1097 追加：EffectSpeed 迅捷（药水饮用，+20%/级移速）/ EffectStrength 力量（药水饮用，+130%/级
     //   近战旧口径）——时序源在 PlayerController m_speedTimer / m_strengthTimer（m_slowTimer 同门）。
-    enum StatusEffect { EffectNone = 0, EffectPoison, EffectSlowness, EffectFire, EffectSpeed, EffectStrength };
+    //   t1099 追加：EffectFireResistance 火抗（药水饮用，火/岩浆伤害免疫；时序源 m_fireResTimer）/
+    //   EffectRegeneration 再生（药水饮用，每 2.5s 回 1HP；时序源 m_regenPotionTimer）/
+    //   EffectWeakness 虚弱（药水饮用，近战 -4/级；时序源 m_weakTimer）。**追加在末尾**（快照序 = 枚举序，
+    //   追加不破坏既有消费者；瞬间治疗无 timer 不入枚举不入快照——MC 口径即时效果）。
+    enum StatusEffect { EffectNone = 0, EffectPoison, EffectSlowness, EffectFire, EffectSpeed, EffectStrength, EffectFireResistance, EffectRegeneration, EffectWeakness };
     Q_ENUM(StatusEffect)
     // t311 死亡原因枚举（机制等价 MC 1.0 各来源死因，§9 改名为通用词）。Q_ENUM 暴露给 QML：
     //   PlayerState.Fall 等（同 EntityManager.MobPig 模式）。避免命名 None（Linux CI 下 X11 头 None 宏冲突）。

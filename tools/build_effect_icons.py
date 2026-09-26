@@ -274,9 +274,97 @@ def draw_strength():
     finish(px, "icon_effect_strength.png")
 
 
+def draw_fire_resistance():
+    """烈焰护盾（火抗）：橙红火苗为骨 + 环形浅色盾面（火被盾挡读感）。像素原创（t1099）。"""
+    px = new_canvas()
+    FLAME = (232, 120, 32, 255)   # 火苗橙
+    FLAME_D = (176, 72, 20, 255)  # 火苗暗缘
+    SHIELD = (250, 214, 130, 255) # 盾面浅金
+    SHIELD_D = (198, 152, 62, 255)  # 盾面暗金
+    # 火苗竖列（x5..10，y2..8）：中央高两侧低的火焰骨架。
+    for y in range(2, 9):
+        w = (y - 1) // 2  # 0,1,1,2,2,3,3
+        for x in range(8 - w, 8 + w + 1):
+            put(px, x, y, FLAME if x > 8 - w else FLAME_D)
+    # 盾面斜挡（y9..13，由左下向右上渐进收窄——盾弧读感）。
+    for i, y in enumerate(range(9, 14)):
+        x0, x1 = 3 + (i // 2), 13 - (i // 2)
+        for x in range(x0, x1 + 1):
+            put(px, x, y, SHIELD if i % 2 == 0 else SHIELD_D)
+    # 盾缘高光（顶行亮）。
+    for x in range(4, 12):
+        put(px, x, 9, (255, 236, 180, 255))
+    finish(px, "icon_effect_fireresistance.png")
+
+
+def draw_regeneration():
+    """回环之心（再生）：红心 + 环绕浅色回旋箭头（周期回血读感）。像素原创（t1099）。"""
+    px = new_canvas()
+    HEART = (214, 48, 60, 255)    # 心体红
+    HEART_D = (150, 24, 36, 255)  # 心暗缘
+    SWIRL = (250, 160, 170, 255)  # 回旋浅粉
+    # 心体（两圆顶 + 三角底，y5..13）。
+    for y in range(5, 10):
+        for x in range(4, 12):
+            top = (y < 8 and (x < 5 or x > 10) and not (y == 5 and (x == 5 or x == 10)))
+            if not top:
+                put(px, x, y, HEART)
+    for y in range(8, 14):
+        w = y - 7
+        for x in range(8 - w, 8 + w):
+            if y < 13 or (5 <= x <= 9):
+                put(px, x, y, HEART_D if x == 8 - w else HEART)
+    # 回旋弧（左上 + 右上两段浅粉弧点）。
+    for (x, y) in [(3, 4), (4, 3), (5, 2), (10, 2), (11, 3), (12, 4)]:
+        put(px, x, y, SWIRL)
+    for (x, y) in [(2, 5), (13, 5)]:
+        put(px, x, y, SWIRL)
+    finish(px, "icon_effect_regeneration.png")
+
+
+def draw_weakness():
+    """垂臂之手（虚弱）：灰化握拳下坠 + 上方两道压线（力竭读感；与力量握拳同门反向灰调）。像素原创（t1099）。"""
+    px = new_canvas()
+    FIST = (132, 132, 140, 255)   # 灰化拳体（力量暖棕的反向灰调）
+    FIST_D = (96, 96, 104, 255)   # 拳暗部
+    FIST_E = (58, 58, 66, 255)    # 描边
+    PRESS = (168, 168, 178, 255)  # 上方压线
+    # 拳体（x5..11，y8..14，顶部两角削圆）。
+    for y in range(8, 15):
+        for x in range(5, 12):
+            if (y == 8 and (x == 5 or x == 11)):
+                continue
+            put(px, x, y, FIST)
+    # 指节横纹两道（灰暗化）。
+    for y in (10, 12):
+        for x in range(6, 11):
+            put(px, x, y, FIST_D)
+    # 拇指贴边（右侧竖条）。
+    for y in range(10, 15):
+        put(px, 11, y, FIST_D)
+        put(px, 12, y, FIST_E)
+    # 描边（拳体外圈 1px）。
+    for x in range(5, 12):
+        put(px, x, 9, FIST_E)
+        put(px, x, 14, FIST_E)
+    for y in range(9, 15):
+        put(px, 5, y, FIST_E)
+    # 上方两道下压短线（力被压制读感；力量图标上方无此元素——反向标记）。
+    for x in range(6, 8):
+        put(px, x, 3, PRESS)
+        put(px, x, 5, PRESS)
+    for x in range(9, 11):
+        put(px, x, 3, PRESS)
+        put(px, x, 5, PRESS)
+    finish(px, "icon_effect_weakness.png")
+
+
 if __name__ == "__main__":
     draw_poison()
     draw_slowness()
     draw_fire()
     draw_speed()
     draw_strength()
+    draw_fire_resistance()
+    draw_regeneration()
+    draw_weakness()

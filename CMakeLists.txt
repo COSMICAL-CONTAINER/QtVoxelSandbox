@@ -687,6 +687,9 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_effect_fire.png            # t715 着火效果图标（build_effect_icons.py 程序自绘原创；黄芯火苗剪影）
         textures/icon_effect_speed.png           # t1097 迅捷效果图标（疾风双箭头；原创自绘）
         textures/icon_effect_strength.png        # t1097 力量效果图标（握拳剪影；原创自绘）
+        textures/icon_effect_fireresistance.png  # t1099 火抗效果图标（火苗盾面；原创自绘）
+        textures/icon_effect_regeneration.png    # t1099 再生效果图标（回环之心；原创自绘）
+        textures/icon_effect_weakness.png        # t1099 虚弱效果图标（灰化垂拳；原创自绘）
         textures/icon_snow.png                   # t482 雪块立方体图标（build_cube_icons.py；各面=冷白冰晶噪点，同积雪层）
         textures/icon_abyss_gate.png             # t634/t644 暗渊门立方体图标（--from-pack：endframe_top+side 裁顶空白，与放置态一致）
         textures/icon_cobweb.png                 # t484 蜘蛛网 flat 2D 图标（build_cube_icons.py；透明底+灰白蛛丝放射网纹）
