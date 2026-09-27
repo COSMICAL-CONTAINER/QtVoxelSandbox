@@ -14,16 +14,16 @@
 ```yaml
 project: QtMinecraft
 state: IN_PROGRESS
-current_task: **t1106 IN_PROGRESS（雪傀儡+生物名册审计合集——§14-④ 重盘第四五候选）**：件一雪傀儡[在场性排查先行；南瓜头位 t1105 已铺路；雪块/雪球在场核实+构建面+雪球投掷/雪 trail 口径实读] + 件二生物名册审计[agent 只读核实产出审计表→主控落 docs]。串行 voxel-dev，filter 词 r2076。
+current_task: **t1107 IN_PROGRESS（史莱姆+村民合集——t1106 名册审计清偿，最后两项主世界 mob 缺口）**：件一史莱姆[实体 Kind+弹跳+三档分裂+粘液球+slime chunk 生成实读] + 件二村民[**村庄 worldgen 在场性核实为大头**——分层交付裁定权在核实；1.0 村民无交易（1.3.1 越纪元不取）]。串行 voxel-dev，filter 词 r2077。
 current_task_status: IN_PROGRESS
-last_completed_task: t1105 炼药锅+南瓜农作链（2026-09-28 闭环；矩阵 836→840——两件均真缺形态全交付：炼药锅 153 三段水位[瓶取 -1 级/桶灌满/交互面前置优先]+南瓜链[种子 0x28B 南瓜→4 种=1.0 唯一生存源裁定修正/南瓜茎 151 同门第二实例/南瓜灯 152 光 15 朝向/野生 patch worldgen 确定性]；**顺手诚实修复 t1103 瓜茎 cross 渲染缺口**；接棒纪律履行[前任树面骨架吸收]；429 续作一轮；lawful 11 处。详录 = dev-plan t1105 关单条目）
-last_completed_task_prev: t1104 附魔台纯钉收口（2026-09-27 闭环，矩阵 832→836；详录 = dev-plan t1104 关单条目）
-last_completed_task_commits: fix(t1105)（521968c：炼药锅 153+南瓜 151/152+种子 0x28B+patch worldgen+cross 缺口修复+6 新贴图+atlas 207，24 文件 +585/−25）+ test(t1105)（b1ff3df：r2075a-d 四腿，10 文件 +612/−32）
-last_verified_commit: test(t1105)（矩阵 **840 PASS / 0 FAIL ×2**：matrix_t1105_{pos,final}.log；腿集合 md5[规范配方]三方恒等 dd52e1a8f0ae15747be530f1393d19db；NEG-1 恰红 {r2075a} / NEG-2 恰红 {r2075b} 双还原 840/0；冒烟 tail20 logs/voxelsandbox_t1105_tail20.log[来源头注+横幅+root objects+野生 patch 计数实文]；主控独立脱离式复跑 840/0 同 md5 三方恒等 matrix_orch_t1105_verify.log）
+last_completed_task: t1106 雪傀儡+生物名册审计（2026-09-28 闭环；矩阵 840→844——**又一个全在件**[雪傀儡全链 t482-t629 族]；真交付两笔生产修复 = 雪球烈焰相性 3 伤收口[1.0 真值发射者无关] + **矩阵钉出真 UB bug 修复**[发球节流失效：spawn 扩容悬空引用致连发，经 idx 写回=B8 先例]；section69 新段四腿；lawful=零；名册审计落档[主世界缺口仅史莱姆+村民]。详录 = dev-plan t1106 关单条目）
+last_completed_task_prev: t1105 炼药锅+南瓜农作链（2026-09-28 闭环，矩阵 836→840；详录 = dev-plan t1105 关单条目）
+last_completed_task_commits: fix(t1106)（941b8f7：雪球烈焰相性+发球节流 UB 修复，2 文件 +25/−9）+ test(t1106)（f634f0a：section69_snow_golem.cpp 新段 551 行 r2076a-d）
+last_verified_commit: test(t1106)（矩阵 **844 PASS / 0 FAIL ×2**：matrix_t1106_{pos,final}.log；腿集合 md5[规范配方]三方恒等 d8e9ca6f61eef0752f40ca66e548d7bc；NEG-1 恰红 {r2076c} / NEG-2 恰红 {r2076b} 双还原 4/4；冒烟 tail20 logs/voxelsandbox_t1106_tail20.log[来源头注+横幅+root objects]；主控独立脱离式复跑 844/0 同 md5 三方恒等 matrix_orch_t1106_verify.log）
 last_governance_review: 2026-09-27（audit #22 GREEN——窗口 e776331..e21b6fb 15 提交/t1099-t1103 五闭环证据链全实核[五单 md5 三方恒等 fe383860/95da1b5a/31196e92/7cfabb43/b3f81723 + NEG 十份恰红十份还原吻合[含全量跑恰红三件] + 腿数链 812→832 无断]；**提交纪律 #21 F1 后首窗零命中**[检测器以已知尾注正反验证]；控制块全字段三窗连续守住[counter 1..5 递增+HEAD 行同步]；429 恢复链盘上时间线三段吻合+零 git 回滚；**F1[LOW] 窗口锚哈希记误两处**[agent-state 9079f74→e776331 勘正+派工单终点 345fa4a→e21b6fb——清偿=本批更正+「锚哈希须 git 现抄入简报」惯例] + F2[INFO #21 报告 CJK 载体勘误：实为 fix 提交 9774062/0ec65b6 引证字面，非 docs 提交——#21 报告已补勘误注] + F3/F4 INFO；详见 governance-audit-2026-09-27.md）
 governance_review_due: false（审计 #22 GREEN 落档清零）
-completed_tasks_since_governance_review: 2（t1104 + t1105 闭环；审计 #22 GREEN 于 2026-09-27——下一审计窗口 = t1106 起再 3 闭环 → 审计 #23）
-next_task: **t1106 雪傀儡+生物名册审计（在飞）→ 之后顺延：完整瓜茎茎蔓原型 + 矿井野生瓜 patch + 辉光岩粉链 + 池面再盘点 + 用户侧并行 P5 实机清单/§30.6/§31/择机 push（本地领先远端 100+ 笔）**
+completed_tasks_since_governance_review: 3（t1104 + t1105 + t1106 闭环；审计 #22 GREEN 于 2026-09-27——下一审计窗口 = t1107 起再 2 闭环 → 审计 #23）
+next_task: **t1107 史莱姆+村民（在飞）→ 之后顺延：完整瓜茎茎蔓原型 + 矿井野生瓜 patch + 池面再盘点 + 用户侧并行 P5 实机清单/§30.6/§31/择机 push（本地领先远端 100+ 笔）**
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -33,7 +33,7 @@ needs_human: false
 
 ## Workspace Guard
 
-- HEAD = t1105 炼药锅南瓜链代码终态（fix(t1105) 521968c + test(t1105) b1ff3df 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 840 腿满绿（68 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（t1097-t1105 九单全过）。**git 提交禁任何 AI 署名尾注**（审计 #21 F1 入档纪律——派工简报恒带此句）。**审计窗口锚哈希须 git 现抄**（审计 #22 F1 教训）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（横幅+root objects 实文+组合件带来源头注，主控核对）。**NEG 四件终名日志必须落盘**（t1099 件教训）。
+- HEAD = t1106 雪傀儡收口代码终态（fix(t1106) 941b8f7 + test(t1106) f634f0a 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 844 腿满绿（69 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（t1097-t1106 十单全过）。**git 提交禁任何 AI 署名尾注**（审计 #21 F1 入档纪律——派工简报恒带此句）。**审计窗口锚哈希须 git 现抄**（审计 #22 F1 教训）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（横幅+root objects 实文+组合件带来源头注，主控核对）。**NEG 四件终名日志必须落盘**（t1099 件教训）。
 - 纪律①-⑨全在案；**大 TU 编译一律 -j 1**（09-13 蓝屏教训；分段后单段增量 -j 4 实测安全）。**矩阵测试为 tools/matrix/ 分层结构**：改探针只重编对应段 TU（秒级）+ `--filter <substring>` 只跑本任务腿；新腿落对应段文件，新段置尾 runAll 末执行、须 ≤500KB；section11 起「自建 fresh 小世界」先例（48×48×96 seed 82 + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)）。
 - **R20.06 起值类型纪律**：src/Core/ 新值类型一律 result.h QObjectFree 编译期钉 + 头内 static_assert；命令/事件队列满载拒绝与快照队列覆盖最老是两域容量策略分化，勿「统一」。
 - **R20.07 起编排壳纪律**：GameSession 只做编排（命令 → 整 tick 边界 → World::setBlock 权威），禁复制游戏逻辑；**QML 现行玩法路径零变化是 R20 主线不变量**（Main.qml 含 "GameSession" 即违零迁移阴性钉 r2007b）。
@@ -50,6 +50,7 @@ needs_human: false
 
 ## Recovery Point
 
+- 2026-09-28（二）：t1106 雪傀儡+名册审计闭环——又一个全在件（矩阵 840→844，md5 d8e9ca6f 三方恒等；941b8f7/f634f0a；真交付=烈焰相性收口+发球节流 UB 修复[矩阵钉出]；名册审计落档=主世界缺口仅史莱姆+村民）。恢复点 = 本条；在飞 = t1107 史莱姆+村民（r2077）。
 - 2026-09-28：t1105 炼药锅+南瓜农作链闭环（矩阵 836→840，md5 dd52e1a8 三方恒等；521968c/b1ff3df；两件真缺形态全交付+接棒纪律[t1105 重派误停事件]+t1103 cross 缺口顺手修复）。恢复点 = 本条；在飞 = t1106 雪傀儡+生物名册审计（r2076）。
 - 2026-09-27（三）：t1104 附魔台纯钉收口闭环——四项交付早已在案[t474-t961 族]（矩阵 832→836，md5 005f5365 三方恒等；8be2b0f 单提交 section68 四腿；NEG 选面新教训=流敏感抽签族摘除点须不改抽签次数）。恢复点 = 本条；在飞 = t1105 炼药锅+南瓜链（r2075）。
 - 2026-09-27（二）：t1103 闪烁西瓜生存整链闭环——瞬间治疗生存链闭合（矩阵 828→832，md5 b3f81723 三方恒等；f7e938e/335399d；瓜茎简化结果性生长裁定+矿井池裁定修正+10 处 lawful 前移；§14-④ 池面重盘新增五候选[附魔台旗舰/炼药锅/南瓜链/雪傀儡/生物名册审计]）。恢复点 = 本条；在飞 = t1104 附魔台（r2074）+ 治理审计 #22（只读）。
