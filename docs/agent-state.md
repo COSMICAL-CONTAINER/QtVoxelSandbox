@@ -14,16 +14,16 @@
 ```yaml
 project: QtMinecraft
 state: IN_PROGRESS
-current_task: **t1103 IN_PROGRESS（闪烁西瓜生存整链一组——最后一项大件候选，交付后池面近底触发 §14-④ 重新盘点）**：五环节 = 金粒[段尾+金锭 1→9+9 粒逆行] / 瓜子[地牢池行] / 瓜茎作物原型[茎类选型权在核实：完整茎蔓 vs 简化结果性生长] / 瓜块+瓜瓣[破坏掉 3-7 瓣] / 闪烁西瓜环形合成 → 瞬间治疗生存链闭合。串行 voxel-dev，filter 词 r2073。
+current_task: **t1104 IN_PROGRESS（附魔台+附魔机制——1.0 最后一块核心大件，池面重盘旗舰）**：附魔台方块+UI[AnvilUI 同门]+1.0 附魔口径实读（书架增幅/等级消耗/随机附魔表原值核实）+enchants 既有族 compatibility 裁定；核实在飞，审计 #22 已派（只读独立 agent，窗口 9079f74 后五单..t1103 关单 docs）。串行 voxel-dev，filter 词 r2074。
 current_task_status: IN_PROGRESS
-last_completed_task: t1102 残项小批合集二（2026-09-27 闭环；矩阵 824→828——件一水瓶直酿两行[发酵蛛眼→虚弱/糖→凡庸 0x287；三行越纪元/缺口/存疑不硬造裁定留痕] + 件二压力板 kMc 纪元勘误+数据修正 71→147/72→148[双重冲突消解+零消费者核实] + 件三激活铁轨台账落档 + 件四食物 burp[foodBurped 与 potionDrunk 恒互斥]；NEG 双全量恰红单腿；lawful 1 处携沿革注；**三次 429 中断+主控两次探针协议恢复**。详录 = dev-plan t1102 关单条目）
-last_completed_task_prev: t1101 喷溅型药水——1.0 酿造机制全面收官（2026-09-26 闭环，矩阵 820→824；详录 = dev-plan t1101 关单条目）
-last_completed_task_commits: fix(t1102)（99e255d：直酿两行+凡庸 0x287+kMc 147/148+foodBurped 面，10 文件）+ test(t1102)（87c988a：r2072a-d 四腿，section67 置尾）
-last_verified_commit: test(t1102)（矩阵 **828 PASS / 0 FAIL ×2**：matrix_t1102_{pos,final}.log；腿集合 md5[规范配方]三方恒等 7cfabb43ada599ee239dd43cf7d7060f；NEG-1 恰红 {r2072a} / NEG-2 恰红 {r2072b}[均全量跑 827/1 全局归因] 双还原 828/0；冒烟 tail20 logs/voxelsandbox_t1102_tail20.log[横幅+root objects 实文]；主控独立脱离式复跑 828/0 同 md5 三方恒等 matrix_orch_t1102_verify.log）
+last_completed_task: t1103 闪烁西瓜生存整链（2026-09-27 闭环；矩阵 828→832——金粒双向+瓜子**矿井池裁定修正**[1.0 地牢池无瓜子]+瓜茎简化结果性生长[裁定②留痕：MelonStem=150 crop 原型全族接入+成熟结果 pass 分流 fruits 表+四向扫描哈希定起始向+茎保留多果] + 瓜块 149[3-7 瓣]+瓜瓣 0x28A 可食+2+环形合成→**瞬间治疗生存链闭合**；lawful 10 处携沿革注[图集 201/Count 151/kMc 表尾 105]；首轮 NEG 暴露两处旧钉缺陷如实修复。详录 = dev-plan t1103 关单条目）
+last_completed_task_prev: t1102 残项小批合集二（2026-09-27 闭环，矩阵 824→828；详录 = dev-plan t1102 关单条目）
+last_completed_task_commits: fix(t1103)（f7e938e：金粒/瓜子/瓜茎/瓜块/瓜瓣/环形合成+作物族接入+loottable 矿井行，多文件含 6 新贴图+atlas 重生成）+ test(t1103)（335399d：r2073a-d 四腿含端到端单腿全链+10 处 lawful 前移）
+last_verified_commit: test(t1103)（矩阵 **832 PASS / 0 FAIL ×2**：matrix_t1103_{pos,final}.log；腿集合 md5[规范配方]三方恒等 b3f81723bf832929ca82496cfe806159；NEG-1 恰红 {r2073b,d} / NEG-2 恰红 {r2073c,d} 双还原 832/0；冒烟 tail20 logs/voxelsandbox_t1103_tail20.log[横幅+root objects 实文]；主控独立脱离式复跑 832/0 同 md5 三方恒等 matrix_orch_t1103_verify.log）
 last_governance_review: 2026-09-26（audit #21 GREEN——窗口 9079f74..7353eb8 18 提交/t1094-t1098 五闭环证据链全实核[五单 md5 三方恒等 7416b136/a2f3eb64/9b493da5/d2360c45/6aa9a595 + NEG 十份恰红十份还原吻合 + t1097 md5 不变性机理独立复现 + 控制块全字段纪律五单逐单递增守住=#20 YELLOW 升级条件未触发]；**F1[MEDIUM] t1096 两笔提交带 Co-Authored-By 尾注**[9774062/e33d257——规则此前仅在用户记忆层与派工简报层，t1096 简报未复述、agent 沿 harness 默认；清偿=不改写历史+Workspace Guard 补明文+派工简报恒带] + F2-F4 INFO 落档；详见 governance-audit-2026-09-26.md）
-governance_review_due: false（审计 #21 GREEN 落档清零）
-completed_tasks_since_governance_review: 4（t1099 + t1100 + t1101 + t1102 闭环；审计 #21 GREEN 于 2026-09-26——下一审计窗口 = t1103 闭环即 5/5 → 审计 #22）
-next_task: **t1103 闪烁西瓜整链（在飞）→ 之后池面近底：§14-④ 重新盘点 MC 对标差距扩充候选池 + 用户侧并行 P5 实机清单/§30.6/§31/择机 push（本地领先远端 90+ 笔）**
+governance_review_due: true（5/5 到期——审计 #22 已派，只读独立 agent 参照 governance-audit-2026-09-25-b.md 规程，窗口 = audit #21 落档件 9079f74 后起至 t1103 关单 docs 提交）
+completed_tasks_since_governance_review: 5（t1099 + t1100 + t1101 + t1102 + t1103 闭环；审计 #21 GREEN 于 2026-09-26——**5/5 触发审计 #22，已派在飞**）
+next_task: **t1104 附魔台+附魔机制（在飞，与审计 #22 并行——审计只读窗口闭于 t1103 关单 docs）→ 之后顺延：炼药锅 + 南瓜农作链 + 雪傀儡 + 生物名册审计[docs-only] + 完整瓜茎茎蔓原型 + 矿井野生瓜 patch + 辉光岩粉链 + 用户侧并行 P5 实机清单/§30.6/§31/择机 push（本地领先远端 90+ 笔）**
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -33,7 +33,7 @@ needs_human: false
 
 ## Workspace Guard
 
-- HEAD = t1102 残项小批合集二代码终态（fix(t1102) 99e255d + test(t1102) 87c988a 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 828 腿满绿（67 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（t1097-t1102 六单全过）。**git 提交禁任何 AI 署名尾注**（审计 #21 F1 入档纪律——派工简报恒带此句）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（横幅+root objects 实文，主控核对；stderr 硬杀缓冲丢失可用应用自写 log 组合同源同面）。**NEG 四件终名日志必须落盘**（t1099 件教训）。
+- HEAD = t1103 闪烁西瓜整链代码终态（fix(t1103) f7e938e + test(t1103) 335399d 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 832 腿满绿（67 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（t1097-t1103 七单全过）。**git 提交禁任何 AI 署名尾注**（审计 #21 F1 入档纪律——派工简报恒带此句）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（横幅+root objects 实文，主控核对；stderr 硬杀缓冲丢失可用应用自写 log 组合同源同面）。**NEG 四件终名日志必须落盘**（t1099 件教训）。
 - 纪律①-⑨全在案；**大 TU 编译一律 -j 1**（09-13 蓝屏教训；分段后单段增量 -j 4 实测安全）。**矩阵测试为 tools/matrix/ 分层结构**：改探针只重编对应段 TU（秒级）+ `--filter <substring>` 只跑本任务腿；新腿落对应段文件，新段置尾 runAll 末执行、须 ≤500KB；section11 起「自建 fresh 小世界」先例（48×48×96 seed 82 + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)）。
 - **R20.06 起值类型纪律**：src/Core/ 新值类型一律 result.h QObjectFree 编译期钉 + 头内 static_assert；命令/事件队列满载拒绝与快照队列覆盖最老是两域容量策略分化，勿「统一」。
 - **R20.07 起编排壳纪律**：GameSession 只做编排（命令 → 整 tick 边界 → World::setBlock 权威），禁复制游戏逻辑；**QML 现行玩法路径零变化是 R20 主线不变量**（Main.qml 含 "GameSession" 即违零迁移阴性钉 r2007b）。
@@ -50,6 +50,7 @@ needs_human: false
 
 ## Recovery Point
 
+- 2026-09-27（二）：t1103 闪烁西瓜生存整链闭环——瞬间治疗生存链闭合（矩阵 828→832，md5 b3f81723 三方恒等；f7e938e/335399d；瓜茎简化结果性生长裁定+矿井池裁定修正+10 处 lawful 前移；§14-④ 池面重盘新增五候选[附魔台旗舰/炼药锅/南瓜链/雪傀儡/生物名册审计]）。恢复点 = 本条；在飞 = t1104 附魔台（r2074）+ 治理审计 #22（只读）。
 - 2026-09-27：t1102 残项小批合集二闭环（矩阵 824→828，md5 7cfabb43 三方恒等；99e255d/87c988a；直酿两行+kMc 纪元数据修正+激活铁轨落档+食物 burp；三次 429 协议恢复零返工）。恢复点 = 本条；在飞 = t1103 闪烁西瓜整链（r2073）。
 - 2026-09-26（五）：t1101 喷溅型药水闭环——1.0 酿造机制全面收官（矩阵 820→824，md5 31196e92 三方恒等；d578e89/ed27200；三轮 modifiers 齐；NEG-1 意外全量跑=全局归因最强形态）。恢复点 = 本条；在飞 = t1102 残项小批合集二（r2072）。
 - 2026-09-26（四）：t1100 酿造第三轮合集闭环（矩阵 816→820，md5 95da1b5a 三方恒等；3cced3b/0127265；红石延长二级酿造+呈现层无降级；NEG 终名落盘纪律首例应用）。恢复点 = 本条；在飞 = t1101 喷溅型药水（r2071）。
