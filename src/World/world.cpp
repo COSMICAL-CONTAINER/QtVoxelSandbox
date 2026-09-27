@@ -51,6 +51,7 @@ static inline bool isGrowthBlock(quint8 id)
     using BR = BlockRegistry;
     return id == BR::WheatCrop || id == BR::CarrotCrop || id == BR::PotatoCrop
         || id == BR::MelonStem // t1103：瓜茎作物同门入生长索引（生长 + 成熟结果共 tickCropGrowth 驱动）
+        || id == BR::PumpkinStem // t1105：南瓜茎同门第二实例（同一张生长 / 结果梯，仅结果面 = 南瓜）
         || id == BR::Sugarcane || id == BR::Farmland || id == BR::Sapling
         || id == BR::SweetBerryBush; // t514：浆果丛生长 tick 据 m_growthCells 遍历（O(丛格数) 替代全图扫描）
 }
@@ -434,6 +435,7 @@ void World::sparsePopulateChunk(int cx, int cz)
     placeFlowers(wx0, wx1, wz0, wz1);
     placeSugarcane(wx0, wx1, wz0, wz1);
     placeSweetBerryBushes(wx0, wx1, wz0, wz1);
+    placePumpkinPatches(wx0, wx1, wz0, wz1); // t1105：草系群系野生南瓜 patch（MC Alpha 起稀有 patch；种子唯一生存源闭合）
     m_worldgenQuiet = false;
     m_chunks.setPopulationWriteClamp(false, cx, cz);
     m_popWindowExtended = false; // t1073：扩展域复位（与置位成对——population 段外恒 false）
@@ -3465,8 +3467,9 @@ void World::tickCropGrowth()
             if (b == BlockRegistry::WheatCrop
                 || b == BlockRegistry::CarrotCrop
                 || b == BlockRegistry::PotatoCrop
-                || b == BlockRegistry::MelonStem) {
-                if (b == BlockRegistry::MelonStem
+                || b == BlockRegistry::MelonStem
+                || b == BlockRegistry::PumpkinStem) { // t1105：南瓜茎并入同门快照（第二实例）
+                if ((b == BlockRegistry::MelonStem || b == BlockRegistry::PumpkinStem)
                     && m_chunks.stateAt(x, y, z) >= BlockRegistry::WheatCropStageMax)
                     fruits.push_back({x, y, z, b, m_chunks.stateAt(x, y, z)}); // t1103 成熟茎 → 结果判定
                 else
@@ -3528,6 +3531,9 @@ void World::tickCropGrowth()
         const int mixedSeedF = int(quint32(m_seed) ^ (quint32(m_cropIntervalIndex) * 0x9E3779B9u));
         const quint32 hF = hashVoxel(mixedSeedF, f.x, f.y * 7 + int(f.stage), f.z);
         if (int(hF & 0xFFFFu) % 100 >= kCropGrowPct) continue; // 散布落空 → 本窗不结果
+        // t1105：结果面按茎 id 分流（瓜茎 → Melon / 南瓜茎 → Pumpkin；散布 / 扫描 / 落地面全同式）。
+        const quint8 fruitId = (f.id == BlockRegistry::PumpkinStem)
+                                   ? quint8(BlockRegistry::Pumpkin) : quint8(BlockRegistry::Melon);
         static constexpr int kFruitDir[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
         const int start = int((hF >> 16) & 3u); // 起始向（哈希定，确定性——同 seed 同窗同槽位）
         for (int d = 0; d < 4; ++d) {
@@ -3539,7 +3545,7 @@ void World::tickCropGrowth()
             if (ground != BlockRegistry::Farmland && ground != BlockRegistry::Dirt
                 && ground != BlockRegistry::Grass)
                 continue; // 落地面非瓜果可承载面 → 试下一向（MC 口径）
-            anyChange |= setWaterSilent(nx, f.y, nz, BlockRegistry::Melon, 0);
+            anyChange |= setWaterSilent(nx, f.y, nz, fruitId, 0);
             break; // 本窗本茎至多结果一枚（MC 同口径）
         }
     }
@@ -6478,7 +6484,8 @@ bool World::applyBonemeal(int x, int y, int z)
     //    同 t447 playercontroller 原路径——骨粉是玩家动作，非系统模拟，不走 setWaterSilent 批量静默路径）。
     //    t1103：瓜茎并入同门（仅推阶段；骨粉不结果——MC 口径 bonemeal 只推 stem age，果位由随机 tick）。
     if (id == BlockRegistry::WheatCrop || id == BlockRegistry::CarrotCrop
-        || id == BlockRegistry::PotatoCrop || id == BlockRegistry::MelonStem) {
+        || id == BlockRegistry::PotatoCrop || id == BlockRegistry::MelonStem
+        || id == BlockRegistry::PumpkinStem) { // t1105：南瓜茎并入同门（仅推阶段；骨粉不结果——MC 口径）
         if (st >= BlockRegistry::WheatCropStageMax) return false; // 已成熟 → 无效应不消耗（MC 同）
         //    t1030 登记口径：成熟施用二选一取「无效应不消耗」，非 MC 观感的「消耗无生长」；
         //    P-t1030a 成熟腿行为级钉死——阶段与槽计数俱不动。
@@ -6918,6 +6925,7 @@ void World::generate()
     placeFlowers(); // t397：各群系草地确定性散布 4 色花（PLAN §2-K；草丛后，仅写空气格不覆盖草 / 树）
     placeSugarcane(); // t397：水域邻接陆地确定性散布 1..3 格高甘蔗（PLAN §2-K；花后，仅写空气格不覆盖草 / 树 / 花）
     placeSweetBerryBushes(); // t467：Snowy 群系雪顶确定性散布浆果灌木丛（PLAN §2-K；甘蔗后，仅写空气格不覆盖雪上已占格）
+    placePumpkinPatches(); // t1105：草系群系野生南瓜 patch（PLAN §2-K；浆果丛后，仅写空气格不覆盖树 / 草丛 / 花）
     findSpawnColumn(); // t756：全部地表特征（树 / 草 / 花 / 甘蔗 / 浆果丛）定型后选出生列 —— 裸地表判据读的是最终栅格
     recomputeLightField(); // t151：地形 / 树 / 草丛定型后一次性算光场（worldgen 内 m_chunks.setBlock 直写不触此）
     // perf：worldgen 末全图重建流体方格索引一次 —— worldgen 经 m_chunks.setBlock / fillWater 直写 chunk
@@ -7748,6 +7756,69 @@ void World::placeSweetBerryBushes(int wx0, int wx1, int wz0, int wz1)
     }
     if (!m_worldgenQuiet)
         qInfo() << "worldgen: sweet berry bush placed =" << placed; // 同 seed → 同计数（确定性核对）
+}
+
+// t1105 野生南瓜 patch（见 world.h 头注释）：草系群系草地列确定性稀有散布南瓜（patch 种格 1/256 草列 +
+//   双卫星格，同 hash 位段定朝向与偏移）。机制等价 MC 1.0 野生南瓜（Alpha 1.2.0 起草面稀有 patch 实有；
+//   1.0 南瓜种子唯一生存源 = 野生南瓜 → 1:4 合成，矿井箱 1.0 无南瓜种子行——派工预期纠正留痕见
+//   recipe.h）。三守卫（同 placeFlowers 族）：非沙漠 / 非雪原（群系面简化登记候选池——MC 雪群系草面
+//   实有稀有生成，本工程 v1 不取）、沙滩带/水下不生、仅草顶列。仅写空气格（不覆盖树 / 草丛 / 花）。
+//   纯函数于 seed（hashColumn + biomeAt + heightAt，PLAN §2-K）→ 同 seed 同分布；禁用任何运行期随机源。
+void World::placePumpkinPatches(int wx0, int wx1, int wz0, int wz1)
+{
+    // §29.5-W1b 窗口归一（placeFlowers 同款）。
+    const PopulationWindow pw = populationWindow(wx0, wx1, wz0, wz1); // t1073：归一唯一权威（外环扩展域）
+    const bool win = pw.win;
+    const int xLo = pw.xLo;
+    const int xHi = pw.xHi;
+    const int zLo = pw.zLo;
+    const int zHi = pw.zHi;
+
+    int placed = 0;
+    for (int x = xLo; x < xHi; ++x) {
+        for (int z = zLo; z < zHi; ++z) {
+            const int surfaceY = heightAt(x, z);
+            // 与 placeFlowers 同阈值：沙滩带(wl±1)/水下(h<wl)/低洼不生（机制等价 MC 南瓜不生于沙/水下）。
+            if (surfaceY <= kWaterLevel + 1) continue;
+            const Biome bio = biomeAt(x, z);
+            if (bio == Biome::Desert) continue; // 沙漠不生（同花）；雪原 v1 不取（候选池登记）
+            if (bio == Biome::Snowy) continue;
+            // 仅草顶列（地表湖 / 洞口顶替换了草 → 跳过；同 placeFlowers）。
+            if (m_chunks.blockAt(x, surfaceY, z) != BlockRegistry::Grass) continue;
+
+            const quint32 r = hashColumn(m_seed, x, z);
+            if (r % 256u != 0u) continue; // 稀有 patch 种格：1/256 草列（MC 口径稀有；卫星格聚簇成 patch）
+
+            // 朝向独立位段 (r>>8)&3（0..3，chestFrontFace 同源编码）→ 野生南瓜刻脸朝向随 hash 确定性散布。
+            const quint8 face = quint8((r >> 8) & 3u);
+            const int y = surfaceY + 1; // 草顶上方一格
+            if (y >= m_height) continue; // 世界顶之上不放（防御）
+            // 仅写空气格 → 不覆盖已生成的方块（树干 / 树叶 / 草丛 / 花）。已被占的列自然跳过。
+            if (m_chunks.blockAt(x, y, z) != BlockRegistry::Air) continue;
+            setVoxelIfAir(x, y, z, BlockRegistry::Pumpkin, face);
+            ++placed;
+
+            // 双卫星格（hash 位段定 ±1..2 偏移，确定性）→ 逐格同三守卫 + 仅写空气格（patch 聚簇读感）。
+            static constexpr int kSat[2][2] = { { 1, 0 }, { 0, 1 } };
+            for (int s = 0; s < 2; ++s) {
+                const int offX = int((r >> (12 + s * 4)) & 3u) - 1; // -1..2（位段与密度/朝向解耦）
+                const int offZ = int((r >> (14 + s * 4)) & 3u) - 1;
+                const int sx = x + offX + kSat[s][0], sz = z + offZ + kSat[s][1];
+                if (sx == x && sz == z) continue;
+                const int ssY = heightAt(sx, sz);
+                if (ssY <= kWaterLevel + 1) continue;
+                const Biome sBio = biomeAt(sx, sz);
+                if (sBio == Biome::Desert || sBio == Biome::Snowy) continue;
+                if (m_chunks.blockAt(sx, ssY, sz) != BlockRegistry::Grass) continue;
+                if (ssY + 1 >= m_height) continue;
+                if (m_chunks.blockAt(sx, ssY + 1, sz) != BlockRegistry::Air) continue;
+                setVoxelIfAir(sx, ssY + 1, sz, BlockRegistry::Pumpkin, face);
+                ++placed;
+            }
+        }
+    }
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: pumpkin patches placed =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
 // t395 雪原/针叶群系水面冻结（见 world.h 头注释）：遍历 Snowy 群系列，把海平面表层水（y==waterLevel 的 Water

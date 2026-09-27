@@ -1259,10 +1259,47 @@ public:
         //   kMcBlockId：瓜块=103 / 茎=105（MC 1.0 原值）。
         Melon            = 149, // 西瓜：瓜茎结果 + 9 瓣合成；整立方 opaque；破坏掉 3-7 瓣
         MelonStem        = 150, // 西瓜茎：cross 作物（种瓜种于耕地）；8 阶段生长；成熟结果于邻格
-        Count           = 151, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
-                                 //   t1103 lawful 前移：149→151（Melon=149/MelonStem=150 尾部追加；
-                                 //   t1097 曾 148→149——追加不插中间存档契约，钉值随追加前移）。
+        // ── t1105 南瓜农作链 + 炼药锅（表尾追加三件；机制等价 MC 1.0 pumpkin stem 104 / jack o'lantern
+        //   91 / cauldron 118——Beta 1.2 起南瓜灯、Beta 1.9 pre 起炼药锅，均 1.0.0 基准内）。
+        //   南瓜茎（PumpkinStem）= MelonStem 作物原型**第二实例**（同门直复用：isGrowthBlock 索引 +
+        //   tickCropGrowth 生长门 + 成熟结果分流 + 四向扫描 + 骨粉只推阶段 + cross 几何 + 4 张阶段贴图
+        //   tile 201..204 基底+state/2 口径全同）；差异仅结果面 = 南瓜方块（Pumpkin=100，既存）与掉落
+        //   = 南瓜种子（PumpkinSeedsId 0x28B，材料段尾追加；MC 1.0 南瓜种子唯一生存源 = 野生南瓜 →
+        //   1:4 合成——**矿井箱 1.0 无南瓜种子行**，t1105 实读纠正派工预期，loottable.h 池注留痕）。
+        //   **worldgen 野生南瓜 patch**（placePumpkinPatches：MC Alpha 1.2 起草地稀有 patch 实有；本工程
+        //   v1 取草系群系单块+双卫星散布、雪原/沙漠不生，群系面简化登记候选池）闭合生存链：找到野生
+        //   南瓜 → 合成 4 种子 → 种茎 → 再结果。南瓜灯（JackOLantern）：南瓜 + 火把无序合成（Beta 1.2
+        //   基准内同料）；整立方 opaque（Pumpkin 同族，刻脸放置朝玩家——state 低 2 位 chestFrontFace
+        //   同源编码，与南瓜 t638 完全同门；t1105 接棒修正吸收稿「无 facing metadata」注，沿革注见
+        //   kDefs JackOLantern 行）；**lightEmission=15**（MC 1.0 jack o'lantern luminance 15，真方块光 flood 光源族）；
+        //   贴图 front=205 点亮刻脸（pack 面 = pumpkin_face_on.png——t610/t620 既注「加南瓜灯再接」的
+        //   承诺位兑现）+ 顶/侧复用南瓜 tile 119/117。雪傀儡搭建头位同收（placeBlock 头检测 Pumpkin ∪
+        //   JackOLantern——MC 1.0 造物头位两件皆可）。南瓜刻面（1.7+ 剪刀刻面）与南瓜派（1.4）越纪元
+        //   不取；南瓜可戴盔（1.0 有）随本工程护甲位现状核实后**登记候选池**（1.0 防 Nightwalker 凝视面
+        //   真实存在——凝视激怒机制在案 entitymanager.h stare enrage；护甲穿戴面缺位，禁超容量硬上）。
+        //   炼药锅（Cauldron）：solid=false / ShapeFull（碰撞/选中/射线走整格，Farmland 同门三权解耦）
+        //   + PartialBlockGeometry 画外壁环 + 内水面（state 低 2 位 = 水位 0..3，CauldronStateLevelMask）。
+        //   **交互面（MC 1.0 口径实读）**：玻璃瓶右键 → 1 水瓶 + 锅 -1 级（1 瓶 = 1 级水；满锅恰 3 瓶；
+        //   与水源直取面并存）；装水桶右键 → 锅灌满 3 级 + 生存桶→空桶（创造保持装水桶，倒水同门）；
+        //   空手右键无效应（1.0 无空手交互）；破坏掉锅本体（dropId=自身）+ 水随方块消失。**雨天集水
+        //   1.0 未确证**（派工预期与实读不合，候选池登记不交付）；岩浆锅（1.17+）/ 箭沾水（1.9+ tipped
+        //   arrow）越纪元不取。hardness=2.0 / Pickaxe 加速（requiresTool=false 空手可采且掉落，MC 1.0
+        //   cauldron「Any tool」口径）/ GroupStone。kMcBlockId：南瓜茎=104 / 南瓜灯=91 / 炼药锅=118
+        //   （MC 1.0 原值；kMc 表尾注「南瓜茎 104 缺席故跳位」自此收口）。
+        PumpkinStem      = 151, // 南瓜茎：cross 作物（MelonStem 同门第二实例）；8 阶段生长；成熟结果南瓜
+        JackOLantern     = 152, // 南瓜灯：南瓜+火把无序合成；整立方 opaque；lightEmission 15 光源族；
+                                //   state 低 2 位 = 刻脸朝向（chestFrontFace 同源编码，放置朝玩家——南瓜
+                                //   t638 完全同门；接棒修正吸收稿「固定朝向」注，沿革注见 kDefs 行）
+        Cauldron         = 153, // 炼药锅：瓶取水 -1 级 / 桶灌满 3 级；外壁环异形渲染；破坏掉本体
+        Count           = 154, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+                                 //   t1105 lawful 前移：151→154（PumpkinStem=151/JackOLantern=152/
+                                 //   Cauldron=153 尾部追加；t1103 曾 149→151、t1097 曾 148→149——
+                                 //   追加不插中间存档契约，钉值随追加前移）。
     };
+
+    // t1105 炼药锅 state 编码（复用 chunk m_states，存档 round-trip 保真——水位是方块持久态）：
+    //   bit[1:0] = 水位 0..3（0=空锅[玩家放置默认] / 1..3=逐级水量）。瓶取水 -1 / 桶灌满置 3。
+    static constexpr int CauldronStateLevelMask = 0x3;
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
     //   [FirstExtraBed, LastExtraBed]（white/light_blue/lime/pink/gray/light_gray/purple/brown）。isBed(id) 单一权威
@@ -2056,8 +2093,18 @@ public:
     // t1095：191..192=红石中继器两张（191=repeater_off 熄态底板 / 192=repeater_on 亮态底板；
     //   tools/build_repeater.py 程序生成原创像素图 §9a；Repeater 恒走 PartialBlockGeometry 异形段，
     //   state bit4 选 191/192——同红石粉亮度档选瓦的呈现层选择模式）。
-    static constexpr int AtlasTileCount = 201; // t1103 起 195→201（瓜族 tile 195..200 尾部追加：瓜顶/瓜侧/
-                                               //   茎 4 阶段，不插中间存档契约；t1097 曾 193→195——钉值随追加 lawful 前移）
+    // t1103：195..200=西瓜族六张（195=melon_top 瓜顶网纹 / 196=melon_side 瓜棱带 / 197..200=瓜茎 4 阶段；
+    //   tools/build_melon.py 程序生成原创像素图 §9a）。
+    // t1105：201..206=南瓜族五张 + 炼药锅一张（201..204=pumpkin_stem_0..3 南瓜茎 4 阶段——MelonStem
+    //   197..200 同门第二实例（基底+state/2 覆盖 8 年龄，色调转深绿棕以别西瓜茎黄绿）；
+    //   205=jackolantern_face 点亮刻脸（深橙瓜底 + 亮黄三角眼 / 锯齿嘴 + 内晕光；pack {205→
+    //   pumpkin_face_on.png}——t610/t620 既注「加南瓜灯再接」的承诺位，顶/侧复用南瓜 119/117）；
+    //   206=cauldron 炼药锅壁（暗铸铁 + 顶部沿口亮带 + 三足足影；Cauldron 全盒体 + 内水面 tile 复用
+    //   静水 19，水面高由 PartialBlockGeometry Cauldron case 据 state 水位算）。tools/build_pumpkin_stem.py /
+    //   build_jackolantern.py / build_cauldron.py 程序生成原创像素图 §9a）。**追加不插中间**（同上）。
+    static constexpr int AtlasTileCount = 207; // t1105 起 201→207（南瓜族 tile 201..205 + 炼药锅 206 尾部
+                                               //   追加：南瓜茎 4 阶段/南瓜灯点亮刻脸/炼药锅壁，不插中间
+                                               //   存档契约；t1103 曾 195→201——钉值随追加 lawful 前移）
 
     // t668 图集瓦片像素边长（HD 图集：16→64）。**单一权威**：tools/build_atlas.py TILE（打包像素大小）/
     //   ResourcePackManager::kTile（运行期包内贴图缩放目标）与 mesher 半纹素内缩（chunkgeometry hx/hy、

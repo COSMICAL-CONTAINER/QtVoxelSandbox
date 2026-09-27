@@ -594,6 +594,15 @@ public:
     static constexpr int GoldNuggetsId  = 0x288; // 金粒：金锭 1↔9 双向合成；闪烁西瓜环形合成原料
     static constexpr int MelonSeedsId   = 0x289; // 瓜种：矿井战利品 + 瓜片 1:1 转换 + 茎掉落；种瓜茎
     static constexpr int MelonSliceId   = 0x28A; // 瓜片：破瓜块掉 3-7 片；可食 +2 饥饿；转换瓜种 / 合瓜块
+    // t1105 南瓜种子（材料段 0x28B，瓜片 0x28A 之上**段尾追加**不插中间 = 存档安全铁律）。机制等价
+    //   MC 1.0 pumpkin seeds（Beta 1.8 入版，1.0 基准内）。命名「南瓜种子」（通用描述词，§9 合法）；
+    //   无 pack 映射（越表界 → -1 → 资源包回退自绘，同瓜种先例）；可堆叠 64（材料段默认零特判）。
+    //   **获取链实读纠正（派工预期 vs 1.0 实读）**：派工预期「Mineshaft 池权重行」，1.0 实读**矿井箱
+    //   无南瓜种子行**（t1103 瓜种行是 Beta 1.8 矿井箱原表自带，南瓜种子不在其中——南瓜的 1.0 生存
+    //   入口 = **草系群系野生南瓜 patch**（Alpha 1.2.0 起实有，本单 placePumpkinPatches 交付）→ 南瓜
+    //   1:4 合成本种子；矿井箱战利品行不交付、候选池登记留痕）。次要源 = 破南瓜茎掉 1 种（种植回路）。
+    //   消费面：右键耕地种南瓜茎（kCropSeeds 映射表同门）+ 唯一无合成产物（1.0 无南瓜派等下游）。
+    static constexpr int PumpkinSeedsId = 0x28B; // 南瓜种子：野生南瓜 1:4 合成 + 茎掉落；种南瓜茎
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

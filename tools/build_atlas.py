@@ -437,6 +437,17 @@ TILES = [
     "default_melon_stem_1",          # 198 melon_stem_1（瓜茎阶段 1：短蔓）
     "default_melon_stem_2",          # 199 melon_stem_2（瓜茎阶段 2：立蔓 + 侧卷须）
     "default_melon_stem_3",          # 200 melon_stem_3（瓜茎阶段 3：成熟蔓 + 双卷须 + 小花点；state==7 成熟结果）
+    # t1105 南瓜农作链五张 + 炼药锅一张（机制等价 MC 1.0 pumpkin stem / jack o'lantern / cauldron；
+    #   名称 / 贴图纯原创自绘 §9a——「南瓜」「炼药锅」为通用词，零 MC 专名）。tools/build_pumpkin_stem.py /
+    #   build_jackolantern.py / build_cauldron.py 程序生成原创像素图（§9 override (a)）。
+    "default_pumpkin_stem_0",        # 201 pumpkin_stem_0（南瓜茎阶段 0：嫩芽；4 张覆盖 8 年龄，基底+state/2 同瓜茎）
+    "default_pumpkin_stem_1",        # 202 pumpkin_stem_1（南瓜茎阶段 1：短蔓）
+    "default_pumpkin_stem_2",        # 203 pumpkin_stem_2（南瓜茎阶段 2：立蔓 + 侧卷须）
+    "default_pumpkin_stem_3",        # 204 pumpkin_stem_3（南瓜茎阶段 3：成熟蔓 + 双卷须 + 小黄花点）
+    "default_jackolantern_face",     # 205 jackolantern_face（南瓜灯点亮刻脸：深橙瓜底 + 亮黄眼嘴 + 内晕光；
+                                     #    JackOLantern frontTile=205，pack 接 pumpkin_face_on.png——t610/t620 承诺位兑现）
+    "default_cauldron",              # 206 cauldron（炼药锅壁：暗铸铁 + 顶沿亮带 + 双箍带 + 铆钉；Cauldron 六面；
+                                     #    内水面复用静水 tile 19，水面高由 PartialBlockGeometry 据 state 水位算）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

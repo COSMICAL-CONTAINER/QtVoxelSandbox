@@ -553,9 +553,13 @@ const QList<QPair<int, QString>> &tileFilenameMap()
         {118, QStringLiteral("pumpkin_face_off.png")},       // pumpkin_face（南瓜前面刻面双眼+锯齿嘴）
         {119, QStringLiteral("pumpkin_top.png")},            // pumpkin_top（南瓜顶/底瓜顶带茎）
         // t620 南瓜核实（blockId 100 六面映射全对：top/bottom=119 / side=117 / front(-Z)=118，t582 已接 +
-        //   t610 已修 face_off 懒拷贝退化链）。pumpkin_face_on.png（点亮态）**不接**——本工程无南瓜灯方块 /
-        //   点亮机制（Pumpkin 无 lit state，雪傀儡头也不发光），接了无消费方；仅作 t610 退化回退链的末位
-        //   候选存在（ensureBuiltLocked 内 tile 118 分支），机制等价 MC jack o'lantern 留后续若加南瓜灯再接。
+        //   t610 已修 face_off 懒拷贝退化链）。**t1105 承诺位兑现**：pumpkin_face_on.png（点亮态）本单起
+        //   接入 tile 205 南瓜灯点亮刻脸（t610/t620 既注「留后续若加南瓜灯再接」——南瓜灯方块本单交付，
+        //   消费方在案）；tile 118 的 t610 退化回退链末位候选保留不变（两消费面互不牵连）。
+        {205, QStringLiteral("pumpkin_face_on.png")},         // jackolantern_face（南瓜灯点亮刻脸；t1105 兑现 t610/t620 承诺位）
+        // t1105 南瓜灯顶/侧不另立 pack 行（tile 117/119 既存映射自动覆盖）；南瓜茎 4 阶段（201..204）与
+        //   炼药锅壁（206）无 pack 等价文件（demo 包无 pumpkin_stem/cauldron 系）→ 回落程序生成瓦片。
+        // t609 投掷器：tile 139 dropper_front → pack block/dropper_front_horizontal.png（水平朝向正面小排出口）。
         // t609 投掷器：tile 139 dropper_front → pack block/dropper_front_horizontal.png（水平朝向正面小排出口）。
         //   顶/底/侧复用熔炉 tile 12/13（既存 {12→furnace_top.png}/{13→furnace_side.png} 映射自动覆盖）。竖直
         //   朝向版（dropper_front_vertical.png）待投掷器支持上下朝向时接入（本工程放置朝向恒水平 4 向 →
