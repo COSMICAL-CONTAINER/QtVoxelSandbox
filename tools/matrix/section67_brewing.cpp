@@ -89,6 +89,21 @@ inline void layBrewPlatform(World &w, int px0, int px1, int pz0, int pz1)
         }
 }
 
+// 源钉根路径（t1102 r2072 置尾腿共用：applicationDirPath/../src——既有腿局部 srcRoot 同式收拢成
+//   匿名空间 helper，免每腿重抄三行）。
+inline QString srcRootForPins()
+{
+    return QDir(QCoreApplication::applicationDirPath()
+                + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("src"));
+}
+
+// 裸读源文件原文（块注释锚面——pinSet 剥注释不可锚时用；r2067d readRaw 同门收拢）。
+inline QString rawSource(const QString &path)
+{
+    QFile f(path);
+    return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+}
+
 } // namespace
 
 void MatrixRun::section67_brewing()
@@ -237,12 +252,17 @@ void MatrixRun::section67_brewing()
         const bool t1 = BrewingStore::brewResult(RecipeRegistry::AshWartId, RecipeRegistry::WaterBottleId) == RecipeRegistry::AwkwardPotionId
                         && BrewingStore::brewResult(RecipeRegistry::SugarId, RecipeRegistry::AwkwardPotionId) == RecipeRegistry::SpeedPotionId
                         && BrewingStore::brewResult(RecipeRegistry::BlazePowderId, RecipeRegistry::AwkwardPotionId) == RecipeRegistry::StrengthPotionId;
-        const bool t2 = BrewingStore::brewResult(RecipeRegistry::SugarId, RecipeRegistry::WaterBottleId) == 0
+        const bool t2 = BrewingStore::brewResult(RecipeRegistry::GlisteringMelonId, RecipeRegistry::WaterBottleId) == 0
                         && BrewingStore::brewResult(RecipeRegistry::AshWartId, RecipeRegistry::AwkwardPotionId) == 0
                         && BrewingStore::brewResult(RecipeRegistry::BlazePowderId, RecipeRegistry::WaterBottleId) == 0
                         && BrewingStore::brewResult(RecipeRegistry::AshWartId, RecipeRegistry::SpeedPotionId) == 0
                         && BrewingStore::brewResult(0, RecipeRegistry::WaterBottleId) == 0
                         && BrewingStore::brewResult(RecipeRegistry::AshWartId, 0) == 0;
+        // lawful 钉修订沿革（t1102）：t2 首负例原为 SugarId × WaterBottleId == 0（t1097 时点的「错料」
+        //   口径）。t1102 交付 1.0 水瓶直酿面（水瓶 + 糖 → 凡庸 MundanePotionId，wiki 2026 实读 1.0
+        //   图谱既有行）后该对不再是负例 → 改钉 GlisteringMelonId × WaterBottleId == 0（闪烁西瓜 × 水
+        //   瓶行 t1102 裁定不交付——1.0 纪元形态存疑不硬造，recipe.h 0x287 注留痕——故恒为零的 lawful
+        //   负例；断言语义不变：仍是「错料 × 水瓶 → 0」家族）。
         ok = ok && t1 && t2;
         if (!(t1 && t2)) diag += QStringLiteral("[table t1=%1 t2=%2]").arg(t1).arg(t2);
         // (2) 燃料表。
@@ -2131,6 +2151,383 @@ void MatrixRun::section67_brewing()
                " and icon cases and the particle burst and the audio declaration and the sound asset and"
                " generator rows, and the neighbouring glimmer emission and extended table row and 0x27A icon"
                " and drinkable tail are untouched)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── t1102 残项小批合集二（+4 腿 r2072a-d，置尾追加；矩阵 824→828）────────────────────────────
+    // 任务契约：件一 水瓶直酿行（1.0 基准直酿面两行：水瓶 + 发酵蛛眼 → 虚弱——喷溅虚弱链前置 /
+    //   水瓶 + 糖 → 凡庸 MundanePotionId 0x287 可饮无效果同粗制口径；兔子脚越纪元 / 稠厚原料缺口 /
+    //   闪烁西瓜·红石→凡庸(延长) 纪元形态存疑不硬造，裁定留痕 recipe.h 0x287 注）+ 件二 压力板 kMc
+    //   纪元标注勘误 + 数据修正（weighted 板 = MC 1.5 引入，1.0 的 71/72 = iron door / wooden plate，
+    //   数据 71→147 / 72→148 双重冲突消解，零运行期消费者零破坏）+ 件四 食物完成 burp（MC 1.0 食毕
+    //   随机 burp 通用反馈音，t1100 登记简化①补全：foodBurped 新信号与 potionDrunk 恒互斥）。
+    // NEG 面与豁免设计（恰红归因先于腿文）：
+    //   NEG-1 = 摘直酿行（brewingstore.cpp brewResult 水瓶分支两行新对一并摘——纯字面量行、无函数
+    //     声明牵连 → 编译仍绿）→ 恰红 = {r2072a}（直酿两对静态断言 + 两真驱转换断言全失；凡庸饮面
+    //     / 负例族断言不在摘面 → 部分幸存但腿体 FAIL）；b / c / d（源钉豁免面——不钉两行新对）均
+    //     不受影响。
+    //   NEG-2 = 摘食物 burp 面（playercontroller.cpp finishEating 的 foodBurped 触发行摘除——.h 信号
+    //     声明 / Main.qml 路由幸存 → 编译仍绿）→ 恰红 = {r2072b}（食物完成 foodBurped 恰一断言失；
+    //     饮面 potionDrunk 链不在摘面 → 部分幸存但腿体 FAIL）；a / c / d（源钉豁免面——不钉触发行）
+    //     均不受影响。
+
+    // ── r2072a：水瓶直酿转换行为柱（NEG-1 敏感面）─────────────────────────────────────────────────
+    //   NEG-1（摘 brewResult 水瓶分支两行新对）→ 恰红 = {r2072a}：直酿两对静态断言 + 两真驱断言全失；
+    //   凡庸饮面 / 负例族断言幸存但腿体判 FAIL。既有三小表零冲突负例族同柱断言（红石 / 火药门行「水
+    //   → 0」既录负例 + 未交付行负例）。
+    runLeg("r2072a water-bottle direct brewing conversion behavior column (the brew table maps a"
+        " water bottle plus fermented spider eye to the weakness potion and plus sugar to the"
+        " mundane potion while the ash-wort row still answers the awkward potion, the modifier"
+        " gate rows keep answering zero on water bottles with gunpowder and redstone and the"
+        " undelivered glistering-melon row stays zero, the direct-brew ingredients answer zero on"
+        " extended and splash bottles, a placed brewing stand driven through a full twenty-second"
+        " cycle converts water bottles to the mundane potion and to the weakness potion on the"
+        " ember powder fuel meter, and the mundane potion is a drinkable item outside the splash"
+        " predicate that drinks through the real chain with one empty bottle returned and no"
+        " status effect raised)",
+        [&]() {
+        bool ok = true;
+        QString diag;
+        // (1) 直酿两行 + 既录灰烬疣行不动。
+        const bool t1 =
+            BrewingStore::brewResult(RecipeRegistry::FermentedSpiderEyeId, RecipeRegistry::WaterBottleId) == RecipeRegistry::WeaknessPotionId
+            && BrewingStore::brewResult(RecipeRegistry::SugarId, RecipeRegistry::WaterBottleId) == RecipeRegistry::MundanePotionId
+            && BrewingStore::brewResult(RecipeRegistry::AshWartId, RecipeRegistry::WaterBottleId) == RecipeRegistry::AwkwardPotionId;
+        // (2) 负例族（与既有三小表零冲突 + 未交付行恒零）。
+        const bool t2 =
+            BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::WaterBottleId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::RedstoneId, RecipeRegistry::WaterBottleId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::GlisteringMelonId, RecipeRegistry::WaterBottleId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::FermentedSpiderEyeId, RecipeRegistry::ExtendedWeaknessPotionId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::SugarId, RecipeRegistry::ExtendedWeaknessPotionId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::FermentedSpiderEyeId, RecipeRegistry::SplashWeaknessPotionId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::SugarId, RecipeRegistry::SplashExtendedWeaknessPotionId) == 0;
+        ok = ok && t1 && t2;
+        if (!(t1 && t2)) diag += QStringLiteral("[table t1=%1 t2=%2]").arg(t1).arg(t2);
+        // (3) 真驱转换双链：水 + 糖 → 凡庸 / 水 + 发酵蛛眼 → 虚弱（各 20s 一轮 + 耗 1 原料 + 计量 -1）。
+        const auto driveBrew = [&](int ingId, int expectId) {
+            World w;
+            initFixedBrewWorld(w);
+            layBrewPlatform(w, 20, 30, 20, 30);
+            PlayerController pc;
+            pc.setWorld(&w);
+            BrewingStore store;
+            pc.setBrewingStore(&store);
+            const int bxp = 24, byp = 81, bzp = 24;
+            w.setBlock(bxp, byp, bzp, BR::BrewingStand, 0);
+            store.setSlot(bxp, byp, bzp, BrewingStore::kSlotPotion0, RecipeRegistry::WaterBottleId, 1);
+            store.setSlot(bxp, byp, bzp, BrewingStore::kSlotIngredient, ingId, 1);
+            store.setSlot(bxp, byp, bzp, BrewingStore::kSlotFuel, RecipeRegistry::BlazePowderId, 1);
+            const int steps = int(20.6 / 0.05);
+            for (int i = 0; i < steps; ++i) pc.scanBrewingStands(0.05f);
+            return store.slotIdAt(bxp, byp, bzp, BrewingStore::kSlotPotion0) == expectId
+                   && store.slotCountAt(bxp, byp, bzp, BrewingStore::kSlotIngredient) == 0
+                   && store.fuelOpsAt(bxp, byp, bzp) == BrewingStore::kPowderFuelOps - 1;
+        };
+        const bool drivenMundane = driveBrew(RecipeRegistry::SugarId, RecipeRegistry::MundanePotionId);
+        const bool drivenWeak = driveBrew(RecipeRegistry::FermentedSpiderEyeId, RecipeRegistry::WeaknessPotionId);
+        ok = ok && drivenMundane && drivenWeak;
+        if (!(drivenMundane && drivenWeak))
+            diag += QStringLiteral("[driven mundane=%1 weak=%2]").arg(drivenMundane).arg(drivenWeak);
+        // (4) 凡庸饮面口径：谓词面（可饮 + 非喷溅）+ 真链饮毕（耗 1 + 返 1 空瓶 + potionDrunk 恰一 +
+        //     零效果快照——无效果载体同粗制口径）。
+        const bool preds = PlayerController::isDrinkableItem(RecipeRegistry::MundanePotionId)
+                           && !PlayerController::isSplashPotionItem(RecipeRegistry::MundanePotionId);
+        ok = ok && preds;
+        if (!preds) diag += QStringLiteral("[preds]");
+        World w;
+        initFixedBrewWorld(w);
+        layBrewPlatform(w, 18, 44, 18, 30);
+        EntityManager ents;
+        Hotbar hb;
+        PlayerController pc;
+        pc.setWorld(&w);
+        pc.setEntityManager(&ents);
+        pc.setHotbar(&hb);
+        QQuickWindow probeWin;
+        pc.setParentItem(probeWin.contentItem());
+        pc.grab();
+        pc.setSelectedBlock(int(BR::Air)); // 材料段物品真实接线（t1030 rig 纪律）
+        int drunkCount = 0, snapCount = 0;
+        QObject::connect(&pc, &PlayerController::potionDrunk, &pc, [&](int itemId) {
+            if (itemId == RecipeRegistry::MundanePotionId) ++drunkCount;
+        });
+        QObject::connect(&pc, &PlayerController::activeEffectsChanged, &pc,
+                         [&](const QVariantList &l) { if (!l.isEmpty()) ++snapCount; });
+        hb.setStack(0, RecipeRegistry::MundanePotionId, 2, 0);
+        pc.loadSavedState(24.5, 81.0, 24.5, 0.0, 0.0, 2 /* Survival */);
+        QElapsedTimer pumpT; pumpT.start();
+        while (pumpT.elapsed() < 320)
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        pc.tick();
+        pc.beginEating();
+        const bool eatingStarted = pc.eating();
+        for (int i = 0; i < 44; ++i) {
+            QThread::msleep(60);
+            pc.tick();
+        }
+        pc.endEating();
+        pc.tick();
+        int bottles = 0;
+        for (int i = 0; i < hb.slotCount(); ++i)
+            if (hb.blockIdAt(i) == RecipeRegistry::GlassBottleId) bottles += hb.countAt(i);
+        const bool drinkOk = eatingStarted && drunkCount == 1 && snapCount == 0
+                             && hb.blockIdAt(0) == RecipeRegistry::MundanePotionId && hb.countAt(0) == 1
+                             && bottles == 1;
+        ok = ok && drinkOk;
+        if (!drinkOk)
+            diag += QStringLiteral("[drink eat=%1 drunk=%2 snap=%3 n0=%4 b=%5]")
+                        .arg(eatingStarted).arg(drunkCount).arg(snapCount).arg(hb.countAt(0)).arg(bottles);
+
+        probeWin.deleteLater();
+        pc.release();
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2072a water-bottle direct brewing conversion behavior column (the brew table maps a"
+               " water bottle plus fermented spider eye to the weakness potion and plus sugar to the"
+               " mundane potion while the ash-wort row still answers the awkward potion, the modifier"
+               " gate rows keep answering zero on water bottles with gunpowder and redstone and the"
+               " undelivered glistering-melon row stays zero, the direct-brew ingredients answer zero on"
+               " extended and splash bottles, a placed brewing stand driven through a full twenty-second"
+               " cycle converts water bottles to the mundane potion and to the weakness potion on the"
+               " ember powder fuel meter, and the mundane potion is a drinkable item outside the splash"
+               " predicate that drinks through the real chain with one empty bottle returned and no"
+               " status effect raised)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── r2072b：食物完成 burp 行为柱（真链信号计数钉；NEG-2 敏感面）───────────────────────────────
+    //   NEG-2（摘 finishEating 的 foodBurped 触发行）→ 恰红 = {r2072b}：食物完成 foodBurped 恰一断言
+    //   全失；饮面 potionDrunk 链（链 B）不在摘面 → 部分幸存但腿体判 FAIL。计数钉非空转：foodBurped /
+    //   potionDrunk 都经真链完成沿驱动（r2070b 计数钉同门）。
+    runLeg("r2072b food completion burp behavior column (a real survival player finishing a bread"
+        " eat through the full eat chain emits exactly one foodBurped signal and zero potionDrunk"
+        " signals while consuming one bread, and a real survival drink of a water bottle emits"
+        " exactly one potionDrunk and zero foodBurped with one empty bottle returned, the two"
+        " completion edges staying mutually exclusive on both directions)",
+        [&]() {
+        bool ok = true;
+        QString diag;
+        World w;
+        initFixedBrewWorld(w);
+        layBrewPlatform(w, 18, 44, 18, 30);
+        EntityManager ents;
+        Hotbar hb;
+        PlayerController pc;
+        pc.setWorld(&w);
+        pc.setEntityManager(&ents);
+        pc.setHotbar(&hb);
+        QQuickWindow probeWin;
+        pc.setParentItem(probeWin.contentItem());
+        pc.grab();
+        pc.setSelectedBlock(int(BR::Air)); // 材料段物品真实接线（t1030 rig 纪律）
+        int foodBurpCount = 0, drunkCount = 0;
+        QObject::connect(&pc, &PlayerController::foodBurped, &pc, [&](int itemId) {
+            if (itemId == RecipeRegistry::BreadId) ++foodBurpCount;
+        });
+        QObject::connect(&pc, &PlayerController::potionDrunk, &pc, [&](int) { ++drunkCount; });
+        const auto pumpMs = [](int ms) {
+            QElapsedTimer t; t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        // 链 A：面包（食物完成沿）——真链食满 → foodBurped 恰一 + potionDrunk 零 + 耗 1。
+        hb.setStack(0, RecipeRegistry::BreadId, 2, 0);
+        pc.loadSavedState(24.5, 81.0, 24.5, 0.0, 0.0, 2 /* Survival */);
+        pumpMs(320); // 越过放置 CD
+        pc.tick();
+        pc.beginEating();
+        const bool eatingStarted = pc.eating();
+        for (int i = 0; i < 44; ++i) {
+            QThread::msleep(60);
+            pc.tick();
+        }
+        pc.endEating();
+        pc.tick();
+        const bool foodOk = eatingStarted && foodBurpCount == 1 && drunkCount == 0
+                            && hb.blockIdAt(0) == RecipeRegistry::BreadId && hb.countAt(0) == 1;
+        ok = ok && foodOk;
+        if (!foodOk)
+            diag += QStringLiteral("[food eat=%1 burp=%2 drunk=%3 n0=%4]")
+                        .arg(eatingStarted).arg(foodBurpCount).arg(drunkCount).arg(hb.countAt(0));
+        // 链 B：水瓶（饮用完成沿）——真链喝满 → potionDrunk 恰一 + foodBurped 仍零（计数不回退断言：
+        //   链 A 后 foodBurpCount 恒 1，链 B 零增量）+ 返 1 空瓶。互斥双向：食面无饮沿 / 饮面无食沿。
+        hb.setStack(0, RecipeRegistry::WaterBottleId, 2, 0);
+        pumpMs(320); // 越过 finishEating 冷却 / eat CD
+        pc.tick();
+        pc.beginEating();
+        const bool drinkingStarted = pc.eating();
+        for (int i = 0; i < 44; ++i) {
+            QThread::msleep(60);
+            pc.tick();
+        }
+        pc.endEating();
+        pc.tick();
+        int bottles = 0;
+        for (int i = 0; i < hb.slotCount(); ++i)
+            if (hb.blockIdAt(i) == RecipeRegistry::GlassBottleId) bottles += hb.countAt(i);
+        const bool drinkOk = drinkingStarted && drunkCount == 1 && foodBurpCount == 1 && bottles == 1
+                             && hb.blockIdAt(0) == RecipeRegistry::WaterBottleId && hb.countAt(0) == 1;
+        ok = ok && drinkOk;
+        if (!drinkOk)
+            diag += QStringLiteral("[drink eat=%1 burp=%2 drunk=%3 b=%4 n0=%5]")
+                        .arg(drinkingStarted).arg(foodBurpCount).arg(drunkCount).arg(bottles).arg(hb.countAt(0));
+
+        probeWin.deleteLater();
+        pc.release();
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2072b food completion burp behavior column (a real survival player finishing a bread"
+               " eat through the full eat chain emits exactly one foodBurped signal and zero potionDrunk"
+               " signals while consuming one bread, and a real survival drink of a water bottle emits"
+               " exactly one potionDrunk and zero foodBurped with one empty bottle returned, the two"
+               " completion edges staying mutually exclusive on both directions)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── r2072c：压力板 kMc 数据钉 + 资源包消费面回归柱（件二）────────────────────────────────────
+    //   两 NEG 均不触达（行为钉走 mcBlockId 直读 + 资源包行源钉；标注锚 = 裸读块注释——pinSet 剥
+    //   注释面不可锚，r2067d mcIdRow 裸读先例）。
+    runLeg("r2072c pressure-plate migration mapping and resource-pack face column (the migration"
+        " table sends the iron plate to one-forty-seven and the gold plate to one-forty-eight as"
+        " the true weighted-plate ids with the stone plate at seventy and the wooden plate at"
+        " seventy-two and the iron door at seventy-one so the historical double collisions are"
+        " resolved, the brewing-stand neighbour mapping stays at one-seventeen, and the resource"
+        " pack block-tile rows for the three plates hold their weighted naming untouched)",
+        [&]() {
+        bool ok = true;
+        QString diag;
+        // (1) kMc 数据钉：147/148 真值 + 石板 / 木板 / 铁门 1.0 真值不动 + 酿造台邻族不扰 +
+        //     双重冲突消解断言。
+        const bool mcIds = BR::mcBlockId(quint8(BR::IronPressurePlate)) == 147
+                           && BR::mcBlockId(quint8(BR::GoldPressurePlate)) == 148
+                           && BR::mcBlockId(quint8(BR::StonePressurePlate)) == 70
+                           && BR::mcBlockId(quint8(BR::WoodPressurePlate)) == 72
+                           && BR::mcBlockId(quint8(BR::IronDoor)) == 71
+                           && BR::mcBlockId(quint8(BR::BrewingStand)) == 117
+                           && BR::mcBlockId(quint8(BR::IronPressurePlate)) != BR::mcBlockId(quint8(BR::IronDoor))
+                           && BR::mcBlockId(quint8(BR::GoldPressurePlate)) != BR::mcBlockId(quint8(BR::WoodPressurePlate));
+        ok = ok && mcIds;
+        if (!mcIds) diag += QStringLiteral("[mcIds]");
+        // (2) 纪元标注锚（块注释裸读——剥注释面不可锚）。
+        const QString brSrc = rawSource(srcRootForPins() + QStringLiteral("/Core/blockregistry.cpp"));
+        const bool anchors = brSrc.contains(QStringLiteral("纪元三元组留痕"))
+                             && brSrc.contains(QStringLiteral("/* iron_pressure_plate     */ 147,"))
+                             && brSrc.contains(QStringLiteral("/* gold_pressure_plate     */ 148,"));
+        ok = ok && anchors;
+        if (!anchors) diag += QStringLiteral("[anchors]");
+        // (3) 资源包消费面零破坏（t627 三 tile 行原样——weighted 命名族 = 机制对齐同源留痕）。
+        const QStringList missRp = pinSet(srcRootForPins() + QStringLiteral("/Core/resourcepackmanager.cpp"), {
+            SrcPin("stone tile row", "{154, QStringLiteral(\"stone_pressure_plate.png\")}", 1),
+            SrcPin("heavy tile row", "{155, QStringLiteral(\"heavy_weighted_pressure_plate.png\")}", 1),
+            SrcPin("light tile row", "{156, QStringLiteral(\"light_weighted_pressure_plate.png\")}", 1)});
+        ok = ok && missRp.isEmpty();
+        if (!missRp.isEmpty()) diag += QStringLiteral("[rp %1]").arg(missRp.join(QLatin1Char(',')));
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2072c pressure-plate migration mapping and resource-pack face column (the migration"
+               " table sends the iron plate to one-forty-seven and the gold plate to one-forty-eight as"
+               " the true weighted-plate ids with the stone plate at seventy and the wooden plate at"
+               " seventy-two and the iron door at seventy-one so the historical double collisions are"
+               " resolved, the brewing-stand neighbour mapping stays at one-seventeen, and the resource"
+               " pack block-tile rows for the three plates hold their weighted naming untouched)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── r2072d：凡庸 id + 食物 burp 结构钉族（NEG 触达面全豁免）──────────────────────────────────
+    //   源钉 NEG 豁免面（t1100/t1101 同款设计）：不钉 brewResult 水瓶分支两行新对（NEG-1 触达面）与
+    //   finishEating foodBurped 触发行（NEG-2 触达面），保「恰红」单腿归因；只钉 id 段位 / 呈现面 /
+    //   信号声明 / QML 路由 / 邻族零污染。
+    runLeg("r2072d structure pins (the mundane potion sits at 0x287 as a tail append right after"
+        " SplashExtendedWeaknessPotionId 0x286 with the splash family untouched, the name face and"
+        " palette tail append and icon case and max stack 64 on both layers hold, the drinkable"
+        " face holds the mundane row with the historical tail row verbatim and the pinned ash-wort"
+        " ternary untouched, the food-burp wiring source pin family holds across the signal"
+        " declaration and the qml route with the finishEating emit face unpinned for NEG"
+        " attribution, and the neighbouring splash-weakness row and potion-drunk emit and"
+        " drinkable tail are untouched)", [&]() {
+        bool ok = true;
+        QString diag;
+        // (1) id 段位（尾追加 + 邻接族原值）。
+        const bool ids = RecipeRegistry::MundanePotionId == 0x287
+                         && RecipeRegistry::SplashExtendedWeaknessPotionId == 0x286
+                         && RecipeRegistry::SplashSpeedPotionId == 0x27B
+                         && RecipeRegistry::ExtendedWeaknessPotionId == 0x27A
+                         && RecipeRegistry::SugarId == 0x26A
+                         && RecipeRegistry::AwkwardPotionId == 0x267;
+        ok = ok && ids;
+        if (!ids) diag += QStringLiteral("[ids]");
+        // (2) 呈现面：名面一件 + 调色板尾追加（喷溅 12 连之后恰一位）+ maxStack 双层面 64 + 材料段判定。
+        Hotbar hb;
+        const bool nameOk = hb.nameForBlock(RecipeRegistry::MundanePotionId) == QStringLiteral("凡庸药水");
+        const QVariantList mats = hb.creativeMaterials();
+        int lastSplash = -1, mundaneIdx = -1;
+        for (int i = 0; i < mats.size(); ++i) {
+            const int v = mats.at(i).toInt();
+            if (v == RecipeRegistry::SplashExtendedWeaknessPotionId) lastSplash = i;
+            if (v == RecipeRegistry::MundanePotionId) mundaneIdx = i;
+        }
+        const bool paletteOk = lastSplash >= 0 && mundaneIdx == lastSplash + 1;
+        const bool stackOk = hb.maxStackSize(RecipeRegistry::MundanePotionId) == 64
+                             && BR::maxStackSize(RecipeRegistry::MundanePotionId) == 64
+                             && hb.isMaterial(RecipeRegistry::MundanePotionId);
+        ok = ok && nameOk && paletteOk && stackOk;
+        if (!(nameOk && paletteOk && stackOk))
+            diag += QStringLiteral("[face name=%1 palette=%2/%3 stack=%4]")
+                        .arg(nameOk).arg(lastSplash).arg(mundaneIdx).arg(stackOk);
+        // (3) 全链源钉族（剥注释 pinSet 锚真实语句；NEG 触达面全豁免：水瓶分支两行新对 / finishEating
+        //     触发行不钉）。
+        const QStringList missRh = pinSet(srcRootForPins() + QStringLiteral("/Game/recipe.h"), {
+            SrcPin("mundane row", "static constexpr int MundanePotionId = 0x287;", 1)});
+        const QStringList missRc = pinSet(srcRootForPins() + QStringLiteral("/Game/recipe.cpp"), {
+            SrcPin("assert tail", "static_assert(RecipeRegistry::MundanePotionId", 1)});
+        const QStringList missPcH = pinSet(srcRootForPins() + QStringLiteral("/Game/playercontroller.h"), {
+            SrcPin("burp signal decl", "void foodBurped(int itemId);", 1)});
+        const QStringList missPc = pinSet(srcRootForPins() + QStringLiteral("/Game/playercontroller.cpp"), {
+            SrcPin("drinkable mundane row", "|| itemId == RecipeRegistry::MundanePotionId", 1)});
+        const QStringList missMq = pinSet(srcRootForPins() + QStringLiteral("/ui/Main.qml"), {
+            SrcPin("burp route", "function onFoodBurped(itemId) {", 1)});
+        const QStringList missMi = pinSet(srcRootForPins() + QStringLiteral("/ui/MaterialIcon.qml"), {
+            SrcPin("icon 287", "case 0x287: drawPotion(", 1)});
+        const QStringList missHb = pinSet(srcRootForPins() + QStringLiteral("/Game/hotbar.cpp"), {
+            SrcPin("name row", "return QStringLiteral(\"凡庸药水\")", 1),
+            SrcPin("palette row", "int(RecipeRegistry::MundanePotionId)", 1)});
+        const bool d5 = missRh.isEmpty() && missRc.isEmpty() && missPcH.isEmpty() && missPc.isEmpty()
+            && missMq.isEmpty() && missMi.isEmpty() && missHb.isEmpty();
+        ok = ok && d5;
+        if (!d5) {
+            const QStringList allMiss = QStringList()
+                << missRh << missRc << missPcH << missPc << missMq << missMi << missHb;
+            diag += QStringLiteral("[d5 %1]").arg(allMiss.join(QLatin1Char(',')));
+        }
+        // (4) 邻族零污染（既录尾行 / 三元组行 / 喷溅行 / potionDrunk 发行原样——r2069d/r2071d/r2067d/
+        //     r2070d 同锚互证）。
+        const bool drinkTail = pinSet(srcRootForPins() + QStringLiteral("/Game/playercontroller.cpp"), {
+            SrcPin("drinkable tail untouched", "|| itemId == RecipeRegistry::InstantHealthPotionId;", 1)}).isEmpty();
+        const bool ternary = pinSet(srcRootForPins() + QStringLiteral("/Game/brewingstore.cpp"), {
+            SrcPin("awkward ternary untouched", "return ingredientId == RecipeRegistry::AshWartId ? RecipeRegistry::AwkwardPotionId : 0;", 1)}).isEmpty();
+        const bool splashRow = pinSet(srcRootForPins() + QStringLiteral("/Game/brewingstore.cpp"), {
+            SrcPin("splash ext weak row untouched", "return RecipeRegistry::SplashExtendedWeaknessPotionId;", 1)}).isEmpty();
+        const bool drunkEmit = pinSet(srcRootForPins() + QStringLiteral("/Game/playercontroller.cpp"), {
+            SrcPin("drunk emit untouched", "emit potionDrunk(eatenId);", 1)}).isEmpty();
+        const bool nb = drinkTail && ternary && splashRow && drunkEmit;
+        ok = ok && nb;
+        if (!nb) diag += QStringLiteral("[nb drink=%1 ternary=%2 splash=%3 drunk=%4]")
+                             .arg(drinkTail).arg(ternary).arg(splashRow).arg(drunkEmit);
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2072d structure pins (the mundane potion sits at 0x287 as a tail append right after"
+               " SplashExtendedWeaknessPotionId 0x286 with the splash family untouched, the name face and"
+               " palette tail append and icon case and max stack 64 on both layers hold, the drinkable"
+               " face holds the mundane row with the historical tail row verbatim and the pinned ash-wort"
+               " ternary untouched, the food-burp wiring source pin family holds across the signal"
+               " declaration and the qml route with the finishEating emit face unpinned for NEG"
+               " attribution, and the neighbouring splash-weakness row and potion-drunk emit and"
+               " drinkable tail are untouched)"
             << (ok ? QString() : diag);
     });
 }
