@@ -11,8 +11,10 @@
 //   t1099 第二轮（粗制 + 效果原料 → 效果药水五链，wiki 口径与获取链裁定见 recipe.h 0x26B..0x274 注）：
 //   粗制 + 岩浆膏 → 火抗（3:00）/ 粗制 + 幽灵泪 → 再生（0:45）/ 粗制 + 蜘蛛眼 → 中毒（0:45）/
 //   粗制 + 发酵蛛眼 → 虚弱（1:30）/ 粗制 + 闪烁西瓜 → 瞬间治疗（即时）。
-//   候选池登记（本表尾追加扩展位）：水瓶直酿行（1.0 水瓶+发酵蛛眼 → 虚弱 / +其余原料 → 凡庸药水）、
-//   延长/强化二级链（红石 / 辉光岩）、喷溅药水。
+//   候选池登记（本表尾追加扩展位）：水瓶直酿行 **t1102 已交付两行**（水瓶 + 发酵蛛眼 → 虚弱 /
+//   + 糖 → 凡庸 MundanePotionId 0x287；兔子脚越纪元 / 稠厚原料缺口 / 闪烁西瓜·红石→凡庸(延长) 纪元
+//   形态存疑，裁定留痕见 recipe.h 0x287 注）、延长/强化二级链（红石已交付 / 辉光岩候选池）、喷溅药水
+//   （t1101 已交付）。
 int BrewingStore::brewResult(int ingredientId, int bottleId)
 {
     // t1100 二级酿造门行（MC 1.0 redstone modifier）：红石粉只作用于**成品效果药水** → 对应延长版。
@@ -30,7 +32,21 @@ int BrewingStore::brewResult(int ingredientId, int bottleId)
     if (ingredientId == RecipeRegistry::GunpowderId)
         return splashPotionResult(bottleId);
     if (bottleId == RecipeRegistry::WaterBottleId)
+    {
+        // t1102 水瓶直酿行（MC 1.0 基准直酿面，wiki 2026 实读逐行留痕见 recipe.h 0x287 注）：
+        //   发酵蛛眼 → 虚弱（喷溅虚弱酿造链前置直酿行，1.0 图谱既有）；糖 → 凡庸（1.0 图谱既有）。
+        //   兔子脚（越纪元）/ 辉光岩粉→稠厚（原料缺口）/ 闪烁西瓜·红石→凡庸(延长)（纪元形态存疑且
+        //   红石行与 t1100 红石门行「水 → 0」既录负例冲突）不取，裁定留痕同上。
+        //   NEG 面登记：本两行 = t1102 直酿行 NEG-1 恰红触达面（摘除后编译仍绿——行内仅字面量、
+        //   无函数声明幸存问题——行为柱 r2072a 恰红，其余腿不受影响）。
+        //   负例保护（与既有三小表零冲突）：红石 / 火药门行**在先**已拦截（水 + 红石 → 0、水 + 火药
+        //   → 0 两既录负例不动）；本两行只接非门行原料，粗制 / 效果 / 延长 / 喷溅瓶位全不触达。
+        if (ingredientId == RecipeRegistry::FermentedSpiderEyeId)
+            return RecipeRegistry::WeaknessPotionId; // t1102 直酿行：水瓶 + 发酵蛛眼 → 虚弱
+        if (ingredientId == RecipeRegistry::SugarId)
+            return RecipeRegistry::MundanePotionId;  // t1102 直酿行：水瓶 + 糖 → 凡庸
         return ingredientId == RecipeRegistry::AshWartId ? RecipeRegistry::AwkwardPotionId : 0;
+    }
     if (bottleId == RecipeRegistry::AwkwardPotionId)
     {
         if (ingredientId == RecipeRegistry::SugarId)

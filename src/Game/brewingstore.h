@@ -40,7 +40,10 @@
 //   范围结算；口径留痕见 recipe.h 0x27B..0x286 注 + playercontroller.h 喷溅常量族）。映射 =
 //   splashPotionResult 小表（extendedPotionResult 同门：12 行成对映射 + 单 gate 行；水 / 粗制 /
 //   瞬间治疗 / 喷溅版再酿 / 非瓶 = 无映射负例面）。
-//   其余 1.0 面（水瓶直酿 / 辉光强化 / 即时效果喷溅 / modifier 对喷溅再酿）**登记后续轮**（候选池）。
+//   t1102：水瓶直酿面交付两行（水瓶 + 发酵蛛眼 → 虚弱——喷溅虚弱链前置 / 水瓶 + 糖 → 凡庸药水
+//   MundanePotionId 0x287 可饮无效果同粗制口径），行位接在水瓶分支粗制三元组**之前**（t1097 既录
+//   三元组行原样幸存 = r2067d 源钉零修订）；其余 1.0 面（辉光强化 / 即时效果喷溅 / modifier 对喷溅
+//   再酿 / 闪烁西瓜·红石→凡庸(延长)）**登记后续轮**（候选池，裁定留痕见 recipe.h 0x287 注）。
 //
 // 设计（对齐 HopperStore / FurnaceStore）：纯存储，不持光 / 不依赖 World/Renderer（PLAN §2 分层：本层属
 // Game/ViewModel，机制 tick = PlayerController::scanBrewingStands（Game 层直调 Q_INVOKABLE 读族 + 引擎

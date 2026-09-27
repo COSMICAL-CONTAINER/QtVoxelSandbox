@@ -944,9 +944,16 @@ signals:
     void drinkGulp(float x, float y, float z, int itemId);
     // t1100 饮毕信号：可饮面进食链完成沿发一次（finishEating 可饮分支末），携饮毕持物 id。呈现层
     //   → AudioManager.playBurp（饮毕 burp 音，每次播放随机 ±8% 播放速率抖动 ≈ MC 随机音高）。
-    //   机制等价 MC 1.0 饮毕 burp（食物进食完成面不发本信号——登记简化：burp 仅药水/可饮面，食物
-    //   完成面维持既有静默，候选池登记）。
+    //   机制等价 MC 1.0 饮毕 burp。t1102 起：食物完成面走 foodBurped 伴生信号（与本信号恒互斥——
+    //   饮面发本信号、食面发 foodBurped，防双 burp），本信号语义不变（可饮面统一沿）。
     void potionDrunk(int itemId);
+    // t1102 食物完成 burp 信号（potionDrunk 伴生面；机制等价 MC 1.0 食毕随机 burp——进食完成沿响，
+    //   wiki 2026 实读口径：随机 burp 是**进食完成**的通用反馈音，食物与药水同面）：食物完成沿发一次
+    //   （finishEating 非可饮分支，携食毕持物 id），呈现层 → AudioManager.playBurp（同门 ±8% 随机
+    //   音高抖动，burp 音频面复用同 clip）。与 potionDrunk 恒互斥（可饮面走 potionDrunk，本面只接
+    //   foodHungerAmount>0 的食物完成沿）。分层（PLAN §2）：Game 层发语义事件，呈现层只消费
+    //   （potionDrunk 同门）。
+    void foodBurped(int itemId);
     // t1100 效果粒子信号（药水旋涡粒子近似面）：任一效果激活期（Survival）每 kEffectParticleIntervalSec
     //   秒发一次，携玩家位置 + **主效果**类型（活跃效果取枚举序最小者作色源；多效果同显时仅主效果
     //   粒子 = 简化口径登记，非 MC 每效果各自粒子面）。呈现层 → BlockParticles.burstEffect 按效果类型

@@ -3577,6 +3577,12 @@ Window {
         function onPotionDrunk(itemId) {
             audio.playBurp()
         }
+        // t1102 食物完成 burp 路由（食物完成沿 foodBurped → playBurp；同门 ±8% 随机音高抖动，机制
+        //   等价 MC 食毕随机 burp——burp 是进食完成的通用反馈音，食物与药水同面。与 onPotionDrunk
+        //   恒互斥分流：可饮面走上方路由，食物面走本路由，防双 burp）。
+        function onFoodBurped(itemId) {
+            audio.playBurp()
+        }
         // t1100 效果粒子路由（效果激活期效果粒子沿 effectParticle → BlockParticles.burstEffect 按效果
         //   类型取色迸发；坐标 = 玩家位置，类型 = 主效果枚举）。
         function onEffectParticle(x, y, z, effectType) {
