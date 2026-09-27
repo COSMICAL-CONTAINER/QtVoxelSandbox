@@ -1101,6 +1101,9 @@ add_executable(redstone_matrix_test
     # t1097 酿造台 + 药水探针段（4 腿 r2067a-d，filter 词 r2067；酿造 tick 直调 + 真链 pc rig——
     #   brewingstore 已列，零新 include 面）。
     tools/matrix/section67_brewing.cpp
+    # t1104 附魔台 + 附魔机制探针段（4 腿 r2074a-d，filter 词 r2074；纯 PlayerState/EnchantRegistry/
+    #   World 直驱 + 源钉族——零新 include 面，hotbar/recipe/playerstate/world 均已列）。
+    tools/matrix/section68_enchanting.cpp
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
     #   确定性等价承重墙[8 形态快照 worker ≡ 同步直调逐位恒等：顶点/索引/统计三面]/队列纪律
     #   [容量压小满载 kErrQueueFull 可见拒绝 + 拒绝项不入账 + 接受项恰一产出按 requestId 对账]/
