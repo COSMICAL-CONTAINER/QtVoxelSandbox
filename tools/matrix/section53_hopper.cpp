@@ -440,8 +440,8 @@ void MatrixRun::section53_hopper()
             && hd.topTile == 186 && hd.bottomTile == 187 && hd.sideTile == 187 && hd.frontTile == 188
             && QLatin1String(hd.name) == QLatin1String("hopper")
             && QLatin1String(hd.display) == QLatin1String("漏斗")
-            && int(BR::Jukebox) == 146 && int(BR::Count) == 151 && BR::mcBlockId(quint8(BR::Repeater)) == 93 // t1103 lawful 前移：Count 149→151（Melon=149/MelonStem=150 尾部追加；t1097 曾 148→149）；mcBlockId(Repeater)==93 行为级钉不变
-            && BR::AtlasTileCount == 201; // t1103 lawful 前移：195→201（西瓜族 tile 195..200 追加；t1097 曾 193→195）
+            && int(BR::Jukebox) == 146 && int(BR::Count) == 154 && BR::mcBlockId(quint8(BR::Repeater)) == 93 // t1105 lawful 前移：Count 151→154（PumpkinStem=151/JackOLantern=152/Cauldron=153 尾部追加；t1103 曾 149→151、t1097 曾 148→149）；mcBlockId(Repeater)==93 行为级钉不变
+            && BR::AtlasTileCount == 207; // t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加；t1103 曾 195→201、t1097 曾 193→195）
         ok = ok && d1;
         if (!d1) diag += QStringLiteral("[d1 id=%2 cnt=%3]")
                             .arg(hd.id).arg(int(BR::Count));

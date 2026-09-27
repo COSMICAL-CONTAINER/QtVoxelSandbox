@@ -471,7 +471,7 @@ void MatrixRun::section56_paper_book_bookshelf()
         const QString bSrc = bf.open(QIODevice::ReadOnly)
             ? QString::fromUtf8(bf.readAll()) : QString();
         const bool d2 = BR::mcBlockId(BR::Bookshelf) == 47
-            && BR::AtlasTileCount == 201 && d.frontTile < BR::AtlasTileCount // t1103 lawful 前移：195→201（西瓜族 tile 追加；t1097 曾 193→195）
+            && BR::AtlasTileCount == 207 && d.frontTile < BR::AtlasTileCount // t1105 lawful 前移：201→207（南瓜族 + 炼药锅 tile 追加；t1103 曾 195→201、t1097 曾 193→195）
             && bSrc.count(QStringLiteral("/* bookshelf               */ 47")) == 1;
         ok = ok && d2;
         if (!d2) diag += QStringLiteral("[d2 mc=%1 atlas=%2 row=%3]")
