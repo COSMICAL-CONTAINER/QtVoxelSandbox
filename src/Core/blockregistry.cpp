@@ -799,6 +799,26 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   基底+state/2）；音色 GroupGrass；**不进创造调色板**（作物族同门——由瓜种种植获得）。
     /* melon               */ {int(BlockRegistry::Melon),               195,195,196,196, true,  BlockRegistry::ShapeFull,     1.0f, int(BlockRegistry::NoTool),  0, false,                           0x28A, 1, 64, "melon",         "西瓜"},
     /* melon_stem          */ {int(BlockRegistry::MelonStem),           197,197,197,197, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false,                           0x289, 1, 64, "melon_stem",    "西瓜茎"},
+    // ── t1105 南瓜农作链 + 炼药锅三件（表尾追加；属性注释见 blockregistry.h Id 枚举 PumpkinStem /
+    //   JackOLantern / Cauldron 行）。
+    //   南瓜茎：MelonStem 同门第二实例（cross 作物）；hardness=0 / NoTool / ShapeNone；dropId=0x28B
+    //   （南瓜种子字面量——表兜底 1 种子，真链由破茎掉落覆盖）；贴图基底 201（4 阶段基底+state/2）；
+    //   音色 GroupGrass；**不进创造调色板**（作物族同门——由南瓜种子种植获得）。
+    /* pumpkin_stem        */ {int(BlockRegistry::PumpkinStem),         201,201,201,201, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false,                       0x28B, 1, 64, "pumpkin_stem",  "南瓜茎"},
+    //   南瓜灯：整立方 opaque（solid=true / ShapeFull，南瓜同族）；hardness=1.0 / NoTool / 空手可采且掉落；
+    //   dropId=自身；贴图顶·底=南瓜 119 / 侧=南瓜 117 / 前=205 点亮刻脸；**lightEmission=15**（见
+    //   lightEmission id-only 表行）；音色 GroupGrass（南瓜同族——本工程南瓜/西瓜族 wood 口径取软草近似，
+    //   见 Pumpkin 行 t482 注）；进创造调色板。**朝向 = 放置时刻脸朝玩家**（state 低 2 位
+    //   chestFrontFace 同源编码，placeBlock 写 horizontalFacing^1——与南瓜 t638 完全同门：MC 1.0 两件都
+    //   携 facing metadata。t1105 接棒修正：吸收稿原注「恒固定朝向——MC 1.0 无 facing metadata」与本工程
+    //   t638 南瓜朝向裁定自相矛盾，实读 MC 1.0 jack o'lantern 同样有 facing 位，就地纠正并留沿革注）。
+    /* jack_o_lantern      */ {int(BlockRegistry::JackOLantern),        119,119,117,205, true,  BlockRegistry::ShapeFull,     1.0f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::JackOLantern), 1, 64, "jack_o_lantern", "南瓜灯"},
+    //   炼药锅：solid=false / ShapeFull（碰撞/选中/射线整格 + PartialBlockGeometry 外壁环异形渲染，
+    //   Farmland 同门三权解耦；solid=false → 邻居不剔面无 x-ray 洞）；state 低 2 位 = 水位 0..3
+    //   （CauldronStateLevelMask）；hardness=2.0 / Pickaxe 加速 requiresTool=false（MC 1.0「Any tool」
+    //   口径空手可采且掉落）；dropId=自身（破坏掉锅 + 水随方块消失）；贴图六面=206 锅壁（内水面复用
+    //   静水 tile 19，渲染层选择非 def 字段）；音色 GroupStone（铸铁锅体）；进创造调色板。
+    /* cauldron            */ {int(BlockRegistry::Cauldron),            206,206,206,206, false, BlockRegistry::ShapeFull,     2.0f, int(BlockRegistry::Pickaxe), 0, false, int(BlockRegistry::Cauldron), 1, 64, "cauldron",      "炼药锅"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -1018,6 +1038,13 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     //   南瓜茎 104 本工程缺席故跳位；r2045d 表尾钉随追加前移至 */ 105,；酿造台行本体 117 存在性钉同门）。
     /* melon                   */ 103,
     /* melon_stem              */ 105,
+    // t1105 南瓜族 + 炼药锅三行（表尾追加；机制等价 MC 1.0：南瓜茎 → pumpkin stem id 104（上注
+    //   「104 缺席故跳位」自此收口——本行归位）/ 南瓜灯 → jack o'lantern id 91（Beta 1.2 引入、1.0.0
+    //   沿用）/ 炼药锅 → cauldron id 118（Beta 1.9 pre 系列引入、1.0.0 正式版沿用）。
+    //   **t691 教训**：一行一条目 + 行内注释，防聚合初始化零填充回归（本行追加后全表行数与 Count 154 一致）。
+    /* pumpkin_stem            */ 104,
+    /* jack_o_lantern          */ 91,
+    /* cauldron                */ 118,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -1252,6 +1279,7 @@ bool BlockRegistry::isCrossBillboard(quint8 blockId)
     if (blockId == CarrotCrop) return true; // t407 段外 cross（胡萝卜作物，同小麦作物按 state 选阶段贴图）
     if (blockId == PotatoCrop) return true; // t407 段外 cross（马铃薯作物，同小麦作物按 state 选阶段贴图）
     if (blockId == MelonStem) return true; // t1103 段外 cross（瓜茎作物，同 carrot/potato 口径按 state 选阶段贴图）
+    if (blockId == PumpkinStem) return true; // t1105 段外 cross（南瓜茎作物，MelonStem 同门第二实例，同 carrot/potato 口径按 state 选阶段贴图）
     if (blockId == Ladder) return true; // t413/t501 段外 cross（木梯贴墙竖直爬行梯；t501 改单片贴墙 quad 据 state 摆位，同走 PASS 1 alphaCutoff 路径）
     if (blockId == SweetBerryBush) return true; // t467 段外 cross（雪原浆果灌木丛，两片对角相交双面 quad 贴 stage 贴图）
     if (blockId == Cobweb) return true; // t484 段外 cross（蜘蛛网，两片对角相交双面 quad 贴蛛网贴图；矿井散布）
@@ -2165,6 +2193,8 @@ quint8 BlockRegistry::lightEmission(quint8 blockId)
     case RedstoneBlock: return 5; // t660：红石块微发光（光 level 5 —— 用户「红石块应微发光」；MC 1.5+ 红石块实际不发光，本工程按用户点名取微光，低于红石火把 7 的哑红感）
     case Lava:  return 15;  // t351：岩浆方块光种子 15（地底发光照亮洞穴；MC 1.0 岩浆光 level 15）
     case Fire:  return 15;  // t724：火焰方块光种子 15（MC 1.0 火光 level 15，同岩浆档——点燃即照亮周遭）
+    case JackOLantern: return 15; // t1105：南瓜灯方块光种子 15（MC 1.0 jack o'lantern luminance 15，同岩浆/红石灯档——
+                                  //    「正式光源方块」族；内置火把常亮，真方块光 flood 照亮周遭）
     case AbyssGate: return 10; // t487：暗渊门框架光种子 10（框架放眼亮纹微泛光；t664 框架化语义不变）
     case AbyssGateSurface: return 15; // t664：门面（薄星平面）光 15（机制等价 MC 1.0 end portal 发光 15——要塞
                                       //    黑暗中一片亮星平面即「通往另一宇宙」的观感）
@@ -2427,9 +2457,11 @@ int BlockRegistry::stateTileOverride(quint8 blockId, int face, quint8 state)
     }
     case CarrotCrop:
     case PotatoCrop:
-    case MelonStem: {
+    case MelonStem:
+    case PumpkinStem: {
         // t407 四视觉阶段：state（age）仍 0..7，贴图基底 + age/2（机制等价 MC 4 张阶段图覆盖 8 年龄）。
         //   t1103 瓜茎并入同门（4 阶段贴图 tile 197..200，基底 + age/2 同口径）。
+        //   t1105 南瓜茎同门第二实例（tile 201..204，MelonStem 完全同式——同一张共享阶段梯，仅基底色异）。
         const int stage = qMin(int(state), int(WheatCropStageMax));
         return def(blockId).topTile + stage / 2;
     }
@@ -2985,6 +3017,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case IronBars: // t998 铁栏杆 → 石质音色（金属质薄杆，同 iron_block 族；机制等价 MC iron bars metal SoundType）
     case BoneBlock: // t1077 骨块 → 石质音色（石质整立方，同 stone_brick / 存储块装饰族）
     case Repeater: // t1095 红石中继器 → 石质音色（石质底板，同压力板石族 / 机关件；机制等价 MC repeater stone SoundType）
+    case Cauldron: // t1105 炼药锅 → 石质音色（铸铁锅体金属质，同 iron bars 族；机制等价 MC cauldron stone SoundType）
         return GroupStone;
     case Ice: // t395 冰 → 石质音色（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）
     case Glass: // t405 玻璃 → 石质音色（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）
@@ -3030,6 +3063,8 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case MelonStem: // t1103 瓜茎 → 软草音色（作物同门；机制等价 MC stem SoundType = grass）
     case Melon: // t1103 瓜块 → 软草音色（瓜类植物，同南瓜；机制等价 MC melon SoundType = wood 取软草近似）
     case Pumpkin: // t482 南瓜 → 软草音色（瓜类植物，同草丛；机制等价 MC pumpkin SoundType = wood 取软草近似）
+    case PumpkinStem: // t1105 南瓜茎 → 软草音色（作物同门第二实例，同瓜茎；机制等价 MC stem SoundType = grass）
+    case JackOLantern: // t1105 南瓜灯 → 软草音色（南瓜同族——本工程瓜族 wood 口径取软草近似，同 Pumpkin/Melon 行）
     case Cobweb: // t484 蜘蛛网 → 软草音色（蛛丝软质，同草丛；机制等价 MC cobweb SoundType = grass）
     case TntBlock: // t485 TNT → 软草音色（火药捆软质闷击；机制等价 MC 1.0 TNT SoundType = grass）
     case Fire: // t724 火焰 → 软草音色（软质燃烧物瞬破轻响）

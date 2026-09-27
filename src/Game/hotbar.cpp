@@ -761,7 +761,10 @@ QVariantList Hotbar::creativeMaterials() const
         //   之前分流）。MaterialIcon 自绘金粒 / 瓜种 / 瓜片（§9 原创）。
         int(RecipeRegistry::GoldNuggetsId),  // 金粒：金锭 1↔9 双向；环形合成原料
         int(RecipeRegistry::MelonSeedsId),   // 瓜种：矿井战利品 + 瓜片 1:1 + 茎掉落；种瓜茎
-        int(RecipeRegistry::MelonSliceId)    // 瓜片：破瓜块 3-7 片；可食 +2；转换瓜种 / 合瓜块
+        int(RecipeRegistry::MelonSliceId),   // 瓜片：破瓜块 3-7 片；可食 +2；转换瓜种 / 合瓜块
+        // t1105 南瓜种子一件（0x28B，瓜片 0x28A 之上段尾追加不插中间 = 存档安全铁律）：获取面 =
+        //   野生南瓜 1:4 合成（创造调色板行为兜底获取面，同族口径）。MaterialIcon 自绘（§9 原创）。
+        int(RecipeRegistry::PumpkinSeedsId)  // 南瓜种子：野生南瓜 1:4 合成 + 茎掉落；种南瓜茎
     };
 }
 
@@ -1044,7 +1047,12 @@ QVariantList Hotbar::creativeBlocks() const
              int(BlockRegistry::IronBars),                                   // 铁栏杆（金属薄杆栅格；细柱+横板连接；可放置）
              // t1103 瓜块（机制等价 MC 1.0 melon）：瓜茎结果 + 9 瓣合成；整立方 opaque（南瓜同族），
              //   破坏掉 3-7 瓣。排表尾（段尾追加不插中间——t998 三件既有连续性零触碰）。
-             int(BlockRegistry::Melon) };                                    // 西瓜（瓜茎结果/9 瓣合成；破坏掉 3-7 瓣）
+             int(BlockRegistry::Melon),                                      // 西瓜（瓜茎结果/9 瓣合成；破坏掉 3-7 瓣）
+             // t1105 南瓜农作链 + 炼药锅两件（表尾追加不插中间，紧随瓜块）：南瓜灯 = 南瓜+火把无序合成
+             //   的整立方光源（lightEmission 15，刻脸放置朝玩家）；炼药锅 = 瓶取水/桶灌水的异形容水方块
+             //   （外壁环渲染，state 低 2 位水位）。两件均整格可放置 / 空手可采。
+             int(BlockRegistry::JackOLantern),                               // 南瓜灯（南瓜+火把合成；光 15 光源）
+             int(BlockRegistry::Cauldron) };                                 // 炼药锅（瓶取水 -1 级/桶灌满 3 级）
 }
 
 // ── t965 形态按钮组支持表（hotbar.h 声明处注释为完整契约）──
@@ -1084,8 +1092,12 @@ QVariantList Hotbar::blockFormStates(int blockId) const
     case BlockRegistry::CarrotCrop:
     case BlockRegistry::PotatoCrop:
     case BlockRegistry::MelonStem: // t1103：瓜茎并入形态组（阶段 0..7 同门）
+    case BlockRegistry::PumpkinStem: // t1105：南瓜茎同门第二实例（阶段 0..7 同门）
         for (int st = 0; st <= int(BlockRegistry::WheatCropStageMax); ++st)
             s << st;
+        break;
+    case BlockRegistry::Cauldron: // t1105 炼药锅：空(0)/1 级/2 级/满(3)——水位 state 低 2 位
+        s = { 0, 1, 2, 3 };
         break;
     default:
         break; // 不支持形态切换 → 空表 = 按钮组不出现（面板可见性门）
@@ -1357,6 +1369,8 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::GoldNuggetsId) return QStringLiteral("金粒");     // 金锭 1↔9 双向；环形合成原料
         if (blockId == RecipeRegistry::MelonSeedsId)  return QStringLiteral("瓜种");     // 矿井战利品；种瓜茎 / 瓜片转换
         if (blockId == RecipeRegistry::MelonSliceId)  return QStringLiteral("瓜片");     // 破瓜块 3-7 片；可食 +2；转换瓜种
+        // t1105 南瓜种子（0x28B，瓜片之上段尾追加）：名面一件（通用描述词，§9 合法）。
+        if (blockId == RecipeRegistry::PumpkinSeedsId) return QStringLiteral("南瓜种子"); // 野生南瓜 1:4 合成；种南瓜茎
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落；打火石配方原料。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::FlintId) return QStringLiteral("燧石"); // 挖沙砾概率掉落；打火石配方原料
         // t891② 烈焰弹（材料段 0x25C；机制等价 MC fire charge）：燃烬粉+煤/炭+火药合成 3 发；右键发射火球

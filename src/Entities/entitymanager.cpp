@@ -23,7 +23,8 @@ bool isCropBlock(int blockId)
     return blockId == BlockRegistry::WheatCrop
         || blockId == BlockRegistry::CarrotCrop
         || blockId == BlockRegistry::PotatoCrop
-        || blockId == BlockRegistry::MelonStem; // t1103：瓜茎同门入作物格判定（减速 / 穿透两消费面）
+        || blockId == BlockRegistry::MelonStem // t1103：瓜茎同门入作物格判定（减速 / 穿透两消费面）
+        || blockId == BlockRegistry::PumpkinStem; // t1105：南瓜茎同门第二实例（同两消费面）
 }
 
 // t1053 嵌格容差（review0915 #4）：kEmbedTol 玩家挤出先例（t289/t355，playercontroller.cpp）同值 0.1

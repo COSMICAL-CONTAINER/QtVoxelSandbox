@@ -2209,6 +2209,34 @@ Item {
                 R(6, 4, 2, 1, "#f47070")          // 顶受光
             }
 
+            // t1105 南瓜种子（0x28B）：三粒奶白扁种粒（白壳 + 米黄边 + 浅黄种脐，斜置散布；南瓜种子
+            //   读感——与瓜种 drawMelonSeeds 深绿种粒区隔，与小麦种子 drawSeed 堆粒形态区隔）。
+            //   原创自绘（§9a）。
+            const drawPumpkinSeeds = () => {
+                const husk = "#e8e0c8", huskDk = "#c8bc9c", edge = "#a89878", lite = "#f8f4e4"
+                // 种 1（左上斜置）
+                R(6, 5, 3, 5, husk)               // 种体（竖卵）
+                R(5, 6, 1, 3, huskDk)             // 左缘暗
+                R(9, 6, 1, 3, huskDk)             // 右缘暗
+                R(7, 10, 2, 1, edge)              // 底尖
+                R(6, 5, 2, 1, lite)               // 顶受光
+                R(7, 6, 1, 1, edge)               // 种脐点
+                // 种 2（右侧竖置）
+                R(13, 11, 3, 6, husk)
+                R(12, 12, 1, 4, huskDk)
+                R(16, 12, 1, 4, huskDk)
+                R(14, 17, 2, 1, edge)
+                R(13, 11, 2, 1, lite)
+                R(14, 12, 1, 1, edge)
+                // 种 3（下方横置）
+                R(4, 15, 5, 3, husk)
+                R(4, 14, 4, 1, huskDk)
+                R(3, 16, 1, 1, edge)
+                R(9, 16, 1, 1, edge)
+                R(4, 15, 2, 1, lite)
+                R(5, 16, 1, 1, edge)
+            }
+
             switch (root.materialId) {
             case 0x200: drawStick();        break
             case 0x201: drawCoal();         break
@@ -2343,6 +2371,7 @@ Item {
             case 0x288: drawGoldNugget(); break  // 金粒：金锭 1↔9 双向；环形合成原料
             case 0x289: drawMelonSeeds(); break  // 瓜种：矿井战利品；种瓜茎 / 瓜片 1:1 转换
             case 0x28A: drawMelonSlice(); break  // 瓜片：破瓜块 3-7 片；可食 +2；转换瓜种 / 合瓜块
+            case 0x28B: drawPumpkinSeeds(); break // t1105 南瓜种子：野生南瓜 1:4 合成；种南瓜茎
             // t788 染料 16 色（0x24B..0x25A，白→黑羊毛色序；三色参数取 build_wool.py 同源色板）
             case 0x24B: drawDye("#f0f0ee", "#f9f9f8", "#959594"); break // 白色染料（白花破坏掉落；染白羊毛/白床）
             case 0x24C: drawDye("#de781e", "#ee9f69", "#8a4a13"); break // 橙色染料

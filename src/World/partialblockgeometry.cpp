@@ -499,7 +499,13 @@ int PartialBlockGeometry::append(
         break;
     }
     case BlockRegistry::CarrotCrop:
-    case BlockRegistry::PotatoCrop: {
+    case BlockRegistry::PotatoCrop:
+    case BlockRegistry::MelonStem:  // t1105 接棒补缺：t1103 瓜茎漏挂本 case（isCrossBillboard 已路由进
+                                    //   PASS 1 但 switch 无分支 → default 返 0 顶点 = 茎不可见渲染缺口），
+                                    //   与南瓜茎同门一并挂入——两茎 tile 选择走 stateTileOverride 同源。
+    case BlockRegistry::PumpkinStem: { // t1105 南瓜茎 cross 模型：与 carrot/potato/melon-stem 同款两片对角
+        //   相交双面 quad（满格高 0..1，俯视成 X 形）；tile = 基底(201) + state/2（4 视觉阶段覆盖 8 年龄，
+        //   MelonStem 197..200 同式）；t965 起阶段瓦片单一权威 = BlockRegistry::stateTileOverride。
         // t407 胡萝卜/马铃薯作物 cross 模型：与 WheatCrop 同款两片对角相交双面 quad（满格高 0..1，俯视成 X 形）。
         //   机制等价 MC 1.0 carrot/potato 作物 —— MC 仅 4 张阶段贴图覆盖 8 个年龄（age 0-1→tex0、2-3→tex1、
         //   4-5→tex2、6-7→tex3），故本处据 state 选 tile = 基底 + state/2（4 视觉阶段），区别于小麦的基底 + state
@@ -1238,6 +1244,30 @@ int PartialBlockGeometry::append(
         const float sz1 = (fz != 0) ? sp + s : 9.f * s;
         pushBox(verts, idx, lx, ly, lz, sx0, sx1, 2.f * s, 4.f * s, sz0, sz1,
                 tileBase, light, tileW, hx, hy, v0, v1);
+        break;
+    }
+    case BlockRegistry::Cauldron: {
+        // t1105 炼药锅外壁环异形渲染（机制等价 MC 1.0 cauldron：外壁环 + 内腔 + 内水面随水位）。
+        //   四面 2/16 厚外壁（y 满高 0..1，铸铁锅壁瓦 206）+ 底板（y 0..1/16，内腔封底）+ 内水面
+        //   （level≥1 时才画：静水瓦 19 薄盒 y[wt-1/16, wt]，wt = 0.375 + 0.25×(level-1) → level
+        //   1/2/3 水面 y = 0.375/0.625/0.875，低于沿口 1.0 = MC「不满沿口」读感）。solid=false →
+        //   邻居不剔面无 x-ray 洞；碰撞 / 选中 / 射线走 ShapeFull 整格三权解耦（Farmland 同门）。
+        //   内水面在 PASS 1 terrain 段同材质渲染（非水段半透材质）——呈现层简化登记：锅水不半透。
+        const float s = 1.0f / 16.0f;
+        const int waterTile = BlockRegistry::tileIndex(BlockRegistry::Water, BlockRegistry::PosX); // 静水 19
+        // ① 四面外壁（厚 2/16 × 满高）。
+        pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, 0.f, 1.f, 0.f, 2.f * s, tile, light, tileW, hx, hy, v0, v1);      // -Z
+        pushBox(verts, idx, lx, ly, lz, 0.f, 1.f, 0.f, 1.f, 14.f * s, 1.f, tile, light, tileW, hx, hy, v0, v1);     // +Z
+        pushBox(verts, idx, lx, ly, lz, 0.f, 2.f * s, 0.f, 1.f, 2.f * s, 14.f * s, tile, light, tileW, hx, hy, v0, v1); // -X
+        pushBox(verts, idx, lx, ly, lz, 14.f * s, 1.f, 0.f, 1.f, 2.f * s, 14.f * s, tile, light, tileW, hx, hy, v0, v1); // +X
+        // ② 底板（y 0..1/16，内腔封底）。
+        pushBox(verts, idx, lx, ly, lz, 2.f * s, 14.f * s, 0.f, s, 2.f * s, 14.f * s, tile, light, tileW, hx, hy, v0, v1);
+        // ③ 内水面（level≥1；state 低 2 位水位）。
+        const quint8 level = state & quint8(BlockRegistry::CauldronStateLevelMask);
+        if (level >= 1) {
+            const float wt = 0.375f + 0.25f * float(level - 1);
+            pushBox(verts, idx, lx, ly, lz, 2.f * s, 14.f * s, wt - s, wt, 2.f * s, 14.f * s, waterTile, light, tileW, hx, hy, v0, v1);
+        }
         break;
     }
     case BlockRegistry::BedRed: case BlockRegistry::BedOrange: case BlockRegistry::BedYellow:

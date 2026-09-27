@@ -1805,6 +1805,7 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
                                 || brokenId == BlockRegistry::CarrotCrop
                                 || brokenId == BlockRegistry::PotatoCrop
                                 || brokenId == BlockRegistry::MelonStem // t1103：瓜茎同门按 state 快照（state==max 判熟虽不掉产物，破茎掉 1 种子走 dropCropDrops 茎分支）
+                                || brokenId == BlockRegistry::PumpkinStem // t1105：南瓜茎同门第二实例（state 快照同门）
                                 || brokenId == BlockRegistry::SnowLayer // t505 雪层按 state 掉 (state+1) 雪球
                                 || brokenId == BlockRegistry::Painting // t721 画：state 带 face/index（连通域移除用）
                                 || brokenId == BlockRegistry::EmberGate // t725 门：state 带 axis（连通域熄灭用）
@@ -1999,7 +2000,8 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
         //   brokenState 已在 setBlock(Air) 前读（t134 时序：WheatCrop 在 snapshot 条件内，成熟判定可靠）。
         if (brokenId == BlockRegistry::WheatCrop || brokenId == BlockRegistry::TallGrass
             || brokenId == BlockRegistry::CarrotCrop || brokenId == BlockRegistry::PotatoCrop
-            || brokenId == BlockRegistry::MelonStem) {
+            || brokenId == BlockRegistry::MelonStem
+            || brokenId == BlockRegistry::PumpkinStem) { // t1105：南瓜茎同门（掉落走 dropCropDrops 茎分支）
             // t619 progress 成就埋点（review-L2 上移到此）：**生存玩家直破成熟作物**（任一种）→
             //   cropHarvested 语义事件（「农夫」累计）。仅在 drop=true（生存 canHarvest 通过）的主动
             //   破坏路径发：创造瞬破（drop=false）与破支撑块的失撑级联（dropUnsupportedCropsAround）
@@ -2298,6 +2300,10 @@ void PlayerController::dropCropDrops(int x, int y, int z, quint8 id, quint8 stat
         // t1103 瓜茎破坏掉 1 瓜子（阶段无关恒 1——stem 掉落细化不在 1.0 基准可证范围，工程简化口径留痕；
         //   瓜可再种。注意本分支只管茎本体掉落：瓜块掉瓣走 finishMiningAt 瓜块特例分支（NEG-2 面），两链互斥）。
         emit spawnItem(x, y, z, RecipeRegistry::MelonSeedsId, 1);
+    } else if (id == BlockRegistry::PumpkinStem) {
+        // t1105 南瓜茎破坏掉 1 南瓜种子（MelonStem 同门第二实例：阶段无关恒 1 同简化口径；南瓜种子唯一
+        //   生存源 = 野生南瓜 → 1:4 合成，茎破坏返 1 种是种植回路面。南瓜方块掉本体走 def dropId=自身通用路径）。
+        emit spawnItem(x, y, z, RecipeRegistry::PumpkinSeedsId, 1);
     } else if (id == BlockRegistry::TallGrass) {
         const int dropId = BlockRegistry::dropId(id);
         const int dropCount = std::max(1, BlockRegistry::dropCount(id));
@@ -2317,7 +2323,8 @@ void PlayerController::dropUnsupportedCropsAround(int x, int y, int z)
     const quint8 cid = m_world->blockAt(cx, cy, cz);
     if (cid != BlockRegistry::TallGrass && cid != BlockRegistry::WheatCrop
         && cid != BlockRegistry::CarrotCrop && cid != BlockRegistry::PotatoCrop
-        && cid != BlockRegistry::MelonStem) return; // t1103：瓜茎失撑同门弹落（掉 1 瓜子）
+        && cid != BlockRegistry::MelonStem
+        && cid != BlockRegistry::PumpkinStem) return; // t1103/t1105：两瓜茎失撑同门弹落（各掉 1 种子）
     const quint8 cstate = m_world->stateAt(cx, cy, cz); // setBlock(Air) 前快照（WheatCrop 成熟判定）
     m_world->setBlock(cx, cy, cz, BlockRegistry::Air);  // → World 发 blockBroken(crop) + worldChanged → 粒子 + mesh 重建
     dropCropDrops(cx, cy, cz, cid, cstate);            // 失撑掉落产出与玩家破块同源
@@ -2334,7 +2341,8 @@ void PlayerController::onMobTrampledFarmland(int x, int y, int z)
     if (cy < 0 || cy >= m_world->height()) return;
     const quint8 crop = m_world->blockAt(x, cy, z);
     if (crop != BlockRegistry::WheatCrop && crop != BlockRegistry::CarrotCrop
-        && crop != BlockRegistry::PotatoCrop && crop != BlockRegistry::MelonStem) return; // t1103：踩耕地弹瓜茎同门
+        && crop != BlockRegistry::PotatoCrop && crop != BlockRegistry::MelonStem
+        && crop != BlockRegistry::PumpkinStem) return; // t1103/t1105：踩耕地弹两瓜茎同门
     const quint8 cstate = m_world->stateAt(x, cy, z); // 清格前快照（WheatCrop 成熟判定，t134 时序）
     m_world->setWaterSilent(x, cy, z, BlockRegistry::Air, 0);
     dropCropDrops(x, cy, z, crop, cstate);
@@ -4408,6 +4416,42 @@ void PlayerController::placeBlock()
     //   铁桶在创造 / 生存均反映其内容（舀水即满）；旧守卫使创造模式舀水后桶仍空（spec「当前舀水不变桶」）。
     //   倒水方向保留创造不消耗（装水桶右键放水源，创造保持装水桶 = 无限放水；生存→空桶），不属本任务范围。
     const int heldItemId = m_hotbar ? m_hotbar->selectedItemId() : 0;
+    // t1105 炼药锅交互面（机制等价 MC 1.0 cauldron；须在桶 / 瓶两分支**之前**——同持物命中锅时应与锅交互
+    //   而非触发桶倒水 / 瓶向水源装水的通用路径）。水位面：state 低 2 位 = CauldronStateLevelMask（0..3，
+    //   玩家放置默认空锅 0）：
+    //   ① 玻璃瓶右键 + 锅内 ≥1 级水 → 锅 -1 级 + 予 1 水瓶（1 瓶 = 1 级水，满锅恰 3 瓶——瓶装水从锅
+    //      消耗真实水位，与「瓶向水源直取不动水源」并存口径）；空锅（0 级）无效应不消耗（MC 同）。
+    //   ② 装水桶右键 + 锅未满 → 锅灌满 3 级 + 生存桶→空桶（创造保持装水桶，倒水同门 t174）。
+    //   ③ 空手 / 他物右键锅无效应（1.0 无空手交互面）；空桶舀锅不取（现代纪元面，候选池登记）。
+    //   破坏面：锅掉本体（def dropId=自身通用路径）+ 水随方块消失（无需特判）。命中非锅 → 不入本分支
+    //   （放置 / 桶 / 瓶路径零牵连）。setBlock 同 id state 变更 → worldChanged 重建 + 内水面高度随 state。
+    if (m_hotbar && m_world && m_hasHit
+        && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Cauldron
+        && (heldItemId == RecipeRegistry::GlassBottleId
+            || heldItemId == RecipeRegistry::WaterBucketId)) {
+        const int slot = m_hotbar->selectedSlot();
+        const quint8 level = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz)
+                             & quint8(BlockRegistry::CauldronStateLevelMask);
+        if (heldItemId == RecipeRegistry::GlassBottleId) {
+            if (level >= 1) { // 锅内有水 → 取 1 瓶扣 1 级
+                m_hotbar->takeStack(slot, 1);                              // 扣 1 空瓶
+                m_hotbar->addStack(int(RecipeRegistry::WaterBottleId), 1); // 予 1 水瓶（同 id 合并）
+                m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Cauldron, quint8(level - 1));
+                m_lastPlaceMs = now;
+                emit swingArm();
+            }
+            return; // 瓶 + 锅（取水成功 / 空锅无效应）均不再走放置路径
+        }
+        // 装水桶 + 锅未满 → 灌满 3 级（已满视作「已满」不重复灌、不耗桶——倒流体「已是源不重复放」同门）。
+        if (level < 3) {
+            m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Cauldron, 3);
+            if (m_mode != Creative)
+                m_hotbar->setStack(slot, int(RecipeRegistry::BucketEmptyId), 1); // 生存桶→空桶（创造不耗）
+            m_lastPlaceMs = now;
+            emit swingArm();
+        }
+        return; // 水桶 + 锅（灌满 / 已满）均不再走倒水路径
+    }
     if (m_hotbar && (heldItemId == RecipeRegistry::WaterBucketId
                      || heldItemId == RecipeRegistry::LavaBucketId
                      || heldItemId == RecipeRegistry::BucketEmptyId)) {
@@ -4975,6 +5019,7 @@ void PlayerController::placeBlock()
         { RecipeRegistry::CarrotId, BlockRegistry::CarrotCrop },
         { RecipeRegistry::PotatoId, BlockRegistry::PotatoCrop },
         { RecipeRegistry::MelonSeedsId, BlockRegistry::MelonStem }, // t1103 瓜种 → 瓜茎（作物同门；耕地正上方种下 state=0，生长 / 结果走 tickCropGrowth）
+        { RecipeRegistry::PumpkinSeedsId, BlockRegistry::PumpkinStem }, // t1105 南瓜种子 → 南瓜茎（MelonStem 同门第二实例；同种流程）
     };
     for (const CropSeed &cs : kCropSeeds) {
         if (heldItemId == cs.itemId) {
@@ -5692,11 +5737,14 @@ void PlayerController::placeBlock()
         //   信号从玩家侧（输入端）向前续传）。低 2 位 chestFrontFace 同源编码（0=+X 1=-X 2=+Z 3=-Z）；
         //   延迟档默认 1（bit[3:2]=0）；输出位 / 挂起计数恒 0（World 电力层首算写入）。
         placeState = quint8(horizontalFacing() & 3);
-    } else if (m_selectedBlock == BlockRegistry::Pumpkin) {
+    } else if (m_selectedBlock == BlockRegistry::Pumpkin
+               || m_selectedBlock == BlockRegistry::JackOLantern) {
         // t638 ② 南瓜前面（刻面 pumpkin_face）朝玩家侧：state = horizontalFacing ^ 1（同箱子 / 熔炉 / 发射器
         //   编码；机制等价 MC 1.0 刻面南瓜放置时脸朝玩家——此前南瓜 placeBlock 未写 state → 恒 state=0
         //   → 前面恒 +X 固定方向，不随玩家朝向）。mesher（ChunkGeometry::tileFor）据 state 把 pumpkin_face
         //   贴到对应面（复用 chestFrontFace 解码）。造物（雪傀儡 / 铁傀儡）检测不读南瓜 state → 零影响。
+        //   t1105 南瓜灯同门并入：点亮刻脸（205）放置朝玩家，state 编码与南瓜完全同式（MC 1.0 两件都携
+        //   facing metadata——接棒修正吸收稿「固定朝向」注，沿革注见 kDefs JackOLantern 行）。
         placeState = quint8((horizontalFacing() & 3) ^ 1);
     } else if (BlockRegistry::isRail(quint8(m_selectedBlock))) {
         // t666 铁轨放置轴向 = 玩家面向方位轴（spec：「面向 ±Z → NS 直轨；±X → EW 直轨」；MC 实际按放置
@@ -6179,7 +6227,11 @@ void PlayerController::placeBlock()
     //   就必有此行，缺则证明放南瓜本身被拒（overlaps / 选中非南瓜 / 模式门控）；② 去掉 ty>=2 外层静默守卫
     //   （blockAt 越界安全返 Air，ty-1/ty-2 越界当作「非雪/铁」自然 miss，不再整段跳过）；③ miss 分支打全 3×3
     //   邻域（ty-1 与 ty-2 两层）+ 玩家朝向，用户跑一次即可看清算「南瓜放偏 / 底排朝向偏 / 少一块」。
-    if (idByte == BlockRegistry::Pumpkin && m_world && m_entityManager) {
+    //   t1105 头位同收南瓜灯：造物头位检测 Pumpkin ∪ JackOLantern（吸收稿裁定注「MC 1.0 造物头位两件
+    //   皆可」；南瓜灯整立方 opaque + 刻脸发光同门，头位结构语义与南瓜完全同构——检测只读 id 不读 state
+    //   → 朝向零影响）。
+    if ((idByte == BlockRegistry::Pumpkin || idByte == BlockRegistry::JackOLantern)
+        && m_world && m_entityManager) {
         // t509r ① 无条件入口日志：南瓜放置事件本身（含落点 + 玩家水平朝向 horizontalFacing）。用户日志若缺本行
         //   → 南瓜放置被拒（placeBlock 早 return：overlapsPlayerAABB / 选中槽非南瓜 / canPlace 观察者门控）。
         qInfo("pumpkin placed at %d %d %d (facing=%d, playerY=%.2f)",
@@ -9036,7 +9088,8 @@ void PlayerController::step(qreal dt)
                 if (cy < m_world->height()) {
                     const quint8 crop = m_world->blockAt(bx, cy, bz);
                     if (crop == BlockRegistry::WheatCrop || crop == BlockRegistry::CarrotCrop
-                        || crop == BlockRegistry::PotatoCrop || crop == BlockRegistry::MelonStem) {
+                        || crop == BlockRegistry::PotatoCrop || crop == BlockRegistry::MelonStem
+                        || crop == BlockRegistry::PumpkinStem) { // t1105：南瓜茎踩踏同门清苗掉种
                         const quint8 cstate = m_world->stateAt(bx, cy, bz);
                         // 清作物走既有静默写（失撑级联，非玩家破块 → 无 broken 粒子/音；机制等价 MC 踩踏
                         //   作物掉落无声效）。setWaterSilent 是通用静默 state 写入口（名字历史遗留 water-first）。

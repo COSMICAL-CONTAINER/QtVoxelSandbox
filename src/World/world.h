@@ -1653,6 +1653,15 @@ private:
     //   纯函数于 seed + biomeAt（经 hashColumn）→ 同 seed 同分布；禁用任何运行期随机源。仅写空气格（setVoxelIfAir）
     //   → 不覆盖雪上已生成的方块（云杉树干 / 树叶 / 任何已占格）。
     void placeSweetBerryBushes(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
+    // t1105 野生南瓜 patch 散布（PLAN §2-K 确定性）：草系群系（非沙漠 / 非雪原——雪面 v1 候选池登记）
+    //   草地列按 hashColumn 稀有筛选（patch 种格 1/256 草列），命中列草顶上方放一枚南瓜（Pumpkin，刻脸
+    //   朝向取独立 hash 位段确定性散布）+ 双卫星格（hash 位段定 ±1..2 偏移，逐格三守卫 + 仅写空气格），
+    //   聚簇成 MC 式稀有 patch。机制等价 MC 1.0 野生南瓜（Alpha 1.2.0 起草面稀有 patch 实有；1.0 南瓜
+    //   种子唯一生存源 = 野生南瓜 → 1:4 合成——矿井箱 1.0 无南瓜种子行，派工预期纠正留痕见 recipe.h）。
+    //   三守卫同 placeFlowers 族（surfaceY > kWaterLevel+1 / 非沙滩带水下 / 仅草顶列）。纯函数于 seed
+    //   （hashColumn + biomeAt + heightAt）→ 同 seed 同分布；禁用任何运行期随机源。固定路径 generate 与
+    //   sparse population 窗两路同调（placeSweetBerryBushes 之后）。
+    void placePumpkinPatches(int wx0 = 0, int wx1 = 0, int wz0 = 0, int wz1 = 0);
     // t756 出生列确定性解析（PLAN §2-K）：全部地表特征（树 / 草 / 花 / 甘蔗 / 浆果丛）定型后，自世界
     //   中心列起按 chebyshev 环距向外扫描，取首个「可站立裸地表」列并记录 m_spawnCol*（供 Game 层出生 /
     //   重生定位）。三守卫（机制等价 MC 1.0 spawn 搜索「找首个安全露天落点」；地表取 min(heightAt,

@@ -170,10 +170,12 @@ static int tileFor(quint8 block, int face, quint8 state)
     //   方向）。复用 chestFrontFace 解码（0=+X 1=-X 2=+Z 3=-Z）；其余三侧面 pumpkin_side(117)、顶/底
     //   pumpkin_top(119)。造物（雪傀儡 / 铁傀儡）检测不读南瓜 state → 零影响。旧存档南瓜 state=0 → 前面
     //   +X 兜底（朝向变化可接受，南瓜仅玩家放置）。
-    if (block == BlockRegistry::Pumpkin) {
+    //   t1105 南瓜灯同门并入：def 各面同构（顶/底=119 / 侧=117 / 前=205 点亮刻脸），state 低 2 位朝向
+    //   与南瓜完全同编码（placeBlock 写 horizontalFacing^1）；点亮感由 lightEmission 15 承担非贴图切换。
+    if (block == BlockRegistry::Pumpkin || block == BlockRegistry::JackOLantern) {
         const BlockRegistry::BlockDef &d = BlockRegistry::def(block);
         const int frontFace = int(BlockRegistry::chestFrontFace(state)); // 前面（刻面）所朝面
-        if (face == frontFace) return d.frontTile;                       // pumpkin_face（刻面双眼+锯齿嘴）
+        if (face == frontFace) return d.frontTile;                       // pumpkin_face(118) / jackolantern_face(205)
         if (face == int(BlockRegistry::Top) || face == int(BlockRegistry::Bottom))
             return d.topTile;                                            // 顶/底 = pumpkin_top
         return d.sideTile;                                               // 其余三侧面 = pumpkin_side
@@ -386,6 +388,7 @@ ChunkMeshData MeshBuilder::build(const ChunkMeshSnapshot &snap, Reason reason)
                                             || b == BlockRegistry::Hopper    // t1093 漏斗三盒异形（顶箅板+颈+嘴，hopperShapeBoxes 单一权威）经 PartialBlockGeometry 渲染（t1080 整立方降级翻案；solid=false 邻居不剔面）
                                             || b == BlockRegistry::Repeater  // t1095 中继器贴地薄板异形（底板+双焰标+档位滑标）经 PartialBlockGeometry 渲染（solid=false 邻居不剔面）
                                             || b == BlockRegistry::BrewingStand // t1097 酿造台两盒异形（底座板+中柱，brewingStandShapeBoxes 单一权威）经 PartialBlockGeometry 渲染（solid=false 邻居不剔面）
+                                            || b == BlockRegistry::Cauldron     // t1105 炼药锅外壁环异形（solid=false 邻居不剔面；碰撞/选中/射线走 ShapeFull 整格三权解耦，Farmland 同门）
                                             || BlockRegistry::isBed(b);     // t457 床低 3D 模型经 PartialBlockGeometry 渲染（非整立方）
                     const bool isCrossX   = BlockRegistry::isCrossBillboard(b);
                     // t638 ① 木门镂空窗：门上半格栅窗贴图带 alpha（pack door_wood_upper.png 窗格真透明 /

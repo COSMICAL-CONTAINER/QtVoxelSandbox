@@ -1350,6 +1350,19 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         RecipeRegistry::GoldNuggetsId, RecipeRegistry::MelonSliceId,  RecipeRegistry::GoldNuggetsId,
         RecipeRegistry::GoldNuggetsId, RecipeRegistry::GoldNuggetsId, RecipeRegistry::GoldNuggetsId },
       RecipeRegistry::GlisteringMelonId, 1, 1, "glistering_melon" },
+    // ── t1105 南瓜农作链两行（表尾追加；机制等价 MC 1.0）──
+    //   ⑥ 南瓜 → 4 南瓜种子（无序 2×2 单原料 1:4 分解，机制等价 MC 1.0 pumpkin → 4 pumpkin seeds——
+    //   南瓜种子唯一生存源入口；矿井箱 1.0 无南瓜种子行，裁定留痕见 recipe.h PumpkinSeedsId 行）。
+    //   多重集 {Pumpkin:1} 唯一（单原料行各族 id 互异：糖 / 瓜片 / 金锭 / 可可豆 / 墨囊均异 id）。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { int(BlockRegistry::Pumpkin), 0, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::PumpkinSeedsId,    4, 1, "pumpkin_seeds_from_pumpkin" },
+    //   ⑦ 南瓜灯：南瓜 + 火把 → 1（无序 2×2 可容，机制等价 MC 1.0 jack o'lantern 同料同产率——
+    //   Beta 1.2 起南瓜+火把无序合成，1.0 基准内）。多重集 {Pumpkin:1, Torch:1} 唯一（t802 全表
+    //   自匹配回归自动覆盖）。产物进创造调色板 + 光源方块族（lightEmission 15）。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { int(BlockRegistry::Pumpkin), int(BlockRegistry::Torch), 0, 0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::JackOLantern), 1, 1, "jack_o_lantern" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。
@@ -1423,6 +1436,11 @@ static_assert(RecipeRegistry::MundanePotionId                    == 0x287, "Mund
 static_assert(RecipeRegistry::GoldNuggetsId  == 0x288, "GoldNuggetsId 须为材料段 0x288（凡庸 0x287 之上段尾追加，t1103）");
 static_assert(RecipeRegistry::MelonSeedsId   == 0x289, "MelonSeedsId 须为材料段 0x289");
 static_assert(RecipeRegistry::MelonSliceId   == 0x28A, "MelonSliceId 须为材料段 0x28A（三件段末位）");
+// t1105 南瓜种子段位钉（工程惯例）：0x28B = 瓜片 0x28A 之上**段尾连续追加**（不插中间 = 存档安全铁律）；
+//   Core 层 blockregistry.cpp 南瓜茎 dropId 用同一字面量 0x28B（Core 不 include Game 头）→ 双侧互钉。
+static_assert(RecipeRegistry::PumpkinSeedsId == 0x28B, "PumpkinSeedsId 须为材料段 0x28B（瓜片 0x28A 之上段尾追加，t1105）");
+static_assert(int(BlockRegistry::PumpkinStem)  == 151, "PumpkinStem 方块 id 须为 151（南瓜种子种植产物 + dropId 0x28B 兜底契约）；t1105");
+static_assert(int(BlockRegistry::JackOLantern) == 152, "JackOLantern 方块 id 须为 152（南瓜+火把无序合成行产物锚）；t1105");
 // 编译期互钉：金锭 0x21F ↔ 金粒 0x288 双向合成（t1103 双向行）+ 瓜块方块段 Melon=149 行在。
 static_assert(RecipeRegistry::GoldIngotId == 0x21F, "GoldIngotId 须为 0x21F（金粒双向行两端的锚）");
 static_assert(int(BlockRegistry::Melon) == 149, "Melon 方块 id 须为 149（瓜块存储行产物 + 生长结果面）；t1103");
