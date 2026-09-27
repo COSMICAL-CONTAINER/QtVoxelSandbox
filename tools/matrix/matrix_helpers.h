@@ -605,4 +605,16 @@ private:
                               //   Shape 13/图集 195/枚举尾追加/常量族/配方行/名面调色板/全链源钉族/锚注/
                               //   相邻族零污染]。fixed 48×48×96 s82 + 真链 pc rig（t891 同门），rig 世界
                               //   零接触，接 section66）
+    void section68_enchanting(); // t1104 附魔台 + 附魔机制探针段（置尾先例沿用：r2074a XP 等级阶梯 +
+                              //   spendLevels 结算承重墙[曲线三段锚 + 总量边界 + 真付恰截 + 余额不足
+                              //   零副作用零信号 + 0 级防御 + 扣到零 + addLevels + 单呼跨 5 级]，
+                              //   r2074b 台位锚定书架增幅链 + 抽签阶梯承重墙[上层环带计 6 → 档 2 →
+                              //   offered 9；满环 15 → 档 3 → [10,20,30]；堵角半步 −1；数量阶梯 1/2/3
+                              //   @ offered 5/15/30 + 锐锋等级阶梯 5/1 + 确定性 + 4 槽字段落值]，
+                              //   r2074c 表产物 → 消费面回归柱[锐锋→weaponAttackDamage + 效率→
+                              //   selectedItemEnchantLevel/miningTime + 消费接线源钉族]，r2074d 结构
+                              //   钉族 + UI 路由钉[kMc 116 唯一行 + def 行逐字段 + 0.75 特例 + 配方
+                              //   命中/错心/2×2 负例 + 信号/发射行 + Main.qml 路由族 + 面板五行接线
+                              //   + 相邻族零污染]。PlayerState/EnchantRegistry/World 直驱，rig 世界
+                              //   零接触，接 section67）
 };
