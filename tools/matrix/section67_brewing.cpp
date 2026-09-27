@@ -2,6 +2,14 @@
 
 // t1097 酿造台 + 药水系统探针段（4 腿；filter 词 r2067；矩阵 806→810）。置尾先例沿用（接 section66，
 // runAll 末执行，rig 世界零接触——各腿自建 fresh 小世界 / 真链 pc rig）。
+// t1103 闪烁西瓜生存整链（+4 腿 r2073a-d，置尾追加；矩阵 828→832）：金粒 / 瓜种 / 瓜片物品段 +
+//   瓜块 / 瓜茎方块段 + 瓜茎 crop 原型（茎蔓完整原型候选池登记，裁定注见 blockregistry.h MelonStem 行）
+//   + 矿井池瓜种行 + 五条合成行 + 端到端生存链闭合（瓜子→瓜→瓣+金粒→闪烁西瓜→瞬间治疗）。
+//   NEG 面与豁免设计（恰红归因先于腿文；段尾阴注同文）：
+//   NEG-1 = 摘瓜生长结果门（world.cpp tickCropGrowth 成熟茎结果分支）→ 恰红 = {r2073b, r2073d}
+//     （b 结果面 + d 链瓜源断链；生长序列 / 双门阴性 / 破茎掉种面不触摘面但 b 腿红；a/c 零世界零触达）。
+//   NEG-2 = 摘环形合成行（recipe.cpp glistering_melon 行）→ 恰红 = {r2073c, r2073d}（c 环形命中面 +
+//     d 链酿造原料断链；a 的金粒双向行与池行不在摘面，b 不触合成）。钉面双摘面全豁免（d 不钉两分支体）。
 // t1099 药水效果链第二轮（+4 腿 r2069a-d，置尾追加；矩阵 812→816）：五链核实裁定与 NEG 豁免面设计
 //   见各腿头注——NEG-1（摘发酵蛛眼 brew 行）恰红 {r2069a} / NEG-2（摘 finishEating 分流块）恰红 {r2069b}，
 //   r2069c 直调效果机制面（两 NEG 均不触达）、r2069d 结构钉（不钉两 NEG 触达面 = 豁免设计）。
@@ -513,7 +521,7 @@ void MatrixRun::section67_brewing()
                          && RecipeRegistry::SugarId == 0x26A
                          && RecipeRegistry::GlimmerBottleId == 0x263
                          && int(BR::BrewingStand) == 148
-                         && int(BR::Count) == 149
+                         && int(BR::Count) == 151 // t1103 lawful 前移：149→151（Melon=149/MelonStem=150 尾部追加；t1097 曾 148→149）
                          && int(BR::ShapeBrewingStand) == 13
                          && BR::mcBlockId(int(BR::BrewingStand)) == 117;
         ok = ok && ids;
@@ -530,7 +538,7 @@ void MatrixRun::section67_brewing()
         ok = ok && geom;
         if (!geom) diag += QStringLiteral("[geom n=%1]").arg(nBoxes);
         // (3) 图集 + PlayerState 枚举尾追加 + 常量族。
-        const bool consts = int(BR::AtlasTileCount) == 195
+        const bool consts = int(BR::AtlasTileCount) == 201 // t1103 lawful 前移：195→201（西瓜族 tile 追加；t1097 曾 193→195）
                             && int(PlayerState::EffectSpeed) == int(PlayerState::EffectFire) + 1
                             && int(PlayerState::EffectStrength) == int(PlayerState::EffectFire) + 2
                             && PlayerController::kPotionDurationSec == 180.0f
@@ -607,11 +615,14 @@ void MatrixRun::section67_brewing()
             SrcPin("effect enum tail", "EffectNone = 0, EffectPoison, EffectSlowness, EffectFire, EffectSpeed, EffectStrength", 1)});
         const QStringList missBrH = pinSet(srcRoot + QStringLiteral("/Core/blockregistry.h"), {
             SrcPin("id row", "BrewingStand     = 148,", 1),
-            SrcPin("count row", "Count           = 149,", 1),
+            SrcPin("count row", "Count           = 151,", 1),
+                //   t1103 lawful 前移：149→151（Melon=149/MelonStem=150 尾部追加；t1097 曾 148→149，
+                //   追加不插中间存档契约，钉值随追加前移）。
             SrcPin("shape row", "ShapeBrewingStand = 13,", 1),
             SrcPin("boxes decl", "static int brewingStandShapeBoxes(quint8 state, BlockAABB *out, int cap);", 1),
             SrcPin("lit flag", "static constexpr quint8 BrewingStandStateLitFlag = 0x01;", 1),
-            SrcPin("atlas", "static constexpr int AtlasTileCount = 195;", 1)});
+            SrcPin("atlas", "static constexpr int AtlasTileCount = 201;", 1)});
+                //   t1103 lawful 前移：195→201（西瓜族 tile 195..200 追加；t1097 曾 193→195）。
         const QStringList missBr = pinSet(srcRoot + QStringLiteral("/Core/blockregistry.cpp"), {
             SrcPin("def row", "\"brewing_stand\",  \"酿造台\"", 1)});
         const QStringList missRc = pinSet(srcRoot + QStringLiteral("/Game/recipe.cpp"), {
@@ -1030,7 +1041,7 @@ void MatrixRun::section67_brewing()
                          && RecipeRegistry::SugarId == 0x26A
                          && RecipeRegistry::GlimmerBottleId == 0x263
                          && int(BR::BrewingStand) == 148
-                         && int(BR::Count) == 149;
+                         && int(BR::Count) == 151; // t1103 lawful 前移：149→151（Melon/MelonStem 尾部追加）
         ok = ok && ids;
         if (!ids) diag += QStringLiteral("[ids]");
         // (2) 枚举尾追加序（t1097 序不变 + t1099 三连）。
@@ -1455,7 +1466,7 @@ void MatrixRun::section67_brewing()
                          && RecipeRegistry::SugarId == 0x26A
                          && RecipeRegistry::GlimmerBottleId == 0x263
                          && int(BR::BrewingStand) == 148
-                         && int(BR::Count) == 149;
+                         && int(BR::Count) == 151; // t1103 lawful 前移：149→151（Melon/MelonStem 尾部追加）
         ok = ok && ids;
         if (!ids) diag += QStringLiteral("[ids]");
         // (2) 延长常量族（六新 [四常量] + t1097/t1099 族不动）。
@@ -2528,6 +2539,665 @@ void MatrixRun::section67_brewing()
                " declaration and the qml route with the finishEating emit face unpinned for NEG"
                " attribution, and the neighbouring splash-weakness row and potion-drunk emit and"
                " drinkable tail are untouched)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── t1103 闪烁西瓜生存整链四腿（r2073a-d；NEG 双变异见 b/d 头注阴注；钉面 NEG 双面全豁免）──────
+    //   阴性面（双变异双还原，手工 Edit 做/还原，禁 git checkout/restore；存证 build/ 终名日志
+    //   matrix_r2073_neg{1,2}_{red,restore}.log）：
+    //   NEG-1 摘瓜生长结果门（world.cpp tickCropGrowth 3b 成熟茎结果分支整段）→ **恰红 = {r2073b,
+    //     r2073d}**（b 结果面 + d 链的瓜源断链——两腿吃瓜源；a/c 零世界零触达）。生长 0→7 序列面
+    //     （不触结果分支）与掉落面幸存但腿红；r2072 五族不误伤（r2072a 直酿腿不走生长）。
+    //   NEG-2 摘环形合成行（recipe.cpp glistering_melon 行）→ **恰红 = {r2073c, r2073d}**（c 环形
+    //     命中面 + d 链的酿造原料断链；a 的金粒双向行/瓜种池行不在摘面，b 不触合成）。
+    //   相邻族零污染：r2072 五族（凡庸 0x287 段位 / 直酿两行 / 双 burp 互斥 / 压力板映射 / 结构钉）
+    //   全部零触碰——本组钉面只追加、摘面全豁免；凡庸调色板连续性钉（凡庸 == 喷溅尾 + 1）随尾追加
+    //   自然保持。
+
+    // ── r2073a：金粒双向合成 + 瓜种战利品行 + 瓜片转换/存储行为柱（纯表 + 池 roll；零世界）────────────
+    //   NEG 面：本腿零 NEG 触达——摘结果分支（NEG-1）/ 摘环形行（NEG-2）均不伤本腿（金粒双向行 /
+    //   瓜片转换行 / 瓜块存储行 / 池行行为级直调，不走生长与环形链）。
+    runLeg("r2073a gold-nugget bidirectional crafting plus melon-seed mineshaft loot column (a gold"
+        " ingot breaks down to exactly nine nuggets shapeless in both grids and nine nuggets rebuild"
+        " the ingot in a full three-by-three, a melon slice converts one-to-one into a melon seed and"
+        " nine slices build the melon block with wrong-ingredient pairs answering null with no"
+        " consumption, and the mineshaft chest pool carries the melon-seed row with weight ten and a"
+        " two-to-four count band that the thousand-seed deterministic sweep hits reproducibly inside"
+        " the weight band while the dungeon pool stays untouched)", [&]() {
+        bool ok = true;
+        QString diag;
+        // (1) 金锭 → 9 金粒（无序单原料：2×2 角放 + 3×3 心放双格命中；行名唯一身份 + 产率 9）。
+        const int g2[9] = { RecipeRegistry::GoldIngotId, 0, 0, 0, 0, 0, 0, 0, 0 };
+        const RecipeRegistry::Recipe *r2 = RecipeRegistry::match(g2, 2);
+        const bool ingotDown = r2 && r2->outputId == RecipeRegistry::GoldNuggetsId
+            && r2->outputCount == 9 && r2->shapeless
+            && QLatin1String(r2->name) == QLatin1String("gold_nuggets_x9");
+        const int g3[9] = { 0, 0, 0, 0, RecipeRegistry::GoldIngotId, 0, 0, 0, 0 };
+        const RecipeRegistry::Recipe *r3 = RecipeRegistry::match(g3, 3);
+        const bool ingotDown3 = r3 && r3->outputId == RecipeRegistry::GoldNuggetsId
+            && r3->outputCount == 9;
+        ok = ok && ingotDown && ingotDown3;
+        if (!(ingotDown && ingotDown3)) diag += QStringLiteral("[nugdown %1/%2]").arg(ingotDown).arg(ingotDown3);
+        // (2) 9 金粒 → 1 金锭（3×3 满铺有序行；产率 1）。
+        const int gn = RecipeRegistry::GoldNuggetsId;
+        const int gI[9] = { gn, gn, gn, gn, gn, gn, gn, gn, gn };
+        const RecipeRegistry::Recipe *rI = RecipeRegistry::match(gI, 3);
+        const bool ingotUp = rI && rI->outputId == RecipeRegistry::GoldIngotId
+            && rI->outputCount == 1 && !rI->shapeless
+            && QLatin1String(rI->name) == QLatin1String("gold_ingot_from_nuggets");
+        ok = ok && ingotUp;
+        if (!ingotUp) diag += QStringLiteral("[nugup %1]").arg(rI ? rI->outputId : -1);
+        // (3) 瓜片 → 1 瓜种（1:1 双格命中）+ 9 瓜片 → 瓜块（3×3 满铺；产物 = 方块段 Melon）。
+        const int gS[9] = { RecipeRegistry::MelonSliceId, 0, 0, 0, 0, 0, 0, 0, 0 };
+        const RecipeRegistry::Recipe *rS = RecipeRegistry::match(gS, 2);
+        const bool sliceSeed = rS && rS->outputId == RecipeRegistry::MelonSeedsId
+            && rS->outputCount == 1 && rS->shapeless
+            && QLatin1String(rS->name) == QLatin1String("melon_seeds_from_slice");
+        const int gSliceC[9] = { 0, 0, 0, 0, RecipeRegistry::MelonSliceId, 0, 0, 0, 0 };
+        const RecipeRegistry::Recipe *rS3 = RecipeRegistry::match(gSliceC, 3); // 3×3 心放同命中（单原料无序位置无关）
+        const bool sliceSeed3 = rS3 && rS3->outputId == RecipeRegistry::MelonSeedsId && rS3->outputCount == 1;
+        const int gs = RecipeRegistry::MelonSliceId;
+        const int gM[9] = { gs, gs, gs, gs, gs, gs, gs, gs, gs };
+        const RecipeRegistry::Recipe *rM = RecipeRegistry::match(gM, 3);
+        const bool sliceBlock = rM && rM->outputId == int(BR::Melon) && rM->outputCount == 1
+            && QLatin1String(rM->name) == QLatin1String("melon_from_slices");
+        ok = ok && sliceSeed && sliceSeed3 && sliceBlock;
+        if (!(sliceSeed && sliceSeed3 && sliceBlock))
+            diag += QStringLiteral("[slice s=%1 s3=%2 blk=%3]").arg(sliceSeed).arg(sliceSeed3).arg(sliceBlock);
+        // (4) 错料负例（match()==nullptr = 合成 UI 无效应不消耗权威面；r2062b 同门）：单粒不成行 /
+        //     8 粒 + 糖心不成行 / 金锭+瓜片不成行 / 瓜片+金粒对不成行。
+        const auto expectNoMatch = [&](const int gg[9], int w, const char *why) {
+            const RecipeRegistry::Recipe *r = RecipeRegistry::match(gg, w);
+            if (r) diag += QStringLiteral("[%1 matched %2]").arg(QLatin1String(why)).arg(r->outputId);
+            return r == nullptr;
+        };
+        const int n1[9] = { RecipeRegistry::GoldNuggetsId, 0, 0, 0, 0, 0, 0, 0, 0 };
+        const int nS[9] = { gn, gn, gn, gn, RecipeRegistry::SugarId, gn, gn, gn, gn };
+        const int nI[9] = { 0, 0, 0, 0, RecipeRegistry::GoldIngotId, 0, RecipeRegistry::MelonSliceId, 0, 0 };
+        const int nIS[9] = { RecipeRegistry::MelonSliceId, RecipeRegistry::GoldNuggetsId, 0, 0, 0, 0, 0, 0, 0 };
+        const bool negs = expectNoMatch(n1, 2, "single-nugget")
+            && expectNoMatch(nS, 3, "8-nugget-sugar-center")
+            && expectNoMatch(nI, 3, "ingot-slice")
+            && expectNoMatch(nIS, 2, "slice-nugget-pair");
+        ok = ok && negs;
+        if (!negs) diag += QStringLiteral("[negs]");
+        // (5) 瓜种矿井池行逐字段（10 / 2..4）+ 千 seed 确定性扫描命中 + 复现 + 数量带 + 千 seed 宽频带
+        //     （权重 10/117 ≈ 8.55%/roll × 8000 roll ≈ 684 期望；带 [450,950] 防塌零 / 爆涨两向漂移，
+        //     r2062a 同门算式）+ 地牢池邻族零污染（行数 10 / 权重和 153 / 无瓜种行——r2062d 锚不动）。
+        bool rowOk = false, seedHit = false, reproOk = true, rangeOk = true;
+        int seedStacks = 0;
+        for (const auto &e : LootTable::mineshaftChestPool())
+            if (e.itemId == RecipeRegistry::MelonSeedsId)
+                rowOk = e.weight == 10 && e.minCount == 2 && e.maxCount == 4;
+        for (quint32 s = 0; s < 1000; ++s) {
+            const auto stacks = LootTable::roll(LootTable::mineshaftChestPool(), 8, s);
+            bool hit = false;
+            for (const auto &st : stacks) {
+                if (st.itemId == RecipeRegistry::MelonSeedsId) {
+                    hit = true;
+                    ++seedStacks;
+                    if (st.count < 2 || st.count > 4) rangeOk = false;
+                }
+            }
+            if (hit && !seedHit) {
+                const auto again = LootTable::roll(LootTable::mineshaftChestPool(), 8, s);
+                for (const auto &st : again)
+                    if (st.itemId == RecipeRegistry::MelonSeedsId) { seedHit = true; break; }
+            }
+        }
+        const bool bandOk = seedStacks >= 450 && seedStacks <= 950;
+        int dRows = 0, dWeight = 0;
+        bool dHasSeed = false;
+        for (const auto &e : LootTable::dungeonChestPool()) {
+            ++dRows;
+            dWeight += e.weight;
+            dHasSeed |= e.itemId == RecipeRegistry::MelonSeedsId;
+        }
+        const bool dungeonClean = dRows == 10 && dWeight == 153 && !dHasSeed;
+        const bool lootOk = rowOk && seedHit && reproOk && rangeOk && bandOk && dungeonClean;
+        ok = ok && lootOk;
+        if (!lootOk)
+            diag += QStringLiteral("[loot row=%1 hit=%2 rng=%3 stacks=%4 dungeon=%5]")
+                        .arg(rowOk).arg(seedHit).arg(rangeOk).arg(seedStacks).arg(dungeonClean);
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2073a gold-nugget bidirectional crafting plus melon-seed mineshaft loot column (a gold"
+               " ingot breaks down to exactly nine nuggets shapeless in both grids and nine nuggets rebuild"
+               " the ingot in a full three-by-three, a melon slice converts one-to-one into a melon seed and"
+               " nine slices build the melon block with wrong-ingredient pairs answering null with no"
+               " consumption, and the mineshaft chest pool carries the melon-seed row with weight ten and a"
+               " two-to-four count band that the thousand-seed deterministic sweep hits reproducibly inside"
+               " the weight band while the dungeon pool stays untouched)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── r2073b：瓜茎生长门 + 成熟结果行为柱（真 tick 泵 + 骰子镜像 + 真链破茎；NEG-1 敏感面）──────────
+    //   NEG-1（摘 world.cpp tickCropGrowth 成熟茎结果分支）→ 恰红 = {r2073b, r2073d}：本腿结果面
+    //   断言全失（生长 0→7 骰子镜像序列 / 双门阴性 / 破茎掉种面不触摘面仍绿但腿红）。本腿不破瓜块、
+    //   不触合成 → NEG-2 不误伤。
+    runLeg("r2073b melon-stem growth gate plus mature fruiting behavior column (the planted stem"
+        " climbs the shared eight-age ladder through the farmland plus skylight plus deterministic"
+        " scatter gates with the actual advance windows matching the mirrored dice exactly and"
+        " monotonic single-step stages, a mature stem on stone ground and a stem ringed by solid"
+        " blocks both refuse to fruit past their reachable dice-hit windows while the free-slot stem"
+        " drops exactly one melon block onto the deterministic hash-picked neighbour cell with valid"
+        " ground keeping the stem mature for repeated fruiting, and breaking the stem through the"
+        " real mining chain yields exactly one melon seed)", [&]() {
+        bool ok = true;
+        QString diag;
+        World wG;
+        initFixedBrewWorld(wG);
+        layBrewPlatform(wG, 12, 38, 20, 28);
+        // 三块耕地垫：A 主株(24,81,24) 完整生长+结果（5×5 垫 → 4 邻空位 + 落地面全耕地）/
+        //   B 石地对照(16,81,24)（单块耕地 → 4 邻落地面 = 石坪 → 落地面门拒）/ C 围石对照(32,81,24)
+        //   （4 邻围石 → 槽位门拒）。
+        for (int x = 22; x <= 26; ++x)
+            for (int z = 22; z <= 26; ++z)
+                wG.setBlock(x, 80, z, BR::Farmland, 0);
+        wG.setBlock(16, 80, 24, BR::Farmland, 0);
+        wG.setBlock(32, 80, 24, BR::Farmland, 0);
+        wG.setBlock(24, 81, 24, BR::MelonStem, 0); // A：种下 state 0（种植映射行行为级走 r2073d 链 + d 结构钉）
+        wG.setBlock(16, 81, 24, BR::MelonStem, 7); // B：直置成熟茎
+        wG.setBlock(32, 81, 24, BR::MelonStem, 7); // C：直置成熟茎
+        wG.setBlock(31, 81, 24, BR::Stone, 0);
+        wG.setBlock(33, 81, 24, BR::Stone, 0);
+        wG.setBlock(32, 81, 23, BR::Stone, 0);
+        wG.setBlock(32, 81, 25, BR::Stone, 0);
+        // 光照前置（开露天光 ≥ kCropMinLight=9；t1026a 同门预检）。
+        const bool lightOk = wG.skyLightAt(24, 81, 24) >= 9 && wG.skyLightAt(16, 81, 24) >= 9;
+        // 骰子镜像（world.cpp tickCropGrowth 同式：干耕地 1× 倍率 growPct=6、无雨；窗口序号自 0）。
+        const auto diceHits = [&](int k, int stage, int cx, int cy, int cz) -> bool {
+            const int mixedSeed = int(quint32(wG.seed()) ^ (quint32(k) * 0x9E3779B9u));
+            return int(wG.hashVoxel(mixedSeed, cx, cy * 7 + stage, cz) & 0xFFFFu) % 100 < 6;
+        };
+        // (1) A 株生长序列镜像（阶段 0..6；3000 窗守卫 = 病态 seed 兜底，t1026a 同式）。
+        QVector<int> simAdv;
+        {
+            int stage = 0;
+            for (int k = 0; k < 3000 && stage < 7; ++k)
+                if (diceHits(k, stage, 24, 81, 24)) { ++stage; simAdv.push_back(k); }
+            if (stage < 7) simAdv.clear();
+        }
+        const bool simOk = !simAdv.isEmpty();
+        // (2) 结果窗镜像：A 熟窗之后首个骰子命中窗（stage=7 恒项）+ 期望槽位（四向扫描哈希定起始向，
+        //     +X/-X/+Z/-Z 固定序环绕；首空格 + 落地面耕地 → 唯一期望格——与 world.cpp 3b 同式）。
+        int fruitWin = -1, expectX = -1, expectZ = -1;
+        if (simOk) {
+            const int k7 = simAdv.last();
+            for (int k = k7 + 1; k < k7 + 3000 && fruitWin < 0; ++k)
+                if (diceHits(k, 7, 24, 81, 24)) fruitWin = k;
+            if (fruitWin > 0) {
+                const int mixedSeed = int(quint32(wG.seed()) ^ (quint32(fruitWin) * 0x9E3779B9u));
+                const quint32 h = wG.hashVoxel(mixedSeed, 24, 81 * 7 + 7, 24);
+                const int start = int((h >> 16) & 3u);
+                static constexpr int kDir[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+                for (int d = 0; d < 4; ++d) {
+                    const int nx = 24 + kDir[(start + d) & 3][0];
+                    const int nz = 24 + kDir[(start + d) & 3][1];
+                    if (wG.blockAt(nx, 81, nz) == BR::Air && wG.blockAt(nx, 80, nz) == BR::Farmland) {
+                        expectX = nx;
+                        expectZ = nz;
+                        break;
+                    }
+                }
+            }
+        }
+        const int pumpEnd = (fruitWin > 0) ? fruitWin : (simOk ? simAdv.last() : 0);
+        // (3) 真泵（25 tick = 1 窗；逐窗采样：升阶段序列 ≡ 镜像 + 单调）。
+        bool monoOk = true;
+        int prevStage = 0, advIdx = 0;
+        for (int k = 0; k <= pumpEnd; ++k) {
+            for (int c = 0; c < 25; ++c) wG.tickCropGrowth();
+            const int st = wG.stateAt(24, 81, 24);
+            if (st - prevStage > 1 || st - prevStage < 0 || st > 7) monoOk = false;
+            if (advIdx < simAdv.size() && k == simAdv.at(advIdx) && st - prevStage == 1) ++advIdx;
+            prevStage = st;
+        }
+        const bool seqOk = simOk && advIdx == simAdv.size() && prevStage == BR::WheatCropStageMax;
+        // (4) 结果面：A 环恰 1 瓜 @期望格（NEG-1 摘结果分支 → 环空红）+ 茎保持成熟（复果口径）。
+        const auto ringMelonCount = [&](int cx, int cz, int *mx, int *mz) {
+            int n = 0;
+            static constexpr int kR[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+            for (const auto &o : kR)
+                if (wG.blockAt(cx + o[0], 81, cz + o[1]) == BR::Melon) {
+                    ++n;
+                    if (mx) { *mx = cx + o[0]; *mz = cz + o[1]; }
+                }
+            return n;
+        };
+        int mx = -1, mz = -1;
+        const int aMelons = ringMelonCount(24, 24, &mx, &mz);
+        const bool fruitOk = fruitWin > 0 && expectX > 0 && aMelons == 1
+                             && mx == expectX && mz == expectZ;
+        const bool matureKept = wG.blockAt(24, 81, 24) == BR::MelonStem
+                                && wG.stateAt(24, 81, 24) == BR::WheatCropStageMax;
+        // (5) 真链破茎：持空手生存瞄 A 茎（站位避瓜——沿首条「环格非瓜」轴向退 2 格站，防射线先命中瓜）。
+        PlayerController pcG;
+        pcG.setWorld(&wG);
+        Hotbar hbG;
+        pcG.setHotbar(&hbG);
+        QQuickWindow winG;
+        pcG.setParentItem(winG.contentItem());
+        pcG.grab();
+        pcG.setSelectedBlock(int(BR::Air));
+        QVector<int> dropIdsG, dropCntsG;
+        const QMetaObject::Connection dropConnG = QObject::connect(
+            &pcG, &PlayerController::spawnItem, &pcG,
+            [&](int, int, int, int id, int count, const QVariantList &, const QString &, int) {
+                dropIdsG.push_back(id);
+                dropCntsG.push_back(count);
+            });
+        int standX = 24, standZ = 24;
+        static constexpr int kDirB[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+        for (const auto &o : kDirB) {
+            const int rx = 24 + o[0], rz = 24 + o[1];
+            if (!(rx == mx && rz == mz)) { standX = 24 + 2 * o[0]; standZ = 24 + 2 * o[1]; break; }
+        }
+        const auto aimG = [&](float fx, float fz, float ax, float ay, float az) {
+            const float ex = fx, ey = 81.0f + 1.62f, ez = fz;
+            const float dx = ax - ex, dy = ay - ey, dz = az - ez;
+            const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const float pitch = std::asin(dy / len) * 57.2957795f;
+            const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+            pcG.release();
+            pcG.grab();
+            pcG.loadSavedState(fx, 81.0f, fz, yaw, pitch, 2 /* Survival */);
+            pcG.tick();
+        };
+        aimG(float(standX) + 0.5f, float(standZ) + 0.5f, 24.5f, 81.5f, 24.5f);
+        pcG.beginMining();
+        for (int i = 0; i < 6000 && wG.blockAt(24, 81, 24) != BR::Air; ++i) {
+            QElapsedTimer dtw;
+            dtw.start();
+            while (dtw.elapsed() < 17)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+            pcG.tick();
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+        }
+        pcG.endMining();
+        const bool stemGone = wG.blockAt(24, 81, 24) == BR::Air;
+        const bool stemDrop = stemGone && dropIdsG.size() == 1
+                              && dropIdsG.at(0) == RecipeRegistry::MelonSeedsId
+                              && dropCntsG.at(0) == 1;
+        // (6) B/C 可达域守卫泵（B/C 自有骰子流首个命中窗——摘落地面门 / 槽位门时该窗必出瓜）：
+        //     破茎后再泵（茎已去 → A 环不再变化），泵毕双对照环恒 0 瓜。
+        int bHit = -1, cHit = -1;
+        for (int k = 0; k <= 3000 && (bHit < 0 || cHit < 0); ++k) {
+            if (bHit < 0 && diceHits(k, 7, 16, 81, 24)) bHit = k;
+            if (cHit < 0 && diceHits(k, 7, 32, 81, 24)) cHit = k;
+        }
+        int gateEnd = pumpEnd;
+        if (bHit > gateEnd) gateEnd = bHit;
+        if (cHit > gateEnd) gateEnd = cHit;
+        for (int k = pumpEnd + 1; k <= gateEnd; ++k)
+            for (int c = 0; c < 25; ++c) wG.tickCropGrowth();
+        const bool gatesOk = ringMelonCount(16, 24, nullptr, nullptr) == 0
+                             && ringMelonCount(32, 24, nullptr, nullptr) == 0;
+        ok = ok && lightOk && monoOk && seqOk && fruitOk && matureKept && stemDrop && gatesOk;
+        if (!ok)
+            diag += QStringLiteral("[b light=%1 mono=%2 seq=%3 fruit=%4@(x%5,z%6,n=%7) kept=%8 drop=%9 gone=%10 gates=%11 win=%12]")
+                        .arg(lightOk).arg(monoOk).arg(seqOk).arg(fruitOk)
+                        .arg(mx).arg(mz).arg(aMelons).arg(matureKept).arg(stemDrop).arg(stemGone)
+                        .arg(gatesOk).arg(fruitWin);
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2073b melon-stem growth gate plus mature fruiting behavior column (the planted stem"
+               " climbs the shared eight-age ladder through the farmland plus skylight plus deterministic"
+               " scatter gates with the actual advance windows matching the mirrored dice exactly and"
+               " monotonic single-step stages, a mature stem on stone ground and a stem ringed by solid"
+               " blocks both refuse to fruit past their reachable dice-hit windows while the free-slot"
+               " stem drops exactly one melon block onto the deterministic hash-picked neighbour cell"
+               " with valid ground keeping the stem mature for repeated fruiting, and breaking the stem"
+               " through the real mining chain yields exactly one melon seed)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── r2073c：环形合成 + 瓜片食物面行为柱（纯表 + 真链食环；NEG-2 敏感面）──────────────────────────
+    //   NEG-2（摘 recipe.cpp glistering_melon 环形行）→ 恰红 = {r2073c, r2073d}：本腿环形命中面 +
+    //   3×3 专属面全失（食物面 / 酿造行在不在摘面仍绿但腿红）。真链食环零世界语义 → NEG-1 不误伤。
+    runLeg("r2073c glistering melon ring crafting plus slice food column (eight nuggets ringed"
+        " around one center slice in a three-by-three grid crafts exactly one glistering melon under"
+        " the unique row identity while the two-by-two grid and wrong-center pairs answer null with"
+        " no consumption, the brewing table keeps answering the instant-health potion for the"
+        " glistering melon on an awkward bottle and zero on water or foreign ingredients, and a real"
+        " survival melon-slice eat emits exactly one foodBurped and zero potionDrunk while consuming"
+        " one slice)", [&]() {
+        bool ok = true;
+        QString diag;
+        // (1) 环形命中：8 金粒环 + 中心瓜片 → 1 闪烁西瓜（3×3 有序；行名唯一身份；产率 1）。
+        const int gn = RecipeRegistry::GoldNuggetsId;
+        const int gR[9] = { gn, gn, gn, gn, RecipeRegistry::MelonSliceId, gn, gn, gn, gn };
+        const RecipeRegistry::Recipe *rR = RecipeRegistry::match(gR, 3);
+        const bool ringHit = rR && rR->outputId == RecipeRegistry::GlisteringMelonId
+            && rR->outputCount == 1
+            && QLatin1String(rR->name) == QLatin1String("glistering_melon");
+        ok = ok && ringHit;
+        if (!ringHit) diag += QStringLiteral("[ring %1]").arg(rR ? rR->outputId : -1);
+        // (2) 3×3 专属 + 错料负例（2×2 容不下 8 环 → 四格不成行；糖心 / 金锭心 / 九粒满铺 → 各归各行或零）。
+        const int n2[9] = { gn, gn, gn, RecipeRegistry::MelonSliceId, 0, 0, 0, 0, 0 };
+        const RecipeRegistry::Recipe *r2c = RecipeRegistry::match(n2, 2);
+        const bool notIn2x2 = r2c == nullptr;
+        const int nSugar[9] = { gn, gn, gn, gn, RecipeRegistry::SugarId, gn, gn, gn, gn };
+        const int nIngotC[9] = { gn, gn, gn, gn, RecipeRegistry::GoldIngotId, gn, gn, gn, gn };
+        const bool wrongCenters = RecipeRegistry::match(nSugar, 3) == nullptr
+                                  && RecipeRegistry::match(nIngotC, 3) == nullptr;
+        ok = ok && notIn2x2 && wrongCenters;
+        if (!(notIn2x2 && wrongCenters)) diag += QStringLiteral("[ringneg]");
+        // (3) 酿造尾面（行在——t1099 既录；NEG-2 摘合成行不伤本面，c 的红纯由环形面）：
+        //     闪烁西瓜 + 粗制 → 瞬间治疗；水瓶 / 瓜片 / 金粒底物 → 0（瓜链原料非酿造底物/非效果原料）。
+        const bool brewTail = BrewingStore::brewResult(RecipeRegistry::GlisteringMelonId,
+                                                       RecipeRegistry::AwkwardPotionId)
+                                  == RecipeRegistry::InstantHealthPotionId
+            && BrewingStore::brewResult(RecipeRegistry::GlisteringMelonId,
+                                        RecipeRegistry::WaterBottleId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::MelonSliceId,
+                                        RecipeRegistry::AwkwardPotionId) == 0
+            && BrewingStore::brewResult(RecipeRegistry::GoldNuggetsId,
+                                        RecipeRegistry::AwkwardPotionId) == 0;
+        ok = ok && brewTail;
+        if (!brewTail) diag += QStringLiteral("[brew]");
+        // (4) 食物表面：瓜片 +2（MC 1.0 原值）+ 瓜种 / 金粒非食物非饮品（foodHungerAmount==0 /
+        //     isDrinkableItem==false——饮面回归三连）。
+        const bool foodFace = PlayerController::foodHungerAmount(RecipeRegistry::MelonSliceId) == 2
+            && PlayerController::foodHungerAmount(RecipeRegistry::MelonSeedsId) == 0
+            && PlayerController::foodHungerAmount(RecipeRegistry::GoldNuggetsId) == 0
+            && !PlayerController::isDrinkableItem(RecipeRegistry::MelonSliceId)
+            && !PlayerController::isDrinkableItem(RecipeRegistry::MelonSeedsId)
+            && !PlayerController::isDrinkableItem(RecipeRegistry::GoldNuggetsId);
+        ok = ok && foodFace;
+        if (!foodFace) diag += QStringLiteral("[foodface]");
+        // (5) 真链食环：生存玩家长按吃瓜片 → foodBurped(瓜片) 恰一 + potionDrunk 零 + 耗 1（r2072b 链 A 同门；
+        //     双完成沿互斥的食物向回归——t1102 burp 面随瓜片扩到新食物零改动零扰动）。
+        World wE;
+        initFixedBrewWorld(wE);
+        layBrewPlatform(wE, 18, 44, 18, 30);
+        EntityManager entsE;
+        Hotbar hbE;
+        PlayerController pcE;
+        pcE.setWorld(&wE);
+        pcE.setEntityManager(&entsE);
+        pcE.setHotbar(&hbE);
+        QQuickWindow probeE;
+        pcE.setParentItem(probeE.contentItem());
+        pcE.grab();
+        pcE.setSelectedBlock(int(BR::Air));
+        int burpSlice = 0, drunkE = 0;
+        QObject::connect(&pcE, &PlayerController::foodBurped, &pcE, [&](int itemId) {
+            if (itemId == RecipeRegistry::MelonSliceId) ++burpSlice;
+        });
+        QObject::connect(&pcE, &PlayerController::potionDrunk, &pcE, [&](int) { ++drunkE; });
+        hbE.setStack(0, RecipeRegistry::MelonSliceId, 2, 0);
+        pcE.loadSavedState(24.5, 81.0, 24.5, 0.0, 0.0, 2 /* Survival */);
+        QElapsedTimer pumpT;
+        pumpT.start();
+        while (pumpT.elapsed() < 320)
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        pcE.tick();
+        pcE.beginEating();
+        const bool eatingStarted = pcE.eating();
+        for (int i = 0; i < 44; ++i) {
+            QThread::msleep(60);
+            pcE.tick();
+        }
+        pcE.endEating();
+        pcE.tick();
+        const bool eatOk = eatingStarted && burpSlice == 1 && drunkE == 0
+            && hbE.blockIdAt(0) == RecipeRegistry::MelonSliceId && hbE.countAt(0) == 1;
+        ok = ok && eatOk;
+        if (!eatOk)
+            diag += QStringLiteral("[eat start=%1 burp=%2 drunk=%3 n0=%4]")
+                        .arg(eatingStarted).arg(burpSlice).arg(drunkE).arg(hbE.countAt(0));
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2073c glistering melon ring crafting plus slice food column (eight nuggets ringed"
+               " around one center slice in a three-by-three grid crafts exactly one glistering melon"
+               " under the unique row identity while the two-by-two grid and wrong-center pairs answer"
+               " null with no consumption, the brewing table keeps answering the instant-health potion"
+               " for the glistering melon on an awkward bottle and zero on water or foreign"
+               " ingredients, and a real survival melon-slice eat emits exactly one foodBurped and"
+               " zero potionDrunk while consuming one slice)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── r2073d：端到端生存链 + 结构钉族（NEG-1 敏感[瓜源] + NEG-2 敏感[环形]；钉面双面全豁免）────────
+    //   链：瓜种 → 茎（生长 0→7 骰子镜像泵）→ 成熟结果（NEG-1 面）→ 真链破瓜块掉 3-7 瓣（NEG-2 邻面：
+    //   摘瓣分支回落通用 1 瓣 → 区间断言红；本腿摘面 = 环形行 → 环合成为零红）→ 瓣 → 种回流 + 金锭 →
+    //   9 金粒 → 环形合闪烁西瓜（NEG-2 面）→ brewResult 粗制 + 闪烁西瓜 → 瞬间治疗（生存链闭合钉）。
+    //   结构钉：id 段位族 + 方块/映射/图集段位 + def 行逐字段 + 配方行/池行/接线源钉 + 呈现三面 +
+    //   相邻族零污染。NEG 双摘面（world.cpp 结果分支体 / playercontroller.cpp 掉瓣分支体）零钉——
+    //   行为柱归因 b/c/d 三腿。
+    runLeg("r2073d survival end-to-end chain plus structure pins (a planted melon seed grows"
+        " through the mirrored dice ladder to a mature stem that fruits one melon block on the"
+        " farm pad, breaking that melon through the real mining chain drops three to seven slices,"
+        " one slice converts back into a seed while one gold ingot breaks into nine nuggets, the"
+        " eight-nugget ring around one slice crafts the glistering melon and the brew table answers"
+        " the instant-health potion closing the survival chain, and the structure pin family holds"
+        " across id segments and block mapping and atlas extents and def rows and craft and loot"
+        " and wiring source pins and the presentation faces with the neighbouring mundane family"
+        " untouched)", [&]() {
+        bool ok = true;
+        QString diag;
+        // ── 行为面：端到端链 ──
+        World wD;
+        initFixedBrewWorld(wD);
+        layBrewPlatform(wD, 12, 38, 20, 28);
+        for (int x = 22; x <= 26; ++x)
+            for (int z = 22; z <= 26; ++z)
+                wD.setBlock(x, 80, z, BR::Farmland, 0);
+        const int sx = 24, sy = 81, sz = 24;
+        wD.setBlock(sx, sy, sz, BR::MelonStem, 0); // 瓜种 → 茎（种植映射行为级行由 r2073d 链直种 + 源钉）
+        const auto diceD = [&](int k, int stage) -> bool {
+            const int mixedSeed = int(quint32(wD.seed()) ^ (quint32(k) * 0x9E3779B9u));
+            return int(wD.hashVoxel(mixedSeed, sx, sy * 7 + stage, sz) & 0xFFFFu) % 100 < 6;
+        };
+        int advWin = -1;
+        {
+            int stage = 0;
+            for (int k = 0; k < 3000 && stage < 7; ++k)
+                if (diceD(k, stage)) { ++stage; advWin = k; }
+        }
+        int fruitWinD = -1;
+        if (advWin >= 0)
+            for (int k = advWin + 1; k < advWin + 3000 && fruitWinD < 0; ++k)
+                if (diceD(k, 7)) fruitWinD = k;
+        const bool pumpOk = advWin >= 0 && fruitWinD > 0;
+        for (int k = 0; k <= fruitWinD && pumpOk; ++k)
+            for (int c = 0; c < 25; ++c) wD.tickCropGrowth();
+        auto ringMelonD = [&](int *mx, int *mz) {
+            static constexpr int kR[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+            for (const auto &o : kR)
+                if (wD.blockAt(sx + o[0], sy, sz + o[1]) == BR::Melon) {
+                    if (mx) { *mx = sx + o[0]; *mz = sz + o[1]; }
+                    return true;
+                }
+            return false;
+        };
+        int mxD = -1, mzD = -1;
+        const bool melonGrown = pumpOk && ringMelonD(&mxD, &mzD);
+        ok = ok && melonGrown;
+        if (!melonGrown) diag += QStringLiteral("[grow adv=%1 fruit=%2]").arg(advWin).arg(fruitWinD);
+        // 真链破瓜块（生存空手；NEG-2 邻面：摘 3-7 瓣分支 → 回落通用 1 瓣 → 区间红）。
+        PlayerController pcD;
+        pcD.setWorld(&wD);
+        Hotbar hbD;
+        pcD.setHotbar(&hbD);
+        QQuickWindow winD;
+        pcD.setParentItem(winD.contentItem());
+        pcD.grab();
+        pcD.setSelectedBlock(int(BR::Air));
+        int sliceDrops = 0, sliceTotal = 0;
+        const QMetaObject::Connection sliceConn = QObject::connect(
+            &pcD, &PlayerController::spawnItem, &pcD,
+            [&](int, int, int, int id, int count, const QVariantList &, const QString &, int) {
+                if (id == RecipeRegistry::MelonSliceId) { ++sliceDrops; sliceTotal += count; }
+            });
+        const auto aimD = [&](float fx, float fz, float ax, float ay, float az) {
+            const float ex = fx, ey = float(sy) + 1.62f, ez = fz;
+            const float dx = ax - ex, dy = ay - ey, dz = az - ez;
+            const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const float pitch = std::asin(dy / len) * 57.2957795f;
+            const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+            pcD.release();
+            pcD.grab();
+            pcD.loadSavedState(fx, float(sy), fz, yaw, pitch, 2 /* Survival */);
+            pcD.tick();
+        };
+        aimD(float(sx) + 0.5f, float(sz) + 0.5f, float(mxD) + 0.5f, float(sy) + 0.5f, float(mzD) + 0.5f);
+        pcD.beginMining();
+        for (int i = 0; i < 6000 && wD.blockAt(mxD, sy, mzD) != BR::Air; ++i) {
+            QElapsedTimer dtw;
+            dtw.start();
+            while (dtw.elapsed() < 17)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+            pcD.tick();
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+        }
+        pcD.endMining();
+        const bool melonBroken = wD.blockAt(mxD, sy, mzD) == BR::Air;
+        const bool sliceRange = sliceDrops == 1 && sliceTotal >= 3 && sliceTotal <= 7; // MC 1.0 3-7 口径
+        ok = ok && melonBroken && sliceRange;
+        if (!(melonBroken && sliceRange))
+            diag += QStringLiteral("[melon broken=%1 drops=%2 total=%3]")
+                        .arg(melonBroken).arg(sliceDrops).arg(sliceTotal);
+        // 链下游（纯表）：瓣 → 种回流 + 金锭 → 9 金粒 → 环形合闪烁西瓜 → 酿造瞬间治疗（闭合钉）。
+        const int gnD = RecipeRegistry::GoldNuggetsId;
+        const int gSeedD[9] = { RecipeRegistry::MelonSliceId, 0, 0, 0, 0, 0, 0, 0, 0 };
+        const int gIngotD[9] = { RecipeRegistry::GoldIngotId, 0, 0, 0, 0, 0, 0, 0, 0 };
+        const int gRingD[9] = { gnD, gnD, gnD, gnD, RecipeRegistry::MelonSliceId, gnD, gnD, gnD, gnD };
+        const bool chainOk = melonBroken
+            && RecipeRegistry::match(gSeedD, 2) != nullptr
+            && RecipeRegistry::match(gIngotD, 2) != nullptr
+            && RecipeRegistry::match(gRingD, 3) != nullptr
+            && BrewingStore::brewResult(RecipeRegistry::GlisteringMelonId,
+                                        RecipeRegistry::AwkwardPotionId)
+                == RecipeRegistry::InstantHealthPotionId;
+        ok = ok && chainOk;
+        if (!chainOk) diag += QStringLiteral("[chain]");
+        // ── 结构钉面（NEG 双摘面全豁免；剥注释 pinSet + 裸读锚）──
+        // (S1) id / 段位 / 映射 / 图集（运行期 + 枚举钉）。
+        Hotbar hbS;
+        const bool idsOk = RecipeRegistry::GoldNuggetsId == 0x288
+            && RecipeRegistry::MelonSeedsId == 0x289
+            && RecipeRegistry::MelonSliceId == 0x28A
+            && RecipeRegistry::MundanePotionId == 0x287 // 邻族零污染（t1102 段尾原值）
+            && int(BR::Melon) == 149 && int(BR::MelonStem) == 150
+            && int(BR::Count) == 151
+            && int(BR::AtlasTileCount) == 201
+            && BR::mcBlockId(quint8(BR::Melon)) == 103
+            && BR::mcBlockId(quint8(BR::MelonStem)) == 105
+            && hbS.maxStackSize(RecipeRegistry::GoldNuggetsId) == 64
+            && hbS.maxStackSize(RecipeRegistry::MelonSeedsId) == 64
+            && hbS.maxStackSize(RecipeRegistry::MelonSliceId) == 64
+            && BR::maxStackSize(RecipeRegistry::MelonSliceId) == 64
+            && hbS.isMaterial(RecipeRegistry::MelonSliceId);
+        ok = ok && idsOk;
+        if (!idsOk) diag += QStringLiteral("[ids]");
+        // (S2) def 行逐字段（瓜块 / 瓜茎）。
+        const auto &md = BR::def(BR::Melon);
+        const auto &sd = BR::def(BR::MelonStem);
+        const bool defOk = md.topTile == 195 && md.sideTile == 196 && md.solid
+            && md.shape == int(BR::ShapeFull) && md.hardness == 1.0f
+            && md.dropId == RecipeRegistry::MelonSliceId && md.dropCount == 1
+            && !sd.solid && sd.shape == int(BR::ShapeNone) && sd.hardness == 0.0f
+            && sd.topTile == 197 && sd.dropId == RecipeRegistry::MelonSeedsId;
+        ok = ok && defOk;
+        if (!defOk) diag += QStringLiteral("[def]");
+        // (S3) 呈现三面（名面 / 调色板尾追加四连[喷溅尾→凡庸→金粒→瓜种→瓜片] / 图标 case）。
+        const bool nameOkS = hbS.nameForBlock(RecipeRegistry::GoldNuggetsId) == QStringLiteral("金粒")
+            && hbS.nameForBlock(RecipeRegistry::MelonSeedsId) == QStringLiteral("瓜种")
+            && hbS.nameForBlock(RecipeRegistry::MelonSliceId) == QStringLiteral("瓜片");
+        const QVariantList matsS = hbS.creativeMaterials();
+        int lastSplashS = -1, mundS = -1, nugS = -1, seedS = -1, sliceS = -1;
+        for (int i = 0; i < matsS.size(); ++i) {
+            const int v = matsS.at(i).toInt();
+            if (v == RecipeRegistry::SplashExtendedWeaknessPotionId) lastSplashS = i;
+            if (v == RecipeRegistry::MundanePotionId) mundS = i;
+            if (v == RecipeRegistry::GoldNuggetsId) nugS = i;
+            if (v == RecipeRegistry::MelonSeedsId) seedS = i;
+            if (v == RecipeRegistry::MelonSliceId) sliceS = i;
+        }
+        const bool palOkS = lastSplashS >= 0 && mundS == lastSplashS + 1 // r2072d 凡庸连续性钉保持
+            && nugS == mundS + 1 && seedS == nugS + 1 && sliceS == seedS + 1;
+        bool melonInBlocksS = false;
+        const QVariantList blocksS = hbS.creativeBlocks();
+        for (const QVariant &b : blocksS)
+            melonInBlocksS |= b.toInt() == int(BR::Melon);
+        ok = ok && nameOkS && palOkS && melonInBlocksS;
+        if (!(nameOkS && palOkS && melonInBlocksS))
+            diag += QStringLiteral("[face name=%1 pal=%2/%3/%4/%5 blk=%6]")
+                        .arg(nameOkS).arg(lastSplashS).arg(mundS).arg(nugS).arg(sliceS)
+                        .arg(melonInBlocksS);
+        // (S4) 源钉族（NEG 双摘面零钉；world.h 茎并入锚为注释 → 裸读口径）。
+        const QStringList missRh = pinSet(srcRootForPins() + QStringLiteral("/Game/recipe.h"), {
+            SrcPin("nugget row", "static constexpr int GoldNuggetsId  = 0x288;", 1),
+            SrcPin("seeds row", "static constexpr int MelonSeedsId   = 0x289;", 1),
+            SrcPin("slice row", "static constexpr int MelonSliceId   = 0x28A;", 1)});
+        const QStringList missRc = pinSet(srcRootForPins() + QStringLiteral("/Game/recipe.cpp"), {
+            SrcPin("ring row body", "RecipeRegistry::MelonSliceId,  RecipeRegistry::GoldNuggetsId,", 1),
+            SrcPin("assert nugget", "static_assert(RecipeRegistry::GoldNuggetsId", 1)});
+        const QStringList missBs = pinSet(srcRootForPins() + QStringLiteral("/Game/brewingstore.cpp"), {
+            SrcPin("glistering brew row", "return RecipeRegistry::InstantHealthPotionId;", 1)});
+        const QStringList missLt = pinSet(srcRootForPins() + QStringLiteral("/Game/loottable.cpp"), {
+            SrcPin("melon seed pool row", "{ RecipeRegistry::MelonSeedsId,   10, 2, 4 },", 1)});
+        const QStringList missPc = pinSet(srcRootForPins() + QStringLiteral("/Game/playercontroller.cpp"), {
+            SrcPin("slice food row", "RecipeRegistry::MelonSliceId)     return 2;", 1),
+            SrcPin("planting row", "{ RecipeRegistry::MelonSeedsId, BlockRegistry::MelonStem }", 1)});
+        const QStringList missHb = pinSet(srcRootForPins() + QStringLiteral("/Game/hotbar.cpp"), {
+            SrcPin("name nugget", "return QStringLiteral(\"金粒\")", 1),
+            SrcPin("name seeds", "return QStringLiteral(\"瓜种\")", 1),
+            SrcPin("name slice", "return QStringLiteral(\"瓜片\")", 1),
+            SrcPin("palette nugget", "int(RecipeRegistry::GoldNuggetsId),", 1),
+            SrcPin("blocks melon row", "int(BlockRegistry::Melon) };", 1),
+            SrcPin("stem variant case", "case BlockRegistry::MelonStem:", 1)});
+        const QStringList missMi = pinSet(srcRootForPins() + QStringLiteral("/ui/MaterialIcon.qml"), {
+            SrcPin("icon 288", "case 0x288: drawGoldNugget(); break", 1),
+            SrcPin("icon 289", "case 0x289: drawMelonSeeds(); break", 1),
+            SrcPin("icon 28A", "case 0x28A: drawMelonSlice(); break", 1)});
+        const QStringList missBrH = pinSet(srcRootForPins() + QStringLiteral("/Core/blockregistry.h"), {
+            SrcPin("count sentinel", "Count           = 151", 1),
+            SrcPin("atlas sentinel", "AtlasTileCount = 201", 1),
+            SrcPin("melon enum", "Melon            = 149", 1),
+            SrcPin("stem enum", "MelonStem        = 150", 1)});
+        const QStringList missBrC = pinSet(srcRootForPins() + QStringLiteral("/Core/blockregistry.cpp"), {
+            SrcPin("melon def row", "{int(BlockRegistry::Melon),", 1),
+            SrcPin("stem def row", "{int(BlockRegistry::MelonStem),", 1),
+            SrcPin("stem cross row", "if (blockId == MelonStem) return true;", 1),
+            SrcPin("stem tile case", "case MelonStem:", 1)});
+        const QStringList missWc = pinSet(srcRootForPins() + QStringLiteral("/World/world.cpp"), {
+            SrcPin("growth index row", "id == BR::MelonStem", 1),
+            SrcPin("snapshot row", "|| b == BlockRegistry::MelonStem", 1),
+            SrcPin("bonemeal row", "id == BlockRegistry::MelonStem", 1)});
+        QFile whS(srcRootForPins() + QStringLiteral("/World/world.h"));
+        const QString whTxt = whS.open(QIODevice::ReadOnly) ? QString::fromUtf8(whS.readAll()) : QString();
+        // 中文锚必走 QStringLiteral（UTF-16 语义比较；QLatin1String 按 Latin-1 逐字节解码中文必失配）。
+        const bool whAnchor = whTxt.contains(QStringLiteral("瓜茎（MelonStem）并入本 tick"));
+        const bool pinsOk = missRh.isEmpty() && missRc.isEmpty() && missBs.isEmpty() && missLt.isEmpty()
+            && missPc.isEmpty() && missHb.isEmpty() && missMi.isEmpty() && missBrH.isEmpty()
+            && missBrC.isEmpty() && missWc.isEmpty() && whAnchor;
+        ok = ok && pinsOk;
+        if (!pinsOk) {
+            const QStringList allMiss = QStringList()
+                << missRh << missRc << missBs << missLt << missPc << missHb << missMi
+                << missBrH << missBrC << missWc;
+            diag += QStringLiteral("[pins %1%2]")
+                        .arg(allMiss.join(QLatin1Char(',')))
+                        .arg(whAnchor ? QString() : QStringLiteral("[world.h anchor]"));
+        }
+
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2073d survival end-to-end chain plus structure pins (a planted melon seed grows"
+               " through the mirrored dice ladder to a mature stem that fruits one melon block on the"
+               " farm pad, breaking that melon through the real mining chain drops three to seven"
+               " slices, one slice converts back into a seed while one gold ingot breaks into nine"
+               " nuggets, the eight-nugget ring around one slice crafts the glistering melon and the"
+               " brew table answers the instant-health potion closing the survival chain, and the"
+               " structure pin family holds across id segments and block mapping and atlas extents"
+               " and def rows and craft and loot and wiring source pins and the presentation faces"
+               " with the neighbouring mundane family untouched)"
             << (ok ? QString() : diag);
     });
 }
