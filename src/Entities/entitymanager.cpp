@@ -3855,7 +3855,11 @@ bool EntityManager::aiSnowGolem(int idx, Entity &e, float dt, World *world, cons
                 dirty = true; // yaw 变 → QML eulerRotation 刷新（发球帧可见转向目标）
             }
             fireSnowball(idx, e, te.pos);
-            e.attackCooldown = kSnowGolemThrowInterval;
+            // t1106 修：fireSnowball → spawnSnowball → acquireSlot 在无空槽时 push_back **扩容** m_entities
+            //   （std::vector 重分配）→ 调用方持有的 e 引用（=m_entities[idx]）悬空 → 本行若仍写 e.attack
+            //   Cooldown 即写悬空引用（UB，节流丢失连发）。改经 idx 写回（同骨架 aiHostile 射箭走 m_pending
+            //   Arrows 队列模式 = 审查修 B8 在案；golem 直调路径用经 idx 写回收口，行为面等价）。
+            m_entities[size_t(idx)].attackCooldown = kSnowGolemThrowInterval;
         }
     }
     // t529 复盘 ②「平时随机朝向」：移除 t499 二轮「玩家在 kSnowGolemFaceRange 内 → yawRad 朝玩家」的持续覆盖。
@@ -6715,14 +6719,22 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         //   player(damage==0) → damageEntity 因 amount<=0 早退不扣血，改手动设 hurtFlash 触发红闪。
                         //   仅敌对扣血 / 红闪（被动生物 0 伤害 0 红闪，机制对标 MC 雪球不伤友好生物）；击退 / 减速
                         //   对所有 mob 生效。
-                        if (m.hostile && e.snowballDamage > 0) {
-                            damageEntity(mi, e.snowballDamage); // golem 雪球：敌对扣血 + 红闪（复用受击链）
-                        } else if (m.hostile) {
-                            // 玩家雪球打敌对：0 伤害但触发红闪（damageEntity 守 amount<=0 不闪，手动设 hurtFlash）。
-                            Entity &tm = m_entities[size_t(mi)];
-                            if (tm.alive && tm.kind == Mob && !tm.dead) {
-                                tm.hurtFlash = kHurtFlashTime; // 红闪（QML hurtFlashAt>0 → baseColor 红；t935 起由
-                                // 下方 dirty → tick 末 notify 的槽位指纹差分捕获 hurtFlash 变化 → bump 本槽监视器）
+                        //   t1106 1.0 口径补烈焰人相性：雪球对烈焰人**恒 3 伤**（kSnowballBlazeDamage；机制等价
+                        //   MC 1.0 雪球对 blaze 3 HP / 1.5 心的专属相性伤害，**与发射者无关**——golem 雪球与玩家
+                        //   雪球同价）；其余敌对仍按发射者分流（golem=kSnowballDamage=1 / 玩家=0 红闪）。
+                        if (m.hostile) {
+                            const int hitDamage = (m.mobType == MobEmberling)
+                                                      ? kSnowballBlazeDamage
+                                                      : e.snowballDamage;
+                            if (hitDamage > 0) {
+                                damageEntity(mi, hitDamage); // golem 雪球/烈焰人相性：敌对扣血 + 红闪（复用受击链）
+                            } else {
+                                // 玩家雪球打敌对：0 伤害但触发红闪（damageEntity 守 amount<=0 不闪，手动设 hurtFlash）。
+                                Entity &tm = m_entities[size_t(mi)];
+                                if (tm.alive && tm.kind == Mob && !tm.dead) {
+                                    tm.hurtFlash = kHurtFlashTime; // 红闪（QML hurtFlashAt>0 → baseColor 红；t935 起由
+                                    // 下方 dirty → tick 末 notify 的槽位指纹差分捕获 hurtFlash 变化 → bump 本槽监视器）
+                                }
                             }
                         }
                         // 击退（t553 加大到 kSnowballKnockbackStrength=2.0：追尾敌对 mob 也被明显推开；t505 玩家雪球
