@@ -50,6 +50,7 @@ static inline bool isGrowthBlock(quint8 id)
 {
     using BR = BlockRegistry;
     return id == BR::WheatCrop || id == BR::CarrotCrop || id == BR::PotatoCrop
+        || id == BR::MelonStem // t1103：瓜茎作物同门入生长索引（生长 + 成熟结果共 tickCropGrowth 驱动）
         || id == BR::Sugarcane || id == BR::Farmland || id == BR::Sapling
         || id == BR::SweetBerryBush; // t514：浆果丛生长 tick 据 m_growthCells 遍历（O(丛格数) 替代全图扫描）
 }
@@ -3449,8 +3450,11 @@ void World::tickCropGrowth()
     //   湿润 + 确定性散布概率，复用 WheatCropStageMax 共享阶段上界），故共一生长判定，仅写入时按各自 id。
     //   t425：遍历生长方格索引 m_growthCells（O(生长格数)）替代全图扫描（O(W×D×H)=3.3M）；顺带剔除被直接写入
     //     清掉的生长格（blockAt 已非生长方块 → 索引项过期），防索引随直接写入单调累积。
+    //   t1103：瓜茎（MelonStem）并入同门快照——未熟茎走与三作物同构的生长判定；**成熟茎（state==7）分流
+    //     到 fruits 表走结果判定**（同窗同散布哈希，见 2b）。
     struct CCell { int x, y, z; quint8 id; quint8 stage; };
     std::vector<CCell> cells;
+    std::vector<CCell> fruits; // t1103 成熟瓜茎（结果待定表；与升阶段表分列防同窗既升又果）
     {
         std::vector<quint64> stale;
         for (quint64 k : m_growthCells) {
@@ -3460,8 +3464,14 @@ void World::tickCropGrowth()
             if (!isGrowthBlock(b)) { stale.push_back(k); continue; } // 直接写入清掉 → 剔除过期索引项
             if (b == BlockRegistry::WheatCrop
                 || b == BlockRegistry::CarrotCrop
-                || b == BlockRegistry::PotatoCrop)
-                cells.push_back({x, y, z, b, m_chunks.stateAt(x, y, z)});
+                || b == BlockRegistry::PotatoCrop
+                || b == BlockRegistry::MelonStem) {
+                if (b == BlockRegistry::MelonStem
+                    && m_chunks.stateAt(x, y, z) >= BlockRegistry::WheatCropStageMax)
+                    fruits.push_back({x, y, z, b, m_chunks.stateAt(x, y, z)}); // t1103 成熟茎 → 结果判定
+                else
+                    cells.push_back({x, y, z, b, m_chunks.stateAt(x, y, z)});
+            }
         }
         for (quint64 k : stale) m_growthCells.erase(k);
     }
@@ -3507,6 +3517,32 @@ void World::tickCropGrowth()
     bool anyChange = false;
     for (const CCell &g : grows)
         anyChange |= setWaterSilent(g.x, g.y, g.z, g.id, quint8(g.stage + 1)); // t407：按各自作物 id 写回（小麦/胡萝卜/马铃薯）
+    // 3b) t1103 成熟瓜茎结果判定（同窗同散布哈希族——生长门在本窗的 roll 已消费，结果 roll 独立掷）：
+    //    成熟茎每窗以同式散布（stage=7 恒项，纯 hashVoxel(mixedSeed, x, y*7+7, z)&0xFFFF%100 < kCropGrowPct，
+    //    无湿润 / 雨水 / 天光耦合——MC 茎结果只要求有效果槽位，光照仅门茎体生长，同口径简化）命中 → 四向
+    //    邻格扫描（哈希定起始向 (h>>16)&3，+X/-X/+Z/-Z 固定序自起始环绕）：空格且其下方 ∈ {耕地, 泥土,
+    //    草地}（MC 1.0 melon 落地面）→ 原位落瓜块（Melon state=0；茎保留可反复结果——MC 茎多果口径）。
+    //    无有效槽位 → 本窗 no-op（下窗再试）。走同批 m_batchFluid 静默写（瓜块不透明 → 延迟光照重算由
+    //    flushPendingLightEdits 末尾统一收口，同升阶段写）。NEG-1 (t1103) 曾整段摘除验恰红，已手工还原。
+    for (const CCell &f : fruits) {
+        const int mixedSeedF = int(quint32(m_seed) ^ (quint32(m_cropIntervalIndex) * 0x9E3779B9u));
+        const quint32 hF = hashVoxel(mixedSeedF, f.x, f.y * 7 + int(f.stage), f.z);
+        if (int(hF & 0xFFFFu) % 100 >= kCropGrowPct) continue; // 散布落空 → 本窗不结果
+        static constexpr int kFruitDir[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+        const int start = int((hF >> 16) & 3u); // 起始向（哈希定，确定性——同 seed 同窗同槽位）
+        for (int d = 0; d < 4; ++d) {
+            const int nx = f.x + kFruitDir[(start + d) & 3][0];
+            const int nz = f.z + kFruitDir[(start + d) & 3][1];
+            if (m_chunks.blockAt(nx, f.y, nz) != BlockRegistry::Air) continue; // 槽位被占（含邻茎已结果）
+            if (f.y == 0) break; // 世界底无落地面
+            const quint8 ground = m_chunks.blockAt(nx, f.y - 1, nz);
+            if (ground != BlockRegistry::Farmland && ground != BlockRegistry::Dirt
+                && ground != BlockRegistry::Grass)
+                continue; // 落地面非瓜果可承载面 → 试下一向（MC 口径）
+            anyChange |= setWaterSilent(nx, f.y, nz, BlockRegistry::Melon, 0);
+            break; // 本窗本茎至多结果一枚（MC 同口径）
+        }
+    }
     m_batchFluid = false;
     flushPendingLightEdits(); // t380r：批量写延迟的光照重算 → 联合盒一次 refloodBox（无延迟编辑则 no-op）
     if (anyChange) {
@@ -6440,8 +6476,9 @@ bool World::applyBonemeal(int x, int y, int z)
     // ① 未成熟作物：+2..3 阶段（钳到 WheatCropStageMax=7；三种作物共享阶段上界，blockregistry.h 注释）。
     //    写入走 5 参数 setBlock（id 不变只 state 变 → 不发 broken/placed、发 worldChanged 重建阶段贴图，
     //    同 t447 playercontroller 原路径——骨粉是玩家动作，非系统模拟，不走 setWaterSilent 批量静默路径）。
+    //    t1103：瓜茎并入同门（仅推阶段；骨粉不结果——MC 口径 bonemeal 只推 stem age，果位由随机 tick）。
     if (id == BlockRegistry::WheatCrop || id == BlockRegistry::CarrotCrop
-        || id == BlockRegistry::PotatoCrop) {
+        || id == BlockRegistry::PotatoCrop || id == BlockRegistry::MelonStem) {
         if (st >= BlockRegistry::WheatCropStageMax) return false; // 已成熟 → 无效应不消耗（MC 同）
         //    t1030 登记口径：成熟施用二选一取「无效应不消耗」，非 MC 观感的「消耗无生长」；
         //    P-t1030a 成熟腿行为级钉死——阶段与槽计数俱不动。

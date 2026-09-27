@@ -123,6 +123,8 @@ int PlayerController::foodHungerAmount(int itemId)
     //   本地化取值——recipe.h CookedFishId 注释同源钉死，防后世按 wiki 误校对）。喂豹猫仍只认生鱼（MC 1.0
     //   口径：豹猫不吃熟鱼——下方生鱼分支只 gate RawFishId）。
     if (itemId == RecipeRegistry::CookedFishId)     return 4; // 熟鱼 +4 hunger（生鱼两倍；t836）
+    // t1103 瓜片可食 +2 饥饿（机制等价 MC 1.0 melon slice 原值 +2 hunger；1.0 无饱和度细分面，取饥饿值口径）。
+    if (itemId == RecipeRegistry::MelonSliceId)     return 2; // 瓜片 +2 饥饿（MC 1.0 melon slice）
     return 0;
 }
 
@@ -1802,6 +1804,7 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
                                 || brokenId == BlockRegistry::WheatCrop
                                 || brokenId == BlockRegistry::CarrotCrop
                                 || brokenId == BlockRegistry::PotatoCrop
+                                || brokenId == BlockRegistry::MelonStem // t1103：瓜茎同门按 state 快照（state==max 判熟虽不掉产物，破茎掉 1 种子走 dropCropDrops 茎分支）
                                 || brokenId == BlockRegistry::SnowLayer // t505 雪层按 state 掉 (state+1) 雪球
                                 || brokenId == BlockRegistry::Painting // t721 画：state 带 face/index（连通域移除用）
                                 || brokenId == BlockRegistry::EmberGate // t725 门：state 带 axis（连通域熄灭用）
@@ -1995,7 +1998,8 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
         //   同 PlanksFromDoubleSlabBit 双半砖模式：特殊掉落在通用 BlockDef 表之上提前分流，特例 else 走通用 dropId/dropCount。
         //   brokenState 已在 setBlock(Air) 前读（t134 时序：WheatCrop 在 snapshot 条件内，成熟判定可靠）。
         if (brokenId == BlockRegistry::WheatCrop || brokenId == BlockRegistry::TallGrass
-            || brokenId == BlockRegistry::CarrotCrop || brokenId == BlockRegistry::PotatoCrop) {
+            || brokenId == BlockRegistry::CarrotCrop || brokenId == BlockRegistry::PotatoCrop
+            || brokenId == BlockRegistry::MelonStem) {
             // t619 progress 成就埋点（review-L2 上移到此）：**生存玩家直破成熟作物**（任一种）→
             //   cropHarvested 语义事件（「农夫」累计）。仅在 drop=true（生存 canHarvest 通过）的主动
             //   破坏路径发：创造瞬破（drop=false）与破支撑块的失撑级联（dropUnsupportedCropsAround）
@@ -2045,6 +2049,14 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
             } else {
                 emit spawnItem(x, y, z, dropId, dropCount);
             }
+        } else if (brokenId == BlockRegistry::Melon) {
+            // t1103 瓜块破坏掉 3-7 瓣（机制等价 MC 1.0 melon block 破坏掉 3-7 melon slice；本工程无 Fortune
+            //   附魔 → 恒 3-7 均匀随机，无精准采集面——瓜块不 Silk 自掉，MC 口径破瓜永掉瓣不掉块）。表
+            //   dropId=0x28A（1 瓣）仅兜底，本分支按随机 3..7 覆盖通用 dropCount（同雪块 2-3 / 沙砾模式）。
+            //   走 spawnItem 一次 emit count 件（1 实体携多瓣，拾取 addStack 一次入多件）。NEG-2 敏感面：
+            //   摘本分支 → 回落通用掉 1 瓣 → r2073d 端到端链（瓜块 → 3-7 瓣）恰红。
+            const int sliceCount = 3 + int(QRandomGenerator::global()->bounded(5)); // 随机 3..7（bounded(5) → 0..4）
+            emit spawnItem(x, y, z, RecipeRegistry::MelonSliceId, sliceCount);
         } else if ((brokenState & BlockRegistry::DoubleSlabMarkerBit)
                    && BlockRegistry::fullBlockSlabDrop(brokenId) != 0) {
             // t215/t412 双半砖（合并态）破块掉 2× 对应半砖为**2 个独立物品实体**（非 1 个 count=2 栈）：
@@ -2282,6 +2294,10 @@ void PlayerController::dropCropDrops(int x, int y, int z, quint8 id, quint8 stat
         const int cropItemId = (id == BlockRegistry::CarrotCrop) ? RecipeRegistry::CarrotId : RecipeRegistry::PotatoId;
         const int count = mature ? QRandomGenerator::global()->bounded(1, 5) : 1; // 成熟 1-4 / 未成熟 1
         emit spawnItem(x, y, z, cropItemId, count);
+    } else if (id == BlockRegistry::MelonStem) {
+        // t1103 瓜茎破坏掉 1 瓜子（阶段无关恒 1——stem 掉落细化不在 1.0 基准可证范围，工程简化口径留痕；
+        //   瓜可再种。注意本分支只管茎本体掉落：瓜块掉瓣走 finishMiningAt 瓜块特例分支（NEG-2 面），两链互斥）。
+        emit spawnItem(x, y, z, RecipeRegistry::MelonSeedsId, 1);
     } else if (id == BlockRegistry::TallGrass) {
         const int dropId = BlockRegistry::dropId(id);
         const int dropCount = std::max(1, BlockRegistry::dropCount(id));
@@ -2300,7 +2316,8 @@ void PlayerController::dropUnsupportedCropsAround(int x, int y, int z)
     const int cx = x, cy = y + 1, cz = z; // 正上方格：唯一支撑 = 本格（刚被破为 Air）
     const quint8 cid = m_world->blockAt(cx, cy, cz);
     if (cid != BlockRegistry::TallGrass && cid != BlockRegistry::WheatCrop
-        && cid != BlockRegistry::CarrotCrop && cid != BlockRegistry::PotatoCrop) return;
+        && cid != BlockRegistry::CarrotCrop && cid != BlockRegistry::PotatoCrop
+        && cid != BlockRegistry::MelonStem) return; // t1103：瓜茎失撑同门弹落（掉 1 瓜子）
     const quint8 cstate = m_world->stateAt(cx, cy, cz); // setBlock(Air) 前快照（WheatCrop 成熟判定）
     m_world->setBlock(cx, cy, cz, BlockRegistry::Air);  // → World 发 blockBroken(crop) + worldChanged → 粒子 + mesh 重建
     dropCropDrops(cx, cy, cz, cid, cstate);            // 失撑掉落产出与玩家破块同源
@@ -2317,7 +2334,7 @@ void PlayerController::onMobTrampledFarmland(int x, int y, int z)
     if (cy < 0 || cy >= m_world->height()) return;
     const quint8 crop = m_world->blockAt(x, cy, z);
     if (crop != BlockRegistry::WheatCrop && crop != BlockRegistry::CarrotCrop
-        && crop != BlockRegistry::PotatoCrop) return;
+        && crop != BlockRegistry::PotatoCrop && crop != BlockRegistry::MelonStem) return; // t1103：踩耕地弹瓜茎同门
     const quint8 cstate = m_world->stateAt(x, cy, z); // 清格前快照（WheatCrop 成熟判定，t134 时序）
     m_world->setWaterSilent(x, cy, z, BlockRegistry::Air, 0);
     dropCropDrops(x, cy, z, crop, cstate);
@@ -4957,6 +4974,7 @@ void PlayerController::placeBlock()
         { RecipeRegistry::SeedId,  BlockRegistry::WheatCrop  },
         { RecipeRegistry::CarrotId, BlockRegistry::CarrotCrop },
         { RecipeRegistry::PotatoId, BlockRegistry::PotatoCrop },
+        { RecipeRegistry::MelonSeedsId, BlockRegistry::MelonStem }, // t1103 瓜种 → 瓜茎（作物同门；耕地正上方种下 state=0，生长 / 结果走 tickCropGrowth）
     };
     for (const CropSeed &cs : kCropSeeds) {
         if (heldItemId == cs.itemId) {
@@ -9018,7 +9036,7 @@ void PlayerController::step(qreal dt)
                 if (cy < m_world->height()) {
                     const quint8 crop = m_world->blockAt(bx, cy, bz);
                     if (crop == BlockRegistry::WheatCrop || crop == BlockRegistry::CarrotCrop
-                        || crop == BlockRegistry::PotatoCrop) {
+                        || crop == BlockRegistry::PotatoCrop || crop == BlockRegistry::MelonStem) {
                         const quint8 cstate = m_world->stateAt(bx, cy, bz);
                         // 清作物走既有静默写（失撑级联，非玩家破块 → 无 broken 粒子/音；机制等价 MC 踩踏
                         //   作物掉落无声效）。setWaterSilent 是通用静默 state 写入口（名字历史遗留 water-first）。

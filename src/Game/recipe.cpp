@@ -1317,6 +1317,39 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
       { RecipeRegistry::SpiderEyeId, int(BlockRegistry::BrownMushroom), RecipeRegistry::SugarId,
         0, 0, 0, 0, 0, 0 },
       RecipeRegistry::FermentedSpiderEyeId, 1, 1, "fermented_spider_eye" },
+    // ── t1103 闪烁西瓜生存链五条（表尾追加；机制等价 MC 1.0，金粒 Beta 1.9 pre 入版 = 1.0 基准内）──
+    //   ① 金锭 → 9 金粒（无序 2×2 单原料 1:9 分解；机制等价 MC 1.0 gold ingot → 9 gold nuggets）。
+    //   多重集 {GoldIngot:1} 唯一（糖 1 甘蔗 / 可可豆 / 墨囊各自 id 互异）。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::GoldIngotId, 0, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::GoldNuggetsId,     9, 1, "gold_nuggets_x9" },
+    //   ② 9 金粒 → 1 金锭（有序 3×3 满铺，机制等价 MC 1.0 逆行还原行；多重集 {Nugget:9} 唯一——
+    //   9 木板 / 9 铁锭 / 9 骨粉等满铺行原料 id 互异）。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::GoldNuggetsId, RecipeRegistry::GoldNuggetsId, RecipeRegistry::GoldNuggetsId,
+        RecipeRegistry::GoldNuggetsId, RecipeRegistry::GoldNuggetsId, RecipeRegistry::GoldNuggetsId,
+        RecipeRegistry::GoldNuggetsId, RecipeRegistry::GoldNuggetsId, RecipeRegistry::GoldNuggetsId },
+      RecipeRegistry::GoldIngotId, 1, 1, "gold_ingot_from_nuggets" },
+    //   ③ 瓜片 → 1 瓜种（无序 2×2 单原料 1:1 转换，机制等价 MC 1.0 melon slice → 1 melon seed）。
+    //   多重集 {MelonSlice:1} 唯一（墨囊 / 可可豆 / 糖等单原料行 id 互异）。
+    { int(RecipeRegistry::Inventory2x2), true,
+      { RecipeRegistry::MelonSliceId, 0, 0, 0, 0, 0, 0, 0, 0 },
+      RecipeRegistry::MelonSeedsId,      1, 1, "melon_seeds_from_slice" },
+    //   ④ 9 瓜片 → 1 瓜块（有序 3×3 满铺，机制等价 MC 1.0 melon slice ×9 → melon 存储行；单向行——
+    //   MC 无瓜块 → 9 瓣逆行，破块掉 3-7 瓣为有损面）。多重集 {MelonSlice:9} 唯一。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::MelonSliceId, RecipeRegistry::MelonSliceId, RecipeRegistry::MelonSliceId,
+        RecipeRegistry::MelonSliceId, RecipeRegistry::MelonSliceId, RecipeRegistry::MelonSliceId,
+        RecipeRegistry::MelonSliceId, RecipeRegistry::MelonSliceId, RecipeRegistry::MelonSliceId },
+      int(BlockRegistry::Melon), 1, 1, "melon_from_slices" },
+    //   ⑤ 闪烁西瓜：8 金粒环 + 中心 1 瓜片 → 1（有序 3×3 仅工作台，机制等价 MC 1.0 glistering melon
+    //   同料同产率；瞬间治疗药水原料——生存链闭环面）。多重集 {Nugget:8, MelonSlice:1} 唯一（9 满铺
+    //   行与 8 环 + 心行集合互异；t802 全表自匹配回归自动覆盖）。NEG-2 (t1103) 曾摘本行验恰红，已手工还原。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::GoldNuggetsId, RecipeRegistry::GoldNuggetsId, RecipeRegistry::GoldNuggetsId,
+        RecipeRegistry::GoldNuggetsId, RecipeRegistry::MelonSliceId,  RecipeRegistry::GoldNuggetsId,
+        RecipeRegistry::GoldNuggetsId, RecipeRegistry::GoldNuggetsId, RecipeRegistry::GoldNuggetsId },
+      RecipeRegistry::GlisteringMelonId, 1, 1, "glistering_melon" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。
@@ -1386,6 +1419,13 @@ static_assert(RecipeRegistry::SplashExtendedWeaknessPotionId     == 0x286, "Spla
 // t1102 凡庸药水段位钉（工程惯例）：0x287 = 喷溅族 0x286 之上**段尾连续追加**（不插中间 = 存档安全
 //   铁律）；QML MaterialIcon case 与 hotbar 名面 / 调色板用同字面量互钉。
 static_assert(RecipeRegistry::MundanePotionId                    == 0x287, "MundanePotionId 须为材料段 0x287（喷溅族 0x286 之上段尾追加，t1102）");
+// t1103 闪烁西瓜生存链三件段位（凡庸 0x287 之上段尾追加，r2073d 钉面）。
+static_assert(RecipeRegistry::GoldNuggetsId  == 0x288, "GoldNuggetsId 须为材料段 0x288（凡庸 0x287 之上段尾追加，t1103）");
+static_assert(RecipeRegistry::MelonSeedsId   == 0x289, "MelonSeedsId 须为材料段 0x289");
+static_assert(RecipeRegistry::MelonSliceId   == 0x28A, "MelonSliceId 须为材料段 0x28A（三件段末位）");
+// 编译期互钉：金锭 0x21F ↔ 金粒 0x288 双向合成（t1103 双向行）+ 瓜块方块段 Melon=149 行在。
+static_assert(RecipeRegistry::GoldIngotId == 0x21F, "GoldIngotId 须为 0x21F（金粒双向行两端的锚）");
+static_assert(int(BlockRegistry::Melon) == 149, "Melon 方块 id 须为 149（瓜块存储行产物 + 生长结果面）；t1103");
 // t788 染料跨层契约（同 Coal/Lapis 模式）：Core 层 blockregistry.cpp 四花的 dropId 用字面量（Core 不 include
 //   Game 头）：红花→0x259 / 黄花→0x24F / 蓝花→0x256 / 白花→0x24B；本处钉死 recipe.h 染料常量 == 字面量，
 //   任一处改动忘了同步另一处 → 编译失败（防「破花掉落断裂 / 染色链丢原料」）。另钉 DyeIdBase / DyeBlackId

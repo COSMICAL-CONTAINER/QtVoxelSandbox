@@ -766,6 +766,9 @@ public:
     //   「作物生长无破/放反馈」）。稳态（全成熟 / 无作物 / 全暗）每窗口无变化 → setWaterSilent 全 false → 不发
     //   worldChanged（无重建、无开销）。spectator/创造/生存均长（生长是世界模拟，与玩家模式无关）。
     //   分层（PLAN §2）：本方法属 World 层，只读 m_chunks + lightField + 发 worldChanged。不依赖 Renderer/Physics/Game。
+    //   t1103：瓜茎（MelonStem）并入本 tick——未熟茎与三作物同门生长门（耕地支撑 + 天光 + 散布）；**成熟茎
+    //   每窗另掷结果判定**（同散布哈希族 stage=7 恒项，命中 → 四向邻格空位 + 落地面 ∈ {耕地,泥土,草地} →
+    //   落瓜块；实现见 world.cpp tickCropGrowth 3b 节；茎蔓完整原型候选池登记注见 blockregistry.h MelonStem 行）。
     Q_INVOKABLE void tickCropGrowth();
     // t406 甘蔗生长 tick（t1088 口径归一：上限 3、基材草/泥土/沙、仅邻水处长高）：由呈现层 Main.qml 经
     //   WorldClock.ticked 桥接调用（每 100ms 一 tick；节流到 ~每 kSugarcaneTickInterval×0.1s 一窗）。机制等价

@@ -790,6 +790,15 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   / lit=brewing_stand_lit(194，frontTile 字段复用承载亮态瓦片——熔炉 / 中继器同门)。音色 GroupStone。
     //   进创造调色板（方块 tab 功能方块组）。配方 1 燃烬棒 + 底行 3 圆石（MC 同料）。
     /* brewing_stand       */ {int(BlockRegistry::BrewingStand),       193,193,193,194, false, BlockRegistry::ShapeBrewingStand, 0.5f, int(BlockRegistry::NoTool), 0, false, int(BlockRegistry::BrewingStand),     1, 64, "brewing_stand",  "酿造台"},
+    // ── t1103 西瓜族两件（表尾追加；属性注释见 blockregistry.h Id 枚举 Melon / MelonStem 行）。
+    //   瓜块：整立方 opaque（solid=true / ShapeFull，南瓜同族）；hardness=1.0 / NoTool / 空手可采且掉落；
+    //   dropId=0x28A（瓜片字面量——表兜底 1 片，生存 3-7 片由 playercontroller 特例分支覆盖，同雪层 /
+    //   沙砾模式）；贴图顶·底=195 / 侧=196；音色 GroupGrass（同南瓜软植物音）；进创造调色板。
+    //   瓜茎：cross 作物（小麦 / 胡萝卜 / 马铃薯同门）；hardness=0 / NoTool / ShapeNone；dropId=0x289
+    //   （瓜种字面量——表兜底 1 种子，掉落口径由 dropCropDrops 茎分支覆盖）；贴图基底 197（4 阶段
+    //   基底+state/2）；音色 GroupGrass；**不进创造调色板**（作物族同门——由瓜种种植获得）。
+    /* melon               */ {int(BlockRegistry::Melon),               195,195,196,196, true,  BlockRegistry::ShapeFull,     1.0f, int(BlockRegistry::NoTool),  0, false,                           0x28A, 1, 64, "melon",         "西瓜"},
+    /* melon_stem          */ {int(BlockRegistry::MelonStem),           197,197,197,197, false, BlockRegistry::ShapeNone,     0.0f, int(BlockRegistry::NoTool),  0, false,                           0x289, 1, 64, "melon_stem",    "西瓜茎"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -1005,6 +1014,10 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     //   右键开酿造 UI / 烈焰粉燃料 20 次 / 单次 400 ticks 机制等价实现）。**t691 教训**：一行一条目 +
     //   行内注释，防聚合初始化零填充回归（本行追加后全表行数与 Count 149 一致）。
     /* brewing_stand          */ 117,
+    // t1103 西瓜族两行（表尾追加；机制等价 MC 1.0：瓜块 → melon id 103 / 瓜茎 → melon stem id 105——
+    //   南瓜茎 104 本工程缺席故跳位；r2045d 表尾钉随追加前移至 */ 105,；酿造台行本体 117 存在性钉同门）。
+    /* melon                   */ 103,
+    /* melon_stem              */ 105,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -1238,6 +1251,7 @@ bool BlockRegistry::isCrossBillboard(quint8 blockId)
     if (blockId == Sugarcane) return true; // t397 段外 cross（甘蔗细茎，同 Sapling 模式）
     if (blockId == CarrotCrop) return true; // t407 段外 cross（胡萝卜作物，同小麦作物按 state 选阶段贴图）
     if (blockId == PotatoCrop) return true; // t407 段外 cross（马铃薯作物，同小麦作物按 state 选阶段贴图）
+    if (blockId == MelonStem) return true; // t1103 段外 cross（瓜茎作物，同 carrot/potato 口径按 state 选阶段贴图）
     if (blockId == Ladder) return true; // t413/t501 段外 cross（木梯贴墙竖直爬行梯；t501 改单片贴墙 quad 据 state 摆位，同走 PASS 1 alphaCutoff 路径）
     if (blockId == SweetBerryBush) return true; // t467 段外 cross（雪原浆果灌木丛，两片对角相交双面 quad 贴 stage 贴图）
     if (blockId == Cobweb) return true; // t484 段外 cross（蜘蛛网，两片对角相交双面 quad 贴蛛网贴图；矿井散布）
@@ -2412,8 +2426,10 @@ int BlockRegistry::stateTileOverride(quint8 blockId, int face, quint8 state)
         return def(blockId).topTile + stage;
     }
     case CarrotCrop:
-    case PotatoCrop: {
+    case PotatoCrop:
+    case MelonStem: {
         // t407 四视觉阶段：state（age）仍 0..7，贴图基底 + age/2（机制等价 MC 4 张阶段图覆盖 8 年龄）。
+        //   t1103 瓜茎并入同门（4 阶段贴图 tile 197..200，基底 + age/2 同口径）。
         const int stage = qMin(int(state), int(WheatCropStageMax));
         return def(blockId).topTile + stage / 2;
     }
@@ -3011,6 +3027,8 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Sugarcane: // t397 甘蔗 → 软草音色（细茎软植物，同草丛；机制等价 MC sugar cane SoundType = grass）
     case CarrotCrop: // t407 胡萝卜作物 → 软草音色（同小麦作物；机制等价 MC 作物 SoundType = grass）
     case PotatoCrop: // t407 马铃薯作物 → 软草音色（同小麦作物；机制等价 MC 作物 SoundType = grass）
+    case MelonStem: // t1103 瓜茎 → 软草音色（作物同门；机制等价 MC stem SoundType = grass）
+    case Melon: // t1103 瓜块 → 软草音色（瓜类植物，同南瓜；机制等价 MC melon SoundType = wood 取软草近似）
     case Pumpkin: // t482 南瓜 → 软草音色（瓜类植物，同草丛；机制等价 MC pumpkin SoundType = wood 取软草近似）
     case Cobweb: // t484 蜘蛛网 → 软草音色（蛛丝软质，同草丛；机制等价 MC cobweb SoundType = grass）
     case TntBlock: // t485 TNT → 软草音色（火药捆软质闷击；机制等价 MC 1.0 TNT SoundType = grass）

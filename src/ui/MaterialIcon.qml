@@ -2136,6 +2136,79 @@ Item {
                 R(9, 12, 1, 1, gold)              // 金斑 4
             }
 
+            // t1103 金粒（0x288）：三粒金屑（金锭分解物读感——圆润小金块 + 受光高光，三粒三角散布，
+            //   与可可豆三粒同构异色）。原创自绘（§9a）。
+            const drawGoldNugget = () => {
+                const nug = "#f0c030", nugDk = "#b08418", lite = "#fce8a0", shade = "#7a5a10"
+                // 粒 1（左上：rows 5..9 / cols 4..9）
+                R(5, 5, 4, 3, nug)                // 粒体
+                R(4, 6, 1, 2, nugDk)              // 左缘暗
+                R(9, 6, 1, 2, nugDk)              // 右缘暗
+                R(6, 4, 2, 1, nugDk)              // 顶缘暗
+                R(5, 8, 4, 1, shade)              // 底缘暗
+                R(5, 5, 2, 1, lite)               // 左上高光
+                // 粒 2（右侧：rows 10..15 / cols 11..17）
+                R(12, 11, 4, 3, nug)
+                R(11, 12, 1, 2, nugDk)
+                R(16, 12, 1, 2, nugDk)
+                R(13, 10, 2, 1, nugDk)
+                R(12, 14, 4, 1, shade)
+                R(12, 11, 2, 1, lite)
+                // 粒 3（下方：rows 14..18 / cols 4..9）
+                R(5, 15, 4, 3, nug)
+                R(4, 16, 1, 1, nugDk)
+                R(9, 16, 1, 1, nugDk)
+                R(6, 14, 2, 1, nugDk)
+                R(5, 18, 4, 1, shade)
+                R(5, 15, 2, 1, lite)
+            }
+
+            // t1103 瓜种（0x289）：三粒瓜子（扁卵形深浅双色种粒 + 白色种脐点，斜置散布；种子袋读感）。
+            //   原创自绘（§9a；与小麦种子 drawSeed 堆粒形态区隔——扁卵深色种粒 vs 堆粒）。
+            const drawMelonSeeds = () => {
+                const seed = "#3a4a22", seedDk = "#202c10", husk = "#e8e4d0", lite = "#5a7038"
+                // 种 1（左上斜置：rows 5..10）
+                R(6, 5, 3, 5, seed)               // 种体（竖卵）
+                R(5, 6, 1, 3, seedDk)             // 左缘暗
+                R(9, 6, 1, 3, seedDk)             // 右缘暗
+                R(7, 10, 2, 1, seedDk)            // 底尖
+                R(6, 5, 2, 1, lite)               // 顶受光
+                R(7, 6, 1, 1, husk)               // 种脐点
+                // 种 2（右侧竖置：rows 11..17）
+                R(13, 11, 3, 6, seed)
+                R(12, 12, 1, 4, seedDk)
+                R(16, 12, 1, 4, seedDk)
+                R(14, 17, 2, 1, seedDk)
+                R(13, 11, 2, 1, lite)
+                R(14, 12, 1, 1, husk)
+                // 种 3（下方横置：rows 15..18）
+                R(4, 15, 5, 3, seed)
+                R(4, 14, 4, 1, seedDk)
+                R(3, 16, 1, 1, seedDk)
+                R(9, 16, 1, 1, seedDk)
+                R(4, 15, 2, 1, lite)
+                R(5, 16, 1, 1, husk)
+            }
+
+            // t1103 瓜片（0x28A）：三角瓜瓣（红瓤月牙 + 绿皮边 + 白瓤层 + 黑籽两点；切瓣读感）。
+            //   原创自绘（§9a；瓜皮色取 build_melon.py 同源绿系）。
+            const drawMelonSlice = () => {
+                const flesh = "#e05050", fleshDk = "#b83030", rind = "#3a7a2a", rindDk = "#256018"
+                const pith = "#f4e8d0", seed = "#2a1810"
+                R(6, 4, 5, 2, flesh)              // 瓣顶瓤
+                R(4, 6, 9, 3, flesh)              // 瓣体主段
+                R(5, 9, 8, 3, fleshDk)            // 瓣体下段（深瓤）
+                R(7, 12, 4, 2, fleshDk)           // 瓣底
+                R(13, 6, 2, 8, rind)              // 右缘皮
+                R(15, 7, 1, 6, rindDk)            // 皮外暗
+                R(4, 6, 1, 3, rindDk)             // 左尖皮
+                R(5, 6, 1, 2, pith)               // 白瓤层（左）
+                R(12, 7, 1, 6, pith)              // 白瓤层（右）
+                R(7, 7, 1, 1, seed)               // 籽 1
+                R(10, 9, 1, 1, seed)              // 籽 2
+                R(6, 4, 2, 1, "#f47070")          // 顶受光
+            }
+
             switch (root.materialId) {
             case 0x200: drawStick();        break
             case 0x201: drawCoal();         break
@@ -2266,6 +2339,10 @@ Item {
             case 0x286: drawPotion("#9090a4", "#b4b4c8", "#d8d8e8"); break // 喷溅虚弱药水（延长）：延长虚弱 + 火药
             // t1102 凡庸药水（0x287）：浑浊土灰液体（ mundane 无效果载体，§9 通用词自绘；可饮无效果同粗制）。
             case 0x287: drawPotion("#7a6a4a", "#a89878", "#d0c4a4"); break // 凡庸药水：水瓶 + 糖直酿；可饮无效果
+            // t1103 闪烁西瓜生存链三件（0x288..0x28A，段尾追加）：金粒 / 瓜种 / 瓜片三自绘。
+            case 0x288: drawGoldNugget(); break  // 金粒：金锭 1↔9 双向；环形合成原料
+            case 0x289: drawMelonSeeds(); break  // 瓜种：矿井战利品；种瓜茎 / 瓜片 1:1 转换
+            case 0x28A: drawMelonSlice(); break  // 瓜片：破瓜块 3-7 片；可食 +2；转换瓜种 / 合瓜块
             // t788 染料 16 色（0x24B..0x25A，白→黑羊毛色序；三色参数取 build_wool.py 同源色板）
             case 0x24B: drawDye("#f0f0ee", "#f9f9f8", "#959594"); break // 白色染料（白花破坏掉落；染白羊毛/白床）
             case 0x24C: drawDye("#de781e", "#ee9f69", "#8a4a13"); break // 橙色染料

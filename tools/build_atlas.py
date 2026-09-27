@@ -429,6 +429,14 @@ TILES = [
     #   tools/build_brewing_stand.py 程序生成原创像素图（§9 override (a)）。
     "default_brewing_stand",         # 193 brewing_stand（静置态：石灰底座 + 中柱 + 双臂横杆暗槽 + 三瓶位暗点）
     "default_brewing_stand_lit",     # 194 brewing_stand_lit（酿造态：底纹提亮 + 柱身炉心橙辉光带 + 臂端亮斑）
+    # t1103 西瓜族六张（机制等价 MC 1.0 melon / melon stem；名称 / 贴图纯原创自绘 §9a——「西瓜」为通用
+    #   词，零 MC 专名）。tools/build_melon.py 程序生成原创像素图（§9 override (a)）。
+    "default_melon_top",             # 195 melon_top（瓜块顶/底面：深绿底 + 浅绿网纹 + 对角短线；Melon 顶·底）
+    "default_melon_side",            # 196 melon_side（瓜块侧面：绿底 + 纵向波浪棱带（无刻面）；Melon 侧）
+    "default_melon_stem_0",          # 197 melon_stem_0（瓜茎阶段 0：嫩芽；4 张覆盖 8 年龄，基底+state/2 同 t407）
+    "default_melon_stem_1",          # 198 melon_stem_1（瓜茎阶段 1：短蔓）
+    "default_melon_stem_2",          # 199 melon_stem_2（瓜茎阶段 2：立蔓 + 侧卷须）
+    "default_melon_stem_3",          # 200 melon_stem_3（瓜茎阶段 3：成熟蔓 + 双卷须 + 小花点；state==7 成熟结果）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")
