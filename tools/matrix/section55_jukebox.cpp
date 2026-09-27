@@ -445,7 +445,7 @@ void MatrixRun::section55_jukebox()
 
         // (2) kMcBlockId 行（MC 1.0 jukebox = 84 真实存在——迁移文档面）+ 图集容量（191 > 190）。
         const bool d2 = BlockRegistry::mcBlockId(BlockRegistry::Jukebox) == 84
-            && BlockRegistry::AtlasTileCount == 201; // t1103 lawful 前移：195→201（西瓜族 tile 195..200 追加；t1097 曾 193→195）
+            && BlockRegistry::AtlasTileCount == 207; // t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加；t1103 曾 195→201、t1097 曾 193→195）
         ok = ok && d2;
         if (!d2) diag += QStringLiteral("[d2 mc=%1 atlas=%2]")
                              .arg(BlockRegistry::mcBlockId(BlockRegistry::Jukebox))

@@ -458,9 +458,9 @@ void MatrixRun::section68_enchanting()
         const bool idsOk = int(BR::EnchantingTable) == 94
             && mc116Rows == 1
             && BR::mcBlockId(quint8(BR::EnchantingTable)) == 116
-            && int(BR::Count) == 151                       // 相邻族原值（t1103 段尾）
-            && int(BR::AtlasTileCount) == 201
-            && RecipeRegistry::MelonSliceId == 0x28A       // 0x28A 段尾原值
+            && int(BR::Count) == 154                       // t1105 lawful 前移：151→154（南瓜族+炼药锅三件尾部追加；t1103 曾 149→151）
+            && int(BR::AtlasTileCount) == 207              // t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加）
+            && RecipeRegistry::MelonSliceId == 0x28A       // 0x28A 原值（t1105 起 0x28B 南瓜种子续段尾——本钉钉「原值不插中间」非「段末位」）
             && RecipeRegistry::MundanePotionId == 0x287    // t1102 段尾原值
             && int(BR::BrewingStand) == 148                // t1097 邻族原值
             && hb.maxStackSize(int(BR::EnchantingTable)) == 64

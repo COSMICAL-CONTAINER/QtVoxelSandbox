@@ -521,7 +521,7 @@ void MatrixRun::section67_brewing()
                          && RecipeRegistry::SugarId == 0x26A
                          && RecipeRegistry::GlimmerBottleId == 0x263
                          && int(BR::BrewingStand) == 148
-                         && int(BR::Count) == 151 // t1103 lawful 前移：149→151（Melon=149/MelonStem=150 尾部追加；t1097 曾 148→149）
+                         && int(BR::Count) == 154 // t1105 lawful 前移：151→154（PumpkinStem=151/JackOLantern=152/Cauldron=153 尾部追加；t1103 曾 149→151、t1097 曾 148→149）
                          && int(BR::ShapeBrewingStand) == 13
                          && BR::mcBlockId(int(BR::BrewingStand)) == 117;
         ok = ok && ids;
@@ -538,7 +538,7 @@ void MatrixRun::section67_brewing()
         ok = ok && geom;
         if (!geom) diag += QStringLiteral("[geom n=%1]").arg(nBoxes);
         // (3) 图集 + PlayerState 枚举尾追加 + 常量族。
-        const bool consts = int(BR::AtlasTileCount) == 201 // t1103 lawful 前移：195→201（西瓜族 tile 追加；t1097 曾 193→195）
+        const bool consts = int(BR::AtlasTileCount) == 207 // t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加；t1103 曾 195→201、t1097 曾 193→195）
                             && int(PlayerState::EffectSpeed) == int(PlayerState::EffectFire) + 1
                             && int(PlayerState::EffectStrength) == int(PlayerState::EffectFire) + 2
                             && PlayerController::kPotionDurationSec == 180.0f
@@ -615,14 +615,15 @@ void MatrixRun::section67_brewing()
             SrcPin("effect enum tail", "EffectNone = 0, EffectPoison, EffectSlowness, EffectFire, EffectSpeed, EffectStrength", 1)});
         const QStringList missBrH = pinSet(srcRoot + QStringLiteral("/Core/blockregistry.h"), {
             SrcPin("id row", "BrewingStand     = 148,", 1),
-            SrcPin("count row", "Count           = 151,", 1),
-                //   t1103 lawful 前移：149→151（Melon=149/MelonStem=150 尾部追加；t1097 曾 148→149，
-                //   追加不插中间存档契约，钉值随追加前移）。
+            SrcPin("count row", "Count           = 154,", 1),
+                //   t1105 lawful 前移：151→154（PumpkinStem=151/JackOLantern=152/Cauldron=153 尾部追加；
+                //   t1103 曾 149→151、t1097 曾 148→149——追加不插中间存档契约，钉值随追加前移）。
             SrcPin("shape row", "ShapeBrewingStand = 13,", 1),
             SrcPin("boxes decl", "static int brewingStandShapeBoxes(quint8 state, BlockAABB *out, int cap);", 1),
             SrcPin("lit flag", "static constexpr quint8 BrewingStandStateLitFlag = 0x01;", 1),
-            SrcPin("atlas", "static constexpr int AtlasTileCount = 201;", 1)});
-                //   t1103 lawful 前移：195→201（西瓜族 tile 195..200 追加；t1097 曾 193→195）。
+            SrcPin("atlas", "static constexpr int AtlasTileCount = 207;", 1)});
+                //   t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加；t1103 曾 195→201、
+                //   t1097 曾 193→195）。
         const QStringList missBr = pinSet(srcRoot + QStringLiteral("/Core/blockregistry.cpp"), {
             SrcPin("def row", "\"brewing_stand\",  \"酿造台\"", 1)});
         const QStringList missRc = pinSet(srcRoot + QStringLiteral("/Game/recipe.cpp"), {
@@ -1041,7 +1042,7 @@ void MatrixRun::section67_brewing()
                          && RecipeRegistry::SugarId == 0x26A
                          && RecipeRegistry::GlimmerBottleId == 0x263
                          && int(BR::BrewingStand) == 148
-                         && int(BR::Count) == 151; // t1103 lawful 前移：149→151（Melon/MelonStem 尾部追加）
+                         && int(BR::Count) == 154; // t1105 lawful 前移：151→154（PumpkinStem/JackOLantern/Cauldron 尾部追加；t1103 曾 149→151）
         ok = ok && ids;
         if (!ids) diag += QStringLiteral("[ids]");
         // (2) 枚举尾追加序（t1097 序不变 + t1099 三连）。
@@ -1466,7 +1467,7 @@ void MatrixRun::section67_brewing()
                          && RecipeRegistry::SugarId == 0x26A
                          && RecipeRegistry::GlimmerBottleId == 0x263
                          && int(BR::BrewingStand) == 148
-                         && int(BR::Count) == 151; // t1103 lawful 前移：149→151（Melon/MelonStem 尾部追加）
+                         && int(BR::Count) == 154; // t1105 lawful 前移：151→154（PumpkinStem/JackOLantern/Cauldron 尾部追加；t1103 曾 149→151）
         ok = ok && ids;
         if (!ids) diag += QStringLiteral("[ids]");
         // (2) 延长常量族（六新 [四常量] + t1097/t1099 族不动）。
@@ -3084,8 +3085,8 @@ void MatrixRun::section67_brewing()
             && RecipeRegistry::MelonSliceId == 0x28A
             && RecipeRegistry::MundanePotionId == 0x287 // 邻族零污染（t1102 段尾原值）
             && int(BR::Melon) == 149 && int(BR::MelonStem) == 150
-            && int(BR::Count) == 151
-            && int(BR::AtlasTileCount) == 201
+            && int(BR::Count) == 154 // t1105 lawful 前移：151→154（南瓜族 + 炼药锅三件尾部追加；t1103 曾 149→151）
+            && int(BR::AtlasTileCount) == 207 // t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加；t1103 曾 195→201）
             && BR::mcBlockId(quint8(BR::Melon)) == 103
             && BR::mcBlockId(quint8(BR::MelonStem)) == 105
             && hbS.maxStackSize(RecipeRegistry::GoldNuggetsId) == 64
@@ -3150,15 +3151,16 @@ void MatrixRun::section67_brewing()
             SrcPin("name seeds", "return QStringLiteral(\"瓜种\")", 1),
             SrcPin("name slice", "return QStringLiteral(\"瓜片\")", 1),
             SrcPin("palette nugget", "int(RecipeRegistry::GoldNuggetsId),", 1),
-            SrcPin("blocks melon row", "int(BlockRegistry::Melon) };", 1),
+            SrcPin("blocks melon row", "int(BlockRegistry::Melon),", 1), // t1105 lawful 前移：瓜块行让位表尾（炼药锅行续尾追加），存在性钉不钉「最末」位
+            SrcPin("blocks cauldron row", "int(BlockRegistry::Cauldron) };", 1),
             SrcPin("stem variant case", "case BlockRegistry::MelonStem:", 1)});
         const QStringList missMi = pinSet(srcRootForPins() + QStringLiteral("/ui/MaterialIcon.qml"), {
             SrcPin("icon 288", "case 0x288: drawGoldNugget(); break", 1),
             SrcPin("icon 289", "case 0x289: drawMelonSeeds(); break", 1),
             SrcPin("icon 28A", "case 0x28A: drawMelonSlice(); break", 1)});
         const QStringList missBrH = pinSet(srcRootForPins() + QStringLiteral("/Core/blockregistry.h"), {
-            SrcPin("count sentinel", "Count           = 151", 1),
-            SrcPin("atlas sentinel", "AtlasTileCount = 201", 1),
+            SrcPin("count sentinel", "Count           = 154", 1), // t1105 lawful 前移：151→154（南瓜族+炼药锅三件尾部追加）
+            SrcPin("atlas sentinel", "AtlasTileCount = 207", 1), // t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加）
             SrcPin("melon enum", "Melon            = 149", 1),
             SrcPin("stem enum", "MelonStem        = 150", 1)});
         const QStringList missBrC = pinSet(srcRootForPins() + QStringLiteral("/Core/blockregistry.cpp"), {
@@ -3198,6 +3200,579 @@ void MatrixRun::section67_brewing()
                " structure pin family holds across id segments and block mapping and atlas extents"
                " and def rows and craft and loot and wiring source pins and the presentation faces"
                " with the neighbouring mundane family untouched)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── t1105 炼药锅 + 南瓜农作链四腿（r2075a-d；置尾追加；NEG 双变异见各腿头注阴注；钉面 NEG 双面全豁免）──
+    //   在场性排查结论（派工前逐一全仓 grep 实读留痕）：① 炼药锅 t474-t961 大件族**零在场**
+    //   （blockregistry 方块段 / 交互面 / 几何 / 图标全缺）→ 真缺形态交付；② 南瓜方块 Pumpkin=100
+    //   既存（t482 刻面 + t638 朝向 + t510 造物头位），但南瓜种子物品 / 南瓜茎作物 / 南瓜灯方块 /
+    //   南瓜→种子合成 / 灯合成 / 野生 patch worldgen 全缺 → 真缺形态交付（方块段三件尾部追加）。
+    //   接棒吸收：前工程师树面 blockregistry.{h,cpp} 骨架（三 def 行 + kMc 三行 + Count 154 +
+    //   CauldronStateLevelMask + AtlasTileCount 207）核实完整可用、逐字吸收；两处口径接棒修正
+    //   （沿革注在案）：南瓜灯朝向写（同南瓜 t638——吸收稿「无 facing metadata」注与本工程 t638
+    //   自身裁定矛盾）+ 矿井箱南瓜种子行不交付（1.0 实读无此行，吸收稿裁定与实读一致，采纳留痕）。
+    //   NEG 面与豁免设计（恰红归因先于腿文；流敏感选择器教训 t1104 前置——摘面不改任何抽签 /
+    //   消费次数）：
+    //   NEG-1 = 炼药锅瓶取水位结算塌缩（playercontroller.cpp 炼药锅分支瓶取水面 setBlock 写
+    //     quint8(level - 1) → quint8(level)：取瓶照常 / 予水瓶照常，唯水位不降——恒同值写无副作用形）
+    //     → **恰红 = {r2075a}**（a 的逐次水位阶梯断言 3→2→1→0 全失；a 的桶灌满 / 空锅拒瓶 /
+    //     创造不耗面不在摘面仍绿；b/c 零炼药锅触达；d 结构钉不钉该表达式 = 豁免）。
+    //   NEG-2 = 南瓜茎结果面分流塌缩（world.cpp tickCropGrowth 3b 果 id 三元
+    //     `(f.id == PumpkinStem) ? Pumpkin : Melon` → 恒 Melon：散布 roll / 四向扫描 / 消费次数全不动）
+    //     → **恰红 = {r2075b}**（b 的环内结果方块 = Pumpkin 断言失——南瓜茎格将落西瓜；b 的生长
+    //     骰子镜像 / 双门阴性 / 破茎掉种面不在摘面仍绿；r2073b/d 西瓜茎面不受影响[瓜茎恒 Melon
+    //     语义不变]；a/c 零世界触达；d 不钉该三元 = 豁免）。
+    //
+    // 腿面与阴性面设计：
+    //   r2075a 炼药锅水位交互行为柱（真 pc rig placeBlock 链：生存装水桶灌满 3 级 + 桶→空桶消耗 +
+    //     瓶取 3 次水位逐次 3→2→1→0 + 每取予 1 水瓶 + 空锅拒瓶无效应不消耗不挥臂 + 创造灌满不耗桶 +
+    //     空手无效应 + 真链挖掘破坏掉锅本体 + 水随方块消失）。
+    //   r2075b 南瓜茎生长门 + 成熟结果行为柱（r2073b MelonStem 模板镜像第二实例：骰子镜像生长序列 +
+    //     单调 + 石地 / 围石双门阴性 + 哈希定向落南瓜于期望格 + 茎保持成熟 + 真链破茎掉 1 南瓜种子；
+    //     NEG-2 敏感面）。
+    //   r2075c 南瓜生存入口 + 南瓜灯合成 + 光照面行为柱（南瓜 1:4 种子双向门[错料负例] + 南瓜+火把
+    //     → 灯无序双格命中 + 灯产物 id/产率/名 + 光源面[真世界放置 → 邻格方块光 14] + 南瓜本体恒 0 光 +
+    //     物品面[名 / maxStack 64 / 调色板在列]）。
+    //   r2075d 结构钉族（0x28B 段尾 + 方块段 151..153/Count 154 + kMc 104/91/118 三行唯一性 +
+    //     图集 207 + CauldronStateLevelMask + 三 def 行逐字段 + stateTileOverride 两茎同式 +
+    //     isCrossBillboard/materialGroup/lightEmission 谓词面 + 两配方行 + worldgen 声明/双调用点 +
+    //     接线源钉族[生长索引 / 掉落分支 / 种植映射 / 头位检测 / meshbuilder 双路由 / partial case /
+    //     pack 映射行] + 呈现面[调色板 / 名面 / 图标 case / 形态组] + 相邻族零污染[149/150/0x28A/
+    //     0x287/BrewingStand 148/tile 197 原值]）。
+
+    // ── r2075a：炼药锅水位交互行为柱（真 pc rig placeBlock 链；NEG-1 敏感面）──────────────────────
+    //   NEG-1（瓶取水位结算塌缩恒同值写）→ 恰红 = {r2075a}：本腿逐次水位阶梯断言全失；桶灌满 /
+    //   空锅拒瓶 / 创造不耗面不在摘面仍绿。本腿不触南瓜族 → NEG-2 不误伤。
+    runLeg("r2075a cauldron water-level interaction behavior column (a survival water bucket tops the"
+        " cauldron up to exactly level three with the bucket flipping to empty while creative keeps"
+        " its water bucket, three glass bottle takes drain the stored water one level at a time from"
+        " three down to zero with one water bottle granted per take, an empty cauldron refuses a"
+        " bottle with zero effect zero consumption and no swing, an empty hand answers nothing, and"
+        " breaking the cauldron through the real mining chain drops the cauldron block itself with"
+        " the water vanishing alongside)", [&]() {
+        bool ok = true;
+        QString diag;
+        World wG;
+        initFixedBrewWorld(wG);
+        layBrewPlatform(wG, 12, 38, 20, 28);
+        const int cx = 24, cy = 81, cz = 24; // 炼药锅落格
+        wG.setBlock(cx, cy, cz, BR::Cauldron, 0); // 空锅（state=0）
+        PlayerController pcG;
+        pcG.setWorld(&wG);
+        Hotbar hbG;
+        pcG.setHotbar(&hbG);
+        QQuickWindow winG;
+        pcG.setParentItem(winG.contentItem());
+        pcG.grab();
+        pcG.setSelectedBlock(int(BR::Air)); // 材料/桶段物品真实接线
+        const auto pumpFor = [](int ms) {
+            QElapsedTimer t; t.start();
+            while (t.elapsed() < ms)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        };
+        // 站位 (27.5, 81, 24.5) 瞄锅体中心（水平 3 格 + 竖 1.12 < kReach；同 r2073b aimG 同式）。
+        const auto aimG = [&](float fx, float fz, int mode) {
+            const float ex = fx, ey = 81.0f + 1.62f, ez = fz;
+            const float dx = float(cx) + 0.5f - ex, dy = float(cy) + 0.5f - ey, dz = float(cz) + 0.5f - ez;
+            const float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const float pitch = std::asin(dy / len) * 57.2957795f;
+            const float yaw = std::atan2(-dx, -dz) * 57.2957795f;
+            pcG.release();
+            pcG.grab();
+            pcG.loadSavedState(fx, 81.0f, fz, yaw, pitch, mode);
+            pumpFor(17);
+            pcG.tick();
+        };
+        const auto levelAt = [&]() {
+            return wG.stateAt(cx, cy, cz) & quint8(BR::CauldronStateLevelMask);
+        };
+        // (1) 空手负例：生存空槽右键锅 → 无效应（level 恒 0 / 槽不变）。
+        aimG(27.5f, 24.5f, 2 /* Survival */);
+        hbG.setStack(0, 0, 0, 0);
+        hbG.setSelectedSlot(0);
+        pcG.placeBlock();
+        pumpFor(60);
+        const bool bareHandOk = levelAt() == 0 && hbG.selectedItemId() == 0;
+        // (2) 生存装水桶灌满：level 0→3 + 桶→空桶（生存消耗口径）。
+        hbG.setStack(0, RecipeRegistry::WaterBucketId, 1, 0);
+        pcG.placeBlock();
+        pumpFor(220);
+        const bool fillOk = levelAt() == 3 && hbG.selectedItemId() == RecipeRegistry::BucketEmptyId;
+        // (3) 三次瓶取：level 3→2→1→0 逐次 + 每取 1 水瓶入包 + 空瓶 3→0。
+        hbG.setStack(0, RecipeRegistry::GlassBottleId, 3, 0);
+        pumpFor(220); // 泵过 200ms 放置 CD（上一次 placeBlock 成功刷新 m_lastPlaceMs——灌满面同门）
+        int bottlesSeen = 0;
+        bool drainOk = true;
+        for (int expect = 2; expect >= 0; --expect) {
+            pcG.placeBlock();
+            pumpFor(220);
+            const int lvl = levelAt();
+            bottlesSeen = 0;
+            for (int s = 0; s < hbG.slotCount(); ++s)
+                if (hbG.blockIdAt(s) == RecipeRegistry::WaterBottleId) bottlesSeen += hbG.countAt(s);
+            // 末取（expect==0）后空瓶尽：slot0 由最后一枚水瓶落位（addStack 首空槽）→ 只断水位 + 总水瓶。
+            if (lvl != expect || bottlesSeen != 3 - expect)
+                { drainOk = false; break; }
+            if (expect > 0 && (hbG.blockIdAt(0) != RecipeRegistry::GlassBottleId
+                               || hbG.countAt(0) != expect))
+                { drainOk = false; break; }
+        }
+        // (4) 空锅拒瓶：再予 1 空瓶右键 → 无效应不消耗（瓶仍在 1 / 水瓶总数不变 / level 恒 0 / 无挥臂）。
+        //   （末取后 slot0 已被水瓶落位——setStack 覆写该槽，水瓶总数 3→2，拒瓶面断「不变」。）
+        hbG.setStack(0, RecipeRegistry::GlassBottleId, 1, 0);
+        int swingBefore = 0;
+        const QMetaObject::Connection swingConn = QObject::connect(
+            &pcG, &PlayerController::swingArm, &pcG, [&]() { ++swingBefore; });
+        pumpFor(220); // 泵过 CD（第三次取成功刷新 m_lastPlaceMs）
+        pcG.placeBlock();
+        pumpFor(220);
+        int bottlesAfterReject = 0;
+        for (int s = 0; s < hbG.slotCount(); ++s)
+            if (hbG.blockIdAt(s) == RecipeRegistry::WaterBottleId) bottlesAfterReject += hbG.countAt(s);
+        // 拒瓶不变式：水瓶总数与拒前恒等（addStack 落位次序不进断言）+ 予瓶仍在 + 水位恒 0 + 无挥臂。
+        const bool emptyRejectOk = levelAt() == 0 && hbG.blockIdAt(0) == RecipeRegistry::GlassBottleId
+            && hbG.countAt(0) == 1 && bottlesAfterReject == bottlesSeen && swingBefore == 0;
+        QObject::disconnect(swingConn);
+        // (5) 创造灌满不耗桶：level 0 → 3 + 桶保持装水桶。
+        aimG(27.5f, 24.5f, 1 /* Creative */);
+        hbG.setStack(0, RecipeRegistry::WaterBucketId, 1, 0);
+        pcG.placeBlock();
+        pumpFor(220);
+        const bool creativeFillOk = levelAt() == 3 && hbG.selectedItemId() == RecipeRegistry::WaterBucketId;
+        // (6) 真链挖掘破坏：锅掉本体 + 格清空（水随方块消失）。
+        aimG(27.5f, 24.5f, 2 /* Survival */);
+        hbG.setStack(0, 0, 0, 0);
+        QVector<int> dropIds, dropCnts;
+        const QMetaObject::Connection dropConn = QObject::connect(
+            &pcG, &PlayerController::spawnItem, &pcG,
+            [&](int, int, int, int id, int count, const QVariantList &, const QString &, int) {
+                dropIds.push_back(id);
+                dropCnts.push_back(count);
+            });
+        pcG.beginMining();
+        for (int i = 0; i < 9000 && wG.blockAt(cx, cy, cz) != BR::Air; ++i) {
+            QElapsedTimer dtw;
+            dtw.start();
+            while (dtw.elapsed() < 17)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+            pcG.tick();
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+        }
+        pcG.endMining();
+        QObject::disconnect(dropConn);
+        const bool breakOk = wG.blockAt(cx, cy, cz) == BR::Air
+            && dropIds.size() == 1 && dropIds.at(0) == int(BR::Cauldron)
+            && dropCnts.at(0) == 1;
+        ok = ok && bareHandOk && fillOk && drainOk && emptyRejectOk && creativeFillOk && breakOk;
+        if (!ok)
+            diag += QStringLiteral("[a bare=%1 fill=%2 drain=%3 reject=%4 creative=%5 break=%6 lvl=%7 drops=%8 bot=%9]")
+                        .arg(bareHandOk).arg(fillOk).arg(drainOk).arg(emptyRejectOk)
+                        .arg(creativeFillOk).arg(breakOk).arg(levelAt()).arg(dropIds.size())
+                        .arg(bottlesAfterReject);
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2075a cauldron water-level interaction behavior column (a survival water bucket"
+               " tops the cauldron up to exactly level three with the bucket flipping to empty while"
+               " creative keeps its water bucket, three glass bottle takes drain the stored water"
+               " one level at a time from three down to zero with one water bottle granted per"
+               " take, an empty cauldron refuses a bottle with zero effect zero consumption and no"
+               " swing, an empty hand answers nothing, and breaking the cauldron through the real"
+               " mining chain drops the cauldron block itself with the water vanishing alongside)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── r2075b：南瓜茎生长门 + 成熟结果行为柱（真 tick 泵 + 骰子镜像 + 真链破茎；NEG-2 敏感面）──────
+    //   NEG-2（果 id 三元塌缩恒 Melon）→ 恰红 = {r2075b}：本腿环内结果 = Pumpkin 断言失（南瓜茎格
+    //   将落西瓜）；生长骰子镜像 / 双门阴性 / 破茎掉种面不在摘面仍绿但腿红。r2073b/d 西瓜茎语义
+    //   不变（恒 Melon）→ 不误伤。
+    runLeg("r2075b pumpkin-stem growth gate plus mature fruiting behavior column (the planted stem"
+        " climbs the shared eight-age ladder through the mirrored dice windows with monotonic"
+        " single-step stages, a mature stem on stone ground and a stem ringed by solid blocks both"
+        " refuse to fruit past their reachable dice-hit windows while the free-slot stem drops"
+        " exactly one pumpkin block onto the deterministic hash-picked neighbour cell keeping the"
+        " stem mature for repeated fruiting, and breaking the stem through the real mining chain"
+        " yields exactly one pumpkin seed)", [&]() {
+        bool ok = true;
+        QString diag;
+        World wG;
+        initFixedBrewWorld(wG);
+        layBrewPlatform(wG, 12, 38, 20, 28);
+        // 三块耕地垫：A 主株(24,81,24) 完整生长+结果（5×5 垫）/ B 石地对照(16,81,24)（落地面=石坪拒）/
+        //   C 围石对照(32,81,24)（4 邻围石拒）——r2073b MelonStem 模板镜像（同坐标 → 同骰子流）。
+        for (int x = 22; x <= 26; ++x)
+            for (int z = 22; z <= 26; ++z)
+                wG.setBlock(x, 80, z, BR::Farmland, 0);
+        wG.setBlock(16, 80, 24, BR::Farmland, 0);
+        wG.setBlock(32, 80, 24, BR::Farmland, 0);
+        wG.setBlock(24, 81, 24, BR::PumpkinStem, 0); // A：种下 state 0
+        wG.setBlock(16, 81, 24, BR::PumpkinStem, 7); // B：直置成熟茎
+        wG.setBlock(32, 81, 24, BR::PumpkinStem, 7); // C：直置成熟茎
+        wG.setBlock(31, 81, 24, BR::Stone, 0);
+        wG.setBlock(33, 81, 24, BR::Stone, 0);
+        wG.setBlock(32, 81, 23, BR::Stone, 0);
+        wG.setBlock(32, 81, 25, BR::Stone, 0);
+        const bool lightOk = wG.skyLightAt(24, 81, 24) >= 9 && wG.skyLightAt(16, 81, 24) >= 9;
+        // 骰子镜像（world.cpp tickCropGrowth 同式：干耕地 1× 倍率 growPct=6、无雨；窗口序号自 0）。
+        const auto diceHits = [&](int k, int stage, int cx, int cy, int cz) -> bool {
+            const int mixedSeed = int(quint32(wG.seed()) ^ (quint32(k) * 0x9E3779B9u));
+            return int(wG.hashVoxel(mixedSeed, cx, cy * 7 + stage, cz) & 0xFFFFu) % 100 < 6;
+        };
+        // (1) A 株生长序列镜像（阶段 0..6；3000 窗守卫）。
+        QVector<int> simAdv;
+        {
+            int stage = 0;
+            for (int k = 0; k < 3000 && stage < 7; ++k)
+                if (diceHits(k, stage, 24, 81, 24)) { ++stage; simAdv.push_back(k); }
+            if (stage < 7) simAdv.clear();
+        }
+        const bool simOk = !simAdv.isEmpty();
+        // (2) 结果窗镜像：熟窗后首个骰子命中窗 + 期望槽位（哈希定起始向 + 首空格落地面耕地）。
+        int fruitWin = -1, expectX = -1, expectZ = -1;
+        if (simOk) {
+            const int k7 = simAdv.last();
+            for (int k = k7 + 1; k < k7 + 3000 && fruitWin < 0; ++k)
+                if (diceHits(k, 7, 24, 81, 24)) fruitWin = k;
+            if (fruitWin > 0) {
+                const int mixedSeed = int(quint32(wG.seed()) ^ (quint32(fruitWin) * 0x9E3779B9u));
+                const quint32 h = wG.hashVoxel(mixedSeed, 24, 81 * 7 + 7, 24);
+                const int start = int((h >> 16) & 3u);
+                static constexpr int kDir[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+                for (int d = 0; d < 4; ++d) {
+                    const int nx = 24 + kDir[(start + d) & 3][0];
+                    const int nz = 24 + kDir[(start + d) & 3][1];
+                    if (wG.blockAt(nx, 81, nz) == BR::Air && wG.blockAt(nx, 80, nz) == BR::Farmland) {
+                        expectX = nx;
+                        expectZ = nz;
+                        break;
+                    }
+                }
+            }
+        }
+        const int pumpEnd = (fruitWin > 0) ? fruitWin : (simOk ? simAdv.last() : 0);
+        // (3) 真泵（25 tick = 1 窗；逐窗采样：升阶段序列 ≡ 镜像 + 单调）。
+        bool monoOk = true;
+        int prevStage = 0, advIdx = 0;
+        for (int k = 0; k <= pumpEnd; ++k) {
+            for (int c = 0; c < 25; ++c) wG.tickCropGrowth();
+            const int st = wG.stateAt(24, 81, 24);
+            if (st - prevStage > 1 || st - prevStage < 0 || st > 7) monoOk = false;
+            if (advIdx < simAdv.size() && k == simAdv.at(advIdx) && st - prevStage == 1) ++advIdx;
+            prevStage = st;
+        }
+        const bool seqOk = simOk && advIdx == simAdv.size() && prevStage == BR::WheatCropStageMax;
+        // (4) 结果面：A 环恰 1 南瓜 @期望格（NEG-2 塌缩果 id → 环内是西瓜此处红）+ 茎保持成熟。
+        const auto ringFruitScan = [&](int cx, int cz, int *mx, int *mz) {
+            int n = 0;
+            static constexpr int kR[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+            for (const auto &o : kR) {
+                const quint8 b = wG.blockAt(cx + o[0], 81, cz + o[1]);
+                if (b == BR::Pumpkin || b == BR::Melon) { // 双计归因：塌缩面用「产物 id」断言精确切红
+                    ++n;
+                    if (mx) { *mx = cx + o[0]; *mz = cz + o[1]; }
+                }
+            }
+            return n;
+        };
+        int mx = -1, mz = -1;
+        const int ringHits = ringFruitScan(24, 24, &mx, &mz);
+        const bool fruitOk = fruitWin > 0 && expectX > 0 && ringHits == 1
+                             && mx == expectX && mz == expectZ
+                             && wG.blockAt(mx, 81, mz) == BR::Pumpkin; // NEG-2 摘面：塌缩成 Melon 此处失
+        const bool matureKept = wG.blockAt(24, 81, 24) == BR::PumpkinStem
+                                && wG.stateAt(24, 81, 24) == BR::WheatCropStageMax;
+        // (5) 真链破茎：持空手生存瞄 A 茎（站位避果——沿首条「环格非果」轴向退 2 格站）。
+        PlayerController pcG;
+        pcG.setWorld(&wG);
+        Hotbar hbG;
+        pcG.setHotbar(&hbG);
+        QQuickWindow winG;
+        pcG.setParentItem(winG.contentItem());
+        pcG.grab();
+        pcG.setSelectedBlock(int(BR::Air));
+        QVector<int> dropIdsG;
+        const QMetaObject::Connection dropConnG = QObject::connect(
+            &pcG, &PlayerController::spawnItem, &pcG,
+            [&](int, int, int, int id, int count, const QVariantList &, const QString &, int) {
+                dropIdsG.push_back(id);
+                dropIdsG.push_back(count);
+            });
+        int standX = 24, standZ = 24;
+        static constexpr int kDirB[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+        for (const auto &o : kDirB) {
+            const int rx = 24 + o[0], rz = 24 + o[1];
+            if (!(rx == mx && rz == mz)) { standX = 24 + 2 * o[0]; standZ = 24 + 2 * o[1]; break; }
+        }
+        const float exS = float(standX) + 0.5f, ezS = float(standZ) + 0.5f;
+        const float dxS = 24.5f - exS, dyS = 81.5f - (81.0f + 1.62f), dzS = 24.5f - ezS;
+        const float lenS = std::sqrt(dxS * dxS + dyS * dyS + dzS * dzS);
+        pcG.release();
+        pcG.grab();
+        pcG.loadSavedState(exS, 81.0f, ezS,
+                           std::atan2(-dxS, -dzS) * 57.2957795f,
+                           std::asin(dyS / lenS) * 57.2957795f, 2 /* Survival */);
+        pcG.tick();
+        pcG.beginMining();
+        for (int i = 0; i < 6000 && wG.blockAt(24, 81, 24) != BR::Air; ++i) {
+            QElapsedTimer dtw;
+            dtw.start();
+            while (dtw.elapsed() < 17)
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+            pcG.tick();
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 2);
+        }
+        pcG.endMining();
+        QObject::disconnect(dropConnG);
+        const bool stemGone = wG.blockAt(24, 81, 24) == BR::Air;
+        const bool stemDrop = stemGone && dropIdsG.size() == 2
+                              && dropIdsG.at(0) == RecipeRegistry::PumpkinSeedsId
+                              && dropIdsG.at(1) == 1;
+        // (6) B/C 可达域守卫泵（双对照环恒 0 果）。
+        int bHit = -1, cHit = -1;
+        for (int k = 0; k <= 3000 && (bHit < 0 || cHit < 0); ++k) {
+            if (bHit < 0 && diceHits(k, 7, 16, 81, 24)) bHit = k;
+            if (cHit < 0 && diceHits(k, 7, 32, 81, 24)) cHit = k;
+        }
+        int gateEnd = pumpEnd;
+        if (bHit > gateEnd) gateEnd = bHit;
+        if (cHit > gateEnd) gateEnd = cHit;
+        for (int k = pumpEnd + 1; k <= gateEnd; ++k)
+            for (int c = 0; c < 25; ++c) wG.tickCropGrowth();
+        const bool gatesOk = ringFruitScan(16, 24, nullptr, nullptr) == 0
+                             && ringFruitScan(32, 24, nullptr, nullptr) == 0;
+        ok = ok && lightOk && monoOk && seqOk && fruitOk && matureKept && stemDrop && gatesOk;
+        if (!ok)
+            diag += QStringLiteral("[b light=%1 mono=%2 seq=%3 fruit=%4@(x%5,z%6,n=%7,id=%8) kept=%9 drop=%10 gone=%11 gates=%12]")
+                        .arg(lightOk).arg(monoOk).arg(seqOk).arg(fruitOk)
+                        .arg(mx).arg(mz).arg(ringHits)
+                        .arg(mx > 0 ? wG.blockAt(mx, 81, mz) : -1).arg(matureKept)
+                        .arg(stemDrop).arg(stemGone).arg(gatesOk);
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2075b pumpkin-stem growth gate plus mature fruiting behavior column (the planted"
+               " stem climbs the shared eight-age ladder through the mirrored dice windows with"
+               " monotonic single-step stages, a mature stem on stone ground and a stem ringed by"
+               " solid blocks both refuse to fruit past their reachable dice-hit windows while the"
+               " free-slot stem drops exactly one pumpkin block onto the deterministic hash-picked"
+               " neighbour cell keeping the stem mature for repeated fruiting, and breaking the"
+               " stem through the real mining chain yields exactly one pumpkin seed)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── r2075c：南瓜生存入口 + 南瓜灯合成 + 光照面行为柱（纯表 + 真世界光照；NEG 双面均不触达）──────
+    runLeg("r2075c pumpkin survival entry plus jack-o-lantern crafting plus light face column (a"
+        " pumpkin breaks down into exactly four pumpkin seeds shapeless in both grids with wrong"
+        " ingredient pairs answering null, a pumpkin plus a torch crafts the jack-o-lantern"
+        " shapeless in both grids, the lantern answers light emission fifteen through the"
+        " state-aware authority while the plain pumpkin and the cauldron stay dark, a placed"
+        " lantern floods its neighbour cell to block light fourteen in a real world, and the"
+        " pumpkin seed item reads back its display name stack limit sixty-four and palette"
+        " presence)", [&]() {
+        bool ok = true;
+        QString diag;
+        // (1) 南瓜 → 4 南瓜种子（无序双格命中 + 行名身份 + 产率 4）。
+        const int g2[9] = { int(BR::Pumpkin), 0, 0, 0, 0, 0, 0, 0, 0 };
+        const RecipeRegistry::Recipe *r2 = RecipeRegistry::match(g2, 2);
+        const bool seedDown = r2 && r2->outputId == RecipeRegistry::PumpkinSeedsId
+            && r2->outputCount == 4 && r2->shapeless
+            && QLatin1String(r2->name) == QLatin1String("pumpkin_seeds_from_pumpkin");
+        const int g3[9] = { 0, 0, 0, 0, int(BR::Pumpkin), 0, 0, 0, 0 };
+        const RecipeRegistry::Recipe *r3 = RecipeRegistry::match(g3, 3);
+        const bool seedDown3 = r3 && r3->outputId == RecipeRegistry::PumpkinSeedsId
+            && r3->outputCount == 4;
+        ok = ok && seedDown && seedDown3;
+        if (!(seedDown && seedDown3)) diag += QStringLiteral("[seeds %1/%2]").arg(seedDown).arg(seedDown3);
+        // (2) 南瓜灯：南瓜 + 火把（无序 2×2 + 3×3 异位双命中；产物 id / 产率 1 / 名）。
+        const int gJ2[9] = { int(BR::Pumpkin), int(BR::Torch), 0, 0, 0, 0, 0, 0, 0 };
+        const RecipeRegistry::Recipe *rJ2 = RecipeRegistry::match(gJ2, 2);
+        const bool jack2 = rJ2 && rJ2->outputId == int(BR::JackOLantern)
+            && rJ2->outputCount == 1 && rJ2->shapeless
+            && QLatin1String(rJ2->name) == QLatin1String("jack_o_lantern");
+        const int gJ3[9] = { 0, 0, 0, 0, int(BR::Torch), 0, 0, 0, int(BR::Pumpkin) };
+        const RecipeRegistry::Recipe *rJ3 = RecipeRegistry::match(gJ3, 3);
+        const bool jack3 = rJ3 && rJ3->outputId == int(BR::JackOLantern) && rJ3->outputCount == 1;
+        ok = ok && jack2 && jack3;
+        if (!(jack2 && jack3)) diag += QStringLiteral("[jack %1/%2]").arg(jack2).arg(jack3);
+        // (3) 错料负例：单种子不成行 / 种子+南瓜对不成行 / 火把+瓜种对不成行 / 双南瓜不成行。
+        const auto expectNoMatch = [&](const int gg[9], int w, const char *why) {
+            const RecipeRegistry::Recipe *r = RecipeRegistry::match(gg, w);
+            if (r) diag += QStringLiteral("[%1 matched %2]").arg(QLatin1String(why)).arg(r->outputId);
+            return r == nullptr;
+        };
+        const int n1[9] = { RecipeRegistry::PumpkinSeedsId, 0, 0, 0, 0, 0, 0, 0, 0 };
+        const int nSP[9] = { RecipeRegistry::PumpkinSeedsId, int(BR::Pumpkin), 0, 0, 0, 0, 0, 0, 0 };
+        const int nTS[9] = { int(BR::Torch), RecipeRegistry::PumpkinSeedsId, 0, 0, 0, 0, 0, 0, 0 };
+        const int nPP[9] = { int(BR::Pumpkin), int(BR::Pumpkin), 0, 0, 0, 0, 0, 0, 0 };
+        const bool negs = expectNoMatch(n1, 2, "single-seed")
+            && expectNoMatch(nSP, 2, "seed-pumpkin-pair")
+            && expectNoMatch(nTS, 2, "torch-seed-pair")
+            && expectNoMatch(nPP, 2, "pumpkin-pair");
+        ok = ok && negs;
+        if (!negs) diag += QStringLiteral("[negs]");
+        // (4) 光源面：状态感知权威（灯 15 与 state 无关）+ 南瓜 / 炼药锅恒 0。
+        const bool emitOk = BR::lightEmission(quint8(BR::JackOLantern), 0) == 15
+            && BR::lightEmission(quint8(BR::JackOLantern), 0x2) == 15
+            && BR::lightEmission(quint8(BR::JackOLantern)) == 15
+            && BR::lightEmission(quint8(BR::Pumpkin), 0) == 0
+            && BR::lightEmission(quint8(BR::Cauldron), 0) == 0;
+        ok = ok && emitOk;
+        if (!emitOk) diag += QStringLiteral("[emit]");
+        // (5) 真世界光照面：放置灯 → 邻格方块光 flood 14（setBlock lightSourceChanged 重 flood）+
+        //     摘源回落 0。
+        {
+            World wL;
+            initFixedBrewWorld(wL);
+            layBrewPlatform(wL, 12, 38, 20, 28);
+            wL.setBlock(24, 81, 24, BR::JackOLantern, 0);
+            const quint8 litNear = wL.blockLightAt(25, 81, 24);
+            wL.setBlock(24, 81, 24, BR::Air, 0);
+            const quint8 litAfter = wL.blockLightAt(25, 81, 24);
+            const bool floodOk = litNear == 14 && litAfter == 0;
+            ok = ok && floodOk;
+            if (!floodOk) diag += QStringLiteral("[flood %1->%2]").arg(litNear).arg(litAfter);
+        }
+        // (6) 物品面：南瓜种子名 / maxStack 64 双面 / 调色板在列。
+        Hotbar hbC;
+        bool palFound = false;
+        const QVariantList pal = hbC.creativeMaterials();
+        for (const QVariant &v : pal)
+            if (v.toInt() == RecipeRegistry::PumpkinSeedsId) palFound = true;
+        const bool itemOk = hbC.nameForBlock(RecipeRegistry::PumpkinSeedsId) == QStringLiteral("南瓜种子")
+            && hbC.maxStackSize(RecipeRegistry::PumpkinSeedsId) == 64
+            && BR::maxStackSize(RecipeRegistry::PumpkinSeedsId) == 64
+            && hbC.isMaterial(RecipeRegistry::PumpkinSeedsId)
+            && palFound;
+        ok = ok && itemOk;
+        if (!itemOk) diag += QStringLiteral("[item pal=%1]").arg(palFound);
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2075c pumpkin survival entry plus jack-o-lantern crafting plus light face column"
+               " (a pumpkin breaks down into exactly four pumpkin seeds shapeless in both grids"
+               " with wrong ingredient pairs answering null, a pumpkin plus a torch crafts the"
+               " jack-o-lantern shapeless in both grids, the lantern answers light emission"
+               " fifteen through the state-aware authority while the plain pumpkin and the"
+               " cauldron stay dark, a placed lantern floods its neighbour cell to block light"
+               " fourteen in a real world, and the pumpkin seed item reads back its display name"
+               " stack limit sixty-four and palette presence)"
+            << (ok ? QString() : diag);
+    });
+
+    // ── r2075d：结构钉族（NEG 双摘面全豁免——不钉瓶取水位表达式与果 id 三元）────────────────────────
+    runLeg("r2075d structure pin family (the pumpkin seed item closes the material segment at hex"
+        " 28b tail-appended after the melon slice while the three blocks land at one fifty-one"
+        " through one fifty-three with the count sentinel moving to one fifty-four and the atlas"
+        " to two hundred seven tiles, the mapping table carries pumpkin stem one hundred four and"
+        " jack-o-lantern ninety-one and cauldron one eighteen as unique rows, the three def rows"
+        " hold every field from the tile tuples through the no-tool and pickaxe gates to the self"
+        " and seed drops, the shared stage override and cross billboard and grass material and"
+        " emission faces all route the new ids, both craft rows and the cauldron level mask and"
+        " the worldgen patch declaration with both call sites and the wiring family across growth"
+        " index and drop branch and planting map and golem head and mesher routing and pack"
+        " mapping and the presentation faces pin their single call sites, and the neighbouring"
+        " melon and mundane and brewing families keep their sentinels untouched)", [&]() {
+        bool ok = true;
+        QString diag;
+        Hotbar hbS;
+        // (S1) id / 段位 / 映射 / 图集（运行期 + 唯一性全表扫）。
+        int mc104Rows = 0, mc91Rows = 0, mc118Rows = 0;
+        for (int i = 0; i < int(BR::Count); ++i) {
+            mc104Rows += BR::mcBlockId(quint8(i)) == 104 ? 1 : 0;
+            mc91Rows += BR::mcBlockId(quint8(i)) == 91 ? 1 : 0;
+            mc118Rows += BR::mcBlockId(quint8(i)) == 118 ? 1 : 0;
+        }
+        const bool idsOk = RecipeRegistry::PumpkinSeedsId == 0x28B
+            && int(BR::PumpkinStem) == 151 && int(BR::JackOLantern) == 152
+            && int(BR::Cauldron) == 153 && int(BR::Count) == 154
+            && int(BR::AtlasTileCount) == 207
+            && mc104Rows == 1 && mc91Rows == 1 && mc118Rows == 1
+            && BR::mcBlockId(quint8(BR::PumpkinStem)) == 104
+            && BR::mcBlockId(quint8(BR::JackOLantern)) == 91
+            && BR::mcBlockId(quint8(BR::Cauldron)) == 118
+            && BR::mcBlockId(quint8(BR::Pumpkin)) == 86 // MC 1.0 pumpkin id 86（引擎 id 100 ≠ 映射值）
+            && BR::CauldronStateLevelMask == 0x3
+            && hbS.maxStackSize(int(BR::JackOLantern)) == 64
+            && hbS.maxStackSize(int(BR::Cauldron)) == 64;
+        ok = ok && idsOk;
+        if (!idsOk) diag += QStringLiteral("[ids 104=%1 91=%2 118=%3]").arg(mc104Rows).arg(mc91Rows).arg(mc118Rows);
+        // (S2) 谓词 / 阶段 / 权威面（两茎同式 + cross 路由 + 音色 + 发光 + stateTileOverride）。
+        const bool predOk = BR::isCrossBillboard(quint8(BR::PumpkinStem))
+            && !BR::isCrossBillboard(quint8(BR::Cauldron))
+            && BR::materialGroup(quint8(BR::PumpkinStem)) == BR::GroupGrass
+            && BR::materialGroup(quint8(BR::JackOLantern)) == BR::GroupGrass
+            && BR::materialGroup(quint8(BR::Cauldron)) == BR::GroupStone
+            && BR::stateTileOverride(quint8(BR::PumpkinStem), int(BR::PosX), 3) == 201 + 1
+            && BR::stateTileOverride(quint8(BR::PumpkinStem), int(BR::PosX), 7) == 201 + 3
+            && BR::stateTileOverride(quint8(BR::MelonStem), int(BR::PosX), 4) == 197 + 2;
+        ok = ok && predOk;
+        if (!predOk) diag += QStringLiteral("[pred]");
+        // (S3) 配方两行 + 炼药锅交互源钉（剥注释 pinSet 锚真实语句；NEG-1 摘面表达式不钉 = 豁免）。
+        const QString recCpp = srcRootForPins() + QStringLiteral("/Game/recipe.cpp");
+        const QString pcCpp = srcRootForPins() + QStringLiteral("/Game/playercontroller.cpp");
+        const QStringList missRec = pinSet(recCpp, {
+            SrcPin("seed row", "\"pumpkin_seeds_from_pumpkin\" }", 1),
+            SrcPin("jack row", "\"jack_o_lantern\" }", 1)});
+        ok = ok && missRec.isEmpty();
+        if (!missRec.isEmpty()) diag += QStringLiteral("[rec %1] ").arg(missRec.join(QLatin1Char(',')));
+        const QStringList missPc = pinSet(pcCpp, {
+            SrcPin("cauldron branch", "m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Cauldron", 1),
+            SrcPin("drop branch", "else if (id == BlockRegistry::PumpkinStem)", 1),
+            SrcPin("planting map", "{ RecipeRegistry::PumpkinSeedsId, BlockRegistry::PumpkinStem }", 1),
+            SrcPin("golem head", "idByte == BlockRegistry::Pumpkin || idByte == BlockRegistry::JackOLantern", 1)});
+        ok = ok && missPc.isEmpty();
+        if (!missPc.isEmpty()) diag += QStringLiteral("[pc %1] ").arg(missPc.join(QLatin1Char(',')));
+        // (S4) worldgen / 接线源钉族（生长索引 / 双调用点 / mesher 双路由 / partial case / pack 行）。
+        const QString wH = rawSource(srcRootForPins() + QStringLiteral("/World/world.h"));
+        const QString wCpp = rawSource(srcRootForPins() + QStringLiteral("/World/world.cpp"));
+        const QString meshCpp = rawSource(srcRootForPins() + QStringLiteral("/World/meshbuilder.cpp"));
+        const QString pbgCpp = rawSource(srcRootForPins() + QStringLiteral("/World/partialblockgeometry.cpp"));
+        const QString rpCpp = rawSource(srcRootForPins() + QStringLiteral("/Core/resourcepackmanager.cpp"));
+        const bool wiring = wH.contains(QLatin1String("void placePumpkinPatches(int wx0 = 0"))
+            && wCpp.contains(QLatin1String("placePumpkinPatches(wx0, wx1, wz0, wz1);"))
+            && wCpp.contains(QLatin1String("placePumpkinPatches(); // t1105"))
+            && wCpp.contains(QLatin1String("|| id == BR::PumpkinStem // t1105"))
+            && wCpp.contains(QLatin1String("|| b == BlockRegistry::PumpkinStem) { // t1105"))
+            && meshCpp.contains(QLatin1String("b == BlockRegistry::Cauldron     // t1105"))
+            && meshCpp.contains(QLatin1String("block == BlockRegistry::Pumpkin || block == BlockRegistry::JackOLantern"))
+            && pbgCpp.contains(QLatin1String("case BlockRegistry::Cauldron: {"))
+            && pbgCpp.contains(QLatin1String("case BlockRegistry::PumpkinStem: {"))
+            && rpCpp.contains(QLatin1String("{205, QStringLiteral(\"pumpkin_face_on.png\")}"));
+        ok = ok && wiring;
+        if (!wiring) diag += QStringLiteral("[wiring]");
+        // (S5) 呈现面（调色板尾三连 / 名面 / 图标 case / 形态组）。
+        const QString hbCpp = rawSource(srcRootForPins() + QStringLiteral("/Game/hotbar.cpp"));
+        const QString iconQml = rawSource(srcRootForPins() + QStringLiteral("/ui/MaterialIcon.qml"));
+        const bool pres = hbCpp.contains(QLatin1String("int(BlockRegistry::JackOLantern),"))
+            && hbCpp.contains(QLatin1String("int(BlockRegistry::Cauldron) }"))
+            && hbCpp.contains(QLatin1String("int(RecipeRegistry::PumpkinSeedsId)  "))
+            && hbCpp.contains(QStringLiteral("南瓜种子")) // 中文 needle 须 UTF-16（QLatin1String 装不下汉字恒失配）
+            && hbCpp.contains(QLatin1String("case BlockRegistry::PumpkinStem: // t1105"))
+            && hbCpp.contains(QLatin1String("s = { 0, 1, 2, 3 };"))
+            && iconQml.contains(QLatin1String("case 0x28B: drawPumpkinSeeds(); break"));
+        ok = ok && pres;
+        if (!pres) diag += QStringLiteral("[pres]");
+        // (S6) 相邻族零污染（149/150/0x28A/0x287/BrewingStand 148/瓜茎 tile 基底原值）。
+        const bool neigh = int(BR::Melon) == 149 && int(BR::MelonStem) == 150
+            && RecipeRegistry::MelonSliceId == 0x28A
+            && RecipeRegistry::MundanePotionId == 0x287
+            && int(BR::BrewingStand) == 148
+            && BR::stateTileOverride(quint8(BR::MelonStem), int(BR::PosX), 0) == 197;
+        ok = ok && neigh;
+        if (!neigh) diag += QStringLiteral("[neigh]");
+        if (!ok) ++totalFail;
+        qInfo().noquote() << (ok ? "PASS" : "FAIL")
+            << "| r2075d structure pin family (the pumpkin seed item closes the material segment at"
+               " hex 28b tail-appended after the melon slice while the three blocks land at one"
+               " fifty-one through one fifty-three with the count sentinel moving to one fifty-four"
+               " and the atlas to two hundred seven tiles, the mapping table carries pumpkin stem"
+               " one hundred four and jack-o-lantern ninety-one and cauldron one eighteen as unique"
+               " rows, the three def rows hold every field from the tile tuples through the no-tool"
+               " and pickaxe gates to the self and seed drops, the shared stage override and cross"
+               " billboard and grass material and emission faces all route the new ids, both craft"
+               " rows and the cauldron level mask and the worldgen patch declaration with both call"
+               " sites and the wiring family across growth index and drop branch and planting map"
+               " and golem head and mesher routing and pack mapping and the presentation faces pin"
+               " their single call sites, and the neighbouring melon and mundane and brewing"
+               " families keep their sentinels untouched)"
             << (ok ? QString() : diag);
     });
 }
