@@ -617,4 +617,15 @@ private:
                               //   命中/错心/2×2 负例 + 信号/发射行 + Main.qml 路由族 + 面板五行接线
                               //   + 相邻族零污染]。PlayerState/EnchantRegistry/World 直驱，rig 世界
                               //   零接触，接 section67）
+    void section69_snow_golem(); // t1106 雪傀儡 + 生物名册审计合集探针段（置尾先例沿用：r2076a 构建
+                              //   面真 rig 列[真 pc placeBlock 链：南瓜×雪块×2 竖直 → 恰一 MobSnowGolem
+                              //   4 血朝玩家 + 3 块静默消耗 + JackOLantern 头位同门 + 缺雪块/非头位
+                              //   双负例零构建]，r2076b AI 行为列[雪 trail 脚下格铺 SnowLayer state=0
+                              //   + 不叠层 + 入水融化 1HP/1s 慢扣 + 剪南瓜头信号恰一次幂等]，
+                              //   r2076c 雪球投掷伤害列[nearestHostile 发球 + 2.5s 节流 + 友好零发球
+                              //   + golem 雪球 1 伤/烈焰相性 3 伤/玩家雪球烈焰相性 3 伤发射者无关/
+                              //   玩家 0 伤红闪/被动 0 伤 0 红闪]，r2076d 结构钉族[枚举位 12/尾 20/
+                              //   kMobTypeCount 21 + 常量族含 kSnowballBlazeDamage=3 + 雪块合成链 +
+                              //   源钉族七针 + 相邻族零污染]。fresh 48×48×96 s82 + 真链 pc rig（t891
+                              //   同门），rig 世界零接触，接 section68）
 };
