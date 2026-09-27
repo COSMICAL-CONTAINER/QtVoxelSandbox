@@ -2639,6 +2639,10 @@ private:
     static constexpr float kSnowballLifetime       = 5.0f;  // 雪球最长存活（秒；飞行未命中兜底移除，同箭）
     static constexpr float kSnowballHitHalfW       = 0.3f;  // 雪球 vs 敌对 mob 命中盒 XZ/Y 外扩（blocks；雪球是小点）
     static constexpr int   kSnowballDamage         = 1;     // 雪球命中伤害（HP；低伤害）
+    // t1106 雪球对烈焰人专属相性伤害（HP）。机制等价 MC 1.0 雪球对 blaze 3 HP / 1.5 心的专属伤害相性
+    //   （雪球对多数实体 0 伤只击退、对烈焰人 3 伤），**与发射者无关**（golem 雪球与玩家雪球同价）。
+    //   命中分流读它：Snowball tick 命中 MobEmberling 时 damageEntity(kSnowballBlazeDamage) 覆盖发射者分流值。
+    static constexpr int   kSnowballBlazeDamage    = 3;     // 雪球对烈焰人伤害（HP；1.0 相性 3 伤，发射者无关）
     // t553 雪球命中击退强度（倍率；knockback strength 参数）。旧版恒 1.0（= kKnockbackHoriz 4.5 blocks/s，
     //   推距 ~1.1 格）—— 用户报「雪球打生物不击退」：敌对 mob 追击玩家（~2.8 blocks/s）时，1.1 格后退被追击
     //   前进抵消 → 净位移≈0 肉眼不可见。提至 2.0（=9 blocks/s，推距 ~2.2 格）→ 追尾 mob 也被明显推开。
