@@ -2264,6 +2264,8 @@ Item {
             case 0x284: drawPotion("#e07898", "#f4a8c0", "#fcd4e2"); break // 喷溅再生药水（延长）：延长再生 + 火药
             case 0x285: drawPotion("#68a458", "#94c484", "#c4e4b4"); break // 喷溅中毒药水（延长）：延长中毒 + 火药
             case 0x286: drawPotion("#9090a4", "#b4b4c8", "#d8d8e8"); break // 喷溅虚弱药水（延长）：延长虚弱 + 火药
+            // t1102 凡庸药水（0x287）：浑浊土灰液体（ mundane 无效果载体，§9 通用词自绘；可饮无效果同粗制）。
+            case 0x287: drawPotion("#7a6a4a", "#a89878", "#d0c4a4"); break // 凡庸药水：水瓶 + 糖直酿；可饮无效果
             // t788 染料 16 色（0x24B..0x25A，白→黑羊毛色序；三色参数取 build_wool.py 同源色板）
             case 0x24B: drawDye("#f0f0ee", "#f9f9f8", "#959594"); break // 白色染料（白花破坏掉落；染白羊毛/白床）
             case 0x24C: drawDye("#de781e", "#ee9f69", "#8a4a13"); break // 橙色染料

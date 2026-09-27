@@ -129,6 +129,8 @@ int PlayerController::foodHungerAmount(int itemId)
 // t1097 饮用品判定（单一权威；foodHungerAmount 姊妹面，头注释见 .h）：水瓶 / 粗制药水 / 迅捷 /
 //   力量药水可饮。水瓶 / 粗制可饮无效果（MC 1.0 口径——水瓶饮用零效果；粗制是无效果载体）；
 //   迅捷 / 力量在 finishEating 据持物挂效果。新增可饮药水只改本方法一处。
+// t1102 凡庸药水（0x287）并入可饮面：可饮无效果同粗制口径（水瓶 + 糖直酿产物），行插粗制之后、
+//   既录尾行**原样幸存**（r2069d / r2071d 饮面尾行源钉零修订）。
 // t1100 延长药水族（0x275..0x27A）并入可饮面：早退 switch 独立面在**前**（基础链 return 原句逐字
 //   不动——r2069d 源钉「drinkable tail」零修订纪律，t1100 零 lawful 钉修订目标）。
 bool PlayerController::isDrinkableItem(int itemId)
@@ -148,6 +150,7 @@ bool PlayerController::isDrinkableItem(int itemId)
     }
     return itemId == RecipeRegistry::WaterBottleId
         || itemId == RecipeRegistry::AwkwardPotionId
+        || itemId == RecipeRegistry::MundanePotionId // t1102 凡庸：可饮无效果（同粗制口径；饮毕走 potionDrunk 统一沿 + 返空瓶）
         || itemId == RecipeRegistry::SpeedPotionId
         || itemId == RecipeRegistry::StrengthPotionId
         || itemId == RecipeRegistry::FireResistancePotionId
@@ -3019,12 +3022,19 @@ void PlayerController::finishEating()
         else if (eatenId == RecipeRegistry::ExtendedWeaknessPotionId)
             applyStatusEffect(PlayerState::EffectWeakness, kWeaknessExtDurationSec, 1);
         // t1100 饮毕信号（可饮面统一沿：水瓶 / 粗制 / 基础 / 延长药水饮毕各发一次）→ 呈现层
-        //   playBurp（机制等价 MC 饮毕随机 burp；食物完成面不发——登记简化见 .h 信号注）。
+        //   playBurp（机制等价 MC 饮毕随机 burp）。
         emit potionDrunk(eatenId);
         if (m_mode == Survival) {
             m_hotbar->addStack(int(RecipeRegistry::GlassBottleId), 1); // 喝完留空瓶（MC 口径）
         }
     }
+    // t1102 食物完成 burp（机制等价 MC 1.0 食毕随机 burp——进食完成通用反馈音，wiki 2026 实读口径；
+    //   t1100 登记简化①补全）：食物完成沿发一次 → 呈现层 playBurp（同门 ±8% 随机音高，复用同 clip）。
+    //   与 potionDrunk 恒互斥（可饮面在上方分支发 potionDrunk，本面只接非可饮完成沿——防双 burp）。
+    //   NEG 面登记：本行 = t1102 食物 burp NEG-2 恰红触达面（摘除后编译仍绿——.h 信号声明 / Main.qml
+    //   路由幸存——行为柱 r2072b 恰红，其余腿不受影响）。
+    if (!isDrinkableItem(eatenId))
+        emit foodBurped(eatenId);
     m_lastPlaceMs = m_evtClock.elapsed();
     emit swingArm(); // 进食完成挥手（一次「使用」动作）
     // t513 吃完冷却：置 m_eatCooldown（机制等价 MC 1.0 进食冷却 ~1s）。**不调 cancelEating** —— 保持 m_eating=true

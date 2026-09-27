@@ -568,6 +568,17 @@ public:
     static constexpr int SplashExtendedRegenerationPotionId = 0x284; // 喷溅再生药水（喷溅·延长）：延长再生 + 火药；1:30 档
     static constexpr int SplashExtendedPoisonPotionId       = 0x285; // 喷溅中毒药水（喷溅·延长）：延长中毒 + 火药；1:30 档
     static constexpr int SplashExtendedWeaknessPotionId     = 0x286; // 喷溅虚弱药水（喷溅·延长）：延长虚弱 + 火药；4:00 档
+    // t1102 凡庸药水（材料段 0x287，喷溅族 0x286 之上**段尾追加**不插中间 = 存档安全铁律）：
+    //   机制等价 MC 1.0 mundane potion（水瓶直酿产物；可饮**无效果**，同粗制药水口径——wiki 2026 实读
+    //   「凡庸药水饮之无效果」）。命名「凡庸药水」（mundane 通用描述词，§9 合法）；无 pack 映射（越表界
+    //   → -1 → 资源包回退自绘，同药水族）；可堆叠 64（材料段默认，同药水族零特判）。
+    //   **1.0 水瓶直酿行逐行核实留痕（wiki 2026 实读；本族唯二交付行见 brewingstore.cpp 水瓶分支）**：
+    //   ① 灰烬疣 → 粗制（t1097 已交付）；② 发酵蛛眼 → 虚弱（t1102 交付——喷溅虚弱酿造链的前置直酿行，
+    //   1.0 图谱既有）；③ 糖 → 凡庸（t1102 交付，1.0 图谱既有）。**不取行裁定**：兔子脚 → 凡庸不取
+    //   （rabbit's foot 为 MC 1.8+ 物品，越 1.0 纪元）；辉光岩粉 → 稠厚不取（稠厚药水 1.0 存在，但本工程
+    //   无辉光岩粉物品——原料缺口，候选池登记）；闪烁西瓜 → 凡庸（延长）与红石 → 凡庸（延长）不硬造
+    //   （1.0 纪元形态两说不确，候选池登记——红石行另与 t1100 红石门行「水 → 0」既录负例冲突）。
+    static constexpr int MundanePotionId = 0x287; // 凡庸药水：水瓶 + 糖直酿；可饮无效果（同粗制口径）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

@@ -1383,6 +1383,9 @@ static_assert(RecipeRegistry::SplashExtendedFireResistancePotionId == 0x283, "Sp
 static_assert(RecipeRegistry::SplashExtendedRegenerationPotionId == 0x284, "SplashExtendedRegenerationPotionId 须为材料段 0x284");
 static_assert(RecipeRegistry::SplashExtendedPoisonPotionId       == 0x285, "SplashExtendedPoisonPotionId 须为材料段 0x285");
 static_assert(RecipeRegistry::SplashExtendedWeaknessPotionId     == 0x286, "SplashExtendedWeaknessPotionId 须为材料段 0x286（喷溅族段末位）");
+// t1102 凡庸药水段位钉（工程惯例）：0x287 = 喷溅族 0x286 之上**段尾连续追加**（不插中间 = 存档安全
+//   铁律）；QML MaterialIcon case 与 hotbar 名面 / 调色板用同字面量互钉。
+static_assert(RecipeRegistry::MundanePotionId                    == 0x287, "MundanePotionId 须为材料段 0x287（喷溅族 0x286 之上段尾追加，t1102）");
 // t788 染料跨层契约（同 Coal/Lapis 模式）：Core 层 blockregistry.cpp 四花的 dropId 用字面量（Core 不 include
 //   Game 头）：红花→0x259 / 黄花→0x24F / 蓝花→0x256 / 白花→0x24B；本处钉死 recipe.h 染料常量 == 字面量，
 //   任一处改动忘了同步另一处 → 编译失败（防「破花掉落断裂 / 染色链丢原料」）。另钉 DyeIdBase / DyeBlackId

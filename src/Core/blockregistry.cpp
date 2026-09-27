@@ -926,12 +926,21 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* gold_block              */ 41,  // t620 金块 → MC 1.0 gold block id 41
     /* redstone_block          */ 0,   // t620 红石块（MC 1.5+ 才有；1.0 无）
     /* redstone_lamp           */ 0,   // t620 红石灯（MC 1.2+ 才有；1.0 无；on/off 由本项目 state bit0 分）
-    // t627 压力板家族扩展 → MC 1.0 对齐：stone plate id 70 / iron(heavy weighted) plate id 71 / gold(light
-    //   weighted) plate id 72（三者 MC 1.0 均存在——iron/gold 在 MC 是「weighted pressure plate」，本工程按
-    //   材质直呼铁/金压力板，机制对齐重/轻触发权重）。
+    // t627 压力板家族扩展 → MC 对齐：stone plate id 70（1.0 既有）。
+    // t1102 纪元标注勘误 + 数据修正（铁 / 金压力板行）：铁 / 金压力板机制等价 MC「weighted pressure
+    //   plate」（重质铁板 / 轻质金板——触发权重对齐 t743 修订 + resourcepackmanager t627 贴图行
+    //   heavy/light_weighted_pressure_plate.png 同源命名），而 weighted 板是 **MC 1.5（红石更新
+    //   13w01a）** 引入方块——**MC 1.0 无此二方块**。1.0 真值：id 71 = iron door、id 72 = wooden
+    //   pressure plate（本表 iron_door 行 / wood_pressure_plate 行已各自正确映射 71 / 72——旧值与本
+    //   表两行**双重冲突**）。纪元三元组留痕：本工程铁 / 金板（t627，机制 1.5 weighted）——MC 真实
+    //   id 147（heavy weighted）/ 148（light weighted）——1.0 无等价。数据修正 71→147 / 72→148：
+    //   真实 MC id 是更优迁移文档（0 = 「1.0 无此方块」语义留给纯 1.0 缺位面）；**零运行期消费者**
+    //   （mcBlockId 现状唯一消费面 = 矩阵探针；资源包方块贴图面按图集 tile 序 154/155/156 映射、
+    //   不读本表——resourcepackmanager.cpp 现场核实）→ 零行为变化、资源包面零破坏。石板 70（1.0
+    //   既有）不动。
     /* stone_pressure_plate    */ 70,  // t627 石压力板 → MC 1.0 stone pressure plate id 70
-    /* iron_pressure_plate     */ 71,  // t627 铁压力板 → MC 1.0 heavy weighted pressure plate id 71
-    /* gold_pressure_plate     */ 72,  // t627 金压力板 → MC 1.0 light weighted pressure plate id 72
+    /* iron_pressure_plate     */ 147, // t627 铁压力板（机制 = heavy weighted）；1.0 无等价 → MC 1.5 id 147（t1102 勘误，旧值 71 与 iron_door 行冲突）
+    /* gold_pressure_plate     */ 148, // t627 金压力板（机制 = light weighted）；1.0 无等价 → MC 1.5 id 148（t1102 勘误，旧值 72 与 wood_pressure_plate 行冲突）
     // t638 铁轨家族扩展 / 红石火把 → MC 1.0 对齐：golden(powered) rail id 27（1.0 存在）、detector rail
     //   id 28（1.0 存在）、redstone torch（lit）id 76（1.0 存在——unlit off 变体 id 75 本工程恒亮不取）。
     /* golden_rail             */ 27,  // t638 动力铁轨 → MC 1.0 powered rail id 27
