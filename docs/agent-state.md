@@ -14,15 +14,15 @@
 ```yaml
 project: QtMinecraft
 state: IN_PROGRESS
-current_task: **t1104 IN_PROGRESS（附魔台+附魔机制——1.0 最后一块核心大件，池面重盘旗舰）**：附魔台方块+UI[AnvilUI 同门]+1.0 附魔口径实读（书架增幅/等级消耗/随机附魔表原值核实）+enchants 既有族 compatibility 裁定；核实在飞，审计 #22 已派（只读独立 agent，窗口 9079f74 后五单..t1103 关单 docs）。串行 voxel-dev，filter 词 r2074。
+current_task: **t1104 IN_PROGRESS（附魔台+附魔机制——1.0 最后一块核心大件，池面重盘旗舰）**：附魔台方块+UI[AnvilUI 同门]+1.0 附魔口径实读（书架增幅/等级消耗/随机附魔表原值核实）+enchants 既有族 compatibility 裁定；核实在飞，审计 #22 已派（只读独立 agent，窗口 e776331 后五单..e21b6fb[t1103 关单 docs；锚哈希 git 现抄勘正=审计 #22 F1]）。串行 voxel-dev，filter 词 r2074。
 current_task_status: IN_PROGRESS
 last_completed_task: t1103 闪烁西瓜生存整链（2026-09-27 闭环；矩阵 828→832——金粒双向+瓜子**矿井池裁定修正**[1.0 地牢池无瓜子]+瓜茎简化结果性生长[裁定②留痕：MelonStem=150 crop 原型全族接入+成熟结果 pass 分流 fruits 表+四向扫描哈希定起始向+茎保留多果] + 瓜块 149[3-7 瓣]+瓜瓣 0x28A 可食+2+环形合成→**瞬间治疗生存链闭合**；lawful 10 处携沿革注[图集 201/Count 151/kMc 表尾 105]；首轮 NEG 暴露两处旧钉缺陷如实修复。详录 = dev-plan t1103 关单条目）
 last_completed_task_prev: t1102 残项小批合集二（2026-09-27 闭环，矩阵 824→828；详录 = dev-plan t1102 关单条目）
 last_completed_task_commits: fix(t1103)（f7e938e：金粒/瓜子/瓜茎/瓜块/瓜瓣/环形合成+作物族接入+loottable 矿井行，多文件含 6 新贴图+atlas 重生成）+ test(t1103)（335399d：r2073a-d 四腿含端到端单腿全链+10 处 lawful 前移）
 last_verified_commit: test(t1103)（矩阵 **832 PASS / 0 FAIL ×2**：matrix_t1103_{pos,final}.log；腿集合 md5[规范配方]三方恒等 b3f81723bf832929ca82496cfe806159；NEG-1 恰红 {r2073b,d} / NEG-2 恰红 {r2073c,d} 双还原 832/0；冒烟 tail20 logs/voxelsandbox_t1103_tail20.log[横幅+root objects 实文]；主控独立脱离式复跑 832/0 同 md5 三方恒等 matrix_orch_t1103_verify.log）
-last_governance_review: 2026-09-26（audit #21 GREEN——窗口 9079f74..7353eb8 18 提交/t1094-t1098 五闭环证据链全实核[五单 md5 三方恒等 7416b136/a2f3eb64/9b493da5/d2360c45/6aa9a595 + NEG 十份恰红十份还原吻合 + t1097 md5 不变性机理独立复现 + 控制块全字段纪律五单逐单递增守住=#20 YELLOW 升级条件未触发]；**F1[MEDIUM] t1096 两笔提交带 Co-Authored-By 尾注**[9774062/e33d257——规则此前仅在用户记忆层与派工简报层，t1096 简报未复述、agent 沿 harness 默认；清偿=不改写历史+Workspace Guard 补明文+派工简报恒带] + F2-F4 INFO 落档；详见 governance-audit-2026-09-26.md）
-governance_review_due: true（5/5 到期——审计 #22 已派，只读独立 agent 参照 governance-audit-2026-09-25-b.md 规程，窗口 = audit #21 落档件 9079f74 后起至 t1103 关单 docs 提交）
-completed_tasks_since_governance_review: 5（t1099 + t1100 + t1101 + t1102 + t1103 闭环；审计 #21 GREEN 于 2026-09-26——**5/5 触发审计 #22，已派在飞**）
+last_governance_review: 2026-09-27（audit #22 GREEN——窗口 e776331..e21b6fb 15 提交/t1099-t1103 五闭环证据链全实核[五单 md5 三方恒等 fe383860/95da1b5a/31196e92/7cfabb43/b3f81723 + NEG 十份恰红十份还原吻合[含全量跑恰红三件] + 腿数链 812→832 无断]；**提交纪律 #21 F1 后首窗零命中**[检测器以已知尾注正反验证]；控制块全字段三窗连续守住[counter 1..5 递增+HEAD 行同步]；429 恢复链盘上时间线三段吻合+零 git 回滚；**F1[LOW] 窗口锚哈希记误两处**[agent-state 9079f74→e776331 勘正+派工单终点 345fa4a→e21b6fb——清偿=本批更正+「锚哈希须 git 现抄入简报」惯例] + F2[INFO #21 报告 CJK 载体勘误：实为 fix 提交 9774062/0ec65b6 引证字面，非 docs 提交——#21 报告已补勘误注] + F3/F4 INFO；详见 governance-audit-2026-09-27.md）
+governance_review_due: false（审计 #22 GREEN 落档清零）
+completed_tasks_since_governance_review: 0（审计 #22 GREEN 于 2026-09-27——下一审计窗口 = t1104 起 5 闭环 → 审计 #23）
 next_task: **t1104 附魔台+附魔机制（在飞，与审计 #22 并行——审计只读窗口闭于 t1103 关单 docs）→ 之后顺延：炼药锅 + 南瓜农作链 + 雪傀儡 + 生物名册审计[docs-only] + 完整瓜茎茎蔓原型 + 矿井野生瓜 patch + 辉光岩粉链 + 用户侧并行 P5 实机清单/§30.6/§31/择机 push（本地领先远端 90+ 笔）**
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
@@ -33,7 +33,7 @@ needs_human: false
 
 ## Workspace Guard
 
-- HEAD = t1103 闪烁西瓜整链代码终态（fix(t1103) f7e938e + test(t1103) 335399d 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 832 腿满绿（67 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（t1097-t1103 七单全过）。**git 提交禁任何 AI 署名尾注**（审计 #21 F1 入档纪律——派工简报恒带此句）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（横幅+root objects 实文，主控核对；stderr 硬杀缓冲丢失可用应用自写 log 组合同源同面）。**NEG 四件终名日志必须落盘**（t1099 件教训）。
+- HEAD = t1103 闪烁西瓜整链代码终态（fix(t1103) f7e938e + test(t1103) 335399d 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 832 腿满绿（67 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（t1097-t1103 七单全过）。**git 提交禁任何 AI 署名尾注**（审计 #21 F1 入档纪律——派工简报恒带此句）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（横幅+root objects 实文，主控核对；stderr 硬杀缓冲丢失可用应用自写 log 组合同源同面）。**NEG 四件终名日志必须落盘**（t1099 件教训）。**审计窗口锚哈希须 git 现抄**（审计 #22 F1 教训——派工简报/台账记窗时 `git log --oneline` 现场抄入，禁凭记忆转写）。**tail20 组合件统一带来源头注**（t1103 式「from app-written logs/voxelsandbox.log」首行注）。
 - 纪律①-⑨全在案；**大 TU 编译一律 -j 1**（09-13 蓝屏教训；分段后单段增量 -j 4 实测安全）。**矩阵测试为 tools/matrix/ 分层结构**：改探针只重编对应段 TU（秒级）+ `--filter <substring>` 只跑本任务腿；新腿落对应段文件，新段置尾 runAll 末执行、须 ≤500KB；section11 起「自建 fresh 小世界」先例（48×48×96 seed 82 + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)）。
 - **R20.06 起值类型纪律**：src/Core/ 新值类型一律 result.h QObjectFree 编译期钉 + 头内 static_assert；命令/事件队列满载拒绝与快照队列覆盖最老是两域容量策略分化，勿「统一」。
 - **R20.07 起编排壳纪律**：GameSession 只做编排（命令 → 整 tick 边界 → World::setBlock 权威），禁复制游戏逻辑；**QML 现行玩法路径零变化是 R20 主线不变量**（Main.qml 含 "GameSession" 即违零迁移阴性钉 r2007b）。
