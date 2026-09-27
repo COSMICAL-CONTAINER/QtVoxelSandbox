@@ -301,8 +301,9 @@ void MatrixRun::section51_bonemeal_flora_boneblock()
             //   t1083 二次同门修订：Jukebox=146 尾部追加 → 146→147 / 189→191。
             //   t1095 三次同门修订：Repeater=147 尾部追加 → 147→148 / 191→193。
             //   t1097 四次同门修订：BrewingStand=148 尾部追加 → 148→149 / 193→195。
-            SrcPin("Count sentinel", "Count           = 149", 1),
-            SrcPin("atlas tile count", "AtlasTileCount = 195", 1)});
+            //   t1103 五次同门修订：Melon=149/MelonStem=150 尾部追加 → 149→151 / 195→201。
+            SrcPin("Count sentinel", "Count           = 151", 1),
+            SrcPin("atlas tile count", "AtlasTileCount = 201", 1)});
         ok = ok && missBrH.isEmpty();
         if (!missBrH.isEmpty()) diag += QStringLiteral("[br.h %1] ").arg(missBrH.join(QLatin1Char(',')));
         // kMcBlockId 双行（音符盒对齐补行 25 + 骨块行 0）——行注释后缀形态 → 裸读文件口径（raw contains）。
@@ -312,11 +313,14 @@ void MatrixRun::section51_bonemeal_flora_boneblock()
         //   （*/ 84,）钉存在性不钉「最末」位，表尾钉随追加前移。
         //   t1097 五次同门修订：中继器后尾部追加酿造台行（MC 1.0 brewing stand id 117）→ 表尾现为
         //   「*/ 117,\n};」；中继器行本体（*/ 93,）钉存在性不钉「最末」位。
+        //   t1103 六次同门修订：酿造台后尾部追加西瓜族两行（MC 1.0 melon id 103 / melon stem id 105）
+        //   → 表尾现为「*/ 105,\n};」；酿造台行本体（*/ 117,）钉存在性不钉「最末」位。
         const bool brCppRows = brCppTxt.contains(QLatin1String("*/ 25,")) // note_block 行（音符盒 MC 1.0 id 25）
             && brCppTxt.contains(QLatin1String("*/ 0,"))
             && brCppTxt.contains(QLatin1String("*/ 84,"))
             && brCppTxt.contains(QLatin1String("*/ 93,")) // 中继器行（t1095；存在性钉，非表尾钉）
-            && brCppTxt.contains(QLatin1String("*/ 117,\n};")); // 酿造台行（表尾最后一条目，t1097）
+            && brCppTxt.contains(QLatin1String("*/ 117,")) // 酿造台行（t1097；存在性钉，非表尾钉）
+            && brCppTxt.contains(QLatin1String("*/ 105,\n};")); // 瓜茎行（表尾最后一条目，t1103）
         ok = ok && brCppRows;
         if (!brCppRows) diag += QStringLiteral("[br.cpp rows] ");
         // 配方两行 / 调色板 / 图标 / pack 映射 / 派生链工具表。
