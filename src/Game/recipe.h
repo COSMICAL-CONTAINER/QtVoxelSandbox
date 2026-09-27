@@ -509,17 +509,18 @@ public:
     //   t1012）；MC 1.0 蜘蛛掉 0-1 蜘蛛眼（1/3 独立掷，cave spider 同率）→ 蜘蛛眼掉落行入 onMobDied
     //   蜘蛛 / 洞蛛两分支（Main.qml 字面量约定）；发酵蛛眼 = 蜘蛛眼+褐菇+糖 无序（MC 1.0 同料，2×2 可容；
     //   褐菇 BrownMushroom=115 沼泽 worldgen 在场、糖 = 甘蔗既有）→ 两件生存可达。
-    //   **闪烁西瓜获取链裁定（核实留痕，分层交付）**：MC 1.0 闪烁西瓜（glistering melon）= 瓣 1 + 金粒 8
-    //   环形（金粒 = 1 金锭 → 9 粒）；西瓜瓣唯一获取 = 收西瓜方块（西瓜子 = 地牢 / 废弃矿道箱战利品 →
-    //   瓜茎农田）。本工程西瓜方块 / 瓜茎作物 / 西瓜子 / 金粒全缺席（grep melon / nugget 零命中）→ 生存
-    //   链整根缺三环，其中瓜茎是新作物原型（工程无茎类 crop，成本超本单）→ 整条链候选池登记（西瓜子
-    //   地牢池行 + 瓜茎瓜块 + 瓣 + 金粒 + 环形配方一组回收），闪烁西瓜本体创造专属（灰烬疣先例）；效果
-    //   链（粗制 → 瞬间治疗）交付即用。
+    //   **闪烁西瓜获取链裁定（核实留痕，分层交付；t1103 整链回收本登记）**：MC 1.0 闪烁西瓜
+    //   （glistering melon）= 瓣 1 + 金粒 8 环形（金粒 = 1 金锭 → 9 粒）；西瓜瓣唯一获取 = 收西瓜方块。
+    //   t1099 时点本工程西瓜链全缺席（grep melon / nugget 零命中）→ 整条链候选池登记、闪烁西瓜本体
+    //   创造专属（灰烬疣先例）。**t1103 回收**：金粒（0x288）+ 瓜种（0x289，矿井战利品行——地牢池
+    //   1.0 无瓜种，裁定留痕见 loottable.cpp）+ 瓜茎作物原型（MelonStem=150，茎蔓裁定注见
+    //   blockregistry.h）+ 瓜块（Melon=149）+ 瓣（0x28A）+ 环形配方一行全数交付 → 闪烁西瓜自本单起
+    //   **生存可达**（瞬间治疗药水生存链闭合）；效果链（粗制 → 瞬间治疗）t1099 交付即用。
     static constexpr int MagmaCreamId       = 0x26B; // 岩浆膏：粗制 → 火抗原料（MC 1.0 magma cream）；创造专属（岩浆怪缺席裁定）
     static constexpr int GhastTearId        = 0x26C; // 幽灵泪：粗制 → 再生原料（MC 1.0 ghast tear）；创造专属（恶魂缺席裁定）
     static constexpr int SpiderEyeId        = 0x26D; // 蜘蛛眼：粗制 → 中毒原料；蜘蛛/洞蛛 1/3 掉落（生存可达）
     static constexpr int FermentedSpiderEyeId = 0x26E; // 发酵蛛眼：蛛眼+褐菇+糖 无序；粗制 → 虚弱原料（生存可达）
-    static constexpr int GlisteringMelonId  = 0x26F; // 闪烁西瓜：粗制 → 瞬间治疗原料；创造专属（西瓜链缺席裁定）
+    static constexpr int GlisteringMelonId  = 0x26F; // 闪烁西瓜：粗制 → 瞬间治疗原料；t1103 起生存可达（瓣+8 金粒环形合成）
     static constexpr int FireResistancePotionId = 0x270; // 火抗药水：粗制 + 岩浆膏；火/岩浆免疫 180s（MC 1.0 fire resistance 3:00）
     static constexpr int RegenerationPotionId   = 0x271; // 再生药水：粗制 + 幽灵泪；每 2.5s 回 1HP 45s（MC 1.0 regeneration 0:45）
     static constexpr int PoisonPotionId         = 0x272; // 中毒药水：粗制 + 蜘蛛眼；每 1.25s 扣 1HP 45s 不致死（MC 1.0 poison 0:45）
@@ -579,6 +580,20 @@ public:
     //   无辉光岩粉物品——原料缺口，候选池登记）；闪烁西瓜 → 凡庸（延长）与红石 → 凡庸（延长）不硬造
     //   （1.0 纪元形态两说不确，候选池登记——红石行另与 t1100 红石门行「水 → 0」既录负例冲突）。
     static constexpr int MundanePotionId = 0x287; // 凡庸药水：水瓶 + 糖直酿；可饮无效果（同粗制口径）
+    // t1103 闪烁西瓜生存整链三件（材料段 0x288..0x28A，凡庸 0x287 之上**段尾追加**不插中间 = 存档安全
+    //   铁律）。机制等价 MC 1.0 三件（金粒 Beta 1.9 pre（=1.0.0 开发期）入版；瓜种 / 瓜片 Beta 1.8 入版
+    //   ——均在 1.0 基准内）。命名全通用词（§9 合法，零 MC 专名）；无 pack 映射（越表界 → -1 → 资源包
+    //   回退自绘，同药水族 / 可可豆先例）；可堆叠 64（材料段默认零特判）。
+    //   ① 金粒（gold nugget）：金锭 1 ↔ 9 金粒双向合成（MC 1.0 同料同产率）；唯一机制消费 = 闪烁西瓜
+    //   环形合成（8 粒 + 1 瓜片）。
+    //   ② 瓜种（melon seeds）：废弃矿井运输箱战利品（权重 10 / 2..4，行位沿革注见 loottable.cpp；地牢
+    //   池 1.0 **无**瓜种——1.3.1 战利品重整才入池，裁定留痕）+ 瓜片 1:1 转换 + 瓜茎破坏掉落；右键耕地
+    //   种瓜茎（crop 原型，茎蔓裁定注见 blockregistry.h MelonStem 行）。
+    //   ③ 瓜片（melon slice）：破瓜块掉 3-7 片（MC 1.0 口径；本工程无 Fortune 故恒 3-7 随机）；可食
+    //   +2 饥饿（MC 1.0 melon slice 原值）；1:1 转换瓜种 + 9 片合成瓜块。
+    static constexpr int GoldNuggetsId  = 0x288; // 金粒：金锭 1↔9 双向合成；闪烁西瓜环形合成原料
+    static constexpr int MelonSeedsId   = 0x289; // 瓜种：矿井战利品 + 瓜片 1:1 转换 + 茎掉落；种瓜茎
+    static constexpr int MelonSliceId   = 0x28A; // 瓜片：破瓜块掉 3-7 片；可食 +2 饥饿；转换瓜种 / 合瓜块
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

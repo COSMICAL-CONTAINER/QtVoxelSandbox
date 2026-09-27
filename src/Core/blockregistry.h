@@ -1238,7 +1238,30 @@ public:
         //   「Any tool」口径）/ dropId=自身、dropCount=1、maxStack=64。音色 GroupStone。进创造调色板
         //   （方块 tab 功能方块组，铁砧之后）。配方（recipe.cpp）：1 燃烬棒 + 底行 3 圆石 → 1 台（MC 同料）。
         BrewingStand     = 148, // 酿造台：右键开酿造 UI；燃烬粉燃料 + 瓶原位变换（机制等价 MC 1.0 brewing stand id 117）
-        Count           = 149, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+        // ── t1103 西瓜族方块两件（机制等价 MC 1.0 melon / melon stem；Beta 1.8 入版 = 1.0 基准内）。
+        //   瓜块（Melon）：**整立方 opaque**（solid=true / ShapeFull——走 mesher 整立方面路径，与南瓜
+        //   Pumpkin 同族；名称 / 贴图原创自绘 §9a「西瓜」零 MC 专名）。硬面 = 南瓜量级：hardness=1.0、
+        //   NoTool（空手可采且掉落）、requiresTool=false、dropId=0x28A（瓜片，Core 字面量——表兜底 1 片；
+        //   生存掉 3-7 片由 playercontroller finishMiningAt 特例分支覆盖通用 drop 路径，同雪层 / 沙砾模式）、
+        //   dropCount=1、maxStack=64。各面贴图：顶·底=melon_top(195)（绿色瓜皮网格纹）/ 侧=melon_side(196)
+        //   （绿皮 + 深绿棱带瓜纹，无刻面——机制等价 MC melon 无 jack-o'-face）。音色归 GroupGrass（软植物
+        //   音，同南瓜 t482 口径）。**获取面**：农田生长（瓜茎结果）+ 9 瓣合成（存储行）+ 创造调色板。
+        //   **瓜茎（MelonStem）= 作物原型裁定（成本×忠实度分层交付，本单落地简化结果性生长）**：
+        //   复用小麦 / 胡萝卜 / 马铃薯 crop 同门基建（isGrowthBlock 索引 + tickCropGrowth 生长门[耕地支撑 +
+        //   天光 + 确定性散布] + WheatCropStageMax=7 共享阶段上界 + cross 几何 + 骨粉催熟①分支），茎以
+        //   crop 方块 state 承载（4 张阶段贴图 tile 197..200，基底+state/2 同 carrot/potato 口径）；成熟
+        //   （state==7）后由 tickCropGrowth 同窗散布哈希驱动**结果**：四向邻格扫描（哈希定起始向）→ 空
+        //   格 + 其下方 ∈ {耕地,泥土,草地} → 原位落瓜块（茎保留，可反复结果——MC 茎多果口径）。**茎蔓
+        //   完整原型（stem 方块爬蔓 / 结果朝向 state 面）候选池登记**（r2073 汇报层留痕；成本超单轮）。
+        //   solid=false / ShapeNone / hardness=0 / NoTool / dropId=0x289（表兜底 1 种子；掉 1 种子口径
+        //   由 dropCropDrops 茎分支覆盖）+ maxStack=64。音色 GroupGrass（同胡萝卜作物）。**种植**：持
+        //   瓜种右键耕地（kCropSeeds 映射表同门）；**不进创造调色板**（作物族同门：由物品种植获得）。
+        //   kMcBlockId：瓜块=103 / 茎=105（MC 1.0 原值）。
+        Melon            = 149, // 西瓜：瓜茎结果 + 9 瓣合成；整立方 opaque；破坏掉 3-7 瓣
+        MelonStem        = 150, // 西瓜茎：cross 作物（种瓜种于耕地）；8 阶段生长；成熟结果于邻格
+        Count           = 151, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+                                 //   t1103 lawful 前移：149→151（Melon=149/MelonStem=150 尾部追加；
+                                 //   t1097 曾 148→149——追加不插中间存档契约，钉值随追加前移）。
     };
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
@@ -1895,6 +1918,12 @@ public:
     //     alphaCutoff cutout；不绑定 BlockDef 瓦片字段 —— mesher 据铁轨 state 连接位选 121(直 NS)/UV 旋转(直 EW)/
     //     136(拐角)/137(十字)，同 Water 流水贴图 19/23 的「呈现层据 state 选瓦片」模式；tools/build_rail.py 生成）。
     //   137=rail_cross（t565 铁轨十字交叉贴图：南北 + 东西双轨叠交 + 中央方枕木；同上不绑定 BlockDef）。
+    //   195=melon_top（t1103 瓜块顶/底面贴图；深绿皮 + 浅绿网格瓜纹，原创自绘 §9a；tools/build_melon.py）。
+    //   196=melon_side（t1103 瓜块侧面贴图；绿皮 + 深绿棱带条纹（无刻面——MC melon 无刻面语义）；
+    //      Melon 各面：顶·底=195 / 侧=196，走 mesher 整立方面路径）。
+    //   197..200=melon_stem_0..3（t1103 瓜茎 4 阶段贴图；cross 几何段，alpha 透明底 cutout；4 张覆盖 8 个
+    //      年龄（基底+state/2，t407 carrot/potato 口径）；MelonStem def 各面=197（基底阶段 0），mesher 在
+    //      cross 几何段据 state 选 tile；tools/build_melon.py 程序生成原创像素图）。
     // 图集由 tools/build_atlas.py 打包全部 138 瓦片；mesher / BlockCube 都读本常量算每瓦片 UV
     //   宽 1/AtlasTileCount —— **单一权威**，与 build_atlas.py 的 TILES 长度严格对齐。
     // -Z 面（NegZ「前面」）走 frontTile（熔炉炉口；其余方块 frontTile == sideTile，无视觉差异）。
@@ -2027,7 +2056,8 @@ public:
     // t1095：191..192=红石中继器两张（191=repeater_off 熄态底板 / 192=repeater_on 亮态底板；
     //   tools/build_repeater.py 程序生成原创像素图 §9a；Repeater 恒走 PartialBlockGeometry 异形段，
     //   state bit4 选 191/192——同红石粉亮度档选瓦的呈现层选择模式）。
-    static constexpr int AtlasTileCount = 195; // t1097 起 193→195（酿造台 tile 193 idle / 194 lit 尾部追加，不插中间存档契约）
+    static constexpr int AtlasTileCount = 201; // t1103 起 195→201（瓜族 tile 195..200 尾部追加：瓜顶/瓜侧/
+                                               //   茎 4 阶段，不插中间存档契约；t1097 曾 193→195——钉值随追加 lawful 前移）
 
     // t668 图集瓦片像素边长（HD 图集：16→64）。**单一权威**：tools/build_atlas.py TILE（打包像素大小）/
     //   ResourcePackManager::kTile（运行期包内贴图缩放目标）与 mesher 半纹素内缩（chunkgeometry hx/hy、

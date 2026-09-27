@@ -715,14 +715,15 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::StrengthPotionId), // 力量药水：粗制 + 燃烬粉；饮用 +130%/级近战 180s
         int(RecipeRegistry::SugarId),          // 糖：1 甘蔗 → 1 糖；迅捷药水原料
         // t1099 药水第二轮物品族十件（材料段 0x26B..0x274，糖 0x26A 之上段尾追加不插中间 = 存档安全铁律）。
-        //   岩浆膏 / 幽灵泪 / 闪烁西瓜创造专属（获取链裁定见 recipe.h 注）；蜘蛛眼（蜘蛛/洞蛛 1/3 掉落）/
-        //   发酵蛛眼（无序合成）生存可达。全员可堆叠 64（材料段默认）；五药水右键长按饮用（isDrinkableItem
-        //   面）；MaterialIcon 自绘膏团 / 泪滴 / 眼珠 / 瓜球 / 色液瓶族（§9 原创）。
+        //   岩浆膏 / 幽灵泪创造专属（获取链裁定见 recipe.h 注）；蜘蛛眼（蜘蛛/洞蛛 1/3 掉落）/
+        //   发酵蛛眼（无序合成）/ 闪烁西瓜（t1103 瓣+8 金粒环形合成——生存链闭环）生存可达。全员可堆叠
+        //   64（材料段默认）；五药水右键长按饮用（isDrinkableItem 面）；MaterialIcon 自绘膏团 / 泪滴 /
+        //   眼珠 / 瓜球 / 色液瓶族（§9 原创）。
         int(RecipeRegistry::MagmaCreamId),           // 岩浆膏：粗制 → 火抗原料
         int(RecipeRegistry::GhastTearId),            // 幽灵泪：粗制 → 再生原料
         int(RecipeRegistry::SpiderEyeId),            // 蜘蛛眼：粗制 → 中毒原料
         int(RecipeRegistry::FermentedSpiderEyeId),   // 发酵蛛眼：粗制 → 虚弱原料
-        int(RecipeRegistry::GlisteringMelonId),      // 闪烁西瓜：粗制 → 瞬间治疗原料
+        int(RecipeRegistry::GlisteringMelonId),      // 闪烁西瓜：粗制 → 瞬间治疗原料；t1103 起生存可达（环形合成）
         int(RecipeRegistry::FireResistancePotionId), // 火抗药水：火/岩浆免疫 180s
         int(RecipeRegistry::RegenerationPotionId),   // 再生药水：每 2.5s 回 1HP 45s
         int(RecipeRegistry::PoisonPotionId),         // 中毒药水：每 1.25s 扣 1HP 45s 不致死
@@ -752,7 +753,15 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::SplashExtendedWeaknessPotionId),       // 喷溅虚弱药水（喷溅·延长）：延长虚弱 + 火药
         // t1102 凡庸药水一件（0x287，喷溅族之上段尾追加不插中间 = 存档安全铁律）：获取面 = 水瓶直酿
         //   （水瓶 + 糖，创造调色板行为唯一兜底获取面，同族口径）。
-        int(RecipeRegistry::MundanePotionId)                       // 凡庸药水：水瓶 + 糖直酿；可饮无效果
+        int(RecipeRegistry::MundanePotionId),                      // 凡庸药水：水瓶 + 糖直酿；可饮无效果
+        // t1103 闪烁西瓜生存链三件（材料段 0x288..0x28A，凡庸 0x287 之上段尾追加不插中间 = 存档安全铁律）：
+        //   金粒（金锭 1↔9 双向合成，环形合成原料）/ 瓜种（矿井战利品 + 瓜片 1:1 转换 + 茎掉落，种瓜茎）/
+        //   瓜片（破瓜块 3-7 片，可食 +2 饥饿，转换瓜种 + 9 片合瓜块）。全员可堆叠 64（材料段默认零特判）；
+        //   非方块 → 右键不放置（瓜种右键耕地 = 种瓜茎，kCropSeeds 映射表同门，在 selectedBlock Air 守卫
+        //   之前分流）。MaterialIcon 自绘金粒 / 瓜种 / 瓜片（§9 原创）。
+        int(RecipeRegistry::GoldNuggetsId),  // 金粒：金锭 1↔9 双向；环形合成原料
+        int(RecipeRegistry::MelonSeedsId),   // 瓜种：矿井战利品 + 瓜片 1:1 + 茎掉落；种瓜茎
+        int(RecipeRegistry::MelonSliceId)    // 瓜片：破瓜块 3-7 片；可食 +2；转换瓜种 / 合瓜块
     };
 }
 
@@ -1032,7 +1041,10 @@ QVariantList Hotbar::creativeBlocks() const
              //   裂纹石砖紧随石砖族（同族变体）；铁栏杆是要塞窗棂 / 栏杆建筑件（薄杆异形可连接）。
              int(BlockRegistry::MossyStoneBrick),                            // 苔石砖（石砖长苔变体；要塞墙体风化面；可放置）
              int(BlockRegistry::CrackedStoneBrick),                          // 裂纹石砖（石砖开裂变体；要塞墙体破损面；可放置）
-             int(BlockRegistry::IronBars) };                                 // 铁栏杆（金属薄杆栅格；细柱+横板连接；可放置）
+             int(BlockRegistry::IronBars),                                   // 铁栏杆（金属薄杆栅格；细柱+横板连接；可放置）
+             // t1103 瓜块（机制等价 MC 1.0 melon）：瓜茎结果 + 9 瓣合成；整立方 opaque（南瓜同族），
+             //   破坏掉 3-7 瓣。排表尾（段尾追加不插中间——t998 三件既有连续性零触碰）。
+             int(BlockRegistry::Melon) };                                    // 西瓜（瓜茎结果/9 瓣合成；破坏掉 3-7 瓣）
 }
 
 // ── t965 形态按钮组支持表（hotbar.h 声明处注释为完整契约）──
@@ -1071,6 +1083,7 @@ QVariantList Hotbar::blockFormStates(int blockId) const
     case BlockRegistry::WheatCrop: // 作物三族：生长阶段 0..7（共享 WheatCropStageMax 上界，t407 同机制）
     case BlockRegistry::CarrotCrop:
     case BlockRegistry::PotatoCrop:
+    case BlockRegistry::MelonStem: // t1103：瓜茎并入形态组（阶段 0..7 同门）
         for (int st = 0; st <= int(BlockRegistry::WheatCropStageMax); ++st)
             s << st;
         break;
@@ -1340,6 +1353,10 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::SplashExtendedWeaknessPotionId)       return QStringLiteral("喷溅虚弱药水（延长）");
         // t1102 凡庸药水（0x287）：名面一件（通用描述词，§9 合法；可饮无效果同粗制——水瓶 + 糖直酿）。
         if (blockId == RecipeRegistry::MundanePotionId)                      return QStringLiteral("凡庸药水");
+        // t1103 闪烁西瓜生存链三件（0x288..0x28A，凡庸之上段尾追加）：名面三件（全通用词，§9 合法）。
+        if (blockId == RecipeRegistry::GoldNuggetsId) return QStringLiteral("金粒");     // 金锭 1↔9 双向；环形合成原料
+        if (blockId == RecipeRegistry::MelonSeedsId)  return QStringLiteral("瓜种");     // 矿井战利品；种瓜茎 / 瓜片转换
+        if (blockId == RecipeRegistry::MelonSliceId)  return QStringLiteral("瓜片");     // 破瓜块 3-7 片；可食 +2；转换瓜种
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落；打火石配方原料。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::FlintId) return QStringLiteral("燧石"); // 挖沙砾概率掉落；打火石配方原料
         // t891② 烈焰弹（材料段 0x25C；机制等价 MC fire charge）：燃烬粉+煤/炭+火药合成 3 发；右键发射火球
