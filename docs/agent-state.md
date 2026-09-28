@@ -14,8 +14,8 @@
 ```yaml
 project: QtMinecraft
 state: IN_PROGRESS
-state 说明见 current_task_status：**池面真底待机**——候选池已空（1.0 基准内边界内内容收官于 t1109，矩阵 856 腿满绿 72 段）；残余候选全部停放待用户（下界/蘑菇岛维度级[灰烬疣生存获取/恶魂/岩浆怪/僵尸猪人/辉光岩粉链/蘑菇牛]、§30/§31 设计门控、P5 实机清单、push 156 笔）；P0 用户反馈永远插队。心跳按 ④ 如实待机。
-current_task_status: STANDBY（池面真底——等用户裁决或 P0 反馈）
+current_task: **t1110 IN_PROGRESS（1.0 方块/物品名册全量审计 + 两笔已登记小缺口清偿——用户 2026-09-29 重授权连续开发[「直接继续开发不用停下来问我」]；维度开发与 §30/§31 门控边界不变）**：件一名册审计[t1106 mob 名册姊妹件——1.0 方块/物品名册逐项对照在场表，三列审计表素材产出→主控落 docs，预期翻出真缺口] + 件二雪球对狼 3 伤[t1106 登记候选——1.0 相性另一成员收口] + 件三 slime/villager 音效[t1107 登记后续——AudioManager generic 兜底→§9a 程序合成两音]。串行 voxel-dev，filter 词 r2080。
+current_task_status: IN_PROGRESS
 last_completed_task: t1109 残项小批合集三·池面收官批（2026-09-28 闭环；矩阵 852→856——三件实读裁定两处纠正派工预期：瓜茎[MC 固定格已等价即终态+单果门纠正 t1103 多果误读+南瓜朝向 state+落地面 1.1+ 纠正不收窄]/矿井野生瓜[前提证伪=任何版本矿井无瓜，负面收口柱]/沙漠村庄[Desert 准入+模板同构+砂岩变体否决纠正]；**四份兼容日志全绿=兼容性铁律履行**；lawful 1 处。详录 = dev-plan t1109 关单条目）
 last_completed_task_prev: t1108 村庄 worldgen（2026-09-28 闭环，矩阵 848→852；详录 = dev-plan t1108 关单条目）
 last_completed_task_commits: fix(t1109)（960978f：单果门+朝向 state+Desert 准入+Sand 守卫扩+注释纠正族，3 文件 +48/−12）+ test(t1109)（1c18d73：section72_t1109_closeout.cpp 新段 r2079a-d，5 文件 +695/−1）
@@ -23,7 +23,7 @@ last_verified_commit: test(t1109)（矩阵 **856 PASS / 0 FAIL ×2**：matrix_t1
 last_governance_review: 2026-09-28（audit #23 GREEN——窗口 84bafc1..4e2b0db 14 提交/t1104-t1108 五闭环证据链全实核[五单 md5 三方恒等 005f5365/dd52e1a8/d8e9ca6f/54b5d3cb/b9ad4689 + NEG 十份恰红十份还原吻合 + 腿数链 832→852 无断]；提交纪律 14 笔署名零命中[检测器正反验证]+全窗纯 ASCII；tail20 来源头注 5/5 全应用=#22 F4 整改首窗落地；控制块第四窗连续守住[counter 1..5+HEAD 行同步]；「锚哈希 git 现抄」整改生效=本窗锚零记误；不变量五单 file:line 级实文亲读全过[含 t1108 三笔 bug 门实文]；**F1[LOW] 规程参照文件名陈旧**[governance-audit-2026-09-25-b.md 实为 #20 报告，应为 2026-09-27.md=#22——连续两窗同根因，清偿=本批更正+「规程参照文件名须 ls docs/ 现核」纪律扩充] + F2[INFO push 积压实数 156 笔[原记 100+]以实数汇报] + F3[INFO CJK 载体=矩阵段注释既有惯例免]；详见 governance-audit-2026-09-28.md）
 governance_review_due: false（审计 #23 GREEN 落档清零——待机期不累计）
 completed_tasks_since_governance_review: 0（审计 #23 GREEN 于 2026-09-28；待机期新任务（P0 反馈/用户开题）重新起算——5 闭环 → 审计 #24）
-next_task: **无排队单（池面真底待机）**——唤醒条件 = ①P0 用户反馈（永远插队）②用户裁决停放候选（下界/蘑菇岛维度/§30/§31/P5 实机清单清偿）③push 156 笔择机。
+next_task: **t1111+（从 t1110 名册审计结果分级登记）→ 长线停放待用户：下界/蘑菇岛维度级候选/§30/§31/P5 实机清单/push 156+ 笔**
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
