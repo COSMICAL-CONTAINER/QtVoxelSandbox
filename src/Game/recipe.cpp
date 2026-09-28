@@ -1439,6 +1439,12 @@ static_assert(RecipeRegistry::MelonSliceId   == 0x28A, "MelonSliceId 须为材�
 // t1105 南瓜种子段位钉（工程惯例）：0x28B = 瓜片 0x28A 之上**段尾连续追加**（不插中间 = 存档安全铁律）；
 //   Core 层 blockregistry.cpp 南瓜茎 dropId 用同一字面量 0x28B（Core 不 include Game 头）→ 双侧互钉。
 static_assert(RecipeRegistry::PumpkinSeedsId == 0x28B, "PumpkinSeedsId 须为材料段 0x28B（瓜片 0x28A 之上段尾追加，t1105）");
+// t1107 史莱姆球 + 双蛋段位钉（工程惯例）：0x28C..0x28E = 南瓜种子 0x28B 之上**段尾连续追加**（不插
+//   中间 = 存档安全铁律）；QML MaterialIcon case 与 hotbar 名面 / 调色板用同字面量互钉；蛋表行由
+//   mobTypeForSpawnEgg case 值承担（上表）。
+static_assert(RecipeRegistry::SlimeBallId        == 0x28C, "SlimeBallId 须为材料段 0x28C（南瓜种子 0x28B 之上段尾追加，t1107）");
+static_assert(RecipeRegistry::SpawnEggSlimeId    == 0x28D, "SpawnEggSlimeId 须为材料段 0x28D（史莱姆球 0x28C 之上段尾追加，t1107）");
+static_assert(RecipeRegistry::SpawnEggVillagerId == 0x28E, "SpawnEggVillagerId 须为材料段 0x28E（史莱姆蛋 0x28D 之上段尾追加，t1107）");
 static_assert(int(BlockRegistry::PumpkinStem)  == 151, "PumpkinStem 方块 id 须为 151（南瓜种子种植产物 + dropId 0x28B 兜底契约）；t1105");
 static_assert(int(BlockRegistry::JackOLantern) == 152, "JackOLantern 方块 id 须为 152（南瓜+火把无序合成行产物锚）；t1105");
 // 编译期互钉：金锭 0x21F ↔ 金粒 0x288 双向合成（t1103 双向行）+ 瓜块方块段 Melon=149 行在。
@@ -1691,6 +1697,8 @@ int RecipeRegistry::mobTypeForSpawnEgg(int itemId)
     case SpawnEggOcelotId:      return EntityManager::MobOcelot;      // t785 豹猫（野生）
     case SpawnEggBabyShamblerId: return EntityManager::MobBabyShambler; // t952 小蹒跚者（幼体僵尸；生成时掷小鸡骑士组合骰）
     case SpawnEggCaveSpiderId:   return EntityManager::MobCaveSpider;   // t1012③ 洞穴蜘蛛（0.7× 蓝染 + 中毒 DoT）
+    case SpawnEggSlimeId:        return EntityManager::MobSlime;        // t1107 史莱姆（蛋刷固定中档 kSlimeDefaultSpawnSize）
+    case SpawnEggVillagerId:     return EntityManager::MobVillager;     // t1107 村民（被动人形；村庄 worldgen 候选池，蛋先行）
     default: return -1;
     }
 }

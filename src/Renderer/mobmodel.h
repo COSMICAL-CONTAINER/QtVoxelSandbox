@@ -78,6 +78,12 @@
 //     entity_emberling 程序贴图（64×32，build_entities_pack.py 按 blaze 布局自绘头区+棒条区，棒=烟灰
 //     暗黄竖纹贴图长条）。原点 = 碰撞中心（halfW=0.5/halfH=0.6），hover 悬浮由 Main.qml delegate 动画
 //     驱动（几何不动）。眼：贴图脸自带（pack 态 blaze 脸暗色眼纹 / 程序态白热焰核）→ 无 overlay 眼层。
+//   21 = Slime（史莱姆；t1107）：单一大档基准立方（半长 0.60 三轴，心在原点，盒底 −0.60）——尺寸缩放
+//     在呈现层（QML scale = halfH/0.60：中档 0.5× / 小档 0.25×，mobModelYOff=0 恒贴地）。半透明外层 +
+//     内核盒由 Main.qml delegate 补子 Model（材质 opacity，几何不透明源不变）。pack 面不接（候选池）。
+//   22 = Villager（村民；t1107）：长袍人形——长袍躯干（覆脚无腿，MC 村民抱胸无腿摆语义）+ 大头 +
+//     前伸长鼻 + 抱胸横臂条（四盒；腿底本地 −0.90 贴 collision 底面 halfH=0.90 → offset 0）。walkPhase
+//     不消费（无腿摆）。pack 面不接（候选池）。
 // 其余值（含 0 / 越界）→ 兜底按 Pig 建（保几何非空、bounds 合法）。
 //
 // 顶点格式：pos(3) + uv(2) = 5 float。每盒 6 面 × 4 角 = 24 顶点 / 36 索引；多盒累加。
@@ -172,7 +178,7 @@ public:
     //   EntityManager::MobCaveSpider+1 断言，t1012③ 起上界 = 洞穴蜘蛛 20）。public 常量的原因：Renderer 在
     //   Entities 之下（PLAN §2 分层），本层不得 include entitymanager.h，跨层钉契约只能经头文件常量由上层
     //   消费端完成。新增 mobType 时补 .cpp 表行 + 同步本值 + 探针断言三级全过。
-    static constexpr int kValidMobTypeCount = 21; // == EntityManager::MobCaveSpider(20) + 1（镜像值，探针钉死）
+    static constexpr int kValidMobTypeCount = 23; // == EntityManager::MobVillager(22) + 1（镜像值，探针钉死；t1107 尾追加 Slime=21/Villager=22 携沿革注：原 MobCaveSpider(20)+1=21）
 
     int mobType() const { return m_mobType; }
     void setMobType(int type);

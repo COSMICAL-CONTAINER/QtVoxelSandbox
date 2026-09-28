@@ -2284,6 +2284,8 @@ Window {
             "stalker": EntityManager.MobStalker,
             "spider": EntityManager.MobSpider,
             "cavespider": EntityManager.MobCaveSpider, // t1012③ 洞穴蜘蛛（/summon cavespider、/kill @e[type=cavespider]）
+            "slime": EntityManager.MobSlime,           // t1107 史莱姆（/summon slime、/kill @e[type=slime]）
+            "villager": EntityManager.MobVillager,     // t1107 村民（/summon villager、/kill @e[type=villager]）
             "chicken": EntityManager.MobChicken,
             "squid": EntityManager.MobSquid
         }
@@ -3098,8 +3100,10 @@ Window {
         //   剪过毛的羊被打死不掉羊毛（机制等价 MC 1.0 sheared sheep 无羊毛掉落；烧死仍替换为熟羊肉——
         //   熟羊肉是「肉」非「毛」，不受剪毛影响）。旧 7 参连接（Qt 新式信号槽允许槽参数少于信号）
         //   依旧兼容；本 handler 是 QML 侧唯一消费端，签名同步为 8 参。
-        function onMobDied(x, y, z, mobType, burned, wasBaby, woolIdx, sheared) {
+        function onMobDied(x, y, z, mobType, burned, wasBaby, woolIdx, sheared, slimeSize) {
             progress.onMobKilled(mobType)  // progress 统计击杀 + 成就「怪物猎人」（敌对 mob）
+            // t1107 史莱姆 XP=尺寸档（MC 1.0 slime 掉 XP=档：大 4/中 2/小 1——xpForMob 表按型索引无法承载
+            //   尺寸维度， slimeSize 第 9 参分流；其余型该参恒 0 走表）。
             // t479 幼崽死亡不掉落（机制等价 MC 1.0 幼崽不掉落）：幼崽（baby）死亡 → 不掉战利品 + 不掉 XP。
             //   wasBaby = EntityManager 致死瞬间快照（deathBaby）—— 0.5s 死亡动画窗口内 growTimer 可能到 0 长大，
             //   快照保「致死时是幼崽」语义（同 deathBurned 快照模式）。成体（wasBaby=false）走既有掉落流程。
@@ -3132,7 +3136,10 @@ Window {
             xpForMob[EntityManager.MobSilverfish] = 5 // t487 银鱼：5 XP（敌对近战小虫，同敌对量级；无常规掉落）
             xpForMob[EntityManager.MobNightwalker] = 5 // t727 夜行者：5 XP（敌对瘦长暗影，同敌对量级；掉暗渊珠）
             xpForMob[EntityManager.MobEmberling] = 3 // t728 燃烬者：3 XP（敌对悬浮远程；掉燃烬棒）
-            const xpAmt = xpForMob[mobType]
+            xpForMob[EntityManager.MobVillager] = 1 + Math.floor(Math.random() * 3) // t1107 村民：1-3 XP（被动同门；无战利品）
+            let xpAmt = xpForMob[mobType]
+            // t1107 史莱姆 XP=尺寸档分流（大 4 / 中 2 / 小 1；MC 1.0 slime 掉 XP=档口径）。
+            if (mobType === EntityManager.MobSlime && slimeSize > 0) xpAmt = slimeSize
             if (xpAmt && xpAmt > 0) xpOrbs.spawnOrb(x, y, z, xpAmt)
             // t344 burned = mob 燃烧态（fireTimer>0）致死 → 被动动物的「生肉掉落」替换为熟肉（机制等价 MC 1.0
             //   着火死亡掉熟肉）：猪→熟猪排 / 牛→熟牛肉（皮革非肉、不变）/ 羊→熟羊肉（替代羊毛）。熟肉 id：
@@ -3255,6 +3262,20 @@ Window {
                 for (let i = 0; i < snowballCount; ++i)
                     itemEntities.spawnItem(x, y, z, 0x23D, 1) // 雪球 ×1（每件独立实体，同被动多件掉落）
             }
+            else if (mobType === EntityManager.MobSlime) {
+                // t1107 史莱姆掉落（1.0 口径）：**只有小档（slimeSize===1）掉粘液球 0-2**（中/大档死亡走
+                //   C++ 分裂面，不掉战利品——MC 分裂怪无掉落语义）；分裂子代已在 C++ 侧 spawn（mobDied
+                //   信号前），此处只结算粘液球。0-2 = 两次独立掷（同鱿鱼 1-3 模式）。0x28C = SlimeBallId
+                //   （⚠️ QML 字面量约定同上）。
+                if (slimeSize === 1) {
+                    if (Math.random() < 0.5) itemEntities.spawnItem(x, y, z, 0x28C, 1)
+                    if (Math.random() < 0.5) itemEntities.spawnItem(x, y, z, 0x28C, 1)
+                }
+            }
+            else if (mobType === EntityManager.MobVillager) {
+                // t1107 村民：**零战利品**（1.0 村民死亡无常规掉落；XP 已走上方 1-3 被动同门行）。空分支
+                //   仅作文档锚 + 防误并入相邻分支读面。
+            }
             // MobTest（通用测试生物）不掉落 —— 调试生物无游戏内常规产出。Stalker 爆炸破坏方块的掉落由
             //   detonateStalker 的 explosionDroppedItem 单独发（t297）；MobStalker 常规击杀掉火药归本 onMobDied 上方分支（t485）。
         }
@@ -3336,6 +3357,7 @@ Window {
                 else if (mobType === EntityManager.MobNightwalker) cause = PlayerState.Nightwalker // t727 夜行者重拳（蓄力背后近战大伤害）
                 else if (mobType === EntityManager.MobEmberling) cause = PlayerState.Emberling // t728 燃烬者火球命中（Fireball tick mobAttackedPlayer 携 MobEmberling → 「被燃烬者的火球焚杀」）
                 else if (mobType === EntityManager.MobAnvil) cause = PlayerState.Anvil // t794 下落铁砧砸中（FallingBlock 砸伤分支携 MobAnvil 哨兵 → 「被落下的铁砧砸死」）
+                else if (mobType === EntityManager.MobSlime) cause = PlayerState.Slime // t1107 史莱姆接触伤害（aiSlime 携 MobSlime → 「被史莱姆撞杀」；1.0 slain by Slime 同源）
                 // t345 护甲减伤 + t476 保护族附魔减伤（mob 近战 / 箭 / 爆炸命中也走护甲值 + 附魔 EPF 减伤 + 耐久损耗）。
                 //   护甲值每点 4%（cap 0.80）+ 附魔 EPF 每点 4%（cap 0.80），合计 cap 0.85；至少 1 点穿透。
                 var finalAmt = amount
@@ -4889,6 +4911,12 @@ Window {
         // t487 银鱼（Silverfish；机制等价 MC 1.0 银鱼，§9 原创）：灰白甲壳底 + 深灰体节横纹 + 暗头斑（build_mob.py
         //   程序生成原创像素图，§9a 区隔不照搬 MC）。MobModel 小型虫几何（分节躯干 + 前伸小头 + 多对短腿）每面铺整张贴图。
         Texture { id: mobSilverfishTex; source: "qrc:/textures/mob_silverfish.png"; generateMipmaps: false }
+        // t1107 史莱姆（Slime；机制等价 MC 1.0 slime，§9 原创）：青绿凝胶贴图（build_mob.py 程序生成）。
+        //   MobModel 大档基准立方几何每面铺整张贴图；半透明观感由 delegate 材质 opacity 承载（贴图实底）。
+        Texture { id: mobSlimeTex; source: "qrc:/textures/mob_slime.png"; generateMipmaps: false }
+        // t1107 村民（Villager；机制等价 MC 1.0 villager，§9 原创）：长袍棕贴图（build_mob.py 程序生成）。
+        //   MobModel 长袍人形几何（长袍 / 头 / 鼻 / 臂条四盒）每面铺整张贴图。
+        Texture { id: mobVillagerTex; source: "qrc:/textures/mob_villager.png"; generateMipmaps: false }
         // t727 夜行者（Nightwalker；机制等价 MC 1.0 末影人，§9 改名 + 原创）：暗紫黑细长黑影贴图（build_mob.py 程序
         //   生成原创像素图，§9a 区隔不照搬 MC）。MobModel 细长人形几何每面铺整张贴图；眼睛是独立发光层（见下方
         //   nightwalkerEyesTex，顶层小盒铺透明底紫白竖眼）。
@@ -8357,6 +8385,11 @@ Window {
                         if (entMobType === EntityManager.MobSilverfish) return 0.15 - mobHalfH // t487 Silverfish 银鱼（腿底 0.15）
                         if (entMobType === EntityManager.MobNightwalker) return 1.40 - mobHalfH // t727/t781 Nightwalker（细肢人形：MobModel 腿底本地 |y|=1.40，halfH=1.40 → offset=0 腿底贴地）
                         if (entMobType === EntityManager.MobEmberling) return 0.0 // t782 Emberling（悬浮单头+4棒：MobModel 原点=碰撞中心，头心 +0.10/棒跨 [-0.68,+0.62]（t968 棒 Y 交错）→ offset=0 居中；整体悬浮由 hover 升空）
+                        // t1107 史莱姆：MobModel 大档基准立方盒底 -0.60，QML 缩放 scale = halfH/0.60 后盒底
+                        //   恰 = -halfH（缩比与碰撞盒同源恒抵消）→ offset=0 贴地。
+                        if (entMobType === EntityManager.MobSlime) return 0.0
+                        // t1107 村民：MobModel 长袍盒底本地 -0.90 = halfH（0.30/0.90 人形盒）→ offset=0 贴地。
+                        if (entMobType === EntityManager.MobVillager) return 0.0
                         // t482/t483 防御造物：方块身 + 南瓜头堆叠 Model（不走 MobModel；局部原点 = 碰撞中心），
                         //   底部方块（腿/底雪块）底面须贴 collision 底面（= 地面）。底部方块 local y center = -halfH + 0.45
                         //   （0.45 = 底块半高）；mobModelYOff 把整组 Model 下移（halfH-0.45），使底块底面（-halfH-0.45...）
@@ -8365,6 +8398,12 @@ Window {
                         if (entMobType === EntityManager.MobSnowGolem) return 0.0
                         if (entMobType === EntityManager.MobIronGolem) return 0.0
                         return 0.50 - mobHalfH                          // MobTest（UnitCube ±0.5）
+                    }
+                    // t1107 史莱姆呈现缩放：MobModel 大档基准立方（半长 0.60）× 本缩放 = 当前碰撞盒
+                    //   （缩比与 halfH 同源：scale = halfH/0.60 → 大 1.0 / 中 0.5 / 小 0.25，缩后盒底恒贴地）。
+                    property real slimeModelScale: {
+                        const _r = mon.revision
+                        return _r >= 0 ? (entMobType === EntityManager.MobSlime ? mobHalfH / 0.60 : 1.0) : 1.0
                     }
                     // t400 求偶/驯服爱心粒子（t878③ 重做）：3 颗**相机朝向像素心**（BillboardQuad + mob_heart.png
                     //   程序像素心）相位错开 1/3 周期循环**升腾 + 渐隐 + 微摆**（1.2s/颗，机制等价 MC love mode
@@ -9619,6 +9658,124 @@ Window {
                                             baseColorMap: mobEmberlingPackTex.source.toString().length > 0 ? mobEmberlingPackTex : mobEmberlingTex
                                         }
                                     }
+                                }
+                            }
+                        }
+                        onLoaded: if (item) item.parent = mobDelegate
+                    }
+                    Loader {
+                        active: entKind === EntityManager.Mob && entMobType === EntityManager.MobSlime
+                        sourceComponent: Component {
+                            Model {
+                                id: slimeRoot
+                                // t1107 史莱姆（Slime，mobType 21；机制等价 MC 1.0 slime，§9 改名 + 原创模型/贴图）：
+                                //   **半透明绿色弹跳立方**——外层 MobModel 大档基准立方（0.60 半长）× slimeModelScale
+                                //   （= halfH/0.60，随碰撞盒三档缩放：大 1.0/中 0.5/小 0.25），材质 opacity 0.75 承载
+                                //   MC 半透明凝胶观感；内核 = 内嵌不透明小立方（scale 0.55，MC 内核语义，纯色深绿）。
+                                //   眼睛 overlay：贴图全脸无五官（同猪/牛全脸家族约定）→ 前面补 2 白眼底 + 2 深瞳
+                                //   + 1 嘴（z = -0.60 前面外贴 0.012 防共面）。walkPhase 无腿摆语义（绑 0 恒静）。
+                                //   pack 面：不接（候选池登记，mob_slime 程序贴图唯一路径）。
+                                visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobSlime
+                                position: Qt.vector3d(0, mobModelYOff, 0) // = 0（基准盒底 -0.60×scale 恰贴 collision 底）
+                                scale: Qt.vector3d(slimeModelScale, slimeModelScale, slimeModelScale)
+                                geometry: MobModel {
+                                    mobType: 21
+                                    packTextured: false // t1107 pack 面不接（程序贴图唯一路径；候选池登记）
+                                    walkPhase: 0        // 史莱姆无步态（弹跳滑流不走腿摆）
+                                }
+                                materials: PrincipledMaterial {
+                                    lighting: PrincipledMaterial.NoLighting
+                                    opacity: 0.75 // MC slime 半透明凝胶观感（透明通道；内核不透明读作实体核）
+                                    baseColor: { const _r = mon.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
+                                    baseColorMap: mobSlimeTex
+                                }
+                                Model { // 内核（MC slime 内核语义：不透明深绿小立方）
+                                    geometry: UnitCube {}
+                                    scale: Qt.vector3d(0.55, 0.55, 0.55)
+                                    materials: PrincipledMaterial {
+                                        lighting: PrincipledMaterial.NoLighting
+                                        baseColor: { const _r = mon.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : "#3f7a28") : "#000000" }
+                                    }
+                                }
+                                Model { // 白眼左
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.16, 0.12, -0.612)
+                                    scale: Qt.vector3d(0.14, 0.16, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8f0e0" }
+                                }
+                                Model { // 白眼右
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.16, 0.12, -0.612)
+                                    scale: Qt.vector3d(0.14, 0.16, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#e8f0e0" }
+                                }
+                                Model { // 深瞳左
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.16, 0.10, -0.622)
+                                    scale: Qt.vector3d(0.07, 0.08, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a2a12" }
+                                }
+                                Model { // 深瞳右
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.16, 0.10, -0.622)
+                                    scale: Qt.vector3d(0.07, 0.08, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a2a12" }
+                                }
+                                Model { // 嘴
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.0, -0.14, -0.612)
+                                    scale: Qt.vector3d(0.18, 0.06, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#1a2a12" }
+                                }
+                            }
+                        }
+                        onLoaded: if (item) item.parent = mobDelegate
+                    }
+                    Loader {
+                        active: entKind === EntityManager.Mob && entMobType === EntityManager.MobVillager
+                        sourceComponent: Component {
+                            Model {
+                                // t1107 村民（Villager，mobType 22；机制等价 MC 1.0 villager，§9 改名 + 原创模型/贴图）：
+                                //   **长袍人形**——MobModel 四盒（长袍覆脚无腿 + 大头 + 前伸长鼻 + 抱胸臂条），walkPhase
+                                //   无腿摆语义（绑 0 恒静）。不透明长袍（无透明面）。眼睛 overlay：头面前 2 白眼底 +
+                                //   2 深瞳（z = -0.22 头面前外贴 0.012 防共面；鼻居中不遮眼位）。pack 面：不接（候选池
+                                //   登记，mob_villager 程序贴图唯一路径）。
+                                visible: entKind === EntityManager.Mob && entMobType === EntityManager.MobVillager
+                                position: Qt.vector3d(0, mobModelYOff, 0) // = 0（长袍盒底 -0.90 贴 collision 底）
+                                scale: Qt.vector3d(1.0, 1.0, 1.0)
+                                geometry: MobModel {
+                                    mobType: 22
+                                    packTextured: false // t1107 pack 面不接（程序贴图唯一路径；候选池登记）
+                                    walkPhase: 0        // 长袍覆脚无腿摆
+                                }
+                                materials: PrincipledMaterial {
+                                    lighting: PrincipledMaterial.NoLighting
+                                    baseColor: { const _r = mon.revision; return _r >= 0 ? (entityManager.hurtFlashAt(index) > 0 ? "#ff0000" : terrainLight(worldClock.skyLight)) : "#000000" }
+                                    baseColorMap: mobVillagerTex
+                                }
+                                Model { // 白眼左
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.08, 0.74, -0.232)
+                                    scale: Qt.vector3d(0.07, 0.09, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#f0f0e8" }
+                                }
+                                Model { // 白眼右
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.08, 0.74, -0.232)
+                                    scale: Qt.vector3d(0.07, 0.09, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#f0f0e8" }
+                                }
+                                Model { // 深瞳左
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(-0.08, 0.72, -0.242)
+                                    scale: Qt.vector3d(0.035, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#20301a" }
+                                }
+                                Model { // 深瞳右
+                                    geometry: UnitCube {}
+                                    position: Qt.vector3d(0.08, 0.72, -0.242)
+                                    scale: Qt.vector3d(0.035, 0.05, 0.02)
+                                    materials: PrincipledMaterial { lighting: PrincipledMaterial.NoLighting; baseColor: "#20301a" }
                                 }
                             }
                         }

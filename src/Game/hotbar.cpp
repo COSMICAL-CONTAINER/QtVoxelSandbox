@@ -527,6 +527,8 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::SpawnEggOcelotId),      // t785 生物蛋（豹猫）：右键 → 生成野生豹猫
         int(RecipeRegistry::SpawnEggBabyShamblerId), // t952 生物蛋（小蹒跚者）：右键 → 生成幼体僵尸（生成时掷小鸡骑士组合骰）
         int(RecipeRegistry::SpawnEggCaveSpiderId),   // t1012③ 生物蛋（洞穴蜘蛛）：右键 → 生成洞穴蜘蛛（0.7× 蓝染 + 中毒 DoT）
+        int(RecipeRegistry::SpawnEggSlimeId),        // t1107 生物蛋（史莱姆）：右键 → 生成中档史莱姆（蛋区尾追加保连续同列）
+        int(RecipeRegistry::SpawnEggVillagerId),     // t1107 生物蛋（村民）：右键 → 生成村民（蛋区尾追加保连续同列）
         // t244 mob 死亡掉落物（杀猪 / 牛 / 羊产出；机制等价 MC 1.0 被动生物掉落，纯原创自绘 MaterialIcon §9a）：
         //   完成创造调色板一览 —— 生存时由 mob 死亡掉落 / 拾取获得，创造直接取用便于测试 / 装饰。
         //   可堆叠 64（走材料段默认 maxStack）；非方块 → 右键不放置（playercontroller selectedBlock 守 Air）。
@@ -764,7 +766,11 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::MelonSliceId),   // 瓜片：破瓜块 3-7 片；可食 +2；转换瓜种 / 合瓜块
         // t1105 南瓜种子一件（0x28B，瓜片 0x28A 之上段尾追加不插中间 = 存档安全铁律）：获取面 =
         //   野生南瓜 1:4 合成（创造调色板行为兜底获取面，同族口径）。MaterialIcon 自绘（§9 原创）。
-        int(RecipeRegistry::PumpkinSeedsId)  // 南瓜种子：野生南瓜 1:4 合成 + 茎掉落；种南瓜茎
+        int(RecipeRegistry::PumpkinSeedsId),  // 南瓜种子：野生南瓜 1:4 合成 + 茎掉落；种南瓜茎
+        // t1107 史莱姆球一件（0x28C，南瓜种子 0x28B 之上段尾追加不插中间 = 存档安全铁律）：获取面 =
+        //   小史莱姆掉 0-2（创造调色板行为兜底获取面，同族口径）。双蛋入蛋区（0x28D/0x28E，
+        //   t785 蛋区连续同列契约）。MaterialIcon 自绘（§9 原创）。
+        int(RecipeRegistry::SlimeBallId)         // 史莱姆球：小史莱姆掉 0-2；收藏 / 候选池原料
     };
 }
 
@@ -1371,6 +1377,10 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::MelonSliceId)  return QStringLiteral("瓜片");     // 破瓜块 3-7 片；可食 +2；转换瓜种
         // t1105 南瓜种子（0x28B，瓜片之上段尾追加）：名面一件（通用描述词，§9 合法）。
         if (blockId == RecipeRegistry::PumpkinSeedsId) return QStringLiteral("南瓜种子"); // 野生南瓜 1:4 合成；种南瓜茎
+        // t1107 史莱姆球 + 双蛋（0x28C..0x28E，南瓜种子之上段尾追加）：名面三件（通用描述词，§9 合法）。
+        if (blockId == RecipeRegistry::SlimeBallId)        return QStringLiteral("史莱姆球");       // 小史莱姆掉 0-2；收藏 / 候选池原料
+        if (blockId == RecipeRegistry::SpawnEggSlimeId)    return QStringLiteral("生物蛋（史莱姆）"); // 右键 → 中档史莱姆（敌对弹跳）
+        if (blockId == RecipeRegistry::SpawnEggVillagerId) return QStringLiteral("生物蛋（村民）");   // 右键 → 村民（被动游荡）
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落；打火石配方原料。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::FlintId) return QStringLiteral("燧石"); // 挖沙砾概率掉落；打火石配方原料
         // t891② 烈焰弹（材料段 0x25C；机制等价 MC fire charge）：燃烬粉+煤/炭+火药合成 3 发；右键发射火球

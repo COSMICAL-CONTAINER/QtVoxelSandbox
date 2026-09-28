@@ -909,6 +909,8 @@ const QList<QPair<int, QString>> &itemFilenameMap()
         //   同管线成蛋形 + 同族染色可辨，区别成体蹒跚者蛋暗绿）。
         {0x25D, QStringLiteral("zombie_spawn_egg.png")},   // 生物蛋（小蹒跚者；t1008① 补映射，缺 → spawnEggTint 生成式回退）
         {0x25E, QStringLiteral("cave_spider_spawn_egg.png")}, // 生物蛋（洞穴蜘蛛；t1012③；现代包有则直用，缺 → spawnEggTint 生成式回退）
+        {0x28D, QStringLiteral("slime_spawn_egg.png")},       // 生物蛋（史莱姆；t1107；包有则直用，缺 → spawnEggTint 生成式回退）
+        {0x28E, QStringLiteral("villager_spawn_egg.png")},    // 生物蛋（村民；t1107；包有则直用，缺 → spawnEggTint 生成式回退）
         // —— 护甲段（ArmorId；皮革/铁/铜/金/钻石×4 部位。铜护甲 t613 入映射：现代包 copper_* 直用；老包
         //   缺 copper_* → itemIconSource 走 copperIronFallback 用 iron_* 染铜（描边带 + 铜橙梯度））——
         {0x300, QStringLiteral("leather_helmet.png")},
@@ -2187,6 +2189,16 @@ const EggTint *spawnEggTint(int itemId)
     if (itemId == 0x25E) {
         static const EggTint kCaveSpider = { { 0x1c, 0x3a, 0x52 }, { 0xc8, 0x18, 0x18 } };
         return &kCaveSpider;
+    }
+    // t1107 史莱姆：青绿凝胶壳 + 深绿凝胶斑（slime shell #5fa83a / gel #3f7a28——渲染凝胶族同板）。
+    if (itemId == 0x28D) {
+        static const EggTint kSlime = { { 0x5f, 0xa8, 0x3a }, { 0x3f, 0x7a, 0x28 } };
+        return &kSlime;
+    }
+    // t1107 村民：长袍棕壳 + 深棕袍纹（villager shell #8a6a4a / robe #6e5238——长袍族同板）。
+    if (itemId == 0x28E) {
+        static const EggTint kVillager = { { 0x8a, 0x6a, 0x4a }, { 0x6e, 0x52, 0x38 } };
+        return &kVillager;
     }
     return nullptr;
 }

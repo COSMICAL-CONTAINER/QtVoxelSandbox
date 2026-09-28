@@ -115,7 +115,9 @@ public:
     //   §9）。**追加在末尾**（同上纪律：armorProtectionFactor 按序数 switch 有 default 兜底，DeathCause 不进存档）。
     //   t794 再追 1：Anvil=被落下的铁砧砸死（下落铁砧砸中玩家；EntityManager tick FallingBlock 砸伤分支
     //   mobAttackedPlayer 携 MobAnvil 哨兵 → 呈现层映射本死因，同 MobTnt 先例）。
-    enum DeathCause { Generic = 0, Fall, Suffocation, Drowning, Starvation, Shambler, Bones, Spider, Stalker, Fire, Cactus, Tnt, GolemLaunchFall, GolemSlain, Nightwalker, Emberling, AbyssPearlTp, Anvil };
+    //   t1107 再追 1：Slime=被史莱姆撞杀（1.0 死讯「slain by Slime」同源；aiSlime 接触伤害 mobAttackedPlayer
+    //   携 MobSlime → 呈现层映射本死因）。**追加在末尾**（同上纪律）。
+    enum DeathCause { Generic = 0, Fall, Suffocation, Drowning, Starvation, Shambler, Bones, Spider, Stalker, Fire, Cactus, Tnt, GolemLaunchFall, GolemSlain, Nightwalker, Emberling, AbyssPearlTp, Anvil, Slime };
     Q_ENUM(DeathCause)
 
     explicit PlayerState(QObject *parent = nullptr);

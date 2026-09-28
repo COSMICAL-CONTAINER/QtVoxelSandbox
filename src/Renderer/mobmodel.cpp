@@ -373,6 +373,8 @@ constexpr bool kValidMobModelType[] = {
     /* 18 Anvil 哨兵 */  false,
     /* 19 BabyShambler */ true, // t952 小蹒跚者（幼体僵尸：头大身小比例人形盒）
     /* 20 CaveSpider */    true, // t1012③ 洞穴蜘蛛（与 7 Spider 共享几何；0.7× 缩放/蓝染在 QML delegate）
+    /* 21 Slime */         true, // t1107 史莱姆（大档基准立方；QML 三档缩放）
+    /* 22 Villager */      true, // t1107 村民（长袍人形四盒）
 };
 // review24 低危收尾（#35）：表长钉死到头常量（t782 根因复刻防线——MobType 枚举中部插值 / 尾部新增忘补
 //   表行时，本断言 + 矩阵探针「kValidMobTypeCount == EntityManager::MobBabyShambler+1」两级编译期拦截；
@@ -1178,6 +1180,36 @@ void MobModel::rebuild()
         sheepHeadIdxStart = int(idx.size()); // 头盒索引段起点（subset 1 边界；sheepSkinHead 才消费）
         setMobTex(0, 0, 6, 6, 8);
         addHeadRot(0.00f, 0.10f, -0.45f, 0.14f, 0.16f, 0.16f, m_headPitch, verts, idx, bMin, bMax); // 小头（吃草时俯仰；subset 1）
+    } else if (m_mobType == 21) {
+        // t1107 史莱姆（MobSlime；机制等价 MC 1.0 slime，§9 区隔原创模型 + 程序贴图）—— **单一大档基准立方**
+        //   （半长 0.60 三轴，心在原点 → spans y[−0.60,+0.60]，盒底本地 −0.60）。尺寸缩放在呈现层：
+        //   QML delegate scale = halfH/0.60（中档 0.5× / 小档 0.25×）+ mobModelYOff=0（缩后盒底恰贴
+        //   collision 底面——缩比与 halfH 同源恒抵消）。**半透明观感 + 内核不在本几何**（MobModel 是
+        //   不透明几何源；外层 opacity 0.75 + 内核盒由 QML delegate 补子 Model，透明度走
+        //   PrincipledMaterial.opacity，几何层零改动）。pack 面：**不接**（无 slime/villager 包映射——
+        //   本工程几何为原创比例，接包 UV 需逐盒 texOffs 取证；候选池登记，当下程序贴图唯一路径 →
+        //   setMobTex 仅占位 MC slime(0,0)16³ 值，packTextured 恒 false 不消费）。
+        g_texW = 64.0f; g_texH = 32.0f;
+        setMobTex(0, 0, 16, 16, 16);
+        addBox(0.00f, 0.00f, 0.00f, 0.60f, 0.60f, 0.60f, verts, idx, bMin, bMax); // 大档基准立方（QML 缩放三档）
+    } else if (m_mobType == 22) {
+        // t1107 村民（MobVillager；机制等价 MC 1.0 villager，§9 区隔原创模型 + 程序贴图）—— **长袍人形**：
+        //   长袍躯干（无腿——长袍覆脚，MC 村民双臂抱胸无腿摆语义）+ 大头 + 前伸长鼻 + 抱胸横臂条。
+        //   局部原点 = 腿底本地 y=−0.90 贴 collision 底面（halfH=0.90 → mobModelYOff=0）。长袍心 y=−0.20
+        //   半 (0.30,0.70,0.22) → spans y[−0.90,+0.50]；头心 y=+0.695 半 (0.22,0.25,0.22) → 顶 +0.945
+        //   （略超盒 0.045 = MC 人形头风格，同蹒跚者手臂超盒先例）；鼻心 (0,+0.64,−0.26) 半 (0.05,0.09,0.06)
+        //   前伸贴头面前（z −0.22 面外凸 0.04 防共面 z-fight）；抱胸臂条心 (0,+0.38,−0.20) 半 (0.30,0.09,0.14)
+        //   横贯胸前凸出袍面。walkPhase 不消费（无腿摆；传入恒被忽略）。pack 面：不接（同史莱姆——候选池
+        //   登记；setMobTex 占位值不消费）。
+        g_texW = 64.0f; g_texH = 64.0f;
+        setMobTex(0, 19, 8, 18, 6);
+        addBox(0.00f, -0.20f, 0.00f, 0.30f, 0.70f, 0.22f, verts, idx, bMin, bMax); // 长袍（覆脚无腿）
+        setMobTex(0, 0, 8, 10, 8);
+        addBox(0.00f, 0.695f, 0.00f, 0.22f, 0.25f, 0.22f, verts, idx, bMin, bMax); // 大头
+        setMobTex(0, 0, 2, 4, 2);
+        addBox(0.00f, 0.64f, -0.26f, 0.05f, 0.09f, 0.06f, verts, idx, bMin, bMax); // 长鼻（村民特征）
+        setMobTex(0, 19, 8, 4, 6);
+        addBox(0.00f, 0.38f, -0.20f, 0.30f, 0.09f, 0.14f, verts, idx, bMin, bMax); // 抱胸双臂（横条）
     } else {
         // 猪（默认 / 兜底）：紧凑低矮、短腿、大头。机制等价 MC 猪形态（非名词照搬）。
         // R19 C3 UV（MC Pig base 64×32；U1 §1）：body(28,8)10×16×8 / head(0,0)8×8×8 / leg(0,16)4×6×4。

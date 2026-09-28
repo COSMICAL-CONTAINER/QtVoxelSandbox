@@ -603,6 +603,24 @@ public:
     //   1:4 合成本种子；矿井箱战利品行不交付、候选池登记留痕）。次要源 = 破南瓜茎掉 1 种（种植回路）。
     //   消费面：右键耕地种南瓜茎（kCropSeeds 映射表同门）+ 唯一无合成产物（1.0 无南瓜派等下游）。
     static constexpr int PumpkinSeedsId = 0x28B; // 南瓜种子：野生南瓜 1:4 合成 + 茎掉落；种南瓜茎
+    // t1107 史莱姆球 + 生物蛋两件（材料段 0x28C..0x28E，南瓜种子 0x28B 之上**段尾追加**不插中间 =
+    //   存档安全铁律）：
+    //   **史莱姆球**（SlimeBallId=0x28C）：机制等价 MC 1.0 slimeball（同名通用词，§9 合法）。生存唯一
+    //   获取源 = 杀**小史莱姆**掉 0-2（MC 1.0 口径：仅最小档掉落；中/大档死亡分裂不掉物）。用途面实读
+    //   留痕：1.0 工程内**无合成消费行**——粘液球 1.0 下游 = 黏活塞（Beta 1.7 在册，本工程无活塞面）+
+    //   岩浆膏（1.0.0 酿造入版，本工程酿造表无火抗药水对应的岩浆膏行——火抗已由「火抗药水」直酿承载，
+    //   t1101 延长族行在案）→ 两下游面均缺席，本单登记候选池（黏活塞 / 岩浆膏合成行留待相应方块/酿造
+    //   面开题时接），当下=纯掉落收藏 + 创造调色板兜底获取面。可堆叠 64（材料段默认零特判）；无 pack
+    //   映射（越表界 → -1 → 引擎自绘 MaterialIcon，同南瓜种子先例）。
+    //   **生物蛋（史莱姆）**（SpawnEggSlimeId=0x28D）：机制等价 MC 1.0 slime spawn egg（蛋本身为 Beta 1.2
+    //   创造面，史莱姆蛋为工程扩展——夜行者/燃烬者/狼/豹猫蛋同门先例：全员生物配蛋）。右键地面 →
+    //   mobTypeForSpawnEgg 单一权威表 → MobSlime（**固定中档 kSlimeDefaultSpawnSize=2**——蛋刷确定性，
+    //   自然刷怪才掷三档骰）；右键刷怪笼 → 改 slime 笼（t787 交互，spawnerMobTypeForState 白名单在案）。
+    //   **生物蛋（村民）**（SpawnEggVillagerId=0x28E）：机制等价 MC 1.0 villager spawn egg（工程扩展同门）。
+    //   右键地面 → MobVillager；右键刷怪笼 → 改村民笼（被动闸门组）。图标：MaterialIcon 自绘（§9 原创）。
+    static constexpr int SlimeBallId        = 0x28C; // 史莱姆球：小史莱姆掉 0-2；1.0 无合成消费（候选池登记）
+    static constexpr int SpawnEggSlimeId    = 0x28D; // 生物蛋（史莱姆）：右键 → 生成中档史莱姆（MobSlime）
+    static constexpr int SpawnEggVillagerId = 0x28E; // 生物蛋（村民）：右键 → 生成村民（MobVillager）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

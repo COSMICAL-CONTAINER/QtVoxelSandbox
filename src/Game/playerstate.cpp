@@ -59,6 +59,7 @@ QString PlayerState::deathCauseText() const
     case Emberling:       return QStringLiteral("被燃烬者的火球焚杀"); // t728 火球命中点燃（烈焰人，§9 改名）
     case AbyssPearlTp:    return QStringLiteral("被暗渊珠传送撕碎"); // t758 暗渊珠落点传送的固定代价伤害（§9 原创文案）
     case Anvil:           return QStringLiteral("被落下的铁砧砸死"); // t794 下落铁砧砸中玩家（机制等价 MC anvil crush 死因）
+    case Slime:           return QStringLiteral("被史莱姆撞杀"); // t1107 史莱姆接触伤害（1.0 死讯 slain by Slime 同源）
     case Generic:
     default:           return QStringLiteral("不明原因");
     }

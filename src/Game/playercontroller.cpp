@@ -5327,6 +5327,8 @@ void PlayerController::placeBlock()
                 case EntityManager::MobOcelot:      color = QStringLiteral("#e8c890"); break; // t785 奶油底褐纹（机制等价豹猫；蛋刷野生）
                 case EntityManager::MobBabyShambler: color = QStringLiteral("#5a7a42"); break; // t952 亮黄绿幼体色（占位串：小蹒跚者走 MobModel + 贴图不读 color，文档锚同族）
                 case EntityManager::MobCaveSpider:   color = QStringLiteral("#1c3a52"); break; // t1012③ 暗蓝染（机制等价洞穴蜘蛛；占位串走 MobModel 不读 color，文档锚同 Spider 家族）
+                case EntityManager::MobSlime:        color = QStringLiteral("#5fa83a"); break; // t1107 青绿凝胶色（机制等价史莱姆；占位串走 MobModel 半透明立方不读 color，文档锚同族——蛋刷固定中档）
+                case EntityManager::MobVillager:     color = QStringLiteral("#8a6a4a"); break; // t1107 长袍棕（机制等价村民；占位串走 MobModel 长袍人形不读 color，文档锚同族）
                 default: break; // 防御（入口条件已排除 -1；表值恒非空 mobType）
                 }
                 // 生成位 = 命中面相邻格（同方块放置；右键顶面 → 上方一格、右键侧壁 → 玩家侧空气格）。
@@ -6611,6 +6613,8 @@ int PlayerController::mobTypeEggId(int mobType)
     case EntityManager::MobOcelot:   return RecipeRegistry::SpawnEggOcelotId;         // t878④（中键复制豹猫蛋）
     case EntityManager::MobBabyShambler: return RecipeRegistry::SpawnEggBabyShamblerId; // t952（中键复制小蹒跚者蛋）
     case EntityManager::MobCaveSpider:   return RecipeRegistry::SpawnEggCaveSpiderId;   // t1012③（中键复制洞穴蜘蛛蛋）
+    case EntityManager::MobSlime:        return RecipeRegistry::SpawnEggSlimeId;        // t1107（中键复制史莱姆蛋）
+    case EntityManager::MobVillager:     return RecipeRegistry::SpawnEggVillagerId;     // t1107（中键复制村民蛋）
     default: return 0; // 无蛋物品的 mob（Test/Golem/Silverfish/Tnt 哨兵）
     }
 }
