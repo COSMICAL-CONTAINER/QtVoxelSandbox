@@ -408,6 +408,16 @@ bool mobEmbeddedHorizontalEscape(World *world, float posX, float posZ, int feetC
 EntityManager::EntityManager(QObject *parent) : QObject(parent)
 {
     m_clock.start(); // 任务（弓箭 60s despawn）：墙钟计时器（arrowSpawnMs / tick 硬上限用）
+    // t1107 修（r2077 段跑抓出的真 bug，t1106 同族根因的**结构性收口**）：槽池一次预留 kCap——
+    //   acquireSlot 的 push_back 此后**永不扩容**（活体恒 ≤kCap=64 且 releaseSlot 只标记不缩容 →
+    //   m_entities.size() 终身 ≤kCap）→ std::vector 重分配从根上消失。根因：tick 主循环以
+    //   `Entity &e = m_entities[idx]` 持引用横跨整个 AI/物理段，任何段内 spawn（发雪球/箭/火球/蛋/
+    //   t1107 分裂子代）触发 push_back 扩容即令 e 及全部段落局部 Entity& 悬空——t1106 只修了
+    //   aiSnowGolem 的单点写回（attackCooldown 经 idx），tick 循环自身的 e 引用仍是活雷；sizeof(Entity)
+    //   随 t1107 新字段（slimeSize）变化 → 扩容时点漂移 → r2076c 探针偶发踩雷（段跑 segfault 实证，
+    //   HEAD 基线同链路 6/6 稳定 = 扩容时点恰未踩中）。预留 = 零重分配保证杀掉全族隐患（比逐点
+    //   经-idx 化更彻底），成本 ~64×sizeof(Entity) 常驻（可忽略）。
+    m_entities.reserve(int(kCap));
 }
 
 // t935 perf 槽位可见态指纹（= Main.qml mobHost delegate 绑定读到的 At() 访问器底层字段集的散列）。
@@ -588,8 +598,27 @@ void EntityManager::applyMobCollisionBox(int mobType, Entity &e)
         //   0.7×0.7×0.7 缩比——spider 0.9×0.6 × 0.7 → 0.64 宽（halfW 0.32）/ 0.42 高（halfH 0.21）；
         //   halfH 0.21 恰 = MobModel 蜘蛛腿底 0.30 × 0.7 → QML mobModelYOff=0 腿底贴地零偏移）。
         case MobCaveSpider: e.halfW = 0.32f; e.halfH = 0.21f; e.hostile = true; break;
+        // t1107 史莱姆（MobSlime）：敌对弹跳立方（hostile=true——参与黑暗刷怪敌对预算 / 远距消失，机制
+        //   等价 MC slime 敌对生物）。盒基准 = 大档 0.60/0.60（applySlimeSizeBox 会按尺寸档精化——本 case
+        //   是通用入口的缺省兜底：spawnMobCore 走到 slime 分支后立即调 applySlimeSizeBox 覆写，此处保
+        //   任何旁路调用也落在大档合法盒）；大小 = MC 口径 slime 碰撞随尺寸缩放、0.52×size 量级收进本
+        //   工程盒步进（0.52×4≈2.08 直径的 MC 原值对小世界观感偏大，登记简化）。
+        case MobSlime:    e.halfW = 0.60f; e.halfH = 0.60f; e.hostile = true; break;
+        // t1107 村民（MobVillager）：被动人形（hostile 默认 false——不进黑暗刷怪 / 不攻击不仇恨；1.0 村民
+        //   无 panic，setPanicFlee 白名单外静默 no-op 在案）。盒 = 人形通用 0.6×1.8（halfW 0.30 / halfH
+        //   0.90，机制等价 MC 1.0 villager 0.6 宽口径；长袍覆盖腿 → 无腿摆语义，几何静态）。
+        case MobVillager: e.halfW = 0.30f; e.halfH = 0.90f; break;
         default:          e.halfW = 0.50f; e.halfH = 0.50f; break; // MobTest / 通用：1×1×1（UnitCube 精确贴合，保 t95 旧路径）
     }
+}
+
+// t1107 史莱姆尺寸档 → 碰撞盒（见头文件注释；applyMobCollisionBox 的 slime 专属后置精化，单一权威）。
+//   缩比基准 = 大档 0.60：half = 0.60 × size/4 → 大 4 档 0.60 / 中 2 档 0.30 / 小 1 档 0.15。静态纯函数。
+void EntityManager::applySlimeSizeBox(Entity &e)
+{
+    const float half = 0.60f * (float(e.slimeSize) / 4.0f);
+    e.halfW = half;
+    e.halfH = half;
 }
 
 int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString &color, int maxHealth)
@@ -600,6 +629,13 @@ int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString 
     }
     Entity e;
     applyMobCollisionBox(mobType, e); // t1025 碰撞盒单一权威（原内联 switch 本体抽出；显式传参——e.mobType 此处尚未赋值）
+    // t1107 史莱姆缺省档（生物蛋 / 通用入口路径——spawnSlime 显式传档路径会经槽位写回覆盖）：中档
+    //   kSlimeDefaultSpawnSize + 血量=尺寸档（MC 1.0 slime health==size，区别于通用 kDefaultMaxHealth）
+    //   + 盒按档精化。须在 e.pos 赋值**之前**（pos.y 读 e.halfH——精化后盒才得正确贴地高度）。
+    if (mobType == MobSlime) {
+        e.slimeSize = kSlimeDefaultSpawnSize;
+        applySlimeSizeBox(e);
+    }
     // pos.y 用 halfH（非旧版固定 +0.5）：spawn 在空气格 y 上方贴地（resting 高度 = y + halfH）→
     //   免首帧 collision 底面嵌入地面再 snap（cow halfH=0.70 时旧 +0.5 会嵌 0.2 进支撑方块）。
     //   t728 燃烬者（Emberling）：+kEmberlingHoverOffset 抬升 → spawn 即悬空 ~0.4 格（机制等价 MC 烈焰人飞浮）。
@@ -610,6 +646,13 @@ int EntityManager::spawnMobCore(int x, int y, int z, int mobType, const QString 
     e.mobType = mobType;
     e.maxHealth = maxHealth > 0 ? maxHealth : kDefaultMaxHealth;
     e.health = e.maxHealth;
+    // t1107 史莱姆血量=尺寸档（MC 1.0 slime health==size 口径：大 4/中 2/小 1）——覆盖上一行的通用
+    //   kDefaultMaxHealth=10；显式传 maxHealth>0 的路径（spawnMobTyped 直调）同样按档覆盖（slime 血量
+    //   单一权威 = slimeSize，非 caller 血量参数，防蛋表/自然刷怪两路血量漂移）。
+    if (mobType == MobSlime) {
+        e.maxHealth = e.slimeSize;
+        e.health = e.maxHealth;
+    }
     e.dead = false;
     e.hurtFlash = 0.0f;
     e.deathTimer = 0.0f;
@@ -1196,6 +1239,14 @@ void EntityManager::spawnHostileMob(int x, int y, int z, int mobType)
 {
     QString color;
     int health = kHostileDefaultHealth;
+    // t1107 史莱姆分流（刷怪笼蛋改型/自然刷怪统一入口到 slime 专用生成）：spawnSlime 收口尺寸档/血量/
+    //   盒三面（spawnHostileMob 的 kHostileDefaultHealth=20 通用敌对血量对 slime 不适用——slime 血量
+    //   单一权威=尺寸档，见 spawnMobCore slime 覆写注）；自然刷怪路径直接调 spawnSlime 不经本入口，
+    //   此处仅兜底「笼型=slime 的刷怪笼」刷出（固定中档，机制等价 MC 笼刷随机器官方档）。
+    if (mobType == MobSlime) {
+        spawnSlime(x, y, z, kSlimeDefaultSpawnSize);
+        return;
+    }
     if (mobType == MobBones) {
         color = QStringLiteral("#d8d4c4"); // Bones：灰白骨色（机制等价 MC 骷髅；原创配色非照搬）
     } else if (mobType == MobStalker) {
@@ -1241,12 +1292,54 @@ void EntityManager::spawnPassiveMob(int x, int y, int z, int mobType)
     case MobWolf:     color = QStringLiteral("#c8ccd4"); break;
     case MobOcelot:   color = QStringLiteral("#e8c890"); break;
     case MobPig:      color = QStringLiteral("#f0a8b0"); break;
+    case MobVillager: // t1107 村民（刷怪笼蛋改型被动笼路径）：长袍棕占位串（渲染走 MobModel + mob_villager
+                      //   程序贴图不读 color，文档锚同族）；1.0 村民非自然刷怪——仅蛋改笼可达，笼刷即收口。
+        color = QStringLiteral("#8a6a4a"); break;
     default:
         color = QStringLiteral("#f0a8b0"); // 猪（兜底同型防御）
         if (mobType != MobPig) mobType = MobPig; // 防御：非被动七型一律按 Pig（敌对型应走 spawnHostileMob）
         break;
     }
     spawnMobTyped(x, y, z, mobType, color, kDefaultMaxHealth);
+}
+
+// t1107 史莱姆生成入口（见头文件注释）：spawnMobTyped(MobSlime) 生成（spawnMobCore 缺省中档 + 血量=
+//   档）→ 槽位写回显式尺寸档 + 盒精化（size ∈ {1,2,4}，非法值防御回退中档——同 spawnHostileMob 回退
+//   Shambler 模式）。返槽索引；达 kCap → -1（spawnMobTyped 内静默）。
+int EntityManager::spawnSlime(int x, int y, int z, int size)
+{
+    const int slot = spawnMobTyped(x, y, z, MobSlime, QStringLiteral("#5fa83a"), 0);
+    if (slot < 0) return slot; // 满槽（spawnMobTyped 已告警）
+    Entity &e = m_entities[size_t(slot)];
+    e.slimeSize = (size == 1 || size == 2 || size == 4) ? size : kSlimeDefaultSpawnSize;
+    applySlimeSizeBox(e);     // 盒随档精化（spawnMobCore 落的是缺省中档盒）
+    e.maxHealth = e.slimeSize; // 血量=尺寸档（spawnMobCore 缺省中档血量 → 显式档覆盖）
+    e.health = e.maxHealth;
+    qCInfo(lcEnt) << "spawned slime size" << e.slimeSize << "at" << x << y << z;
+    return slot;
+}
+
+// t1107 第 i 只 mob 的史莱姆尺寸档（见头文件注释）。越界 / 非 slime → 0。
+int EntityManager::slimeSizeAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0;
+    const Entity &e = m_entities[size_t(i)];
+    if (!e.alive || e.kind != Mob || e.mobType != MobSlime) return 0;
+    return e.slimeSize;
+}
+
+// t1107 史莱姆块判定（见头文件注释；MC 1.0 口径 10% chunk + 深度门两段中的纯函数段）：种子 + chunk
+//   坐标 32 位混合（两次乘子扩散 + 异或折叠）→ %10==0 判真。确定性（无 RNG——同 seed 同 chunk 恒同
+//   判，世界生成语义非生物 AI；PLAN §2-K 禁运行期随机源合规）。乘子取工程 hash 惯例素数
+//   （kSlimeChunkHashA/B），非 MC 原生 java.util.Random 逐位复刻（机制等价登记——10% 命中率与
+//   确定性两性质对齐，具体 chunk 分布与本世界种子耦合，跨 seed 无相关性即达标）。
+bool EntityManager::slimeChunkForSeed(int seed, int chunkX, int chunkZ)
+{
+    quint32 h = quint32(seed) ^ quint32(chunkX) * kSlimeChunkHashA ^ quint32(chunkZ) * kSlimeChunkHashB;
+    h ^= h >> 16;
+    h *= kSlimeChunkHashA;
+    h ^= h >> 13;
+    return (h % 10u) == 0u; // 10% chunk（MC 1.0 slime chunk 口径）
 }
 
 // t374 被动生物群系化类型选取：据群系 id（World::biomeIdAt 编码）按 kPassiveSpawnWeights 加权随机返
@@ -1299,6 +1392,8 @@ int EntityManager::spawnerMobTypeForState(int state) const
         case MobEmberling:
         case MobBabyShambler: // t952 小蹒跚者蛋（0x25D）右键刷怪笼改型（组合骰在 spawnMobCore 末段照掷）
         case MobCaveSpider:   // t1012③ 洞穴蜘蛛笼（SpawnerStateCaveSpider=0x28；worldgen pieceSpiderRoom 转正写入）
+        case MobSlime:        // t1107 史莱姆蛋（0x28D）改笼：敌对笼闸门组（全局/区域/笼周三重），spawnHostileMob 分流 spawnSlime
+        case MobVillager:     // t1107 村民蛋（0x28E）改笼：被动笼同型 local cap 闸门，spawnPassiveMob 白名单（长袍棕 case 在案）
             return typeBits;
         default:
             return MobShambler;
@@ -1575,6 +1670,24 @@ void EntityManager::tickHostileLife(qreal dt, World *world, const QVector3D &pla
                 // review26 #19：脚下支撑收口 isCollidable（t865 单一权威）——旧 isSolid（非 air）把花草 /
                 //   轨 / 火把 / 作物 / 火当「可站立」，刷在其上的 mob 下帧失支撑再坠落。
                 if (!world->isCollidable(cx, cy - 1, cz)) continue; // 脚下须有碰撞支撑（防悬空 / 花草刷怪）
+                // t1107 史莱姆块分流（MC 1.0 口径）：深度 <kSlimeSpawnMaxY(40) 且该 chunk 是 slime chunk
+                //   （slimeChunkForSeed 确定性 10%）→ 本格无视光照门刷史莱姆（机制等价 MC slime chunk 深层
+                //   生成不受亮度约束；史莱姆不走下方敌对五份抽签表——MC 口径史莱姆生成与黑暗刷怪池独立，
+                //   仅共享本选择点与敌对预算）。分流的骰子消费：尺寸三档骰 bounded(3)（MC 自然刷出 1/2/4
+                //   三档口径）——仅在真史莱姆格消费（非 slime 格不掷，防主抽签流漂移；非 slime 路径骰子
+                //   消费次数与旧基线逐位一致 = r2077c 常驻腿钉面）。
+                const bool slimeCell = cy < kSlimeSpawnMaxY
+                    && slimeChunkForSeed(world->seed(),
+                                         cx >= 0 ? cx / 16 : (cx - 15) / 16,   // floor 除 16（负坐标安全）
+                                         cz >= 0 ? cz / 16 : (cz - 15) / 16);
+                if (slimeCell) {
+                    const int slimeSize = 1 + int(rng->bounded(3)); // {1,2,3}→ 映射 {1,2,4}
+                    const int naturalSize = (slimeSize == 1) ? 1 : (slimeSize == 2) ? 2 : 4;
+                    spawnSlime(cx, cy, cz, naturalSize);
+                    qCInfo(lcEnt) << "slime spawned size" << naturalSize << "at" << cx << cy << cz
+                                  << "(slime chunk, depth gate only)";
+                    break; // 本周期成功 spawn 1 个即收手（同敌对路径）
+                }
                 const quint8 skyL = world->skyLightAt(cx, cy, cz);
                 const quint8 blkL = world->blockLightAt(cx, cy, cz);
                 const float effSkyL = float(skyL) * skyBrightness; // 天光乘昼夜（夜间→0、白天→原值）
@@ -1732,10 +1845,11 @@ void EntityManager::tickSpawners(qreal dt, World *world, const QVector3D &player
                 case MobSquid:
                 case MobWolf:
                 case MobOcelot:
+                case MobVillager: // t1107 村民笼 = 被动闸门组（同型 local cap；长袍棕 case 已入 spawnPassiveMob 白名单）
                     passiveType = true;
                     break;
                 default:
-                    break; // 敌对七型（Shambler/Bones/Stalker/Spider/Silverfish/Nightwalker/Emberling）
+                    break; // 敌对型（Shambler/Bones/Stalker/Spider/Silverfish/Nightwalker/Emberling/Slime——t1107 史莱姆走敌对笼闸门组）
                 }
 
                 // 闸门按笼型分流（review #31：MC spawner 不受 ambient hostile cap 约束——被动笼仅留同型
@@ -4473,6 +4587,91 @@ bool EntityManager::aiHostile(int idx, Entity &e, float dt, World *world, const 
     }
 
     return moved;
+}
+
+// t1107 史莱姆 AI（见头文件 aiSlime 注释）。机制对齐 MC 1.0 slime：敌对弹跳立方——贴地周期起跳 +
+//   空中滑流 + 近距接触伤害（伤害=尺寸档，最小档无攻击）。实现三段：
+//   (1) 攻击/跳跃计时推进：attackCooldown 复用敌对节律；wanderTimer 复用为**贴地跳跃倒计时**（同
+//       aiWander 的时间片字段复用惯例，slime 无 wander 语义——字段即「下次起跳还有多久」）。
+//   (2) 起跳帧（resting && wanderTimer<=0）：追击（玩家可锁定且 ≤kDetectRange）→ yaw 朝玩家；否则随机
+//       yaw。vy = kSlimeJumpSpeed × 档缩比（size/4），jumpGX/GZ = 朝向 × kSlimeChaseSpeed × 档缩比 ×
+//       （追击 1.0 / 游荡 0.5）× speedScale（水中减速透传，同 aiWander 的 t298 口径）——空中滑流由
+//       tick 共享物理段应用（t670 通道），着地自动清零。跳跃计时重置 kSlimeJumpIntervalMin..Max。
+//   (3) 接触伤害：伤害=尺寸档（大 4/中 2）且**最小档 0 无攻击**（1.0 口径；直接不发信号）；其余门 =
+//       XZ≤kAttackRange + 垂直同层 kAttackVertRange + 单 mob 冷却 + t321 全局节流（同 aiHostile (4)，
+//       击退方向 = 推开玩家）。
+//   分层（PLAN §2）：只读自身 + 传参玩家位；攻击走语义信号；不读写 World（world 参数保留签名兼容）。
+bool EntityManager::aiSlime(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos,
+                            float worldW, float worldD, float speedScale, bool playerTargetable)
+{
+    Q_UNUSED(idx);
+    Q_UNUSED(world);
+    Q_UNUSED(worldW);
+    Q_UNUSED(worldD);
+    // t1029 wander 冻结测试缝（setWanderFrozen）：早退在计时推进 / RNG 消费之前（同 aiWander 缝语义
+    //   ——RNG 流不推进、状态保持；仅 moveSpeed 归零）。缺省 false = 生产路径零改动。
+    if (m_wanderFrozen) {
+        e.moveSpeed = 0.0f;
+        return false;
+    }
+
+    // (1) 单 mob 攻击冷却递减（不论追踪与否；自然走完，复击不卡陈旧值）。
+    if (e.attackCooldown > 0.0f) {
+        e.attackCooldown -= dt;
+        if (e.attackCooldown < 0.0f) e.attackCooldown = 0.0f;
+    }
+
+    // 目标判定（t290 同门：玩家不可锁定 → 恒游荡跳；MC slime 寻敌 16 格 = kDetectRange 口径）。
+    const float pdx = playerPos.x() - e.pos.x();
+    const float pdz = playerPos.z() - e.pos.z();
+    const float pdy = playerPos.y() - e.pos.y();
+    const float pdist = std::sqrt(pdx * pdx + pdz * pdz);
+    const bool chasing = playerTargetable && pdist <= kDetectRange;
+
+    // (2) 起跳帧：仅贴地（resting）且跳跃倒计时到才跳（史莱姆无行走步态——空中只滑流）。
+    if (e.resting) {
+        e.wanderTimer -= dt;
+        if (e.wanderTimer <= 0.0f) {
+            // 方向：追击跳朝玩家 / 游荡跳随机（yaw ∈ [0,2π)，同 aiWander 掷法）。
+            if (chasing && pdist > 1e-4f) {
+                e.yawRad = std::atan2(-pdx, -pdz); // 朝玩家（dir=(-sin,-cos) 约定）
+            } else {
+                e.yawRad = float(QRandomGenerator::global()->bounded(62832)) / 10000.0f;
+            }
+            const float sizeScale = float(e.slimeSize) / 4.0f;       // 大 1.0 / 中 0.5 / 小 0.25
+            const float hopSpeed = kSlimeChaseSpeed * (chasing ? 1.0f : 0.5f) * speedScale;
+            e.vy = kSlimeJumpSpeed * sizeScale;                      // 大档峰值 v²/2g ≈ 1.0 格
+            e.jumpGX = -std::sin(e.yawRad) * hopSpeed * sizeScale;   // t670 滑流通道（着地自动清零）
+            e.jumpGZ = -std::cos(e.yawRad) * hopSpeed * sizeScale;
+            e.resting = false;                                       // 解除贴地 → 共享重力段接管抛物
+            e.wanderTimer = kSlimeJumpIntervalMin
+                + float(QRandomGenerator::global()->bounded(1000)) / 1000.0f
+                  * (kSlimeJumpIntervalMax - kSlimeJumpIntervalMin);
+            e.moveSpeed = hopSpeed * sizeScale;                      // 视觉/revision 刷新量（slime 无腿摆语义）
+            return true;                                             // 本帧起跳 → caller dirty
+        }
+        e.moveSpeed = 0.0f;                                          // 贴地候跳：静止（无步态可推进）
+        return false;
+    }
+
+    // 空中：无步态推进（滑流位移在 tick 共享段）；仅 (3) 接触伤害判定。
+    e.moveSpeed = 0.0f;
+
+    // (3) 接触伤害（NEG-1 敏感面：伤害=尺寸档，最小档 0 无攻击——直接不发信号；门内含
+    //     playerTargetable——观察者/创造不可锁定不挨打，同 aiHostile 的 t290 敌对链整体门语义）。
+    const int slimeDamage = (e.slimeSize > 1) ? e.slimeSize : 0;
+    if (slimeDamage > 0 && playerTargetable && pdist <= kAttackRange && std::abs(pdy) <= kAttackVertRange
+        && e.attackCooldown <= 0.0f && m_playerHitCooldown <= 0.0f) {
+        e.attackCooldown = kAttackCooldown;
+        m_playerHitCooldown = kPlayerHitThrottle; // t321 全局串行化玩家受击（同 aiHostile）
+        float kbX = 0.0f, kbZ = 0.0f;
+        if (pdist > 1e-3f) { kbX = pdx / pdist; kbZ = pdz / pdist; }
+        else { kbX = -std::sin(e.yawRad); kbZ = -std::cos(e.yawRad); } // 贴脸重合兜底（同 aiHostile）
+        emit mobAttackedPlayer(slimeDamage, int(MobSlime), kbX, kbZ);
+        qCInfo(lcEnt) << "slime" << idx << "size" << e.slimeSize
+                      << "contact-hit player for" << slimeDamage << "HP";
+    }
+    return false;
 }
 
 // t283 骷髅弓箭手 AI（detect→keep-distance→shoot；详见头文件 aiArcher 注释）。机制对齐 MC 1.0 骷髅射手。
@@ -7939,9 +8138,28 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     //   t789 woolIndex = 羊毛色下标（仅 MobSheep 有意义；呈现层羊分支据此掉对应色羊毛）。
                     //   review #32 sheared = 致死瞬间快照（deathSheared）—— 剪毛羊死亡不掉羊毛的呈现层守卫依据。
                     const int dx = qFloor(e.pos.x()), dy = qFloor(e.pos.y()), dz = qFloor(e.pos.z());
+                    // t1107 史莱姆死亡分裂快照 + 子代生成（MC 1.0 口径：大→中×2-4 / 中→小×2-4，子代落
+                    //   母体死亡格）：分裂在 mobDied 之前——(a) 快照 slimeSize 到局部量（spawn 可能扩容
+                    //   m_entities 使 e 引用悬空，t1106 雪傀儡 use-after-free 同族教训——快照后不再经 e
+                    //   读任何字段）；(b) 子代 spawnSlime 走 spawnMobTyped 可能 push_back → 完成后再 emit
+                    //   mobDied（emit 段本就只触本地量）。小档（size 1）零分裂——掉落走呈现层 mobDied
+                    //   slimeSize 分流（粘液球 0-2）。分裂骰 = 2 + bounded(3) → [2,4]（kSlimeSplitChildren
+                    //   Min..Max 窗）；子代档 = 母档/2（4→2 / 2→1）。
+                    int slimeSizeSnap = 0;
+                    if (e.mobType == MobSlime) slimeSizeSnap = e.slimeSize;
+                    if (slimeSizeSnap > 1) {
+                        const int children = kSlimeSplitChildrenMin
+                            + int(QRandomGenerator::global()->bounded(
+                                kSlimeSplitChildrenMax - kSlimeSplitChildrenMin + 1));
+                        for (int c = 0; c < children; ++c)
+                            spawnSlime(dx, dy, dz, slimeSizeSnap / 2);
+                        qCInfo(lcEnt) << "slime size" << slimeSizeSnap
+                                      << "split into" << children << "size" << slimeSizeSnap / 2;
+                    }
                     emit mobDied(dx, dy, dz, e.mobType, e.deathBurned, e.deathBaby,
                                  e.mobType == MobSheep ? e.sheepWool : 0,
-                                 e.mobType == MobSheep && e.deathSheared);
+                                 e.mobType == MobSheep && e.deathSheared,
+                                 slimeSizeSnap);
                     toRemove.push_back(idx);
                     dirty = true;
                 }
@@ -8336,7 +8554,14 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         e.fuseTimer = 0.0f;
                         dirty = true; // chasing/fuse 翻转 → bump 让 QML 收回追踪高亮 / 蓄力膨胀
                     }
-                    if (aiWander(e, float(aiDt), world, worldW, worldD, speedScale)) dirty = true;
+                    // t1107 史莱姆不走 aiWander 滑行（无步态语义——走行分派会让创造模式下的史莱姆
+                    //   「贴地滑行」而非弹跳，观感破绽）：玩家不可锁定 → aiSlime(playerTargetable=false)
+                    //   恒游荡跳（不追击 / 接触伤害命中段照样过 t321 门但玩家创造无敌于呈现层）。
+                    //   机制等价 MC：slime 移动与目标无关，创造模式不追但照跳。
+                    if (e.mobType == MobSlime) {
+                        if (aiSlime(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale, false))
+                            dirty = true;
+                    } else if (aiWander(e, float(aiDt), world, worldW, worldD, speedScale)) dirty = true;
                 } else if (e.mobType == MobBones) {
                     // t281/t283/t284 敌对 AI：替代 wander。listener = 玩家脚位（tick 参数）。
                     //   t281 Shambler（僵尸）→ aiHostile（detect→pathfind→melee attack）。
@@ -8372,6 +8597,12 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                     if (aiEmberling(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale)) dirty = true;
                     // 火球冷却 / 漂移状态在 aiEmberling 内推进；无独立每帧显示态需 bump（浮动画由 QML Animation
                     //   驱动非 revision 绑定，无需 term）。悬浮移动已由 dirty=true 覆盖（revision → QML position 绑定）。
+                } else if (e.mobType == MobSlime) {
+                    // t1107 史莱姆（MobSlime；机制等价 MC 1.0 slime）：独立弹跳 AI —— 贴地周期起跳（追击跳朝
+                    //   玩家 / 游荡跳随机向）+ 空中 jumpG 滑流（t670 既有物理，着地自动清零）+ 近距接触伤害
+                    //   （尺寸档，最小档无攻击）。aiSlime 内推进跳跃计时（wanderTimer 复用）；空中抛物 / 着地
+                    //   由共享物理段跑。playerTargetable 透传（观察者/创造不被瞄准，同敌对 t290 门）。
+                    if (aiSlime(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale, playerTargetable)) dirty = true;
                 } else {
                     if (aiHostile(idx, e, float(aiDt), world, listener, worldW, worldD, speedScale, skyBrightness)) dirty = true;
                 }

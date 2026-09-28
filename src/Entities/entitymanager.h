@@ -246,7 +246,20 @@ public:
     //   分支（同 Arrow）。死亡掉 0-1 燃烬棒（BlazeRodId 0x245，t726）+ 3 XP（呈现层 onMobDied 分流）。死因
     //   DeathCause::Emberling「被燃烬者的火球焚杀」（t727 Nightwalker 先例）。§9 原创：名称 / 模型（MobModel
     //   中心头盒 + QML 环绕旋转竖棒）/ 贴图（t717 已建 entity_emberling 程序贴图 + pack blaze.png）全原创。
-    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10, MobOcelot = 11, MobSnowGolem = 12, MobIronGolem = 13, MobSilverfish = 14, MobTnt = 15, MobNightwalker = 16, MobEmberling = 17, MobAnvil = 18, MobBabyShambler = 19, MobCaveSpider = 20 }; // t494：MobTnt=15 哨兵 mobType（非真实 mob —— 仅 TNT 爆炸 mobAttackedPlayer 传它区分死因「被 TNT 炸死」vs 潜行者自爆）；t727 MobNightwalker=16 夜行者（末影人，3 格高）；t728 MobEmberling=17 燃烬者（烈焰人，双段「悬浮单头 + 环绕旋转棒」）；t794 MobAnvil=18 哨兵 mobType（非真实 mob —— 仅下落铁砧砸中玩家 mobAttackedPlayer 传它 → 呈现层映射 DeathCause::Anvil「被落下的铁砧砸死」，同 MobTnt 先例）；t952 MobBabyShambler=19 小蹒跚者（幼体僵尸：<1 格高 halfH=0.45、移速快 kBabyShamblerChaseSpeedMul、低伤 kBabyShamblerAttackDamage、可穿盔甲——t950 拾取门 / t377 随机甲门 / setMobArmorSet 族门均入白名单；概率与小鸡组成「小鸡骑士」——kChickenJockeyChance，见 rideMob/mobRider 双向链）；t1012 MobCaveSpider=20 洞穴蜘蛛（机制等价 MC 1.0 cave spider——**枚举尾追加 = 存档兼容契约，勿插中间**；矿井蛛网走廊刷怪笼转正型：蜘蛛同族小体型 halfH=0.21〔0.7×〕+ 命中中毒 DoT〔呈现层 applyStatusEffect(EffectPoison) 挂 t669 毒薯同源 m_poisonTimer 链〕；渲染走 MobModel 蜘蛛几何共享分支 + QML delegate 0.7× 缩放蓝染 tint；worldgen pieceSpiderRoom 笼 state=SpawnerStateCaveSpider=(20<<1)=0x28）
+    // t494：MobTnt=15 哨兵 mobType（非真实 mob —— 仅 TNT 爆炸 mobAttackedPlayer 传它区分死因「被 TNT 炸死」vs 潜行者自爆）；t727 MobNightwalker=16 夜行者（末影人，3 格高）；t728 MobEmberling=17 燃烬者（烈焰人，双段「悬浮单头 + 环绕旋转棒」）；t794 MobAnvil=18 哨兵 mobType（非真实 mob —— 仅下落铁砧砸中玩家 mobAttackedPlayer 传它 → 呈现层映射 DeathCause::Anvil「被落下的铁砧砸死」，同 MobTnt 先例）；t952 MobBabyShambler=19 小蹒跚者（幼体僵尸：<1 格高 halfH=0.45、移速快 kBabyShamblerChaseSpeedMul、低伤 kBabyShamblerAttackDamage、可穿盔甲——t950 拾取门 / t377 随机甲门 / setMobArmorSet 族门均入白名单；概率与小鸡组成「小鸡骑士」——kChickenJockeyChance，见 rideMob/mobRider 双向链）；t1012 MobCaveSpider=20 洞穴蜘蛛（机制等价 MC 1.0 cave spider——**枚举尾追加 = 存档兼容契约，勿插中间**；矿井蛛网走廊刷怪笼转正型：蜘蛛同族小体型 halfH=0.21〔0.7×〕+ 命中中毒 DoT〔呈现层 applyStatusEffect(EffectPoison) 挂 t669 毒薯同源 m_poisonTimer 链〕；渲染走 MobModel 蜘蛛几何共享分支 + QML delegate 0.7× 缩放蓝染 tint；worldgen pieceSpiderRoom 笼 state=SpawnerStateCaveSpider=(20<<1)=0x28）；
+    //   t1107 MobSlime=21 史莱姆（机制等价 MC 1.0 slime——**枚举尾追加 = 存档兼容契约，勿插中间**；敌对弹跳立方：
+    //   单一 MobType + Entity.slimeSize 尺寸档 {1,2,4}（小/中/大；尺寸裁定留痕：MC 1.0 slime 即单实体带 size 数据，
+    //   三 Kind 会三倍 QML delegate / 蛋表 / 名册面并污染 mobType 枚举段——mob 无存档序列化面〔entitystore 只管
+    //   ItemEntity〕→ Entity 新字段零存档风险，羊 sheepWool per-entity 字段同门先例）；血量=尺寸档（4/2/1 HP）+
+    //   接触伤害=尺寸档（大 4/中 2/最小档 0——1.0 口径最小档无攻击）；死亡分裂 大→中×2-4→小×2-4；小档死亡掉
+    //   粘液球 0-2（0x28C）；生成 = 史莱姆块（slimeChunkForSeed 种子哈希 10% chunk）+ 深度 <40 层，无视光照门；
+    //   渲染走 MobModel 半透明绿立方几何 + QML 尺寸缩放 + 程序贴图 mob_slime）；t1107 MobVillager=22 村民
+    //   （机制等价 MC 1.0 villager——被动人形：长袍大鼻程序贴图 + 游荡 AI（aiWander 同门）；无交易（交易 1.3.1
+    //   越纪元不取——蕴辉瓶/青金石同门先例）+ 无掉落（1.0 村民死亡零战利品）+ 不惊逃（1.0 村民无 panic，
+    //   setPanicFlee 白名单外静默 no-op 在案）；生成面 = 生物蛋 + 候选池（村庄 worldgen 本单缺席，分层登记——
+    //   1.0 村民仅随村庄结构生成，结构生成器缺席则村民仅蛋/矩阵可达）；渲染走 MobModel 长袍人形几何 +
+    //   程序贴图 mob_villager）。
+    enum MobType { MobTest = 0, MobPig = 1, MobCow = 2, MobSheep = 3, MobShambler = 4, MobBones = 5, MobStalker = 6, MobSpider = 7, MobChicken = 8, MobSquid = 9, MobWolf = 10, MobOcelot = 11, MobSnowGolem = 12, MobIronGolem = 13, MobSilverfish = 14, MobTnt = 15, MobNightwalker = 16, MobEmberling = 17, MobAnvil = 18, MobBabyShambler = 19, MobCaveSpider = 20, MobSlime = 21, MobVillager = 22 }; // t494：MobTnt=15 哨兵 mobType（非真实 mob —— 仅 TNT 爆炸 mobAttackedPlayer 传它区分死因「被 TNT 炸死」vs 潜行者自爆）；t727 MobNightwalker=16 夜行者（末影人，3 格高）；t728 MobEmberling=17 燃烬者（烈焰人，双段「悬浮单头 + 环绕旋转棒」）；t794 MobAnvil=18 哨兵 mobType（非真实 mob —— 仅下落铁砧砸中玩家 mobAttackedPlayer 传它 → 呈现层映射 DeathCause::Anvil「被落下的铁砧砸死」，同 MobTnt 先例）；t952 MobBabyShambler=19 小蹒跚者（幼体僵尸：<1 格高 halfH=0.45、移速快 kBabyShamblerChaseSpeedMul、低伤 kBabyShamblerAttackDamage、可穿盔甲——t950 拾取门 / t377 随机甲门 / setMobArmorSet 族门均入白名单；概率与小鸡组成「小鸡骑士」——kChickenJockeyChance，见 rideMob/mobRider 双向链）；t1012 MobCaveSpider=20 洞穴蜘蛛（机制等价 MC 1.0 cave spider——**枚举尾追加 = 存档兼容契约，勿插中间**；矿井蛛网走廊刷怪笼转正型：蜘蛛同族小体型 halfH=0.21〔0.7×〕+ 命中中毒 DoT〔呈现层 applyStatusEffect(EffectPoison) 挂 t669 毒薯同源 m_poisonTimer 链〕；渲染走 MobModel 蜘蛛几何共享分支 + QML delegate 0.7× 缩放蓝染 tint；worldgen pieceSpiderRoom 笼 state=SpawnerStateCaveSpider=(20<<1)=0x28）
     Q_ENUM(MobType)
 
     // 生成默认测试生物（mobType=0、#ff5555、满血 kDefaultMaxHealth）。t239 调试入口（M 键）；t243 spawn eggs
@@ -267,6 +280,22 @@ public:
     //   后再翻 Entity.hostile（spawnMobTyped 是通用入口，不知哪些 mobType 是敌对；本入口收口敌对语义）。
     //   达 kCap → 委托内静默跳过。mobType 仅 MobShambler/MobBones 合法（其余当敌对调是非语义，但仍生成不崩）。
     Q_INVOKABLE void spawnHostileMob(int x, int y, int z, int mobType);
+    // t1107 史莱姆生成入口（自然刷怪 / 生物蛋 / 矩阵探针统一收口）：spawnMobTyped(MobSlime) 生成后按
+    //   size 写 Entity.slimeSize + 血量=尺寸档（MC 1.0 slime health==size：大 4/中 2/小 1）+ 按
+    //   applySlimeSizeBox 重设碰撞盒（大 0.60 / 中 0.30 / 小 0.15 半宽同值——MC 口径 slime 碰撞盒随尺寸
+    //   缩放，取 0.52×size 的量级收紧到本工程盒步进）。size ∈ {1,2,4}（MC 1.0 自然刷出三档）；非法值
+    //   防御回退 2（中档，同 spawnHostileMob 回退 Shambler 模式）。返槽索引（同 spawnMobTyped）；
+    //   达 kCap → -1。
+    Q_INVOKABLE int spawnSlime(int x, int y, int z, int size);
+    // t1107 第 i 只 mob 的史莱姆尺寸档（仅 MobSlime 用：1 小 / 2 中 / 4 大；其余 mob 恒 0）。QML delegate
+    //   据它 + halfHeightAt 推缩放比（几何为大档 1.2³ 基准盒 → scale = halfH / 0.60），矩阵探针钉分裂守恒
+    //   （大死→中 size=2 / 中死→小 size=1）。越界 / 非 slime → 0。
+    Q_INVOKABLE int slimeSizeAt(int i) const;
+    // t1107 史莱姆块判定（纯函数；MC 1.0 口径：10% 的 chunk 是 slime chunk——种子哈希 %10==0，确定性无
+    //   RNG；chunk 坐标 = 世界格 ÷16 向下取整）。黑暗刷怪在「深度 <40 且 slime chunk」的洞位无视光照门刷
+    //   史莱姆（机制等价 MC 1.0 slime chunk 深层生成不受亮度约束）。static Q_INVOKABLE 供矩阵探针直钉
+    //   确定性（同 seed 同坐标恒同判）+ EntityManager 内部黑暗刷怪消费（读 world->seed()）。
+    Q_INVOKABLE static bool slimeChunkForSeed(int seed, int chunkX, int chunkZ);
     // t952 小鸡骑士组合概率缝写（缺省 kChickenJockeyChance=0.05；0=生成恒独立 / ≥1=生成必组合——矩阵探针
     //   C++ 直调端钉概率两端，同 PlayerController::setEquipmentPickupChance 先例）。纯标量状态（非世界态，
     //   跨世界 reset 族无需清）。QML 调试命令可直调。
@@ -1206,7 +1235,11 @@ signals:
     //   对应色羊毛（t834 起统一方块段：白→Wool 方块 27 / 有色→羊毛方块 63..77）。
     //   review #32（2026-08-23）sheared = **致死瞬间**快照（Entity.deathSheared，同 deathBaby 模式）——剪过毛
     //   的羊死亡不掉羊毛（机制等价 MC 1.0 剪毛羊死时无毛可掉；呈现层羊分支守卫），非 MobSheep 恒 false。
-    void mobDied(int x, int y, int z, int mobType, bool burned, bool wasBaby, int woolIndex, bool sheared);
+    //   t1107 slimeSize = 致死瞬间的 Entity.slimeSize 快照（同 deathBurned 快照模式——死亡动画窗口内分裂
+    //   子代 spawn 可能扩容实体向量，emit 前先拷值防悬空）：仅 MobSlime 有意义（1 小 / 2 中 / 4 大），呈现层
+    //   onMobDied 据它分流「小档掉粘液球 0-2（MC 1.0 口径：只有最小档掉物）+ XP=尺寸档」；其余 mob 恒 0。
+    //   尾追加参数 = 源兼容扩展（QML handler 形参缺省不写即忽略；唯一 emit 点同步更新）。
+    void mobDied(int x, int y, int z, int mobType, bool burned, bool wasBaby, int woolIndex, bool sheared, int slimeSize = 0);
     // t281 敌对 mob 近战攻击命中玩家（spec「attack」）：hostile mob（Shambler/Bones/Spider）在 aiHostile 内检测到
     //   玩家处于攻击范围（XZ<=kAttackRange + 垂直同层）且攻击冷却（kAttackCooldown）到时发本信号。amount = 单次伤害 HP
     //   （kAttackDamage=3，MC 简单难度僵尸）；mobType = 子类 id（Shambler/Bones/Stalker/Spider）。呈现层（Main.qml）
@@ -1672,6 +1705,13 @@ private:
         //     初始化不错位（同 aiAccum / slowTimer 模式，DMI 兜底）。
         float meltAccum = 0.0f;       // 雪傀儡热伤害累积器（秒；达 kSnowMeltInterval 扣 1HP；仅 MobSnowGolem）
         bool  snowGolemSheared = false; // 雪傀儡是否已被剪南瓜头（true=无头 derpy 形态；仅 MobSnowGolem）
+        // t1107 史莱姆尺寸档（仅 mobType==MobSlime 用；其余 mob 恒默认 1 不读）：1 小 / 2 中 / 4 大
+        //   （MC 1.0 自然刷出三档口径）。驱动四面：血量=档（spawnSlime 设 4/2/1）、接触伤害=档（aiSlime
+        //   读，最小档 0 无攻击）、碰撞盒（applySlimeSizeBox 半宽 0.60/0.30/0.15）、死亡分裂（tick 死亡
+        //   到期分支读——大死→中×2-4 / 中死→小×2-4 / 小死零分裂只掉粘液球）与 QML 尺寸缩放
+        //   （slimeSizeAt）。mob 无存档序列化面（entitystore 只管 ItemEntity）→ 新字段零存档风险
+        //   （羊 sheepWool per-entity 字段同门）。DMI 缺省 = 非 slime 恒 1（占位，不读）。
+        int   slimeSize = 1;          // 史莱姆尺寸档（1 小 / 2 中 / 4 大；仅 MobSlime 用）
         // rv-low-batch1 槽代际序号（修「snowballThrower 槽复用误排除」）：每次 acquireSlot 复用 / 追加槽位时
         //   把全局单调计数 m_spawnSerial 写入新实体（槽的「这一任」标识）。投射物记发射者 slot+serial 快照，
         //   命中排除时同时比对 —— 槽被复用（release → 新实体进驻同 slot）后 serial 不同 → 不再误排除新生物
@@ -1843,7 +1883,7 @@ private:
     //   不向上依赖物品 id，PLAN §2）：下标 = mobType（容量 = 枚举尾 + 1 **自动跟随**，review0909 #3——
     //   勿再手抄数字：MobType 枚举「新类型尾追加」扩展时容量随行，忘改即编译红而非静默越界）。
     //   缺省全 false = 无引诱（空手 / 非食物物品时动物不追随玩家）。运行期状态不持久化（每次持物变更即重写）。
-    static constexpr int kMobTypeCount = MobCaveSpider + 1; // 枚举尾自动跟随（MobCaveSpider=20 → 21）
+    static constexpr int kMobTypeCount = MobVillager + 1; // 枚举尾自动跟随（MobVillager=22 → 23；t1107 尾追加 MobSlime=21/MobVillager=22 携沿革注：原 MobCaveSpider + 1 = 21，lawful 前移）
     bool m_foodLure[kMobTypeCount] = {};
     // t1029 wander 冻结测试缝状态（setWanderFrozen 写；缺省 false = 照常 wander）。true 时 aiWander
     //   顶部早退（跳过 RNG 消费 / 速度写入 / 位移，物理重力保留）——headless 探针把甩钩窗内的猪钉在原地。
@@ -2029,6 +2069,19 @@ private:
     //   slowTimer / damageEntity / yawRad）+ 向下静默写 World（setWaterSilent 雪层）。无向上依赖。
     bool aiSnowGolem(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos,
                      float worldW, float worldD, float speedScale);
+    // t1107 史莱姆 AI（tick Mob 敌对分支 mobType==MobSlime 调，替代 aiHostile；详见 .cpp 实现注释）。机制
+    //   对齐 MC 1.0 slime（敌对弹跳立方）：
+    //   (1) 弹跳移动：史莱姆**没有行走步态**——只在贴地（resting）且跳跃计时到时起跳（kSlimeJumpIntervalMin..
+    //       Max 随机 0.5-1.5s，MC 口径 10-30 tick）：vy=kSlimeJumpSpeed×档缩比（大档 ≈1 格跳高，中小档按
+    //       halfH 比例收缩）+ jumpGX/jumpGZ 水平滑流（t670 既有滑流物理，着地自动清零）→ 空中抛物弧线。
+    //   (2) 目标定向：玩家可锁定且 16 格内（kDetectRange，MC slime 寻敌 16 格口径）→ yaw 朝玩家（追击跳）；
+    //       否则随机 yaw（游荡跳）。速度差异：追击跳滑流 = kSlimeChaseSpeed×档缩比，游荡跳 = 半速。
+    //   (3) 接触伤害：XZ ≤ kAttackRange + 垂直同层（复用 aiHostile 门）+ 单 mob 冷却 + t321 全局节流 →
+    //       emit mobAttackedPlayer(kSlimeAttackDamage(size), MobSlime, kbX, kbZ)——伤害=尺寸档（大 4/中 2），
+    //       **最小档 0 无攻击**（1.0 口径：size 1 史莱姆不造成伤害，直接不发信号）。
+    //   返是否真位移（驱动 dirty）。分层（PLAN §2）：只读自身 + 传参玩家位；攻击走语义信号；无 World 写。
+    bool aiSlime(int idx, Entity &e, float dt, World *world, const QVector3D &playerPos,
+                 float worldW, float worldD, float speedScale, bool playerTargetable);
     // t483 铁傀儡 AI（tick Mob 分支 mobType==MobIronGolem 调，替代 aiWander；详见 .cpp 实现注释）。机制对齐
     //   MC 1.0 铁傀儡（防御造物：游荡 + 追击打敌对 + 重拳击退）：
     //   (1) 节流扫最近敌对 mob（nearestHostile，kIronGolemDetectRange）→ 有目标则朝它走（kIronGolemWalkSpeed，
@@ -2277,6 +2330,11 @@ private:
     //   e.mobType 在盒赋值之后才写 —— 读字段会恒落 MobTest 默认盒，首跑实锤教训）。hostile 重赋幂等
     //   （spawnHostileMob 已设 / 兜底再判，语义不变）。静态纯函数（只写 e 的三字段）。
     static void applyMobCollisionBox(int mobType, Entity &e);
+    // t1107 史莱姆尺寸档 → 碰撞盒（applyMobCollisionBox 的 slime 专属后置精化）：halfW/halfH 按
+    //   size/4 缩比自大档基准（0.60 半宽同值）——大 0.60 / 中 0.30 / 小 0.15（MC 口径 slime 碰撞盒随
+    //   尺寸缩放，0.52×size 的量级收紧到本工程盒步进）。静态纯函数（只写 e 的两字段）；spawnSlime 与
+    //   spawnMobCore 的 slime 缺省档两处共用（t1025 单一权威同门）。
+    static void applySlimeSizeBox(Entity &e);
     // t481 最近豹猫/猫查找（aiStalker 驱赶调）：返距 pos 在 range 内最近一只 alive && !dead && kind==Mob &&
     //   mobType==MobOcelot 的 mob 索引；无 → -1。O(n) 每 Stalker 每 AI tick，n≤64 可忽略。const 只读。
     int nearestOcelot(const QVector3D &pos, float range) const;
@@ -2667,6 +2725,33 @@ private:
     static constexpr float kSplashBottleLifetime   = 5.0f;  // t1101 喷溅瓶最长存活（秒；同蕴辉瓶 / 蛋 / 雪球家族兜底口径）
     static constexpr float kSplashBottleHitHalfW   = 0.3f;  // t1101 喷溅瓶 vs mob 命中盒 XZ/Y 外扩（blocks；同蛋 / 蕴辉瓶）
     static constexpr float kEggHatchDenominator    = 8.0f;  // 孵化概率分母（1/8；机制等价 MC 1.0 鸡蛋 1/8 出鸡）
+    // t1107 史莱姆常量族（机制等价 MC 1.0 slime；数值口径逐项留痕）：
+    //   - kSlimeJumpIntervalMin/Max：贴地起跳周期（秒；MC 口径 10-30 tick = 0.5-1.5s 随机窗）。
+    //   - kSlimeJumpSpeed：大档（size 4）起跳垂直初速（blocks/s）。重力 kGravity=28 下峰值高
+    //     v²/2g = 56.25/56 ≈ 1.0 格（MC 大史莱姆 ~1 格跳高口径）；中小档按 halfH 比例缩（applySlimeSizeBox
+    //     盒缩比 = size/4 → 中档峰值 ~0.25 格、小档 ~0.06 格的量级，视觉贴合 MC 小史莱姆碎跳）。
+    //   - kSlimeChaseSpeed：大档追击跳水平滑流（blocks/s；量级对齐 kChaseSpeed=2.8 的地面追击——史莱姆
+    //     只在空中滑流，平均位移低于行走怪，数值补偿到可威胁量级）；游荡跳取半速（kSlimeChaseSpeed*0.5）。
+    //   - kSlimeAttackDamageBase：接触伤害基准 = 尺寸档（大 4 / 中 2；aiSlime 读 e.slimeSize 直接取档值，
+    //     本常量 = 大档锚值供源钉；最小档 size==1 在 AI 内直接不发攻击信号 = 1.0 口径最小档无伤害）。
+    //   - kSlimeSplitChildrenMin/Max：死亡分裂子代数量窗（MC 1.0 口径 2-4 只）。
+    //   - kSlimeSpawnMaxY：史莱姆块生成深度上界（MC 1.0 口径「Y<40 层」）。
+    //   - kSlimeChunkHashA/B：史莱姆块种子哈希乘子（10% chunk 判定 = 混后 %10==0；工程 hash 偏移惯例
+    //     同 kDungeonSeedOff 族——确定性、无 RNG、同 seed 同坐标恒同判，非 MC 原生 Random 逐位复刻，
+    //     机制等价登记）。
+    static constexpr float kSlimeJumpIntervalMin   = 0.5f;   // 贴地起跳周期下限（秒）
+    static constexpr float kSlimeJumpIntervalMax   = 1.5f;   // 贴地起跳周期上限（秒）
+    static constexpr float kSlimeJumpSpeed         = 7.5f;   // 大档起跳垂直初速（blocks/s；峰值 ~1.0 格）
+    static constexpr float kSlimeChaseSpeed        = 3.2f;   // 大档追击跳水平滑流（blocks/s）
+    static constexpr int   kSlimeAttackDamageBase  = 4;      // 接触伤害基准（=大档；伤害取尺寸档值）
+    static constexpr int   kSlimeSplitChildrenMin  = 2;      // 死亡分裂子代数下限（只）
+    static constexpr int   kSlimeSplitChildrenMax  = 4;      // 死亡分裂子代数上限（只）
+    static constexpr int   kSlimeSpawnMaxY         = 40;     // 史莱姆块生成深度上界（y<40）
+    static constexpr quint32 kSlimeChunkHashA      = 0x1F123BB5u; // 史莱姆块哈希乘子 A
+    static constexpr quint32 kSlimeChunkHashB      = 0x2545F491u; // 史莱姆块哈希乘子 B
+    // t1107 村民常量（被动人形；数值随 applyMobCollisionBox 的 0.30/0.90 人形盒，无独立 AI 参数——
+    //   游荡走 aiWander 通用常量 kWanderMin/Max/kWalkSpeed，机制等价 MC 1.0 村民无目的踱步）。
+    static constexpr int   kSlimeDefaultSpawnSize  = 2;      // 生物蛋刷史莱姆的固定尺寸档（中档；自然刷怪才掷三档骰）
     // t728 燃烬者火球投射物常量（机制等价 MC 1.0 烈焰人火球：直线弹道 + 命中点燃 + 消失）。
     //   - kFireballLifetime：火球最长存活（秒；直线飞行未命中兜底移除，防永久滞留堆积，同箭/雪球）。
     //   - kFireballHitHalfW：火球 vs 玩家/mob 命中盒 XZ/Y 外扩（blocks；火球是小点，AABB 外扩做命中盒同箭）。

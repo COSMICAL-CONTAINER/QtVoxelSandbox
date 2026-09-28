@@ -884,6 +884,31 @@ Item {
                     R(8, 10, 1, 1, spot); R(11, 9, 1, 1, spot); R(14, 11, 1, 1, spot)
                     R(9, 13, 1, 1, spot); R(12, 14, 1, 1, spot)
                     R(11, 11, 2, 1, spot)
+                } else if (kind === "slime") {
+                    // 史莱姆（t1107）：青绿壳 + 深绿凝胶斑 + 中央浅绿核（凝胶 + 内核一眼辨「史莱姆」）。
+                    //   纯原创抽象纹样（§9 区隔）。主色取史莱姆渲染凝胶族（#5fa83a）。
+                    const shell = "#5fa83a", lite = "#8ac866", dark = "#3f7a28"
+                    fillShell(shell)
+                    R(9, 6, 6, 1, lite); R(7, 7, 8, 1, lite)          // 顶高光
+                    R(7, 17, 10, 1, dark); R(9, 18, 6, 1, dark)       // 底暗影
+                    R(15, 9, 1, 7, dark)                               // 右暗边
+                    // 深绿凝胶斑（体内未溶凝胶团块散布）
+                    R(8, 10, 2, 2, dark); R(12, 9, 1, 1, dark); R(10, 14, 2, 1, dark)
+                    // 中央浅绿核（内核语义）
+                    R(10, 11, 2, 2, lite)
+                } else if (kind === "villager") {
+                    // 村民（t1107）：长袍棕壳 + 深棕竖纹长袍痕 + 大鼻纹（棕袍 + 长鼻一眼辨「村民」）。
+                    //   纯原创抽象纹样（§9 区隔）。主色取村民长袍族（#8a6a4a）。
+                    const shell = "#8a6a4a", lite = "#a88864", dark = "#543e2a"
+                    const robe = "#6e5238"
+                    fillShell(shell)
+                    R(9, 6, 6, 1, lite); R(7, 7, 8, 1, lite)          // 顶高光
+                    R(7, 17, 10, 1, dark); R(9, 18, 6, 1, dark)       // 底暗影
+                    R(15, 9, 1, 7, dark)                               // 右暗边
+                    // 长袍竖折痕（左右两条深竖纹）
+                    R(8, 10, 1, 6, robe); R(14, 10, 1, 6, robe)
+                    // 大鼻（中央小竖条，村民的身份特征）
+                    R(11, 11, 2, 3, lite)
                 }
             }
 
@@ -2372,6 +2397,23 @@ Item {
             case 0x289: drawMelonSeeds(); break  // 瓜种：矿井战利品；种瓜茎 / 瓜片 1:1 转换
             case 0x28A: drawMelonSlice(); break  // 瓜片：破瓜块 3-7 片；可食 +2；转换瓜种 / 合瓜块
             case 0x28B: drawPumpkinSeeds(); break // t1105 南瓜种子：野生南瓜 1:4 合成；种南瓜茎
+            // t1107 史莱姆球 + 双蛋（材料段 0x28C..0x28E，南瓜种子 0x28B 之上段尾追加）。
+            case 0x28C: // 史莱姆球：青绿凝胶球体 + 深绿凝胶块斑 + 浅绿高光（读作「绿色果冻球」）
+                {
+                    const base = "#5fa83a", gel = "#3f7a28", sheen = "#8ac866"
+                    // 球体（居中圆块，四角收进读作球）
+                    R(5, 5, 6, 1, base); R(4, 6, 8, 1, base)
+                    R(3, 7, 10, 2, base)
+                    R(3, 9, 10, 2, base)
+                    R(4, 11, 8, 1, base); R(5, 12, 6, 1, base)
+                    // 凝胶块斑（体内深色悬浮物）
+                    R(5, 8, 2, 2, gel); R(9, 10, 2, 1, gel); R(7, 11, 1, 1, gel)
+                    // 表面高光（左上弧）
+                    R(5, 6, 2, 1, sheen); R(4, 7, 1, 2, sheen)
+                }
+                break
+            case 0x28D: drawSpawnEgg("slime"); break    // t1107 生物蛋（史莱姆）：绿壳深绿斑
+            case 0x28E: drawSpawnEgg("villager"); break // t1107 生物蛋（村民）：棕壳长袍纹
             // t788 染料 16 色（0x24B..0x25A，白→黑羊毛色序；三色参数取 build_wool.py 同源色板）
             case 0x24B: drawDye("#f0f0ee", "#f9f9f8", "#959594"); break // 白色染料（白花破坏掉落；染白羊毛/白床）
             case 0x24C: drawDye("#de781e", "#ee9f69", "#8a4a13"); break // 橙色染料

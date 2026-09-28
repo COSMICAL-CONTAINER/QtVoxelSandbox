@@ -830,6 +830,77 @@ def make_heart():
     print("wrote", os.path.relpath(out, HERE), img.size)
 
 
+def make_slime():
+    """史莱姆（Slime；机制等价 MC 1.0 slime，§9 原创贴图非照搬）：青绿凝胶底 + 深绿凝胶块斑 +
+    浅绿凝胶高光（读作「半透明绿色弹跳立方」；外层材质 opacity 0.75 叠加真半透明观感，贴图本体实底
+    与全家族一致——透明观感统一由材质层承载）。每面铺同图（全脸 UV 方案）→ MobModel 大档基准立方
+    各面显同一张凝胶纹，配 QML 尺寸档缩放（大 1.0 / 中 0.5 / 小 0.25）→ 肉眼读作「绿色弹跳果冻立方」。
+    固定坐标斑点，无随机源（CI 可复现，同族脚本风格）。
+    """
+    img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
+    base = (0x5f, 0xa8, 0x3a, 255)   # 青绿凝胶主色 #5fa83a（非 MC slime 精确色）
+    fill(img, base)
+
+    # 深绿凝胶块斑（体内未溶凝胶团块——固定坐标块斑）
+    gel = (0x3f, 0x7a, 0x28, 255)    # 深绿 #3f7a28
+    blot(img, [
+        (3, 3), (4, 3), (3, 4), (4, 4),
+        (11, 2), (12, 2), (12, 3),
+        (2, 10), (3, 10), (2, 11),
+        (12, 11), (13, 11), (13, 12),
+        (6, 6), (7, 6), (6, 7), (7, 7),
+    ], gel)
+
+    # 浅绿凝胶高光（表面反光——顶部两簇亮斑提通透感）
+    sheen = (0x8a, 0xc8, 0x66, 255)  # 浅绿 #8ac866
+    blot(img, [
+        (5, 1), (6, 1), (5, 2),
+        (10, 8), (11, 8), (11, 9),
+    ], sheen)
+
+    out = os.path.join(SRC, "mob_slime.png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
+def make_villager():
+    """村民（Villager；机制等价 MC 1.0 villager，§9 原创贴图非照搬）：长袍棕底 + 深棕折痕 +
+    浅棕高光 + 腰带横纹（读作「长袍覆脚抱胸的村民长袍人形」）。每面铺同图（全脸 UV 方案）→
+    MobModel 长袍 / 头 / 鼻 / 臂条各盒都显同一张长袍纹，配几何「大鼻 + 抱胸」廓形 → 肉眼读作
+    「村民」。固定坐标折痕，无随机源（CI 可复现，同族脚本风格）。
+    """
+    img = Image.new("RGBA", (TS, TS), (0, 0, 0, 0))
+    base = (0x8a, 0x6a, 0x4a, 255)   # 长袍棕主色 #8a6a4a（非 MC villager 精确色）
+    fill(img, base)
+
+    # 深棕长袍折痕（垂坠褶皱——竖向短痕逐列错位）
+    fold = (0x6e, 0x52, 0x38, 255)   # 深棕 #6e5238
+    blot(img, [
+        (3, 2), (3, 3), (3, 4),
+        (7, 3), (7, 4), (7, 5),
+        (11, 2), (11, 3), (11, 4),
+        (5, 8), (5, 9),
+        (9, 9), (9, 10),
+        (13, 8), (13, 9),
+    ], fold)
+
+    # 腰带横纹（袍身中段一条深横带，读作系腰）
+    belt = (0x54, 0x3e, 0x2a, 255)   # 腰带深棕 #543e2a
+    for x in range(1, TS - 1):
+        blot(img, [(x, 12)], belt)
+
+    # 浅棕高光（袍面受光——左上两簇）
+    sheen = (0xa8, 0x88, 0x64, 255)  # 浅棕 #a88864
+    blot(img, [
+        (2, 1), (3, 1),
+        (6, 7), (7, 7),
+    ], sheen)
+
+    out = os.path.join(SRC, "mob_villager.png")
+    img.save(out)
+    print("wrote", os.path.relpath(out, HERE), img.size)
+
+
 def main():
     make_pig()
     make_cow()
@@ -851,6 +922,8 @@ def main():
     make_fireball()
     make_abyss_eye()
     make_heart()
+    make_slime()
+    make_villager()
 
 
 if __name__ == "__main__":
