@@ -214,6 +214,12 @@ struct AudioManager::Data
     // t1101 喷溅瓶碎裂音（玻璃碎 + 药水泼洒；短 SFX 默认 2s maxFrames 安全）。
     //   触发源：EntityManager::splashBottleBreak（碎裂沿）→ Main.qml 路由。
     Clip splashBreakClip{":/sounds/splash_break.wav"};
+    // t1110 mob 音效两族单件 clip（史莱姆 squish 软体噗 + 村民 hrmm 鼻音短哼；短 SFX 默认 2s
+    //   maxFrames 远大于各自长度、安全）。触发源：mobAmbient/mobAttacked 的 MobSlime=21 /
+    //   MobVillager=22 别名面 + mobBounced（着地沿，仅 MobSlime）→ Main.qml 路由。受击 / idle
+    //   同族复用单 clip（敌对复用 idle clip 先例同门，单一合成族，登记简化）。
+    Clip mobIdleSlimeClip{":/sounds/mob_idle_slime.wav"};
+    Clip mobIdleVillagerClip{":/sounds/mob_idle_villager.wav"};
 
     static constexpr ma_uint32 kChannels = 1;     // mono（合成时即 mono，省一半带宽）
     // t328：合成升到 44100 Hz（更多高频细节 / 更短瞬态分辨 → 音色清晰，详见 build_sounds.py）。
@@ -411,6 +417,9 @@ AudioManager::AudioManager(QObject *parent)
     d->loadClip(d->burpClip);
     // t1101 喷溅瓶碎裂音（短 SFX 默认 maxFrames 安全）。
     d->loadClip(d->splashBreakClip);
+    // t1110 mob 音效两族单件（短 SFX 默认 maxFrames 安全）。
+    d->loadClip(d->mobIdleSlimeClip);
+    d->loadClip(d->mobIdleVillagerClip);
     // t1028 音符盒 25 档音高 clip 池（0.85s 短 SFX，默认 2s maxFrames 安全；路径 makeNotePath 长寿命化）。
     for (int n = 0; n < Data::kNotePitchCount; ++n) {
         d->noteClips[size_t(n)].qrcPath = d->makeNotePath(n);
@@ -451,6 +460,9 @@ AudioManager::AudioManager(QObject *parent)
     d->initSound(d->burpClip);
     // t1101 喷溅瓶碎裂音 sound init（同门）。
     d->initSound(d->splashBreakClip);
+    // t1110 mob 音效两族 sound init（NO_SPATIALIZATION；失败仅自身静默降级 §2-E）。
+    d->initSound(d->mobIdleSlimeClip);
+    d->initSound(d->mobIdleVillagerClip);
     // t1028 音符盒 25 档音高 sound init（NO_SPATIALIZATION，随 Clip 池逐个降级）。
     for (int n = 0; n < Data::kNotePitchCount; ++n)
         d->initSound(d->noteClips[size_t(n)]);
@@ -570,6 +582,9 @@ AudioManager::~AudioManager()
     if (d->burpClip.ok) ma_sound_uninit(&d->burpClip.sound);
     // t1101 喷溅瓶碎裂音析构补齐（同门：新 clip 必入本表）。
     if (d->splashBreakClip.ok) ma_sound_uninit(&d->splashBreakClip.sound);
+    // t1110 mob 音效两族析构补齐（t1046 noteClips 漏析构教训同门：新 clip 必入本表）。
+    if (d->mobIdleSlimeClip.ok) ma_sound_uninit(&d->mobIdleSlimeClip.sound);
+    if (d->mobIdleVillagerClip.ok) ma_sound_uninit(&d->mobIdleVillagerClip.sound);
     // t1046 noteClips 池析构补齐（用户 0912 评审 #4）：t1028 新增 25 档音符盒 clip 池当年漏出本表——
     //   旧版析构只 uninit 旧音效池后直接 ma_engine_uninit，noteClips 的 ma_sound 挂着对 engine 内部
     //   data_source 的引用被连带拆解（未定义行为面；对齐上方 groupClips / 单件池逐个释放模式）。
@@ -642,6 +657,16 @@ void AudioManager::playMobHurt(int mobType)
 {
     // t1012③ 洞穴蜘蛛（20）受击同族采蜘蛛嘶嗡（同 ambient 路由别名先例，防落通用 yelp）。
     if (mobType == 20) mobType = 7;
+    // t1110 史莱姆（21）受击采 squish 单件；村民（22）受击采 hrmm 单件（同族复用 idle 单件——
+    //   敌对复用 idle clip 先例同门；防落通用 yelp，同上先例门）。
+    if (mobType == 21) {
+        d->replay(d->mobIdleSlimeClip, m_volume * 0.9f);
+        return;
+    }
+    if (mobType == 22) {
+        d->replay(d->mobIdleVillagerClip, m_volume * 0.9f);
+        return;
+    }
     if (mobType >= 4 && mobType <= 7) {
         // 敌对专属受击音：复用其 ambient idle clip（已在 mobIdleClips[4..7] 加载）。
         d->replay(d->mobIdleClips[size_t(mobType)], m_volume * 0.9f);
@@ -694,8 +719,29 @@ void AudioManager::playMobAmbient(int mobType)
     if (idx == 19) idx = 4;
     // t1012③ 洞穴蜘蛛（mobType 20）同族采蜘蛛嘶鸣（同族同音色先例；无独立合成 clip，区别于 generic 兜底）。
     if (idx == 20) idx = 7;
+    // t1110 史莱姆（21）/ 村民（22）同族采各自新合成单件（squish / hrmm；同别名先例门——防落
+    //   generic mob_idle 兜底；史莱姆 idle = squish 族，村民 idle = hrmm 族，受击同族复用）。
+    if (idx == 21) {
+        d->replay(d->mobIdleSlimeClip, m_volume * 0.85f);
+        return;
+    }
+    if (idx == 22) {
+        d->replay(d->mobIdleVillagerClip, m_volume * 0.85f);
+        return;
+    }
     if (idx < 0 || idx >= 8) idx = 0; // 越界 → generic 兜底（永不静默：spec 缺组用最常见音色）
     d->replay(d->mobIdleClips[size_t(idx)], m_volume * 0.85f);
+}
+
+// t1110 mob 着地音（slime 弹跳着地 squish）：EntityManager tick 共享物理段着地沿（resting
+//   false→true，per-bounce 恰一次）emit mobBounced(mobType) → Main.qml 路由到本方法。mobType
+//   分流：仅 MobSlime → mob_idle_slime squish 单件（其余 mob 着地静默——MC 无着地音语义，单件
+//   clip 池不扩）。单件 seek 重发不堆叠（同其他单件模式；连跳着地不堆暴）；engine/clip 失败静默
+//   降级（§2-E，不崩）。
+void AudioManager::playMobBounced(int mobType)
+{
+    if (mobType != 21) return; // 仅史莱姆着地有声（MobSlime；其余 mob 静默早退）
+    d->replay(d->mobIdleSlimeClip, m_volume * 0.9f);
 }
 
 // t250 mob 走路声：复用 step 材质分组 clip 池（按脚下方块 id 的材质组选），音量低于玩家 playStep

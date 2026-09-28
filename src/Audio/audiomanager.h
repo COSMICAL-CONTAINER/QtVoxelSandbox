@@ -220,6 +220,13 @@ public:
     //   泼洒床，参数留痕 tools/build_sounds.py gen_splash_break）。单件 clip；固定音高（碎裂宽频
     //   瞬态自带随机感，登记简化）；seek 重发截断不堆叠；engine / clip 失败静默早退（§2-E，不崩）。
     Q_INVOKABLE void playSplashBreak();
+    // t1110 mob 着地音（mob 弹跳 AI 落地沿）：EntityManager tick 共享物理段着地沿（resting
+    //   false→true，per-bounce 恰一次）emit mobBounced(mobType) → Main.qml 路由到本方法。机制等价
+    //   MC 1.0 slime 弹跳 squish（原创程序合成，§9；低频软体噗 + 湿软噪声床，参数留痕
+    //   tools/build_sounds.py gen_slime_squish）。mobType 分流：MobSlime → mob_idle_slime squish；
+    //   其余 mob 着地静默（MC 无着地音语义，单件 clip 池不扩）。单件 clip；seek 重发截断不堆叠
+    //   （同其他单件模式——连跳着地不堆暴）；engine / clip 失败静默早退（§2-E，不崩）。
+    Q_INVOKABLE void playMobBounced(int mobType);
 
     float volume() const { return m_volume; }
     void setVolume(float v);

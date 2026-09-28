@@ -9282,11 +9282,24 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
             const float restY = restTopY + e.halfH
                                 + (e.mobType == MobEmberling ? kEmberlingHoverOffset : 0.0f);
             if (mobNewY <= restY || e.vy < 0.0f) {
+                // t1110 着地沿判据（赋值前置读——贴地帧每 tick 重入本块幂等重钉非沿，wasAirborne 恒 false）。
+                const bool wasAirborne = !e.resting;
                 if (e.pos.y() != restY) { e.pos.setY(restY); dirty = true; }
                 if (e.vy != 0.0f) { e.vy = 0.0f; dirty = true; }
                 e.resting = true;
                 e.jumpGX = 0.0f; // t670 越障跳滑流着地即停（防落地后继续漂移 / 推入墙）
                 e.jumpGZ = 0.0f;
+                // t1110 史莱姆着地 squish 音：着地沿（resting false→true）+ 听者范围门（同
+                //   mobAmbient 的 kAudioRange 门）→ emit mobBounced(MobSlime)，per-bounce 恰一次
+                //   （贴地重钉帧不重发；机制等价 MC slime 弹跳 squish）。其余 mob 着地静默（MC 无
+                //   着地音语义）。
+                if (e.mobType == MobSlime && wasAirborne) {
+                    const float bdx = e.pos.x() - listener.x();
+                    const float bdy = e.pos.y() - listener.y();
+                    const float bdz = e.pos.z() - listener.z();
+                    if (bdx * bdx + bdy * bdy + bdz * bdz <= kAudioRange * kAudioRange)
+                        emit mobBounced(int(MobSlime));
+                }
                 // t970 mob 落地摔伤结算（机制等价 MC 1.0 生物摔落；玩家同式见 PlayerController t22 段）：
                 //   落差 = 滞空最高脚位 − 落点脚位（restTopY；峰值/落点同为 pos.y−halfH 脚位口径，
                 //   Emberling 悬浮偏移两端一致抵消）。① 拉拽一次性豁免**无条件消费**（t690 着地沿无条件

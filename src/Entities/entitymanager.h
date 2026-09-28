@@ -1200,6 +1200,12 @@ signals:
     //   blockId=脚下方块 id)。mobType 当前保留语义对齐；blockId 供 AudioManager 按材质组选 step clip。
     //   呈现层 Connections 路由到 AudioManager.playMobStep（机制等价 MC 生物走路脚步声；§9 原创）。
     void mobStep(int mobType, int blockId);
+    // t1110 mob 着地音：tick 共享物理段着地沿（resting false→true 边沿，per-bounce 恰一次——贴地
+    //   重钉帧 restY/vy 已定值的幂等重入不重发）+ 听者范围内 → emit mobBounced(mobType)。仅
+    //   MobSlime 消费（弹跳着地 squish；其余 mob 着地静默 = MC 无着地音语义）。呈现层 Connections
+    //   路由到 AudioManager.playMobBounced（机制等价 MC 1.0 slime 弹跳 squish；§9 原创；同
+    //   mobAmbient 的听者范围门 + 单向事件流分层）。
+    void mobBounced(int mobType);
     // t117/t220 FallingBlock 遇不完整方块失撑 → 变掉落物。沙下落途中首个「非 air/水」方块为**不完整方块**
     //   （火把 / 半砖 / 栅栏 / ...，即非完整立方）时发本信号：坐标 = 不完整方块**上方一格**（= 沙应掉落位）、
     //   blockId = 实体携带的方块 id（机制等价 MC「沙落火把上 → 沙碎成掉落物」；仅完整立方可支撑沙）。
