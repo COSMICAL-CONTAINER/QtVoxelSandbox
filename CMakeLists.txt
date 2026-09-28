@@ -1113,6 +1113,9 @@ add_executable(redstone_matrix_test
     # t1107 史莱姆 + 村民合集探针段（4 腿 r2077a-d，filter 词 r2077；EntityManager 直驱行为面 +
     #   slimeChunkForSeed 纯函数 + 源钉族——零新 include 面，entitymanager/hotbar/recipe 均已列）。
     tools/matrix/section70_slime_villager.cpp
+    # t1108 村庄 worldgen 探针段（4 腿 r2078a-d，filter 词 r2078；World 直驱行为面 + 桥面 take/refill
+    #   契约 + 源钉族——零新 include 面，world/entitymanager/hotbar 均已列）。
+    tools/matrix/section71_village_worldgen.cpp
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
     #   确定性等价承重墙[8 形态快照 worker ≡ 同步直调逐位恒等：顶点/索引/统计三面]/队列纪律
     #   [容量压小满载 kErrQueueFull 可见拒绝 + 拒绝项不入账 + 接受项恰一产出按 requestId 对账]/
