@@ -516,7 +516,11 @@ void MatrixRun::section71_village_worldgen()
             SrcPin("probability gate", "if ((r % 100u) >= kVillagePct) continue;", 1),
             SrcPin("well water shaft", "putSolid(cx, S - dy, cz, BlockRegistry::Water);", 1),
             SrcPin("farmland row", "putSolid(fx, S, fz, BlockRegistry::Farmland,", 1),
-            SrcPin("road guard", "if (cur != BlockRegistry::Grass && cur != BlockRegistry::Dirt) continue;", 1)});
+            // [lawful 修订 t1109/r2079] road guard 扩 Sand（沙漠列真地表承接面——t1109 沙漠村庄变体）：
+            //   原钉行 `if (cur != BlockRegistry::Grass && cur != BlockRegistry::Dirt) continue;` 沿革
+            //   见 section72 头注；拆两针钉新形态（首行 + Sand 扩展行），沙漠站点行为不触本钉。
+            SrcPin("road guard", "if (cur != BlockRegistry::Grass && cur != BlockRegistry::Dirt", 1),
+            SrcPin("road guard sand ext", "&& cur != BlockRegistry::Sand)", 1)});
         ok = ok && missWc.isEmpty();
         if (!missWc.isEmpty()) diag += QStringLiteral("[wc %1]").arg(missWc.join(QLatin1Char(',')));
 
