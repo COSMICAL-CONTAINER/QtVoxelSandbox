@@ -1240,6 +1240,93 @@ def gen_splash_break():
     return finalize(out, target_peak=0.9)
 
 
+def gen_slime_squish():
+    """史莱姆 squish 音（t1110；弹跳着地 / 受击共用同族 squish，机制等价 MC 1.0 slime 弹跳 squish，
+    §9 原创程序合成）。
+
+    合成参数留痕：~0.18s「软体噗」——低频软体噗 = 正弦扫频 300→110Hz（0.12s 指数滑频，软体落地
+    「啵」的降调体）× 2 次谐波（幅 0.35，软橡皮质感）+ 软噪噗床（白噪 → 二阶单极低通 ~700Hz，
+    60ms 衰减 τ=22ms，湿软挤压气流感）+ 幅度包络快起缓落（5ms 攻 / 0.10s 衰减 τ）；尾段 20ms 颤滑
+    （90Hz 微抖 = 软体回弹余韵）。mono s16 44.1k，峰值归一 0.85。播放端
+    AudioManager::playMobBounced（EntityManager 着地沿 mobBounced 信号驱动）与 playMobHurt /
+    playMobAmbient 的 MobSlime 别名面（受击 / idle 同族 squish——敌对复用 idle clip 先例同门，
+    单一合成族不留独立受击 clip，登记简化）。
+    """
+    dur = 0.18
+    n_s = int(SR * dur)
+    out = [0.0] * n_s
+    # ① 低频软体「啵」：300→110Hz 指数滑频 × 2 次谐波。
+    phase = 0.0
+    for i in range(n_s):
+        t = i / SR
+        f0 = 110.0 + (300.0 - 110.0) * math.exp(-t / 0.045)  # 300→110Hz 指数滑频（τ=45ms）
+        f0 *= 1.0 + 0.05 * math.sin(2 * math.pi * 24.0 * t)  # 24Hz 微颤（软体回弹余韵）
+        phase += 2 * math.pi * f0 / SR
+        body = math.sin(phase) + 0.35 * math.sin(2.0 * phase)
+        env = math.exp(-t / 0.10) * min(1.0, t / 0.005)      # 5ms 攻 + 0.10s 衰减
+        out[i] += body * env * 0.9
+    # ② 软噪噗床：白噪 → 二阶单极低通 ~700Hz（湿软挤压气流，t366 裸高通教训同门规避）。
+    lp = 0.0
+    lp2 = 0.0
+    n_p = int(SR * 0.060)
+    for i in range(n_p):
+        t = i / SR
+        x = (random.random() * 2.0 - 1.0)
+        lp += 0.10 * (x - lp)       # 单极低通一阶
+        lp2 += 0.10 * (lp - lp2)    # 级联二阶（~700Hz 截止 @44.1k）
+        out[i] += lp2 * math.exp(-t / 0.022) * 1.1
+    # 末尾 10ms 线性收口防爆音
+    fade = int(SR * 0.010)
+    for j in range(fade):
+        out[n_s - 1 - j] *= j / fade
+    return finalize(out, target_peak=0.85)
+
+
+def gen_villager_hrmm():
+    """村民 hrmm 哼声音（t1110；idle 哼声 / 受击共用同族，机制等价 MC 1.0 villager 哼声，
+    §9 原创程序合成）。
+
+    合成参数留痕：~0.30s「鼻音短哼」——中频基频 150→120Hz 线性降调（哼声下沉观感）× 谐波列
+    k=1..6（幅 ~1/k^1.1，声门感）+ 鼻音共振峰（中心 ~1.0kHz 窄带共振器注入，Q≈8——鼻腔共鸣的
+    「嗯」质）+ 慢开合包络（40ms 起哼 / 0.12s 稳态 / 0.15s 收哼）+ 4Hz 微幅振颤（±4%，人声哼鸣
+    抖动）。mono s16 44.1k，峰值归一 0.8。播放端 AudioManager::playMobAmbient /
+    playMobHurt 的 MobVillager 别名面（idle 与受击同族 hrmm——敌对复用 idle clip 先例同门，
+    单一合成族不留独立受击 clip，登记简化）。
+    """
+    dur = 0.30
+    n_s = int(SR * dur)
+    out = [0.0] * n_s
+    phase = 0.0
+    f_res = 1000.0                      # 鼻音共振峰中心（窄带）
+    bp = 0.0                            # 共振器状态（二阶带通近似）
+    bp1 = 0.0
+    for i in range(n_s):
+        t = i / SR
+        frac = t / dur
+        f0 = 150.0 - 30.0 * frac        # 150→120Hz 线性降调
+        f0 *= 1.0 + 0.04 * math.sin(2 * math.pi * 4.0 * t)  # 4Hz 微幅振颤 ±4%
+        phase += 2 * math.pi * f0 / SR
+        voice = sum(amp * math.sin(phase * k) for k, amp in
+                    [(1, 1.0), (2, 0.46), (3, 0.28), (4, 0.17), (5, 0.10), (6, 0.06)])
+        # 鼻音共振峰注入：基频能量向 ~1kHz 窄带搬一份（二阶带通近似：单极串 + 减直通）。
+        bp += 2 * math.pi * f_res / SR * (math.sin(phase) - bp)
+        bp1 += 2 * math.pi * f_res / SR * (bp - bp1)
+        nasal = (bp - bp1) * 1.4
+        # 慢开合包络：40ms 起哼 / 0.12s 稳态 / 尾段收哼。
+        if t < 0.04:
+            env = t / 0.04
+        elif t < 0.15:
+            env = 1.0
+        else:
+            env = max(0.0, 1.0 - (t - 0.15) / 0.15)
+        out[i] = (voice + nasal) * env * 0.8
+    # 末尾 10ms 线性收口防爆音
+    fade = int(SR * 0.010)
+    for j in range(fade):
+        out[n_s - 1 - j] *= j / fade
+    return finalize(out, target_peak=0.8)
+
+
 def main():
     root = Path(__file__).resolve().parent.parent
     out_dir = root / "sounds"
@@ -1291,6 +1378,10 @@ def main():
     clips.append(("burp", gen_burp))
     # t1101 喷溅瓶碎裂音（玻璃碎 + 泼洒；gen_splash_break 参数留痕见函数头注）。
     clips.append(("splash_break", gen_splash_break))
+    # t1110 mob 音效两族（史莱姆 squish 软体噗 + 村民 hrmm 鼻音短哼；gen_slime_squish /
+    #   gen_villager_hrmm 参数留痕见函数头注）。
+    clips.append(("mob_idle_slime", gen_slime_squish))
+    clips.append(("mob_idle_villager", gen_villager_hrmm))
     # t1083 唱片机曲目（disc_track_00..02.wav，两位编号同 makeDiscPath %02d 口径）：--only 支持
     #   "disc" 全组 / 单轨名。
     for i in range(3):

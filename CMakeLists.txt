@@ -889,6 +889,8 @@ qt_add_resources(voxelsandbox "voxel_sounds"
         sounds/drink_gulp.wav                      # t1100 药水饮用节拍咕嘟音（build_sounds.py gen_drink_gulp 程序合成 §9 原创；drinkGulp → playDrinkGulp）
         sounds/burp.wav                            # t1100 饮毕 burp 音（build_sounds.py gen_burp 程序合成 §9 原创；potionDrunk → playBurp 随机音高）
         sounds/splash_break.wav                    # t1101 喷溅瓶碎裂音（build_sounds.py gen_splash_break 程序合成 §9 原创；splashBottleBreak → playSplashBreak）
+        sounds/mob_idle_slime.wav                  # t1110 史莱姆 squish 音（build_sounds.py gen_slime_squish 程序合成 §9 原创；mobBounced 着地沿 → playMobBounced，受击/idle 同族别名）
+        sounds/mob_idle_villager.wav               # t1110 村民 hrmm 音（build_sounds.py gen_villager_hrmm 程序合成 §9 原创；mobAmbient/mobAttacked 的 MobVillager 别名同族）
 )
 
 # miniaudio 是 vendored 第三方单头库（src/Audio/miniaudio.h）。

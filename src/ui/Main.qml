@@ -3760,6 +3760,11 @@ Window {
         target: entityManager
         function onMobAmbient(mobType) { audio.playMobAmbient(mobType) }
         function onMobStep(mobType, blockId) { audio.playMobStep(mobType, blockId) }
+        // t1110 mob 着地音（slime 弹跳着地 squish）：着地沿 mobBounced(mobType) → playMobBounced
+        //   （仅 MobSlime 有声，其余 mob 静默早退——AudioManager 内分流）。单向事件流（PLAN §2 分层：
+        //   Entities 层发语义事件、呈现层只消费，同 onMobAmbient/onMobStep 模式）。引擎 / clip 失败时
+        //   AudioManager 内部静默降级（§2-E），此处无需守卫。
+        function onMobBounced(mobType) { audio.playMobBounced(mobType) }
         // t616 Stalker 蓄力点燃嘶嘶声（机制等价 MC 苦力怕蓄力 fuse）：aiStalker fuseTimer 0→正 沿发一次
         //   stalkerFuseLit → 复用 playMobAmbient(6) 的 mob_idle_stalker 嘶声 clip（t366 音高化「引信
         //   哨音」族，非裸噪声；音效系统无独立 fuse SFX，既有资产内最优）。单向事件流（PLAN §2 分层）。
