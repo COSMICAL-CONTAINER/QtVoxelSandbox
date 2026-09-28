@@ -3739,11 +3739,15 @@ void MatrixRun::section67_brewing()
         ok = ok && wiring;
         if (!wiring) diag += QStringLiteral("[wiring]");
         // (S5) 呈现面（调色板尾三连 / 名面 / 图标 case / 形态组）。
+        //   [lawful 修订 t1107/r2077] 调色板材料段尾前移：南瓜种子行自「段尾无逗号形」改「逗号行」
+        //   （t1107 史莱姆球 0x28C 段尾追加为新尾行，t879 图集 201→207 / t1106 kMobTypeCount 同门
+        //   沿革注）；尾行钉改 SlimeBallId。原 `int(RecipeRegistry::PumpkinSeedsId)  ` 段尾形退役。
         const QString hbCpp = rawSource(srcRootForPins() + QStringLiteral("/Game/hotbar.cpp"));
         const QString iconQml = rawSource(srcRootForPins() + QStringLiteral("/ui/MaterialIcon.qml"));
         const bool pres = hbCpp.contains(QLatin1String("int(BlockRegistry::JackOLantern),"))
             && hbCpp.contains(QLatin1String("int(BlockRegistry::Cauldron) }"))
-            && hbCpp.contains(QLatin1String("int(RecipeRegistry::PumpkinSeedsId)  "))
+            && hbCpp.contains(QLatin1String("int(RecipeRegistry::PumpkinSeedsId),"))
+            && hbCpp.contains(QLatin1String("int(RecipeRegistry::SlimeBallId)"))
             && hbCpp.contains(QStringLiteral("南瓜种子")) // 中文 needle 须 UTF-16（QLatin1String 装不下汉字恒失配）
             && hbCpp.contains(QLatin1String("case BlockRegistry::PumpkinStem: // t1105"))
             && hbCpp.contains(QLatin1String("s = { 0, 1, 2, 3 };"))

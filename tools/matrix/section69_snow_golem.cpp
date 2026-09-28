@@ -442,6 +442,9 @@ void MatrixRun::section69_snow_golem()
         bool ok = true;
         QString diag;
         // (S1) 枚举位 + 类型计数(枚举 public 直读;kMobTypeCount private → 源钉声明行)。
+        //   [lawful 修订 t1107/r2077] 声明行 MobCaveSpider + 1 → MobVillager + 1（t1107 枚举尾追加
+        //   MobSlime=21/MobVillager=22 → 计数 21→23 枚举尾自动跟随；t879 图集 201→207 沿革注同门，
+        //   枚举值 12/16/17/20 全部原值零扰动 = 本腿其余行不受扰）。
         const bool enumOk = int(EntityManager::MobSnowGolem) == 12
             && int(EntityManager::MobIronGolem) == 13
             && int(EntityManager::MobNightwalker) == 16
@@ -450,7 +453,7 @@ void MatrixRun::section69_snow_golem()
         ok = ok && enumOk;
         if (!enumOk) diag += QStringLiteral("[enum]");
         const QStringList missCnt = pinSet(srcRootForPins() + QStringLiteral("/Entities/entitymanager.h"), {
-            SrcPin("type count", "static constexpr int kMobTypeCount = MobCaveSpider + 1;", 1)});
+            SrcPin("type count", "static constexpr int kMobTypeCount = MobVillager + 1;", 1)});
         ok = ok && missCnt.isEmpty();
         if (!missCnt.isEmpty()) diag += QStringLiteral("[cnt %1]").arg(missCnt.join(QLatin1Char(',')));
         // (S2) 常量族源钉(private 编译期常量不可直读 → 声明行逐行钉;数值行为面在 r2076b/c 钉)。

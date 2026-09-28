@@ -4776,8 +4776,8 @@ void MatrixRun::section01_redstone_core()
     //    ③ Hotbar::nameForBlock 13 蛋全有名（空名 = 调色板/tooltip 无名，t728 B9 同类缺口）；
     //    ④ Core 生成式染色表 spawnEggTint 13 蛋全有条目 + 非蛋 id 不误命中（pack miss 时该蛋按 mob 配色
     //      两层染色，而非空白模板）。蛋图标观感 / 蛋区排布为 QML 层，需人工目视。
-    runLegMulti({ "t785 spawn-egg completion: 15 eggs (nightwalker/emberling moved into the contiguous egg block + "
-        "wolf 0x249 / ocelot 0x24A new + t952 baby-shambler 0x25D + t1012 cave-spider 0x25E appended) all"
+    runLegMulti({ "t785 spawn-egg completion: 17 eggs (t1107 slime 0x28D / villager 0x28E appended after t1012 cave-spider 0x25E; "
+        "wolf 0x249 / ocelot 0x24A + t952 baby-shambler 0x25D + t1012 cave-spider 0x25E + t1107 slime/villager appended) all"
         " map to correct EntityManager mob types via single-authority table, all present & contiguous in "
         "creative palette with names, all have generative tint entries (egg icon look & palette layout = "
         "QML, manual check)" }, [&]() {
@@ -4794,6 +4794,8 @@ void MatrixRun::section01_redstone_core()
             RecipeRegistry::SpawnEggWolfId, RecipeRegistry::SpawnEggOcelotId,
             RecipeRegistry::SpawnEggBabyShamblerId, // t952 小蹒跚者蛋（0x25D；蛋区尾追加保连续同列）
             RecipeRegistry::SpawnEggCaveSpiderId,   // t1012③ 洞穴蜘蛛蛋（0x25E；蛋区尾追加保连续同列）
+            RecipeRegistry::SpawnEggSlimeId,        // t1107 史莱姆蛋（0x28D；蛋区尾追加保连续同列）
+            RecipeRegistry::SpawnEggVillagerId,     // t1107 村民蛋（0x28E；蛋区尾追加保连续同列）
         };
         const int expectMob[] = {
             EntityManager::MobPig, EntityManager::MobCow, EntityManager::MobSheep,
@@ -4803,6 +4805,8 @@ void MatrixRun::section01_redstone_core()
             EntityManager::MobWolf, EntityManager::MobOcelot,
             EntityManager::MobBabyShambler,
             EntityManager::MobCaveSpider,
+            EntityManager::MobSlime,
+            EntityManager::MobVillager,
         };
         const int eggCount = int(sizeof(allEggs) / sizeof(allEggs[0]));
         for (int i = 0; i < eggCount; ++i) {
@@ -4853,9 +4857,9 @@ void MatrixRun::section01_redstone_core()
         }
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                          << "| t785 spawn-egg completion: 15 eggs (nightwalker/emberling moved into the "
-                             "contiguous egg block + wolf 0x249 / ocelot 0x24A new + t952 baby-shambler "
-                             "0x25D + t1012 cave-spider 0x25E appended) all map to correct "
+                          << "| t785 spawn-egg completion: 17 eggs (t1107 slime 0x28D / villager 0x28E appended after "
+                             "contiguous egg block + wolf/ocelot + t952 baby-shambler "
+                             "0x25D + t1012 cave-spider 0x25E + t1107 slime/villager appended) all map to correct "
                              "EntityManager mob types via single-authority table, all present & contiguous "
                              "in creative palette with names, all have generative tint entries (egg icon "
                              "look & palette layout = QML, manual check)";
@@ -4875,7 +4879,8 @@ void MatrixRun::section01_redstone_core()
         //   → EntityManager::spawnerMobTypeForState 解码回原型。同时锁位布局常量本身。
         const int types786[] = { EntityManager::MobShambler, EntityManager::MobBones,
                                  EntityManager::MobStalker, EntityManager::MobSpider, EntityManager::MobSilverfish,
-                                 EntityManager::MobCaveSpider }; // t1012③ 洞穴蜘蛛笼型入 round-trip 全表
+                                 EntityManager::MobCaveSpider,
+                                 EntityManager::MobSlime, EntityManager::MobVillager }; // t1107 史莱姆/村民笼型入 round-trip 全表（蛋改型白名单在案）
         for (int t : types786) {
             const quint8 st = BlockRegistry::spawnerStateForMob(t);
             if (em786.spawnerMobTypeForState(int(st)) != t) {
@@ -4897,11 +4902,13 @@ void MatrixRun::section01_redstone_core()
         //   非法 type 位 → 兜底 Shambler 不崩不误刷。t787 注：旧样本 0x21（type16）扩表后是合法
         //   Nightwalker（蛋改型）→ 非法样本换 0x29（type20）；t1012③ MobCaveSpider=20 转正后 0x28/
         //   0x29（type20|bit0）均合法 → 非法样本再移 0x2A（type21 > MobCaveSpider=20 越界）；
+        //   [lawful 修订 t1107/r2077] MobSlime=21/MobVillager=22 尾追加转正（0x2A/0x2C 均合法解码）
+        //   → 非法样本再移 0x2E（type23 > MobVillager=22 越界；t952→t1012→t1107 同门沿革注）；
         //   0x3E（type31）仍非法。旧蜘蛛笼 0x0E 解码 MobSpider 不断档（存档兼容）。
         if (em786.spawnerMobTypeForState(0) != EntityManager::MobShambler
             || em786.spawnerMobTypeForState(1) != EntityManager::MobSilverfish
             || em786.spawnerMobTypeForState(0x0E) != EntityManager::MobSpider
-            || em786.spawnerMobTypeForState(0x2A) != EntityManager::MobShambler
+            || em786.spawnerMobTypeForState(0x2E) != EntityManager::MobShambler
             || em786.spawnerMobTypeForState(0x3E) != EntityManager::MobShambler) {
             qInfo() << "  [t786 diag] legacy/invalid-state decode wrong";
             ok = false;
@@ -5263,7 +5270,7 @@ void MatrixRun::section01_redstone_core()
     //    （被动型走 spawnPassiveMob 且 hostile=false；敌对型走原路径）④被动笼同型 local cap（4 只封顶，
     //    mobTypeCountNear 判据——防无上限刷屏）。蛋消耗（Hotbar takeStack）/ 笼心迷你模型切换（QML
     //    cleanupVis 重读链）在 PlayerController/QML 层，需人工目视（同 t786 ④ 注记）。
-    runLegMulti({ "t787 spawn-egg x spawner retype: all 14 eggs (t952 baby-shambler appended) round-trip through sp"
+    runLegMulti({ "t787 spawn-egg x spawner retype: all 16 eggs (t1107 slime/villager appended) round-trip through sp"
         "awnerStateForMob/spawnerMobTypeForState (whitelist extended, sentinels/overflow still fall back "
         "to shambler), retype write via same-id setBlock then tickSpawners spawns the egg's type (pig pas"
         "sive+non-hostile / spider hostile polarity), passive cage capped at 4 same-type nearby (egg cons"
@@ -5279,6 +5286,8 @@ void MatrixRun::section01_redstone_core()
             RecipeRegistry::SpawnEggWolfId, RecipeRegistry::SpawnEggOcelotId,
             RecipeRegistry::SpawnEggBabyShamblerId, // t952 小蹒跚者蛋（0x25D；round-trip 覆盖随全表扩展）
             RecipeRegistry::SpawnEggCaveSpiderId,   // t1012③ 洞穴蜘蛛蛋（0x25E；round-trip 覆盖随全表扩展）
+            RecipeRegistry::SpawnEggSlimeId,        // t1107 史莱姆蛋（0x28D；round-trip 覆盖随全表扩展）
+            RecipeRegistry::SpawnEggVillagerId,     // t1107 村民蛋（0x28E；round-trip 覆盖随全表扩展）
         };
         for (int eggId : eggs787) {
             const int mt = RecipeRegistry::mobTypeForSpawnEgg(eggId);
@@ -5291,10 +5300,11 @@ void MatrixRun::section01_redstone_core()
             }
         }
         // ② 哨兵 / 越界 type 编码后解码仍兜底 Shambler（0=MobTest / 12 SnowGolem / 13 IronGolem / 15 Tnt /
-        //    18 Anvil / 21 越界 —— 均无蛋不可经笼改型写入，白名单拒绝。t952 注：type19 已扩为合法
+        //    18 Anvil —— 均无蛋不可经笼改型写入，白名单拒绝。t952 注：type19 已扩为合法
         //    BabyShambler（蛋 0x25D 可改型写入）→ 越界样本上移到 20；t1012③ 注：type20 已扩为合法
-        //    CaveSpider（worldgen 矿井蛛笼 0x28 直写）→ 越界样本再上移到 21）。
-        const int sentinels787[] = { 0, 12, 13, 15, 18, 21 };
+        //    CaveSpider（worldgen 矿井蛛笼 0x28 直写）→ 越界样本再上移到 21；[lawful 修订 t1107/r2077]
+        //    MobSlime=21/MobVillager=22 尾追加转正（蛋 0x28D/0x28E 可改型写入）→ 越界样本再上移到 23）。
+        const int sentinels787[] = { 0, 12, 13, 15, 18, 23 };
         for (int st_ : sentinels787) {
             if (em787.spawnerMobTypeForState(int(BlockRegistry::spawnerStateForMob(st_))) != EntityManager::MobShambler) {
                 qInfo().noquote() << "  [t787 diag] sentinel type" << st_ << "not rejected by decode whitelist";
@@ -5370,7 +5380,7 @@ void MatrixRun::section01_redstone_core()
         }
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-                          << "| t787 spawn-egg x spawner retype: all 14 eggs (t952 baby-shambler appended) round-trip through "
+                          << "| t787 spawn-egg x spawner retype: all 16 eggs (t1107 slime/villager appended) round-trip through "
                              "spawnerStateForMob/spawnerMobTypeForState (whitelist extended, sentinels/overflow "
                              "still fall back to shambler), retype write via same-id setBlock then tickSpawners "
                              "spawns the egg's type (pig passive+non-hostile / spider hostile polarity), passive "
