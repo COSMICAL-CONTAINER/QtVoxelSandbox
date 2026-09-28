@@ -1122,6 +1122,10 @@ add_executable(redstone_matrix_test
     #   state] + 矿区瓜负面扫描收口柱[派工前提纠正留痕] + 沙漠村庄柱[Desert 准入 + 同构模板 + 沙面
     #   承接] + 结构钉族——零新 include 面，world/loottable/blockregistry 均已列）。
     tools/matrix/section72_t1109_closeout.cpp
+    # t1110 名册审计 + 小缺口清偿合集探针段（4 腿 r2080a-d，filter 词 r2080；狼雪球翻案负面柱 +
+    #   史莱姆弹跳着地信号柱 + 受击信号计数柱 + 结构钉族——零新 include 面，entitymanager/hotbar/
+    #   playercontroller 均已列）。
+    tools/matrix/section73_audio_t1110.cpp
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
     #   确定性等价承重墙[8 形态快照 worker ≡ 同步直调逐位恒等：顶点/索引/统计三面]/队列纪律
     #   [容量压小满载 kErrQueueFull 可见拒绝 + 拒绝项不入账 + 接受项恰一产出按 requestId 对账]/
