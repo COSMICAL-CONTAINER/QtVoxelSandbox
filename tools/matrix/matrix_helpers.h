@@ -88,11 +88,13 @@
 
 // ── 编译期互钉 + 文件级 extern 直连（原 L94-111 逐行搬移）──
 // review24 低危收尾（#35）：MobModel 合法 mobType 白名单表长（kValidMobTypeCount，mobmodel.h public 常量
-//   ↔ mobmodel.cpp kValidMobModelType 表编译期互钉）必须覆盖整个 EntityManager::MobType 枚举（t1012③ 起
-//   上界 = MobCaveSpider=20，实值经核：MobTest=0 .. MobCaveSpider=20 共 21 值）。枚举中部插值 /
+//   ↔ mobmodel.cpp kValidMobModelType 表编译期互钉）必须覆盖整个 EntityManager::MobType 枚举（t1107 起
+//   上界 = MobVillager=22，实值经核：MobTest=0 .. MobVillager=22 共 23 值）。枚举中部插值 /
 //   尾部新增忘补表行时本断言编译期拦截（t782「整表错位静默钳猪」根因的复刻防线）。
-static_assert(MobModel::kValidMobTypeCount == EntityManager::MobCaveSpider + 1,
-              "MobModel 白名单长度必须覆盖整个 EntityManager::MobType（0..MobCaveSpider）——"
+//   [lawful 修订 t1107/r2077] 比较基线 MobCaveSpider + 1 → MobVillager + 1（21→23；枚举尾前移沿革注，
+//   t952→t1012→t1107 同门）。
+static_assert(MobModel::kValidMobTypeCount == EntityManager::MobVillager + 1,
+              "MobModel 白名单长度必须覆盖整个 EntityManager::MobType（0..MobVillager）——"
               "新增 mobType 须同步 kValidMobModelType 表 + mobmodel.h kValidMobTypeCount");
 
 // t777 探针：羊毛层合成器（resourcepackmanager.cpp 文件级函数，头文件外声明 → extern 直连；spawnEggTint
@@ -625,7 +627,15 @@ private:
                               //   r2076c 雪球投掷伤害列[nearestHostile 发球 + 2.5s 节流 + 友好零发球
                               //   + golem 雪球 1 伤/烈焰相性 3 伤/玩家雪球烈焰相性 3 伤发射者无关/
                               //   玩家 0 伤红闪/被动 0 伤 0 红闪]，r2076d 结构钉族[枚举位 12/尾 20/
-                              //   kMobTypeCount 21 + 常量族含 kSnowballBlazeDamage=3 + 雪块合成链 +
+                              //   kMobTypeCount 21→23 lawful 修订 t1107 + 常量族含 kSnowballBlazeDamage=3 + 雪块合成链 +
                               //   源钉族七针 + 相邻族零污染]。fresh 48×48×96 s82 + 真链 pc rig（t891
                               //   同门），rig 世界零接触，接 section68）
+    void section70_slime_villager(); // t1107 史莱姆 + 村民合集探针段（置尾先例沿用：r2077a 史莱姆生成
+                              //   + 分裂链族[大→中×2-4→小×2-4 分裂守恒 + 血量=尺寸档 4/2/1 + 盒三档
+                              //   0.60/0.30/0.15 + 非法档回退]，r2077b 弹跳 AI + 接触伤害列[追击跳净
+                              //   位移收敛 + 大档恰 4 伤/中档恰 2/最小档零信号]，r2077c 史莱姆块生成面
+                              //   [slimeChunkForSeed 双跑逐位恒等 + 10% 命中带 + 深度门/骰面源钉]，
+                              //   r2077d 村民列 + 结构钉族[被动人形 + 贴身零攻击 + 死亡快照 + 枚举位
+                              //   21/22 + 物品族 0x28C..0x28E 蛋表双向 + 源钉族 + 相邻族零污染]。
+                              //   fresh 48×48×96 s82，rig 世界零接触，接 section69）
 };

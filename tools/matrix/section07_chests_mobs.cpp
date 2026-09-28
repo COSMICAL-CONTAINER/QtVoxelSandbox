@@ -1847,7 +1847,9 @@ void MatrixRun::section07_chests_mobs()
         ok = ok && int(EntityManager::MobCaveSpider) == 20; // 枚举尾追加（勿插中间——存档兼容契约）
         ok = ok && BR::SpawnerStateCaveSpider == quint8(0x28); // (20<<1)
         ok = ok && BR::spawnerStateForMob(int(EntityManager::MobCaveSpider)) == quint8(0x28);
-        ok = ok && MobModel::kValidMobTypeCount == 21;
+        // [lawful 修订 t1107/r2077] kValidMobTypeCount 21→23（t1107 尾追加 MobSlime=21/MobVillager=22 →
+        //   MobModel 白名单镜像值随枚举尾自动跟随；t879 图集 201→207 / t1106 kMobTypeCount 同门沿革注）。
+        ok = ok && MobModel::kValidMobTypeCount == 23;
         {
             EntityManager emT34a;
             ok = ok && emT34a.spawnerMobTypeForState(0x28) == EntityManager::MobCaveSpider; // 新笼解码
