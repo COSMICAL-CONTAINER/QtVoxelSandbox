@@ -20,9 +20,9 @@ last_completed_task: t1108 村庄 worldgen（2026-09-28 闭环；矩阵 848→85
 last_completed_task_prev: t1107 史莱姆+村民（2026-09-28 闭环，矩阵 844→848；详录 = dev-plan t1107 关单条目）
 last_completed_task_commits: fix(t1108)（1d5f877：placeVillages+候选表+spawn 桥+模板族+三 bug 修复，+350/−2）+ test(t1108)（c6591a1：section71_village_worldgen.cpp 新段 r2078a-d，+573/−3）
 last_verified_commit: test(t1108)（矩阵 **852 PASS / 0 FAIL ×2**：matrix_t1108_{pos,final}.log；腿集合 md5[规范配方]四路恒等 b9ad4689939c61b36964a1603d327fe7；NEG-1 恰红 {r2078c} / NEG-2 恰红 {r2078b}[均全量 851/1] 双还原 852/0；冒烟 tail20 logs/voxelsandbox_t1108_tail20.log[来源头注+横幅+root objects]；主控独立脱离式复跑 852/0 同 md5 三方恒等 matrix_orch_t1108_verify.log）
-last_governance_review: 2026-09-27（audit #22 GREEN——窗口 e776331..e21b6fb 15 提交/t1099-t1103 五闭环证据链全实核[五单 md5 三方恒等 fe383860/95da1b5a/31196e92/7cfabb43/b3f81723 + NEG 十份恰红十份还原吻合[含全量跑恰红三件] + 腿数链 812→832 无断]；**提交纪律 #21 F1 后首窗零命中**[检测器以已知尾注正反验证]；控制块全字段三窗连续守住[counter 1..5 递增+HEAD 行同步]；429 恢复链盘上时间线三段吻合+零 git 回滚；**F1[LOW] 窗口锚哈希记误两处**[agent-state 9079f74→e776331 勘正+派工单终点 345fa4a→e21b6fb——清偿=本批更正+「锚哈希须 git 现抄入简报」惯例] + F2[INFO #21 报告 CJK 载体勘误：实为 fix 提交 9774062/0ec65b6 引证字面，非 docs 提交——#21 报告已补勘误注] + F3/F4 INFO；详见 governance-audit-2026-09-27.md）
-governance_review_due: true（5/5 到期——审计 #23 已派，只读独立 agent 参照 governance-audit-2026-09-25-b.md 规程，窗口 = 审计 #22 落档件 84bafc1 后起至 t1108 关单 docs 提交）
-completed_tasks_since_governance_review: 5（t1104 + t1105 + t1106 + t1107 + t1108 闭环；审计 #22 GREEN 于 2026-09-27——**5/5 触发审计 #23，已派在飞**）
+last_governance_review: 2026-09-28（audit #23 GREEN——窗口 84bafc1..4e2b0db 14 提交/t1104-t1108 五闭环证据链全实核[五单 md5 三方恒等 005f5365/dd52e1a8/d8e9ca6f/54b5d3cb/b9ad4689 + NEG 十份恰红十份还原吻合 + 腿数链 832→852 无断]；提交纪律 14 笔署名零命中[检测器正反验证]+全窗纯 ASCII；tail20 来源头注 5/5 全应用=#22 F4 整改首窗落地；控制块第四窗连续守住[counter 1..5+HEAD 行同步]；「锚哈希 git 现抄」整改生效=本窗锚零记误；不变量五单 file:line 级实文亲读全过[含 t1108 三笔 bug 门实文]；**F1[LOW] 规程参照文件名陈旧**[governance-audit-2026-09-25-b.md 实为 #20 报告，应为 2026-09-27.md=#22——连续两窗同根因，清偿=本批更正+「规程参照文件名须 ls docs/ 现核」纪律扩充] + F2[INFO push 积压实数 156 笔[原记 100+]以实数汇报] + F3[INFO CJK 载体=矩阵段注释既有惯例免]；详见 governance-audit-2026-09-28.md）
+governance_review_due: false（审计 #23 GREEN 落档清零）
+completed_tasks_since_governance_review: 0（审计 #23 GREEN 于 2026-09-28——下一审计窗口 = t1109 起 5 闭环 → 审计 #24）
 next_task: **t1109 残项小批合集三（在飞，与审计 #23 并行——审计只读窗口闭于 t1108 关单 docs）→ 之后池面真底（下界/蘑菇岛维度级候选全停放待用户）→ §14-④ 再盘点或如实待机 + 用户侧并行 P5 实机清单/§30.6/§31/择机 push（本地领先远端 100+ 笔）**
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
@@ -33,7 +33,7 @@ needs_human: false
 
 ## Workspace Guard
 
-- HEAD = t1108 村庄 worldgen 代码终态（fix(t1108) 1d5f877 + test(t1108) c6591a1 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 852 腿满绿（71 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（t1097-t1108 十二单全过）。**git 提交禁任何 AI 署名尾注**（审计 #21 F1 入档纪律——派工简报恒带此句）。**审计窗口锚哈希须 git 现抄**（审计 #22 F1 教训）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（横幅+root objects 实文+组合件带来源头注，主控核对）。**NEG 四件终名日志必须落盘**（t1099 件教训）。
+- HEAD = t1108 村庄 worldgen 代码终态（fix(t1108) 1d5f877 + test(t1108) c6591a1 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 852 腿满绿（71 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（t1097-t1108 十二单全过）。**git 提交禁任何 AI 署名尾注**（审计 #21 F1 入档纪律——派工简报恒带此句）。**审计窗口锚哈希须 git 现抄 + 规程参照文件名须 ls docs/ 现核**（审计 #22 F1/#23 F1 两教训——禁凭记忆转写哈希与文件名）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（横幅+root objects 实文+组合件带来源头注，主控核对）。**NEG 四件终名日志必须落盘**（t1099 件教训）。
 - 纪律①-⑨全在案；**大 TU 编译一律 -j 1**（09-13 蓝屏教训；分段后单段增量 -j 4 实测安全）。**矩阵测试为 tools/matrix/ 分层结构**：改探针只重编对应段 TU（秒级）+ `--filter <substring>` 只跑本任务腿；新腿落对应段文件，新段置尾 runAll 末执行、须 ≤500KB；section11 起「自建 fresh 小世界」先例（48×48×96 seed 82 + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)）。
 - **R20.06 起值类型纪律**：src/Core/ 新值类型一律 result.h QObjectFree 编译期钉 + 头内 static_assert；命令/事件队列满载拒绝与快照队列覆盖最老是两域容量策略分化，勿「统一」。
 - **R20.07 起编排壳纪律**：GameSession 只做编排（命令 → 整 tick 边界 → World::setBlock 权威），禁复制游戏逻辑；**QML 现行玩法路径零变化是 R20 主线不变量**（Main.qml 含 "GameSession" 即违零迁移阴性钉 r2007b）。
