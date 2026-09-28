@@ -376,6 +376,18 @@ public:
     static constexpr int kJungleTempleSeedOff = 22617;   // 丛林神殿 hash 偏移（placeJungleTemple / jungleTempleSites 同源）
     static constexpr int kJungleTempleHalf = 7;          // 苔石建筑足迹半边（15×15）
     static constexpr int kJungleTempleRoofY = 11;        // 屋顶层相对地表（y = surfaceY + 11）
+    // ── t1108 村庄结构常量（单一权威：placeVillages 布局 / villageSites 足迹 / refillVillageSpawnRequests
+    //    的村民出生点推导三处同源引用，防字面量漂移；同 kDesertTempleHalf 上收先例）──
+    static constexpr int kVillageSeedOff = 26089;        // 村庄 worldgen hash 偏移（placeVillages / villageSites 同源；
+                                                         //   偏移族续位：12037 / 15047 / 19487 / 22617 之后的下一质数）
+    static constexpr int kVillageHalf = 14;              // 村庄足迹半边（29×29 外圈：井 ±2 / 小屋 ±10 / 农田 ±14 / 道路 ±12）
+    static constexpr int kVillageWellDepth = 4;          // 井shaft深（水柱 y S..S-3 + 圆石底 S-4）
+    static constexpr int kVillageHutRoofY = 3;           // 小屋平顶相对站心地表（y = S + 3；墙 y S+1..S+2）
+    // 小屋槽位表（相对站点中心的 4 个对角槽，占用顺序即表序——placeVillages 建屋与 refillVillageSpawnRequests
+    //   的村民出生点推导共用本表 = 单一权威；1.0 村庄小屋沿井四角散布的工程化重创，非逐块考据）。
+    static constexpr int kVillageHutSlots[4][2] = { { -8, -8 }, { 8, -8 }, { -8, 8 }, { 8, 8 } };
+    // 小屋数量（确定性工程骰）：候选 hash → 2..4 间（2 + hash%3）；两处消费同源引用。
+    static int villageHutCount(quint32 r) { return 2 + int(r % 3u); }
     // review0905 #3：神殿保底「出生区可见」半径（单一权威：desertTempleSites / jungleTempleSites 保底
     //   触发门 + P-t1010b 探针同源引用）。语义 = 距世界中心 R 格内 0 座神殿即补座（R 覆盖出生游走圈：
     //   160² 世界中心 (80,80)、R=56 ≈ 出生环走半径上限；小世界 R 超半边 → 门恒开 → 退化为旧「全世界
@@ -402,7 +414,9 @@ public:
         StructureMineshaft = 1,    // 废弃矿井（placeMineshaft 起点厅 + 巷道包络）
         StructureDesertTemple = 2, // 沙漠神殿（金字塔 + 地下密室 bbox）
         StructureJungleTemple = 3, // 丛林神殿（苔石建筑 bbox）
-        StructureKindCount = 4
+        StructureVillage = 4,      // t1108 村庄（井 / 小屋 / 农田 / 道路联合足迹；进入无成就接线——
+                                   //   playerprogress onStructureEntered default 臂忽略，登记口径）
+        StructureKindCount = 5
     };
     // 单一权威判定：点 (x,y,z)（玩家脚底，世界连续坐标）是否落入对应结构任一已生成足迹（cell 闭区间，
     //    同 insideStronghold 的 floor 取整口径）。区域表 = rebuildStructureRegions 在 generate / finishLoad
@@ -418,6 +432,23 @@ public:
     //    区间足迹）。kind 越界 / index 越界 → count -1 / region 空表（防御）。
     Q_INVOKABLE int structureRegionCount(int kind) const;
     Q_INVOKABLE QVariantList structureRegion(int kind, int index) const;
+    // ── t1108 村庄 spawn 桥（World→Entity 单解桥面，PLAN §2 分层：World 不知 Entities）────────
+    //   形态选型 = **spawn 请求快照面（take 语义队列）**，选型依据（两备选对比留痕）：①worldgen 完成
+    //   信号 → QML 路由（t1101 splashBottleBreak 同门）——信号在 generate 栈内发、消费者（EntityManager
+    //   在 ui 层构造）此刻未必就绪，读档路径 finishLoad 还得再发一次 = 两发两订阅面；②请求队列 take
+    //   （r2010 EditBuffer「登记 → 收口消费」同门思想）——World 只持纯值请求（x/y/z 三元组），生成
+    //   （placeVillages → refill）与读档（finishLoad → refill）两路径同缝 refill，上层（Main.qml
+    //   enterWorld）在实体面就绪后**一次性取走**（take 恒空幂等 = 会话内恰一次，重复进入/重复调用零
+    //   重复 = 村民重复生成防护面）。分层保真：请求面只交坐标不触实体类型（村民语义归消费端）。
+    //   返回 [x,y,z]×N 平铺表；空表 = 无可重生村庄（sparse 流式世界村庄豁免 → 无井锚 → 恒空，如实）。
+    Q_INVOKABLE QVariantList takeVillageSpawnRequests();
+    // 桥面观测（矩阵探针 / F3 诊断口径）：当前未取走的村民出生请求数（take 幂等性的对账面）。
+    Q_INVOKABLE int villageSpawnPending() const { return m_villageSpawnQueue.size(); }
+    // spawn 请求 refill 单一权威（generate 末 / finishLoad 末各调一次；先清后填幂等）：村庄候选表
+    //   （villageSites 纯算术，同 t1020/B5「重推导优于序列化」口径）逐站**井锚在场检查**（站心列顶
+    //   格 = 井水柱顶——fixed generate 必在场；玩家拆井后读档不重生村民 = 井毁村空，如实裁定）→
+    //   按小屋槽位表派生每小屋一名村民的出生点（小屋内格 air 门校验：被埋 / 被改建小屋不出请求）。
+    void refillVillageSpawnRequests();
     // inside* 四谓词的共享实现（kind = StructureKind；越界 kind 防御返 false）。public：PlayerController
     //    （Game/Physics）tick 沿检测按 kind 直调（Game 层 C++ 直调，同 insideStronghold 先例）。
     bool insideStructureRegion(int kind, double x, double y, double z) const;
@@ -506,6 +537,10 @@ public:
     //   探针 P-t1010b 据此判「R 内存在合格列」（保底契约前提），与实现零复刻漂移。
     bool desertTempleSiteOk(int cx, int cz) const;
     bool jungleTempleSiteOk(int cx, int cz) const;
+    // t1108 村庄落位四守卫（同门 siteOk 上收方法）：margin / 群系（仅 Plains——1.0 村庄平原+沙漠双
+    //    变体，沙漠砂岩变体单轮超容分层登记为候选池）/ 海域 / 地表起伏（村庄是地表建筑群，井/屋/
+    //    田各坐 heightAt 同一地表层 → 起伏 > 4 的坡地拒绝，机制等价 MC 村庄 start piece 的平坦判据）。
+    bool villageSiteOk(int cx, int cz) const;
 
     // t385 天气系统（机制等价 MC 1.0 天气：clear/rain/snow/thunder 随机转换；天空变暗；按群系）。
     //   全局单一天气态（weatherState）+ tickWeather 随机时长转换（QRandomGenerator 运行期模拟；天气是动态模拟
@@ -1773,6 +1808,10 @@ private:
     std::vector<StructureSite> mineshaftSites() const;
     std::vector<StructureSite> desertTempleSites() const;
     std::vector<StructureSite> jungleTempleSites() const;
+    // t1108 村庄候选表（同门第五表；placeVillages 几何落位与 rebuildStructureRegions 区域重推导、
+    //    refillVillageSpawnRequests 的村民出生点推导三处共同消费 → 选择单源）。足迹 = 村庄联合
+    //    bbox：水平 [cx±kVillageHalf]（29×29 外圈）、竖直 [y-6, y+4]（井底到小屋顶）。
+    std::vector<StructureSite> villageSites() const;
     // 神殿落位五守卫（t1010 siteOk lambda 上收方法；概率主路径 / 保底补座 / place* tryPlace 三路共用
     //    → 落位判据永不漂移。place* 内保留同名薄包装 lambda 仅为存 P-t1010 源码钉字面）。
     //    review0905 #3 起声明上提至 public（探针 P-t1010b 合格列前提同源直读；定义仍在 world.cpp）。
@@ -1866,6 +1905,19 @@ private:
     //   纯函数于 seed（hashColumn / hashVoxel）→ 同 seed 同要塞分布（PLAN §2-K）。**宝藏箱内容**：Chest 物品存
     //   ChestStore，首开填充由 isStrongholdChest 判定 → strongholdChestPool（含暗渊之眼，激活传送门关键物品）。
     void placeStronghold();
+    // t1108 村庄（spec 缺席项补齐：最后一块主世界结构大件；机制等价 MC Beta 1.8/1.0 村庄 village——
+    //   水井锚点 + 小屋群 + 农田 + 砂砾道路 + 村民）。placeStronghold 之后、carveCanyon 之前（神殿
+    //   同门：先于填水 → 不与海水冲突；先于峡谷/树/草 → 地表建筑放于完整地表；后续树/草/花 pass 的
+    //   草顶守卫对村庄占格（圆石/砂砾/木板/耕地）天然跳过，地表湖的低洼草顶判据同理 → 村庄不被后
+    //   续 pass 覆盖）。仅 Plains 群系（沙漠砂岩变体 1.0 实有但单轮超容——候选池登记，平原先行分层）。
+    //   模板族：①水井（5×5 圆石台 + 中芯 1×1 水柱深 4 + 圆石底——1.0 无顶棚开口井口径）②小屋×2..4
+    //   （5×5：木板地/墙/平顶 + 朝井门洞 1×2 + 室内火把）③农田（7×7：中行水道 + 两侧耕地湿 state=3
+    //   + 小麦 crop 阶段 hash 骰 0..7）④道路（十字四臂砂砾——1.0 村庄道路=gravel 口径，grass path
+    //   1.9+ 越纪元不取；只写草/泥地表格守卫 = 对既有结构零覆盖）。确定性纯函数于 seed（hashColumn +
+    //   hashVoxel，PLAN §2-K）→ 同 seed 同村庄。**村民不随本 pass 落地**（World 层无 Entity 依赖）：
+    //   出生请求经 refillVillageSpawnRequests 登记、上层 takeVillageSpawnRequests 取走派生（桥面契约
+    //   见其声明头注）。sparse 流式世界 = 结构族 (c) 豁免同门（sparsePopulateChunk 处置表），不重放。
+    void placeVillages();
     // t309 地表小湖泊（部分露出；spec「地表小湖泊（部分露出）」）：fillWater 之后，plains/forest 平坦地表
     //   确定性散布小型浅水湖——在局部低洼（disc heightAt 轻微起伏、湖岸外圈 ≥ surfaceY）的草地 carve 一个浅水盘
     //   （surfaceY-1 / surfaceY-2 两层水源），周围等高草地天然围成不溢漏的湖岸。湖部分露出（水面 = 周围草地顶 -1，
@@ -1945,6 +1997,11 @@ private:
     //    finishLoad 末从 seed 纯算术重推导落表（先清后填；beginLoad 后未 finishLoad 的错误路径 =
     //    空表 → inside* 恒 false，安全）。每世界区域数：地牢 ~1-3 / 矿井 ~1-8 / 神殿各 0-2，内存可忽略。
     std::vector<StructureSite> m_structureRegions[StructureKindCount];
+    // t1108 村庄村民 spawn 请求队列（桥面承载；契约见 takeVillageSpawnRequests 声明头注）。纯值三元
+    //    组、非 QObject 面不进存档——每次世界内容换代（generate / finishLoad）由 refill 单一权威先清
+    //    后填（重推导口径），take 取走即空 → 会话内恰一次。beginLoad 同步清（防旧世界请求串入）。
+    struct VillageSpawnRequest { int x = 0, y = 0, z = 0; };
+    QVector<VillageSpawnRequest> m_villageSpawnQueue;
     // t756 世界出生列（玩家初始出生 / 未睡床时的重生列）：findSpawnColumn 解析记录（见其声明注释的四守卫）。
     //   修「种子 42 出生在树里」：placeTrees 无出生邻域豁免 → 固定出生列 (80,80) 恰命中密度筛选即生树，
     //   旧出生链只按 heightAt（不含树的纯 fBm 地表）贴 Y → 玩家脚底嵌进树干 / 头部嵌进树冠。出生列改为
