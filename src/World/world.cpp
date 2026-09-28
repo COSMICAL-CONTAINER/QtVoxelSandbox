@@ -251,6 +251,9 @@ void World::sparseGenerateChunk(int cx, int cz)
 //   placeDesertTemple / placeJungleTemple     (c)    结构族（同 mineshaft 引证）
 //   placeStronghold                           (c)    结构族；同页 "strongholds in Java Edition
 //                                                    ... are placed as concentric rings"
+//   placeVillages                             (c)    结构族（t1108 第六员同门引证；1.0 村庄=固定世界
+//                                                    全量生成；流式世界无村庄 → spawn 桥井锚检查恒空
+//                                                    自洽——refillVillageSpawnRequests 头注口径）
 //   carveCanyon                               (b)追    路径纯 noise2 链 + 单 worm 全域 trace；
 //                                                    carveDisc/排水带/侧洞读=写位（skip 守卫
 //                                                    等幂）→ 窗口 bbox 早退只省窗外盘
@@ -838,6 +841,7 @@ void World::beginLoad(int seed)
     // t1020：结构区域表同步清（防旧世界区域残留误导进入判定）；finishLoad 末 rebuildStructureRegions
     //   从 seed 纯算术重推导落表（错误中断路径 = 空表 → inside* 恒 false，安全）。
     for (int k = 0; k < StructureKindCount; ++k) m_structureRegions[k].clear();
+    m_villageSpawnQueue.clear(); // t1108：村民 spawn 请求同步清（防旧世界请求串入；finishLoad 末 refill 重填）
     fluidActReset();         // t488：网格重置 → 活动盒作废（旧世界坐标不指向新栅格；finishLoad 置 dirty → 首次全量扫描兜底）
     gravLightReset();        // t933：网格重置 → 重力级联光照联合盒 / 批标志防御清（正常路径级联收尾已清；防任何中途路径残留批态）
     resetWeather(); // t385 加载存档 → 天气从 Clear 重起（防上一世界天气态残留）
@@ -907,6 +911,9 @@ void World::finishLoad()
     // t1020：结构区域表重落表（同 B5 重推导口径 —— 候选选择是 seed 的纯函数（PLAN §2-K），读档后
     //   纯算术重推导 = 生成期同表；零序列化、零体素扫描，旧存档（t1020 前生成）立即可判）。
     rebuildStructureRegions();
+    // t1108：村庄村民 spawn 请求 refill（读档路径桥面供给——存档块已就位，井锚在场检查有效；
+    //   会话语义 = 每次进世界重 population 一次，会话内死亡不补，见 refill 头注裁定）。
+    refillVillageSpawnRequests();
 }
 
 // 审查修 B5（t724-t729 复盘）：读档后从体素反推要塞暗渊门中心格回写 m_strongholdPortal*。旧版三坐标
@@ -1069,6 +1076,48 @@ QVariantList World::structureRegion(int kind, int index) const
     return out;
 }
 
+// ── t1108 村庄 spawn 桥执行体（契约见 world.h takeVillageSpawnRequests 声明头注）──────────────
+
+// take（消费侧唯一入口）：快照 → 清账（take 恒空幂等 = 会话内恰一次，重复调用零重复）。上层 =
+//   Main.qml enterWorld（实体面就绪后）；稀表 = 无可重生村庄（sparse 豁免世界 / 井被拆）。
+QVariantList World::takeVillageSpawnRequests()
+{
+    QVariantList out;
+    out.reserve(m_villageSpawnQueue.size() * 3);
+    for (const VillageSpawnRequest &rq : m_villageSpawnQueue)
+        out << rq.x << rq.y << rq.z;
+    m_villageSpawnQueue.clear();
+    return out;
+}
+
+// refill（单一权威，generate 末 / finishLoad 末各调一次；先清后填幂等）：候选表纯算术重推导 →
+//   逐站井锚在场检查（站心列顶格 = 井水柱顶；fixed generate 必在场，拆井后读档不重生村民 = 井毁
+//   村空如实裁定，sparse 豁免世界无井 → 恒空与「无村庄方块」自洽）→ 每小屋地板完整门 + 内格 air
+//   双格门 → 每屋一名村民出生点（1.0 村庄人口≈房数的工程化裁定，见 world.h placeVillages 头注）。
+//   t1108 NEG-2 摘面 = 本函数体首行后插恒真早退（桥面退化为恒空请求；调用行钉不受扰）。
+void World::refillVillageSpawnRequests()
+{
+    m_villageSpawnQueue.clear();
+    for (const StructureSite &v : villageSites()) {
+        if (m_chunks.blockAt(v.cx, v.y, v.cz) != BlockRegistry::Water)
+            continue; // 井锚缺席（拆井 / 豁免世界）→ 本站不出请求
+        const int huts = villageHutCount(v.r);
+        for (int i = 0; i < huts && i < 4; ++i) {
+            const int hx = v.cx + kVillageHutSlots[i][0];
+            const int hz = v.cz + kVillageHutSlots[i][1];
+            const int hy = v.y + 1; // 小屋室内格（placeVillages 同表同源偏移，防漂移）
+            // 地板完整门：小屋被 carveCanyon 等后置 carve 切毁（地板消失）→ 该屋不出村民请求
+            //   （「完好小屋才住人」口径；carve 切村=神殿同门既登记风险面，此处做实体侧诚实对齐）。
+            if (m_chunks.blockAt(hx, v.y, hz) != BlockRegistry::Planks)
+                continue;
+            if (m_chunks.blockAt(hx, hy, hz) != BlockRegistry::Air
+                || m_chunks.blockAt(hx, hy + 1, hz) != BlockRegistry::Air)
+                continue; // 小屋内格非空气（被埋 / 玩家改建）→ 该屋不出村民请求（如实）
+            m_villageSpawnQueue.append({ hx, hy, hz });
+        }
+    }
+}
+
 // 结构区域表重建（generate 末 / finishLoad 末各调一次；先清后填幂等）。区域表 = 四结构候选表的直接
 //   投影（候选表自带足迹闭区间）→ 「同 seed 同区域」由候选选择单源（sites() 上收）+ 纯函数性（PLAN
 //   §2-K）双保险；旧存档（t1020 前生成）finishLoad 重推导后立即可判，无序列化迁移面。
@@ -1079,6 +1128,7 @@ void World::rebuildStructureRegions()
     m_structureRegions[StructureMineshaft] = mineshaftSites();
     m_structureRegions[StructureDesertTemple] = desertTempleSites();
     m_structureRegions[StructureJungleTemple] = jungleTempleSites();
+    m_structureRegions[StructureVillage] = villageSites(); // t1108：村庄入表（第五员同门投影）
 }
 
 // 地牢候选表（选择段自 placeDungeons 原循环头逐字迁移 —— 概率 / 抖动 / margin / 海列 / 高度窗 /
@@ -1359,6 +1409,100 @@ std::vector<World::StructureSite> World::jungleTempleSites() const
                 s.minY = s.y; s.maxY = s.y + kJungleTempleRoofY;
                 sites.push_back(s);
             }
+        }
+    }
+    return sites;
+}
+
+// t1108 村庄落位四守卫（同门 siteOk 上收方法：margin / 群系 / 海域 / 地表起伏；契约见 world.h 声明
+//   头注）。placeVillages 主路径 / villageSites 候选表两路共用 → 落位判据永不漂移（desertTempleSiteOk
+//   三路共用同门）。守卫序 = 先廉价算术后 heightAt 采样（同神殿「先群系短门后贵守卫」经济学）。
+bool World::villageSiteOk(int cx, int cz) const
+{
+    constexpr int kMargin = kVillageHalf + 1;      // 留边界（村庄半径 ≤ margin 不越界）
+    constexpr int kMaxRelief = 6;                  // 足迹内地表起伏上限（采样格 max-min；平原 fBm amp≈2 上
+                                                   //   29 格跨度典型 4-6 → 取 6 免「全图无平地」的过筛；坡地埋屋
+                                                   //   由构件同层写自封闭 + 地板/井锚门兜底，登记口径）
+    constexpr int kReliefSample = 3;               // 起伏采样步长（±14 足迹 → 10×10 样点，覆盖井/屋/田锚）
+    constexpr int kBedrockTop = 4;                 // 不动基岩顶（同 carveCaves / placeDungeons / placeMineshaft）
+    if (cx < kMargin || cz < kMargin || cx >= m_width - kMargin || cz >= m_depth - kMargin)
+        return false; // 留 margin 边界
+    if (biomeAt(cx, cz) != Biome::Plains) return false; // 仅 Plains（沙漠变体候选池登记，见 world.h）
+    if (seaColumnHeight(cx, cz) >= 0) return false;     // 海域不叠村庄（避免与海水柱冲突）
+    const int surfaceY = std::min(heightAt(cx, cz), m_height - 1);
+    if (surfaceY + kVillageHutRoofY + 1 >= m_height) return false; // 小屋顶越界保护（roof y=S+3 + 余量）
+    if (surfaceY - kVillageWellDepth - 1 <= kBedrockTop) return false; // 井底贴基岩 → 拒（保井底完整）
+    // 地表起伏门：足迹采样格 max-min > kMaxRelief → 拒（村庄各构件同坐站心地表格，坡地会埋屋 / 悬田；
+    //   机制等价 MC 村庄 start piece 的平坦判据。heightAt 纯 fBm 采样，零栅格访问）。
+    int hMin = surfaceY, hMax = surfaceY;
+    for (int dx = -kVillageHalf; dx <= kVillageHalf; dx += kReliefSample)
+        for (int dz = -kVillageHalf; dz <= kVillageHalf; dz += kReliefSample) {
+            const int h = std::min(heightAt(cx + dx, cz + dz), m_height - 1);
+            hMin = std::min(hMin, h);
+            hMax = std::max(hMax, h);
+        }
+    return hMax - hMin <= kMaxRelief;
+}
+
+// t1108 村庄候选表（t1020 同门第五表：placeVillages 主路径选择段自本表消费；rebuildStructureRegions
+//   区域重推导 + refillVillageSpawnRequests 村民出生点推导同表 → 选择单源）。足迹 = 村庄联合 bbox：
+//   水平 [cx±kVillageHalf]（29×29 外圈）、竖直 [y-6, y+4]（井底到小屋顶）。网格 40 + 命中 50% + 抖动
+//   ±5（抖动界使相邻网格站点中心距 ≥ 40-10 = 30 > 2×kVillageHalf=28 → 村庄足迹互不重叠——沙漠神殿
+//   「grid 间距 > 2×half 不叠」同门口径；小世界 80² 也有 4 候选格 → 站点密度可观测）。
+std::vector<World::StructureSite> World::villageSites() const
+{
+    constexpr int kVillageGrid     = 40;   // 候选网格间距（神殿 48 同量级 → 村庄常规可遇；spec 1.0 低频口径的工程化取点）
+    constexpr unsigned kVillagePct = 50u;  // 候选命中概率（仅 Plains 候选 → 已天然稀有）
+    std::vector<StructureSite> sites;
+    const int villageSeed = m_seed + kVillageSeedOff;
+    // 先行结构表（每调用构建一次，候选循环外——纯函数表，placeSurfaceLakes 村庄守卫逐候选调本表
+    //   的放大面收口；bboxHit 只读不复制）。
+    const std::vector<StructureSite> dunTab = dungeonSites();
+    const std::vector<StructureSite> mineTab = mineshaftSites();
+    const std::vector<StructureSite> dTempleTab = desertTempleSites();
+    const std::vector<StructureSite> jTempleTab = jungleTempleSites();
+
+    for (int bx = kVillageGrid / 2; bx < m_width; bx += kVillageGrid) {
+        for (int bz = kVillageGrid / 2; bz < m_depth; bz += kVillageGrid) {
+            const quint32 r = hashColumn(villageSeed, bx, bz);
+            if ((r % 100u) >= kVillagePct) continue; // 概率筛选（t1108 NEG 摘面敏感行之一：门退化为恒过 → 站点数膨胀）
+            const int span = 5;                       // 抖动 ±5（上注：保证站点互不重叠）
+            const int jx = int((r >> 1) & 0xFu) % (2 * span + 1) - span;
+            const int jz = int((r >> 5) & 0xFu) % (2 * span + 1) - span;
+            const int cx = bx + jx, cz = bz + jz;
+            if (!villageSiteOk(cx, cz)) continue;
+            StructureSite s;
+            s.cx = cx; s.cz = cz; s.y = std::min(heightAt(cx, cz), m_height - 1);
+            s.minX = cx - kVillageHalf; s.maxX = cx + kVillageHalf;
+            s.minZ = cz - kVillageHalf; s.maxZ = cz + kVillageHalf;
+            s.minY = s.y - kVillageWellDepth - 2; s.maxY = s.y + kVillageHutRoofY + 1;
+            s.r = r; // 候选 hash 原值（小屋数量骰消费位；placeVillages / refill 同源直读防二次哈希漂移）
+            // t1108 结构足迹相交门：村庄是**后置**地表 pass（神殿/要塞同门先行）→ putSolid/carveAir
+            //   会覆写先到结构的羊毛纹样/墙体等采样面 → 候选村庄 bbox（3D 闭区间）与任一先行结构
+            //   足迹相交即拒（表内即落位，区域重推导同表 = 单一权威不破）。地下结构（地牢/矿井/
+            //   要塞）竖带与地表村庄天然分离 → 门对它们近乎恒放行（防御性包含）；真正拦截面 =
+            //   同为地表的沙漠/丛林神殿（群系边界村庄足迹跨界压塔，seed 2024 实测）。
+            const auto bboxHit = [&s](const std::vector<StructureSite> &tab) {
+                for (const StructureSite &o : tab)
+                    if (s.minX <= o.maxX && s.maxX >= o.minX
+                        && s.minY <= o.maxY && s.maxY >= o.minY
+                        && s.minZ <= o.maxZ && s.maxZ >= o.minZ)
+                        return true;
+                return false;
+            };
+            if (bboxHit(dunTab) || bboxHit(mineTab)
+                || bboxHit(dTempleTab) || bboxHit(jTempleTab))
+                continue;
+            if (m_hasStronghold) { // 要塞足迹由记录值 + 偏移常量反解（insideStronghold 同源口径）
+                const int scx = m_strongholdPortalX;
+                const int scy = m_strongholdPortalY - kStrongholdPortalDy;
+                const int scz = m_strongholdPortalZ - kStrongholdPortalDz;
+                if (s.minX <= scx + kStrongholdHalf && s.maxX >= scx - kStrongholdHalf
+                    && s.minY <= scy + kStrongholdWallH + 1 && s.maxY >= scy
+                    && s.minZ <= scz + kStrongholdHalf && s.maxZ >= scz - kStrongholdHalf)
+                    continue;
+            }
+            sites.push_back(s);
         }
     }
     return sites;
@@ -6907,6 +7051,7 @@ void World::generate()
     placeDesertTemple(); // t485：沙漠神殿（placeMineshaft 之后 → 神殿独立；仅 Desert 群系；先于填水 → 不与海水冲突；先于峡谷 / 树 / 草 → 金字塔放于完整沙漠地表）。
     placeJungleTemple(); // t486：丛林神殿（placeDesertTemple 之后 → 神殿独立；仅 Jungle 群系；先于填水 → 不与海水冲突；先于峡谷 / 树 / 草 → 苔石建筑放于完整丛林地表）。
     placeStronghold(); // t487：要塞（placeJungleTemple 之后 → 要塞独立；先于填水 → 不与海水冲突；先于峡谷 / 树 / 草 → 地下石砖迷宫放于完整地下）。
+    placeVillages(); // t1108：村庄（placeStronghold 之后 → 村庄独立；先于填水 → 不与海水冲突；先于峡谷/树/草 → 地表建筑放于完整地表，后续树/草/花的草顶守卫对村庄占格天然跳过）。
     carveCanyon(); // t342：大峡谷（caves/ores 之后 → 峡壁既有矿石层被 carve 暴露；先于填水 → 内陆干涸峡谷，
                    //   fillWater 仅填海域故不灌峡谷；先于树/草 → placeTrees/placeTallGrass 据「草顶」守卫天然跳过峡谷列）。
     pruneFloatingSnowLayers(); // t716 ③：carve 类 pass 之后清扫悬浮雪层（峡谷盘 / 洞口开口挖掉支撑格留下的
@@ -6942,6 +7087,8 @@ void World::generate()
     m_lavaDirty = true;
     // t1020：结构区域表落表（place* 选择已收口 sites() → 本重推导 = 同表投影；纯算术零体素访问）。
     rebuildStructureRegions();
+    // t1108：村庄村民 spawn 请求 refill（生成路径桥面供给；读档路径 = finishLoad 末同缝）。
+    refillVillageSpawnRequests();
 }
 
 // 整数哈希（FNV-1a + avalanche）：seed/x/z → 32 位确定性伪随机。R20.12：本体迁
@@ -10930,6 +11077,123 @@ void World::placeStronghold()
     qInfo() << "worldgen: strongholds =" << placed; // 同 seed → 同计数（确定性核对）
 }
 
+// t1108 村庄（见 world.h 头注释）。机制等价 MC Beta 1.8/1.0 村庄 village：地表建筑群（水井锚 + 小屋 +
+//   农田 + 砂砾道路）确定性落位。placeStronghold 之后、carveCanyon 之前（神殿同门时序）；候选选择单源
+//   villageSites()（rebuildStructureRegions 区域重推导 + refillVillageSpawnRequests 村民出生点推导同表）。
+//   构件写序 = 井 → 屋 → 田 → 路（道路末位 + 只写草/泥地表格守卫 → 对前三类构件零覆盖的结构性保证）。
+//   纯函数于 seed（hashColumn / hashVoxel）→ 同 seed 同村庄（PLAN §2-K）。
+void World::placeVillages()
+{
+    constexpr int kWellHalf  = 2;  // 水井 5×5 半边（P-t1108 源码钉字面）
+    constexpr int kHutHalf   = 2;  // 小屋 5×5 半边（同钉）
+    constexpr int kFarmHalf  = 3;  // 农田 7×7 半边（同钉）
+    constexpr int kFarmOffX  = 11; // 农田中心相对站心偏移（+X；足迹 11+3 = 14 = kVillageHalf 同源界）
+    constexpr int kRoadInner = 3;  // 道路臂内端（井环 |2| 外 1 格）
+    constexpr int kRoadOuter = 12; // 道路臂外端（≤ kVillageHalf-2 界内）
+
+    int placed = 0;
+
+    // 单格写入辅助（越界 / 基岩守卫；与 placeDesertTemple put 同模式）。
+    auto putSolid = [&](int px, int yy, int pz, quint8 id, quint8 state = 0) {
+        if (px < 0 || px >= m_width || yy < 0 || yy >= m_height
+            || pz < 0 || pz >= m_depth) return;
+        if (m_chunks.blockAt(px, yy, pz) == BlockRegistry::Bedrock) return; // 不动基岩
+        m_chunks.setBlock(px, yy, pz, id, state);
+    };
+    auto carveAir = [&](int px, int yy, int pz) {
+        if (px < 0 || px >= m_width || yy < 0 || yy >= m_height
+            || pz < 0 || pz >= m_depth) return;
+        if (m_chunks.blockAt(px, yy, pz) == BlockRegistry::Bedrock) return; // 不动基岩
+        m_chunks.setBlock(px, yy, pz, BlockRegistry::Air);
+    };
+
+    for (const StructureSite &v : villageSites()) {
+        const int cx = v.cx, cz = v.cz;
+        const int S = v.y; // 站心地表（villageSites 已钳 m_height-1）
+
+        // ── A) 水井（村庄锚点，先于房屋——1.0 村庄以井为 start piece 的口径重创）：5×5 圆石台 +
+        //       中芯 1×1 水柱（y S..S-kVillageWellDepth+1）+ 圆石井底（S-kVillageWellDepth）。
+        //       开顶无棚（1.0 口径；带棚井为后续版本形态，登记不取）。
+        for (int dx = -kWellHalf; dx <= kWellHalf; ++dx)
+            for (int dz = -kWellHalf; dz <= kWellHalf; ++dz)
+                putSolid(cx + dx, S, cz + dz, BlockRegistry::Cobble);
+        for (int dy = 0; dy < kVillageWellDepth; ++dy)
+            putSolid(cx, S - dy, cz, BlockRegistry::Water);
+        putSolid(cx, S - kVillageWellDepth, cz, BlockRegistry::Cobble);
+
+        // ── B) 小屋 ×2..4（kVillageHutSlots 表序占用，数量 = villageHutCount(v.r) 确定性骰）：
+        //       5×5 木板地板 / 周界墙两层（S+1..S+2）/ 室内净空 / 朝站心墙中格门洞 1×2 / 5×5 平顶
+        //       （S+kVillageHutRoofY）/ 室内火把（中格 +Z 偏 1，落地 state 0——placeMineshaft worldgen
+        //       火把同门）。floor/roof 同层写 → 地形微差下的屋体自封闭（埋足 / 悬基为神殿同门既登记形态）。
+        const int huts = villageHutCount(v.r);
+        for (int i = 0; i < huts && i < 4; ++i) {
+            const int hx = cx + kVillageHutSlots[i][0];
+            const int hz = cz + kVillageHutSlots[i][1];
+            const int dirX = kVillageHutSlots[i][0] > 0 ? -1 : 1; // 门洞朝站心（x 向；槽位对角分布 → x 向即向心）
+            for (int dx = -kHutHalf; dx <= kHutHalf; ++dx)
+                for (int dz = -kHutHalf; dz <= kHutHalf; ++dz)
+                    putSolid(hx + dx, S, hz + dz, BlockRegistry::Planks);      // 地板
+            for (int dy = 1; dy <= 2; ++dy)
+                for (int dx = -kHutHalf; dx <= kHutHalf; ++dx)
+                    for (int dz = -kHutHalf; dz <= kHutHalf; ++dz) {
+                        const bool edge = (dx == -kHutHalf || dx == kHutHalf
+                                           || dz == -kHutHalf || dz == kHutHalf);
+                        if (edge) // t1108 NEG-1 摘面 = 本墙体写入行（门退化为不写 → 墙体整族缺失）
+                            putSolid(hx + dx, S + dy, hz + dz, BlockRegistry::Planks);
+                        else
+                            carveAir(hx + dx, S + dy, hz + dz);                // 室内净空
+                    }
+            carveAir(hx + dirX * kHutHalf, S + 1, hz);                          // 门洞 1×2
+            carveAir(hx + dirX * kHutHalf, S + 2, hz);
+            for (int dx = -kHutHalf; dx <= kHutHalf; ++dx)
+                for (int dz = -kHutHalf; dz <= kHutHalf; ++dz)
+                    putSolid(hx + dx, S + kVillageHutRoofY, hz + dz, BlockRegistry::Planks); // 平顶
+            putSolid(hx, S + 1, hz + 1, BlockRegistry::Torch);                  // 室内照明
+        }
+
+        // ── C) 农田 7×7（中心 (cx+kFarmOffX, cz)，t406/t445 耕地族复用）：中行（dz=0）水道 + 两侧
+        //       耕地（state = FarmlandHydrationMax 湿——邻水道 1 格，tickFarmlandHydration 复算收敛
+        //       同值）+ 小麦 crop（阶段 hash 骰 0..7，WheatCropStageMax 同界；hashVoxel 确定性）。
+        for (int dx = -kFarmHalf; dx <= kFarmHalf; ++dx) {
+            for (int dz = -kFarmHalf; dz <= kFarmHalf; ++dz) {
+                const int fx = cx + kFarmOffX + dx, fz = cz + dz;
+                if (dz == 0) {
+                    putSolid(fx, S, fz, BlockRegistry::Water);                  // 水道行
+                    continue;
+                }
+                putSolid(fx, S, fz, BlockRegistry::Farmland,
+                         BlockRegistry::FarmlandHydrationMax);                  // 湿耕地
+                const quint32 cr = hashVoxel(m_seed + kVillageSeedOff, fx, S + 1, fz);
+                putSolid(fx, S + 1, fz, BlockRegistry::WheatCrop,
+                         quint8(cr % 8u));                                      // 小麦（阶段 0..7）
+            }
+        }
+
+        // ── D) 道路（十字四臂砂砾——1.0 村庄道路=gravel 口径，grass path 1.9+ 越纪元不取）：**随
+        //       地形跟随面**落砂砾（站心 S±带宽内自上而下首个草/泥格 = 该列真地表 → 原位替换；
+        //       起伏列不掉路面，也只吃草/泥 → 井/屋/田占格零覆盖的结构性保证）。带域 = S-4..S+3
+        //       （relief ≤6 门下覆盖足迹起伏；带域内无草/泥格 = 深切列 → 如实跳格）。
+        auto putRoad = [&](int px, int pz) {
+            if (px < 0 || px >= m_width || pz < 0 || pz >= m_depth) return;
+            for (int yy = S + 3; yy >= S - 4; --yy) {
+                if (yy < 0 || yy >= m_height) continue;
+                const quint8 cur = m_chunks.blockAt(px, yy, pz);
+                if (cur != BlockRegistry::Grass && cur != BlockRegistry::Dirt) continue;
+                m_chunks.setBlock(px, yy, pz, BlockRegistry::Gravel);
+                break; // 每列只铺真地表一格
+            }
+        };
+        for (int o = kRoadInner; o <= kRoadOuter; ++o) {
+            putRoad(cx + o, cz);
+            putRoad(cx - o, cz);
+            putRoad(cx, cz + o);
+            putRoad(cx, cz - o);
+        }
+        ++placed;
+    }
+    qInfo() << "worldgen: villages =" << placed; // 同 seed → 同计数（确定性核对）
+}
+
 // t309 地表小湖泊（见 world.h 头注释）。机制等价 MC 1.0 地表小湖泊 / 池塘：地表局部低洼处的浅水洼。
 //   确定性散布（hashColumn + seed 偏移，PLAN §2-K）：网格采样 + 概率筛选 + 抖动 → 选半径 2..3，**局部低洼**判定
 //   （disc 内 heightAt ∈ {surfaceY-1,surfaceY,surfaceY+1}（轻微起伏）、湖岸外圈 heightAt ≥ surfaceY（中心是相对低点））
@@ -10986,6 +11250,19 @@ void World::placeSurfaceLakes(int wx0, int wx1, int wz0, int wz1)
             if (!ext && (x - (rad + 1) < 0 || z - (rad + 1) < 0
                 || x + (rad + 1) >= m_width || z + (rad + 1) >= m_depth)) continue;
             if (seaColumnHeight(x, z) >= 0) continue; // t338：海域不叠地表湖（海独立于湖；heightAt 纯自然高度会误判海列为可挖平坦地 → 误挖海水柱）
+            // t1108：村庄占格不叠地表湖（海域同门——本 pass 的 carve/灌水只认基岩守卫，会覆盖村庄
+            //   的木板/圆石/砂砾构件 → 湖选点加村庄足迹重叠门：disc(rad)+外圈 1 与任一村庄 bbox 相交
+            //   即拒。villageSites 纯算术候选表直读（站点数 ~0-2，每候选 O(站点数) 廉价）；湖下穹顶
+            //   carve 水平内缩 rad-1 ⊆ 本门外圈 → 同门覆盖）。
+            bool villageOverlap = false;
+            for (const StructureSite &v : villageSites()) {
+                if (x + rad + 1 >= v.minX && x - rad - 1 <= v.maxX
+                    && z + rad + 1 >= v.minZ && z - rad - 1 <= v.maxZ) {
+                    villageOverlap = true;
+                    break;
+                }
+            }
+            if (villageOverlap) continue;
             const Biome bio = biomeAt(x, z);
             if (bio != Biome::Plains && bio != Biome::Forest) continue; // 仅 plains/forest
             const int surfaceY = std::min(heightAt(x, z), m_height - 1);

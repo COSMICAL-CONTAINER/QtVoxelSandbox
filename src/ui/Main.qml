@@ -1104,6 +1104,20 @@ Window {
         //   Y = worldgen 地表 +1（落地上方一格 → 重力 tick 贴地表不摔伤）。§9 区隔：模型 / 贴图
         //   原创方块化（不照搬 MC），机制对齐 MC 1.0 passive mob（猪 / 牛 / 羊三种）。spawnMobTyped 第五参
         //   color 仅 mobType 0（测试生物）单色路径读，pig/cow/sheep 走 MobModel + 贴图 → 传占位串即可。
+        // t1108 村庄 worldgen spawn 桥消费（World→Entity 单解桥面的 ui 层消费点）：世界内容已就位
+        //   （fixed 新世界 = generate 末 refill / 读档 = finishLoad 末 refill）→ 一次性取走村民出生
+        //   请求（take 恒空幂等 = 会话内恰一次，重复调用零重复 = 村民重复生成防护面）→ 每请求 spawn
+        //   一名 MobVillager 游荡（1.0 村庄人口≈房数的工程化裁定——refill 侧每小屋恰一请求）。请求
+        //   已按井锚在场 + 小屋内格 air 门校验（拆井 / 被埋小屋不出请求）；Y 取请求原值。sparse 流式
+        //   世界村庄豁免（结构族 c 同门）→ 桥面恒空 → 零 spawn（与「无村庄方块」自洽，如实分层）。
+        {
+            const vreqs = theWorld.takeVillageSpawnRequests()
+            for (let vi = 0; vi + 2 < vreqs.length; vi += 3)
+                entityManager.spawnMobTyped(vreqs[vi], vreqs[vi + 1], vreqs[vi + 2],
+                                            EntityManager.MobVillager, "#8a6a4a", 10)
+            if (vreqs.length > 0)
+                console.info("[t1108] village villagers spawned: " + (vreqs.length / 3)) // 进世界一次性核对（非每帧）
+        }
         spawnInitialMobs()
         appState = "playing"
         player.grab()

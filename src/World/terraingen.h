@@ -24,7 +24,7 @@
 //   未迁（= 仍为 World 同步专有，登记 R20.13+）：placeBedrock / scatterOres / carveCaves /
 //     carveCaveEntrances / carveCanyon / placeGravelPockets / placeUndergroundWaterPools /
 //     placeLavaLakes / placeDungeons / placeMineshaft / placeDesertTemple / placeJungleTemple /
-//     placeStronghold / pruneFloatingSnowLayers / pruneUnsupportedWorldgenRails / fillWater /
+//     placeStronghold / placeVillages / pruneFloatingSnowLayers / pruneUnsupportedWorldgenRails / fillWater /
 //     freezeSurfaceWater / placeSurfaceLakes / placeSwampPools / placeTrees / placeJungleTrees /
 //     placeTallGrass / placeDesertFlora / placeSwampFlora / placeFlowers / placeSugarcane /
 //     placeSweetBerryBushes / findSpawnColumn / recomputeLightField / rebuild*Cells /
