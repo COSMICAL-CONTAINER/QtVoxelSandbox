@@ -111,7 +111,7 @@ void MatrixRun::section26_sparse_population()
             "placeBedrock();", "scatterOres();", "placeGravelPockets();", "carveCaves();",
             "carveCaveEntrances();", "placeUndergroundWaterPools();", "placeLavaLakes();",
             "placeDungeons();", "placeMineshaft();", "placeDesertTemple();",
-            "placeJungleTemple();", "placeStronghold();", "carveCanyon();",
+            "placeJungleTemple();", "placeStronghold();", "placeVillages();", "carveCanyon();",
             "pruneFloatingSnowLayers();", "pruneUnsupportedWorldgenRails();", "fillWater();",
             "freezeSurfaceWater();", "placeSurfaceLakes();", "placeSwampPools();",
             "placeTrees();", "placeJungleTrees();", "placeTallGrass();", "placeDesertFlora();",
@@ -174,7 +174,8 @@ void MatrixRun::section26_sparse_population()
                     || wf.insideMineshaft(x + sh[0], y, z + sh[1])
                     || wf.insideDesertTemple(x + sh[0], y, z + sh[1])
                     || wf.insideJungleTemple(x + sh[0], y, z + sh[1])
-                    || wf.insideStronghold(x + sh[0], y, z + sh[1]))
+                    || wf.insideStronghold(x + sh[0], y, z + sh[1])
+                    || wf.insideStructureRegion(World::StructureVillage, x + sh[0], y, z + sh[1])) // t1108 lawful 修订：村庄第六员入掩蔽面（region 表 kind 4 投影同门；无 insideVillage 薄包装——登记口径）
                     return true;
             return false;
         };
@@ -414,7 +415,8 @@ void MatrixRun::section26_sparse_population()
             && !popBody.contains(QStringLiteral("placeMineshaft("))
             && !popBody.contains(QStringLiteral("placeDesertTemple("))
             && !popBody.contains(QStringLiteral("placeJungleTemple("))
-            && !popBody.contains(QStringLiteral("placeStronghold("));
+            && !popBody.contains(QStringLiteral("placeStronghold("))
+            && !popBody.contains(QStringLiteral("placeVillages(")); // t1108 lawful 修订：村庄第六员入豁免反探
 
         // ③ chunkmanager 拆卸原语单点（声明 + 定义各恰一处；擦槽语义面）。
         const QStringList missCm = pinSet(
