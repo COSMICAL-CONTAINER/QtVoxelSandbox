@@ -1427,7 +1427,10 @@ bool World::villageSiteOk(int cx, int cz) const
     constexpr int kBedrockTop = 4;                 // 不动基岩顶（同 carveCaves / placeDungeons / placeMineshaft）
     if (cx < kMargin || cz < kMargin || cx >= m_width - kMargin || cz >= m_depth - kMargin)
         return false; // 留 margin 边界
-    if (biomeAt(cx, cz) != Biome::Plains) return false; // 仅 Plains（沙漠变体候选池登记，见 world.h）
+    if (biomeAt(cx, cz) != Biome::Plains && biomeAt(cx, cz) != Biome::Desert)
+        return false; // Plains ∪ Desert（t1109 实读收口 t1108 候选池登记：Beta 1.8 村庄实有平原+沙漠
+                      //   双群系；沙漠专属**砂岩块变体** = 12w21a/1.3.1 越纪元不取——模板与平原同构，
+                      //   见 placeVillages；**NEG-2 (t1109) 摘面敏感行**，结构钉腿 r2079d 豁免不钉）
     if (seaColumnHeight(cx, cz) >= 0) return false;     // 海域不叠村庄（避免与海水柱冲突）
     const int surfaceY = std::min(heightAt(cx, cz), m_height - 1);
     if (surfaceY + kVillageHutRoofY + 1 >= m_height) return false; // 小屋顶越界保护（roof y=S+3 + 余量）
@@ -3668,7 +3671,10 @@ void World::tickCropGrowth()
     //    成熟茎每窗以同式散布（stage=7 恒项，纯 hashVoxel(mixedSeed, x, y*7+7, z)&0xFFFF%100 < kCropGrowPct，
     //    无湿润 / 雨水 / 天光耦合——MC 茎结果只要求有效果槽位，光照仅门茎体生长，同口径简化）命中 → 四向
     //    邻格扫描（哈希定起始向 (h>>16)&3，+X/-X/+Z/-Z 固定序自起始环绕）：空格且其下方 ∈ {耕地, 泥土,
-    //    草地}（MC 1.0 melon 落地面）→ 原位落瓜块（Melon state=0；茎保留可反复结果——MC 茎多果口径）。
+    //    草地}（MC 1.1 起集——11w49a 加泥土/草地，1.0 原口径仅耕地；t1103 取 1.1+ 集合为登记的超前简化，
+    //    t1109 实读纠正留痕不收窄——现网行为连续性优先）→ 原位落瓜块（Melon state 恒 0——无刻面；南瓜带
+    //    槽位向刻脸见下）。茎固定格不爬蔓（t1109 实读收口：MC 茎 age 0-7 原位生长，果结邻格 = t1103 形态
+    //    即终态）；单果门 = t1109 纠正旧「MC 茎多果」误读后补齐（见下方门注）。
     //    无有效槽位 → 本窗 no-op（下窗再试）。走同批 m_batchFluid 静默写（瓜块不透明 → 延迟光照重算由
     //    flushPendingLightEdits 末尾统一收口，同升阶段写）。NEG-1 (t1103) 曾整段摘除验恰红，已手工还原。
     for (const CCell &f : fruits) {
@@ -3679,6 +3685,17 @@ void World::tickCropGrowth()
         const quint8 fruitId = (f.id == BlockRegistry::PumpkinStem)
                                    ? quint8(BlockRegistry::Pumpkin) : quint8(BlockRegistry::Melon);
         static constexpr int kFruitDir[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+        // t1109 单果门（MC 1.0 实读收口——Beta 1.8.1 BlockStem 成熟分支先四向早退：任一水平邻格已是
+        //   本茎**同型果块**即整窗不结果；wiki 口径同门「stem 产出果后不再结果直到果被采收」。1.0 无
+        //   attached-stem 变体（1.4.2+ 越纪元），邻格果门即 1.0 的单果机制，且只认同型果（瓜茎认瓜块 /
+        //   南瓜茎认南瓜块，异型果不挡）。t1103 旧注「茎保留可反复结果——MC 茎多果口径」为误读，本单
+        //   纠正（r2073b/r2075b 腿均不越首果窗泵，兼容性核实绿）。门置散布 roll 之后 = roll 语义不变，
+        //   仅命中窗可被门拦截。**NEG-1 (t1109) 摘面敏感行**（结构钉腿 r2079d 豁免不钉本行）。
+        bool hasFruit = false;
+        for (int d = 0; d < 4; ++d)
+            hasFruit = hasFruit
+                || m_chunks.blockAt(f.x + kFruitDir[d][0], f.y, f.z + kFruitDir[d][1]) == fruitId;
+        if (hasFruit) continue; // 单果门：邻格已有同型果 → 本窗不结果（下窗重掷门）
         const int start = int((hF >> 16) & 3u); // 起始向（哈希定，确定性——同 seed 同窗同槽位）
         for (int d = 0; d < 4; ++d) {
             const int nx = f.x + kFruitDir[(start + d) & 3][0];
@@ -3689,7 +3706,13 @@ void World::tickCropGrowth()
             if (ground != BlockRegistry::Farmland && ground != BlockRegistry::Dirt
                 && ground != BlockRegistry::Grass)
                 continue; // 落地面非瓜果可承载面 → 试下一向（MC 口径）
-            anyChange |= setWaterSilent(nx, f.y, nz, fruitId, 0);
+            // t1109 结果朝向 state（blockregistry.h MelonStem 候选池「结果朝向 state 面」交付）：
+            //   南瓜落块带刻脸朝向 = 槽位向（(start+d)&3 即 chestFrontFace 同源编码 0=+X 1=-X 2=+Z
+            //   3=-Z——扫描序与编码天然同构），脸背茎（MC 1.0 茎结果朝向实读：果面朝茎反向——茎连在
+            //   瓜背面）；西瓜无刻面 → state 恒 0（MC 1.0 melon metadata 无视觉朝向面，工程恒 0 登记）。
+            const quint8 fruitState = (fruitId == BlockRegistry::Pumpkin)
+                                          ? quint8((start + d) & 3) : quint8(0);
+            anyChange |= setWaterSilent(nx, f.y, nz, fruitId, fruitState);
             break; // 本窗本茎至多结果一枚（MC 同口径）
         }
     }
@@ -11178,7 +11201,11 @@ void World::placeVillages()
             for (int yy = S + 3; yy >= S - 4; --yy) {
                 if (yy < 0 || yy >= m_height) continue;
                 const quint8 cur = m_chunks.blockAt(px, yy, pz);
-                if (cur != BlockRegistry::Grass && cur != BlockRegistry::Dirt) continue;
+                if (cur != BlockRegistry::Grass && cur != BlockRegistry::Dirt
+                    && cur != BlockRegistry::Sand)
+                    continue; // [t1109 lawful 钉修订 r2078d：road guard 扩 Sand——沙漠列真地表 = Sand，
+                              //   原 Grass/Dirt 门下沙漠站点道路恒灭（带域无草/泥格），1.0 沙漠村庄与平原
+                              //   同构同模板，沙面承接为工程必需；平原站点无 Sand 面行为逐位不变]
                 m_chunks.setBlock(px, yy, pz, BlockRegistry::Gravel);
                 break; // 每列只铺真地表一格
             }

@@ -537,9 +537,10 @@ public:
     //   探针 P-t1010b 据此判「R 内存在合格列」（保底契约前提），与实现零复刻漂移。
     bool desertTempleSiteOk(int cx, int cz) const;
     bool jungleTempleSiteOk(int cx, int cz) const;
-    // t1108 村庄落位四守卫（同门 siteOk 上收方法）：margin / 群系（仅 Plains——1.0 村庄平原+沙漠双
-    //    变体，沙漠砂岩变体单轮超容分层登记为候选池）/ 海域 / 地表起伏（村庄是地表建筑群，井/屋/
-    //    田各坐 heightAt 同一地表层 → 起伏 > 4 的坡地拒绝，机制等价 MC 村庄 start piece 的平坦判据）。
+    // t1108 村庄落位四守卫（同门 siteOk 上收方法）：margin / 群系（Plains ∪ Desert——t1109 实读收口
+    //    t1108 候选池：Beta 1.8 村庄实有平原+沙漠双群系；沙漠**砂岩块变体** = 12w21a/1.3.1 越纪元不取，
+    //    模板与平原同构）/ 海域 / 地表起伏（村庄是地表建筑群，井/屋/田各坐 heightAt 同一地表层 → 起伏
+    //    > 6 的坡地拒绝，机制等价 MC 村庄 start piece 的平坦判据）。
     bool villageSiteOk(int cx, int cz) const;
 
     // t385 天气系统（机制等价 MC 1.0 天气：clear/rain/snow/thunder 随机转换；天空变暗；按群系）。
@@ -803,7 +804,9 @@ public:
     //   分层（PLAN §2）：本方法属 World 层，只读 m_chunks + lightField + 发 worldChanged。不依赖 Renderer/Physics/Game。
     //   t1103：瓜茎（MelonStem）并入本 tick——未熟茎与三作物同门生长门（耕地支撑 + 天光 + 散布）；**成熟茎
     //   每窗另掷结果判定**（同散布哈希族 stage=7 恒项，命中 → 四向邻格空位 + 落地面 ∈ {耕地,泥土,草地} →
-    //   落瓜块；实现见 world.cpp tickCropGrowth 3b 节；茎蔓完整原型候选池登记注见 blockregistry.h MelonStem 行）。
+    //   落瓜块；实现见 world.cpp tickCropGrowth 3b 节；茎蔓完整原型收口注见 blockregistry.h MelonStem
+    //   行（t1109：单果门 + 南瓜结果朝向 state 已交付；「爬蔓」面实读收口——MC 茎固定格，t1103 形态即
+    //   终态；r2073b/r2075b 首果窗兼容性核实绿）。
     Q_INVOKABLE void tickCropGrowth();
     // t406 甘蔗生长 tick（t1088 口径归一：上限 3、基材草/泥土/沙、仅邻水处长高）：由呈现层 Main.qml 经
     //   WorldClock.ticked 桥接调用（每 100ms 一 tick；节流到 ~每 kSugarcaneTickInterval×0.1s 一窗）。机制等价
@@ -1909,11 +1912,13 @@ private:
     //   水井锚点 + 小屋群 + 农田 + 砂砾道路 + 村民）。placeStronghold 之后、carveCanyon 之前（神殿
     //   同门：先于填水 → 不与海水冲突；先于峡谷/树/草 → 地表建筑放于完整地表；后续树/草/花 pass 的
     //   草顶守卫对村庄占格（圆石/砂砾/木板/耕地）天然跳过，地表湖的低洼草顶判据同理 → 村庄不被后
-    //   续 pass 覆盖）。仅 Plains 群系（沙漠砂岩变体 1.0 实有但单轮超容——候选池登记，平原先行分层）。
+    //   续 pass 覆盖）。Plains ∪ Desert 双群系（t1109 实读收口 t1108 候选池登记：Beta 1.8 村庄实有
+    //   平原+沙漠双群系；沙漠专属**砂岩块变体** = 12w21a/1.3.1 越纪元不取——模板与平原同构，沙漠站点
+    //   唯二差异面 = 沙面地表 + 道路守卫扩 Sand 承接）。
     //   模板族：①水井（5×5 圆石台 + 中芯 1×1 水柱深 4 + 圆石底——1.0 无顶棚开口井口径）②小屋×2..4
     //   （5×5：木板地/墙/平顶 + 朝井门洞 1×2 + 室内火把）③农田（7×7：中行水道 + 两侧耕地湿 state=3
     //   + 小麦 crop 阶段 hash 骰 0..7）④道路（十字四臂砂砾——1.0 村庄道路=gravel 口径，grass path
-    //   1.9+ 越纪元不取；只写草/泥地表格守卫 = 对既有结构零覆盖）。确定性纯函数于 seed（hashColumn +
+    //   1.9+ 越纪元不取；只写草/泥/沙地表格守卫 = 对既有结构零覆盖；t1109 扩 Sand——沙漠列真地表承接）。确定性纯函数于 seed（hashColumn +
     //   hashVoxel，PLAN §2-K）→ 同 seed 同村庄。**村民不随本 pass 落地**（World 层无 Entity 依赖）：
     //   出生请求经 refillVillageSpawnRequests 登记、上层 takeVillageSpawnRequests 取走派生（桥面契约
     //   见其声明头注）。sparse 流式世界 = 结构族 (c) 豁免同门（sparsePopulateChunk 处置表），不重放。
