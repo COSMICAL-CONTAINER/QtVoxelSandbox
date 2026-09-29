@@ -532,7 +532,7 @@ void MatrixRun::section71_village_worldgen()
         if (!missMq.isEmpty()) diag += QStringLiteral("[mq %1]").arg(missMq.join(QLatin1Char(',')));
 
         // (D5) 相邻族零污染。
-        const bool neighOk = int(BR::Count) == 154
+        const bool neighOk = int(BR::Count) == 157 // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）
             && int(BR::AtlasTileCount) == 207
             && RecipeRegistry::SlimeBallId == 0x28C
             && RecipeRegistry::SpawnEggVillagerId == 0x28E
