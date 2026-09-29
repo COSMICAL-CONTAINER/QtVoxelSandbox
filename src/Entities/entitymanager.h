@@ -676,6 +676,22 @@ public:
     //   据它判是否可剪（已剪不再可剪，防刷屏）。越界 / 非 SnowGolem → false。revision 在剪南瓜头时 bump 让 QML
     //   绑定刷新（同 shearedAt 模式）。
     Q_INVOKABLE bool snowGolemShearedAt(int i) const;
+    // t1112 第 i 只 mob 是否**已带鞍**（仅 mobType==MobPig 用；其余 mob 恒 false）。QML delegate 据它切换
+    //   猪的鞍座外观面（v1 仅状态面，鞍座模型面候选池登记）。PlayerController 骑乘 / 上鞍分支读它判定。
+    //   越界 / 非 pig → false。**会话内口径**（mob 无存档序列化面，t1013 箱车先例——重进世界鞍消失）。
+    Q_INVOKABLE bool saddledAt(int i) const;
+    // t1112 上鞍（spec「玩家持鞍右键猪 → 猪装备鞍」；机制等价 MC 1.0 saddle on pig）：第 i 只**未鞍的
+    //   活体 pig** → 翻 saddled=true。已鞍 / 非 pig / dead / 越界 → 静默早退（ caller 不消耗鞍）。
+    //   bump revision → QML 状态面刷新（同 shearedAt 模式）。Q_INVOKABLE 兼调试 + PlayerController 直调。
+    Q_INVOKABLE void saddlePig(int i);
+    // t1112 第 i 只实体的代际序号（spawnSerial 快照读口）：骑乘 / 投掷者排除等「槽位 + 代际」快照
+    //   对账消费（PlayerController 骑猪 mount 时捕获、step 对账失配自动脱骑——snowballThrower 同门）。
+    //   越界 → 0（快照失配面）。
+    Q_INVOKABLE quint32 serialAt(int i) const;
+    // t1112 骑乘推挤豁免（PlayerController mount / dismount 双向设置）：resolvePlayerPush 跳过该
+    //   槽位 + 代际的 mob——骑乘钉位把玩家钉在猪背上，无豁免则推解逐帧把猪顶飞（骑乘不可持续）。
+    //   (idx<0, serial 0) = 清豁免。幂等。
+    void setRideExclusion(int idx, quint32 serial);
     // t510 剪雪傀儡南瓜头（spec「玩家持剪刀右键雪傀儡 → 南瓜掉落 + 雪傀儡变雪头形态」；机制等价 MC 1.0
     //   剪刀剪雪傀儡南瓜头）。第 i 只**未剪南瓜头的活体 SnowGolem** → 翻 snowGolemSheared=true + emit snowGolemSheared(坐标)
     //   让呈现层 Connections 转发到 ItemEntityManager.spawnItem 生成南瓜方块掉落实体（BlockRegistry::Pumpkin，
@@ -1718,6 +1734,10 @@ private:
         //   （slimeSizeAt）。mob 无存档序列化面（entitystore 只管 ItemEntity）→ 新字段零存档风险
         //   （羊 sheepWool per-entity 字段同门）。DMI 缺省 = 非 slime 恒 1（占位，不读）。
         int   slimeSize = 1;          // 史莱姆尺寸档（1 小 / 2 中 / 4 大；仅 MobSlime 用）
+        // t1112 猪鞍座态（仅 mobType==MobPig 用；其余 mob 恒默认 false 不触发）：true = 已装备鞍（右键
+        //   骑乘交互面开启）。装备后猪持久带鞍（**会话内口径**——mob 无存档序列化面，t1013 箱车先例：
+        //   重进世界鞍消失，如实登记）。槽复用（spawnMobCore move 入槽）覆盖旧值。DMI 缺省 = false。
+        bool  saddled = false;        // 是否已带鞍（仅 MobPig 用；骑乘交互面开关）
         // rv-low-batch1 槽代际序号（修「snowballThrower 槽复用误排除」）：每次 acquireSlot 复用 / 追加槽位时
         //   把全局单调计数 m_spawnSerial 写入新实体（槽的「这一任」标识）。投射物记发射者 slot+serial 快照，
         //   命中排除时同时比对 —— 槽被复用（release → 新实体进驻同 slot）后 serial 不同 → 不再误排除新生物
@@ -1834,6 +1854,10 @@ private:
     std::vector<Entity> m_entities;
     // rv-low-batch1 全局 spawn 单调序号：acquireSlot 每次分配 +1（写成新实体 spawnSerial）。见 Entity 注释。
     quint32 m_spawnSerialCounter = 0;
+    // t1112 骑乘推挤豁免快照（setRideExclusion 写 / resolvePlayerPush 读）：骑乘中玩家钉在猪背，无豁免
+    //   则推解逐帧把猪顶飞（骑乘不可持续）。槽位 + 代际双键（同 spawnSerial 快照语义，槽复用自动失效）。
+    int     m_rideExcludeIdx = -1;       // 豁免槽位（-1 = 无豁免）
+    quint32 m_rideExcludeSerial = 0;     // 豁免代际快照
     // review #28：玩家侧铁砧砸伤已结算标记（= 已伤过玩家的那一任下落铁砧的 spawnSerial；0 = 未被结算）。
     //   玩家不在 m_entities 槽位 → 无 Entity.anvilCrushSerial 可挂，独立成员记录。同 mob 侧字段语义：
     //   同一落体对玩家只结算一次，新落体（新 serial）照常结算。

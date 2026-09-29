@@ -189,6 +189,14 @@ Item {
         if (!root.hotbar.recipeCanTake(r.outputId, r.outputCount, heldId, heldCount, cap)) return
         for (let i = 0; i < root.craftSlots.length; ++i) {
             if ((root.craftSlots[i] || 0) !== 0) {
+                // t1112 容器交换单点（1.0 口径：蛋糕合成后空桶留在合成格——1.1 12w01a 才改回包）：
+                // 命中容器原料 → 原位转空桶（关包归还链自然带回背包），跳过普通消耗。
+                const swapId = root.hotbar.recipeContainerSwap(r.outputId, root.craftSlots[i])
+                if (swapId !== 0) {
+                    root.craftSlots[i] = swapId
+                    root.craftCounts[i] = 1
+                    continue
+                }
                 root.craftCounts[i] = (root.craftCounts[i] || 0) - 1
                 if ((root.craftCounts[i] || 0) <= 0) {
                     root.craftSlots[i] = 0

@@ -827,6 +827,12 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* sandstone_stairs    */ {int(BlockRegistry::SandstoneStairs),     52, 53, 53, 53, false, BlockRegistry::ShapeStairs,   0.8f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::SandstoneStairs),1, 64, "sandstone_stairs", "砂岩楼梯"},
     /* stone_slab          */ {int(BlockRegistry::StoneSlab),           3,  3,  3,  3, false, BlockRegistry::ShapeSlab,     1.5f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::StoneSlab),      1, 64, "stone_slab",    "石台阶"},
     /* sandstone_slab      */ {int(BlockRegistry::SandstoneSlab),       52, 53, 53, 53, false, BlockRegistry::ShapeSlab,     0.8f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::SandstoneSlab),  1, 64, "sandstone_slab", "砂岩台阶"},
+    // ── t1112 名册中件量批三件（表尾追加；属性注释见 blockregistry.h Id 枚举 FenceGate / GlassPane /
+    //   Cake 行）。栅栏门复用木板 tile 8（**零新 tile**）；玻璃板复用玻璃 tile 68（零新 tile）；蛋糕两新瓦
+    //   207/208（tools/build_cake.py 程序自绘 §9a；AtlasTileCount lawful 前移 207→209）。
+    /* fence_gate          */ {int(BlockRegistry::FenceGate),           8,  8,  8,  8, false, BlockRegistry::ShapeFenceGate, 2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::FenceGate),         1, 64, "fence_gate",      "栅栏门"},
+    /* glass_pane          */ {int(BlockRegistry::GlassPane),           68, 68, 68, 68, false, BlockRegistry::ShapeGlassPane, 0.3f, int(BlockRegistry::Pickaxe), 0, false, 0,                                     1, 64, "glass_pane",      "玻璃板"},
+    /* cake                */ {int(BlockRegistry::Cake),                207,208,208,208, false, BlockRegistry::ShapeCake,     0.5f, int(BlockRegistry::NoTool),  0, false, 0,                                     1, 64, "cake",           "蛋糕"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -1061,6 +1067,13 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* sandstone_stairs        */ -1,
     /* stone_slab              */ 44,
     /* sandstone_slab          */ 44,
+    // t1112 名册中件量批三行（表尾追加；机制等价 MC 1.0 对齐口径）：栅栏门 → 107（Beta 1.6 入版 = 1.0
+    //   基线内，1.0 真实 id）/ 玻璃板 → 102（Beta 1.8 入版 = 1.0 基线内，1.0 真实 id）/ 蛋糕 → 92
+    //   （Beta 1.2 入版 = 1.0 基线内，1.0 真实 id；1.0 无物品形态——物品形态 1.14+ flattening 面）。
+    //   本行追加后全表行数与 Count 160 一致（t691 教训：一行一条目 + 行内注释，防聚合初始化零填充回归）。
+    /* fence_gate              */ 107,
+    /* glass_pane              */ 102,
+    /* cake                    */ 92,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -1132,6 +1145,9 @@ bool BlockRegistry::isPartialBlock(quint8 blockId)
     if (blockId == SandstoneStairs) return true; // t1111 段外砂岩楼梯（ShapeStairs 同门；StoneBrickStairs 先例）
     if (blockId == StoneSlab || blockId == SandstoneSlab) return true; // t1111 段外石/砂岩台阶（ShapeSlab 同门；StoneBrickSlab 先例）
     if (blockId == IronBars) return true; // t998 段外铁栏杆（薄杆异形：ShapeIronBars 细柱 + 运行期连接横板，同 CobbleFence 段外并入模式）
+    if (blockId == FenceGate) return true; // t1112 段外栅栏门（异形门板：ShapeFenceGate 端柱+横档，同 IronBars 段外并入模式）
+    if (blockId == GlassPane) return true; // t1112 段外玻璃板（薄板异形：ShapeGlassPane 细柱 + 运行期连接横板，IronBars 同门）
+    if (blockId == Cake) return true; // t1112 段外蛋糕（矮盒异形：ShapeCake 分块食用收窄盒，Farmland 矮盒同门）
     if (blockId == Lever || blockId == WoodButton || blockId == StoneButton) return true; // t490 段外手动点火机关（t662 几何重做：贴附着面小钮 / 底座+棍，mechBoxes 单一几何源）
     if (blockId == StonePressurePlate || blockId == IronPressurePlate
         || blockId == GoldPressurePlate) return true; // t627 段外压力板家族扩展（与 WoodPressurePlate 同几何：贴地薄板）
@@ -1140,6 +1156,8 @@ bool BlockRegistry::isPartialBlock(quint8 blockId)
 bool BlockRegistry::isSlab(quint8 blockId)           { return blockId == WoodSlab || blockId == CobbleSlab || blockId == SpruceSlab || blockId == StoneBrickSlab || blockId == StoneSlab || blockId == SandstoneSlab; }
 bool BlockRegistry::isStairs(quint8 blockId)         { return blockId == WoodStairs || blockId == CobbleStairs || blockId == StoneBrickStairs || blockId == SandstoneStairs; }
 bool BlockRegistry::isFence(quint8 blockId)          { return blockId == WoodFence || blockId == CobbleFence || blockId == SpruceFence; }
+// t1112 栅栏门统一谓词（声明见 .h 注释）：右键开合分支 / 碰撞开合态统一读它（同 isDoor 单 id 模式）。
+bool BlockRegistry::isFenceGate(quint8 blockId)      { return blockId == FenceGate; }
 // t627 扩展：压力板族五件（wood/cobble/stone/iron/gold——后三件为 t627 家族扩展）。放置放宽 / 失撑掉落 /
 //   mesher plate case / 触发扫描统一读本谓词。
 bool BlockRegistry::isPressurePlate(quint8 blockId)
@@ -1650,6 +1668,10 @@ bool BlockRegistry::isCollidable(quint8 blockId, quint8 state)
     //   collisionAABBs 一致返 true，否则 hasGroundBelowAt（脚底支撑复探，读 isCollidable）会判睡莲「无支撑」→
     //   蹲下边缘安全误锁移动。仅此一 ShapeNone 方块特例；torch / water 仍 false（穿过）。
     if (blockId == LilyPad) return true;
+    // t1112 栅栏门开合态碰撞（ShapeFenceGate 唯一 state 敏感成员）：合=挡（整格 1.5 高，与 shapeBoxesInto
+    //   ShapeFenceGate 盒一致）/ 开=零碰撞可穿行（MC 口径开位无碰撞）。须先于 shape 族判定（default 分支
+    //   恒真会吞开态）——collisionAABBsInto 的 `!isCollidable → 0` 早退 + collisionTopY 的 -1.0 早退都经本门。
+    if (blockId == FenceGate) return (state & FenceGateStateOpenFlag) == 0;
     switch (def(blockId).shape) {
     case ShapeDoor:     return true;             // t261 门板无论开合都实存（合=贴朝向边 / 开=旋后贴铰链侧），恒挡一面
     case ShapeTrapdoor: return true;             // t359 开合都实存：合=水平薄板顶站立 / 开=铰链侧整高竖直板顶站立（见 collisionAABBs/shapeBoxes）
@@ -1912,6 +1934,32 @@ int shapeBoxesInto(BlockRegistry::Shape sh, quint8 state, BlockRegistry::BlockAA
         // t1097 酿造台两盒异形（单一权威 brewingStandShapeBoxes——与渲染 / 选中 / 射线 / 列顶同源，
         //   hopperShapeBoxes 同门）：底座板（可踩 2/16）+ 中柱（可站顶 10/16）。state 不参与盒形。
         return BlockRegistry::brewingStandShapeBoxes(state, out, cap);
+    case BlockRegistry::ShapeFenceGate:
+        // t1112 栅栏门开合态分面碰撞（机制等价 MC 1.0 fence gate：合=整格 footprint × 1.5 高挡通路
+        //   ——栅栏「不可跳越」语义同门；开=零碰撞可穿行）。朝向 / 端柱纯视觉面（渲染 PartialBlock
+        //   Geometry case 摆位），碰撞只有「挡 / 不挡」二元——横档碰撞盒含端部（视觉端柱 4/16 比碰撞
+        //   窄，「横板纯视觉」栅栏族口径反转：门板是拦路面本体非连接装饰 → 满宽碰撞是对齐 MC 门板 hitbox）。
+        if ((state & BlockRegistry::FenceGateStateOpenFlag) != 0)
+            return 0; // 开：无碰撞（穿行）
+        putAABB(out, cap, n, {0.0f, 0.0f, 0.0f, 1.0f, 1.5f, 1.0f}); // 合：整格 1.5 高
+        return n;
+    case BlockRegistry::ShapeGlassPane:
+        // t1112 玻璃板碰撞 = 中心细柱（4/16 见方 × 满格高，ShapeIronBars 同门同盒——连接横板纯视觉，
+        //   碰撞无邻居语境，铁栏杆 t998 同口径）。走默认路径即可（下方统一 shape 家族直排）。
+        putAABB(out, cap, n, {0.375f, 0.0f, 0.375f, 0.625f, 1.0f, 0.625f});
+        return n;
+    case BlockRegistry::ShapeCake:
+        // t1112 蛋糕分块食用矮盒（碰撞 / 选中 / 射线同盒，ShapeRepeater 四消费者同源先例）：footprint
+        //   内缩 1px（1..15/16）× 高 8/16；-X 侧随咬口数每咬收 2px（MC 咬口切片视觉口径：x0 =
+        //   (1+2×bites)/16）。bites 越界 clamp（CakeBitesMax=5 合法域收口）。
+        {
+            int bites = int(state & BlockRegistry::CakeStateBitesMask);
+            if (bites < 0) bites = 0;
+            if (bites > BlockRegistry::CakeBitesMax) bites = BlockRegistry::CakeBitesMax;
+            const float x0 = (1.0f + 2.0f * float(bites)) / 16.0f;
+            putAABB(out, cap, n, {x0, 0.0f, 1.0f / 16.0f, 15.0f / 16.0f, 0.5f, 15.0f / 16.0f});
+        }
+        return n;
     }
     return 0; // 未知 shape → 空（兜底，同旧 shapeBoxes 兜底空 vector）
 }
@@ -2092,9 +2140,30 @@ float BlockRegistry::collisionTopY(quint8 blockId, quint8 state)
     case ShapeHopper:  return 0.625f; // t1093 漏斗顶箅板顶面 10/16（hopperShapeBoxes 最高盒顶 = 可站面）
     case ShapeRepeater: return 0.125f; // t1095 中继器贴地薄板 2/16（ShapeRepeater 碰撞盒顶 = 可踩面）
     case ShapeBrewingStand: return 0.625f; // t1097 酿造台中柱顶 10/16（brewingStandShapeBoxes 最高盒顶 = 可站面）
+    case ShapeFenceGate: return 1.5f;   // t1112 栅栏门合态整格 1.5 高（开态经 isCollidable 早退 -1.0，不达本行）
+    case ShapeGlassPane: return 1.0f;   // t1112 玻璃板中心细柱满格高（ShapeIronBars 同门同值）
+    case ShapeCake: return 0.5f;        // t1112 蛋糕矮盒顶 8/16（咬口只收 -X 侧，顶高恒 0.5 不随 bites）
     }
     return -1.0f; // 未知 shape → 空（兜底，同 shapeBoxes）
 }
+// t1112 栅栏门门板盒单一解码（selectionAABBs / raycastAABBs 双消费同源；文件内静态——Core 外渲染层在
+//   partialblockgeometry.cpp FenceGate case 按同一编码镜像摆位，改编码两处同步）：
+//   合 = 整格 footprint × 1.5 高门板（挡通路全高，碰撞同盒）；
+//   开 = 门板旋至铰链侧竖立（铰链恒取朝向轴负侧）：朝向 0/1（±X）→ 运行轴 Z，板贴 x[0, 3/16]；
+//        朝向 2/3（±Z）→ 运行轴 X，板贴 z[0, 3/16]。板厚 3/16（WoodDoor 门板同厚）。
+static std::vector<BlockRegistry::BlockAABB> fenceGatePanelBoxes(quint8 state)
+{
+    if ((state & BlockRegistry::FenceGateStateOpenFlag) == 0)
+        return {BlockRegistry::BlockAABB{0.0f, 0.0f, 0.0f, 1.0f, 1.5f, 1.0f}};
+    constexpr float kPanelThick = 3.0f / 16.0f;
+    switch ((state & BlockRegistry::FenceGateStateFacingMask) >> BlockRegistry::FenceGateStateFacingShift) {
+    case 2: case 3: // ±Z 朝向 → 运行轴 X，板贴 z[0, 3/16]
+        return {BlockRegistry::BlockAABB{0.0f, 0.0f, 0.0f, 1.0f, 1.0f, kPanelThick}};
+    default:        // ±X 朝向 → 运行轴 Z，板贴 x[0, 3/16]
+        return {BlockRegistry::BlockAABB{0.0f, 0.0f, 0.0f, kPanelThick, 1.0f, 1.0f}};
+    }
+}
+
 std::vector<BlockRegistry::BlockAABB> BlockRegistry::selectionAABBs(quint8 blockId, quint8 state)
 {
     // t639⑦ 耕地选中框贴合 0.9375（spec「耕地选中框应贴 0.9375 高度」）：与碰撞矮盒同源同盒
@@ -2135,6 +2204,15 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::selectionAABBs(quint8 block
     if (blockId == IronBars)
         return std::vector<BlockAABB>{BlockAABB{0.4375f, 0, 0.0f, 0.5625f, 1.0f, 1.0f},   // Z 向条带（柱 + ±Z 横板走向）
                                       BlockAABB{0.0f, 0, 0.4375f, 1.0f, 1.0f, 0.5625f}};  // X 向条带（柱 + ±X 横板走向）
+    // t1112 栅栏门选中框 = 开合态门板（「选中框贴实际形状」口径同门）：合 = 整格 footprint × 1.5 高门板
+    //   （碰撞同盒同源）；开 = 铰链侧竖立薄板（沿运行轴贴边，fenceGatePanelBoxes 单一解码，射线同源）。
+    if (isFenceGate(blockId))
+        return fenceGatePanelBoxes(state);
+    // t1112 玻璃板选中框 = 十字条带双盒（铁栏杆同盒同源）：细柱 + 横板全走向（连接态是运行期邻居判定，
+    //   选中无邻居语境 → 邻接无关条带交叉，瞄板身任意段皆中）。
+    if (blockId == GlassPane)
+        return std::vector<BlockAABB>{BlockAABB{0.4375f, 0, 0.0f, 0.5625f, 1.0f, 1.0f},   // Z 向条带
+                                      BlockAABB{0.0f, 0, 0.4375f, 1.0f, 1.0f, 0.5625f}};  // X 向条带
     return shapeBoxes(def(blockId).shape, state);
 }
 
@@ -2276,6 +2354,10 @@ float BlockRegistry::solidTopOffset(quint8 blockId, quint8 state)
     case ShapeHopper:   return 0.625f;                        // t1093 漏斗顶箅板顶面 10/16（PCF 列顶随可站面）
     case ShapeRepeater: return 0.125f;                        // t1095 中继器薄板顶 2/16（PCF 列顶随可踩面）
     case ShapeBrewingStand: return 0.625f;                    // t1097 酿造台中柱顶 10/16（PCF 列顶随可站面）
+    case ShapeFenceGate: return 1.5f;                         // t1112 栅栏门门板 1.5 高（合态挡通路全高；开态面板竖立
+                                                              //   仍 1.0 视觉高——列顶取族同值 1.5 过遮可忽略，登记简化）
+    case ShapeGlassPane: return 1.0f;                         // t1112 玻璃板细柱满格高（铁栏杆同门）
+    case ShapeCake: return 0.5f;                              // t1112 蛋糕矮盒顶 8/16（PCF 列顶随可站面）
     default:            return 1.0f;                          // ShapeNone（air/torch/water）不入 heightmap 顶，兜底 1.0
     }
 }
@@ -2320,6 +2402,15 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::raycastAABBs(quint8 blockId
     if (blockId == IronBars)
         return {BlockAABB{0.4375f, 0.0f, 0.0f, 0.5625f, 1.0f, 1.0f},   // Z 向条带（柱 + ±Z 横板走向）
                 BlockAABB{0.0f, 0.0f, 0.4375f, 1.0f, 1.0f, 0.5625f}};  // X 向条带（柱 + ±X 横板走向）
+    // t1112 栅栏门射线命中盒 = 与 selectionAABBs 同源的开合态门板（fenceGatePanelBoxes 单一解码）：合 =
+    //   整格 1.5 高门板（瞄门任意部位皆中）；开 = 铰链侧竖立薄板（瞄开位门板可再右键合上）。
+    if (isFenceGate(blockId))
+        return fenceGatePanelBoxes(state);
+    // t1112 玻璃板射线命中盒 = 与 selectionAABBs 同源的十字条带双盒（铁栏杆同盒同源）：瞄板身任意段
+    //   （细柱 / 任一方向横板段）皆中，邻接无关。
+    if (blockId == GlassPane)
+        return {BlockAABB{0.4375f, 0.0f, 0.0f, 0.5625f, 1.0f, 1.0f},   // Z 向条带
+                BlockAABB{0.0f, 0.0f, 0.4375f, 1.0f, 1.0f, 0.5625f}};  // X 向条带
     const Shape sh = def(blockId).shape;
     if (sh == ShapeFull)
         return {BlockAABB{0, 0, 0, 1, 1, 1}}; // 整格：射线进格即中（等同旧行为）
@@ -3029,6 +3120,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case StoneBrick: // t487 石砖 → 石质音色（石质整立方，同 stone 族）
     case StoneBrickSlab: case StoneBrickStairs: // t487 石砖台阶/楼梯 → 石质音色（同 stone 族）
     case SandstoneStairs: case StoneSlab: case SandstoneSlab: // t1111 砂岩楼梯/石·砂岩台阶 → 石质音色（砂岩同 Sandstone/CutSandstone 族；石同 Stone 族）
+    case GlassPane: // t1112 玻璃板 → 石质音色（玻璃质，Glass/Ice 族同门；机制等价 MC glass pane glass SoundType）
     case MossyStoneBrick: case CrackedStoneBrick: // t998 石砖变体 → 石质音色（同 stone brick 族，风化 / 开裂不改材质）
     case AbyssGate: // t487 暗渊门框架 → 石质兜底音色（不可破，仅创造敲响兜底）
     case AbyssGateSurface: // t664 门面 → 石质兜底音色（瞬破薄平面轻响）
@@ -3049,6 +3141,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
         return GroupStone;
     case Log: case Planks: case CraftingTable:
     case WoodSlab: case WoodStairs: case WoodFence:
+    case FenceGate: // t1112 栅栏门 → 木质音色（门族木音，WoodDoor/WoodFence 同门；机制等价 MC fence gate wood SoundType）
     case WoodPressurePlate: case WoodDoor: case WoodTrapdoor: // t134 木制半方块 → 木质音色
     case Chest: // t173 箱子 → 木质音色
     case Wool: // t300 羊毛 → 木质音色（软质闷击，最接近 MC 1.0 羊毛 cloth SoundType）
@@ -3094,6 +3187,8 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case TntBlock: // t485 TNT → 软草音色（火药捆软质闷击；机制等价 MC 1.0 TNT SoundType = grass）
     case Fire: // t724 火焰 → 软草音色（软质燃烧物瞬破轻响）
     case EmberGate: // t725 余烬门 → 软草音色（门面瞬破轻响，同 fire 档软质熄灭）
+    case Cake: // t1112 蛋糕 → 软草音色（松软糕体软材质——草档 = 本工程软材质兜底档；MC cake
+               //   wool/cloth SoundType 的闷感以软草近似，登记简化留痕）
         return GroupGrass;
     case Sand:
     case SnowLayer: // t395 积雪层 → 颗粒雪响（软质颗粒，最接近 MC 1.0 雪 snow SoundType）

@@ -1111,6 +1111,40 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
       { int(BlockRegistry::Sandstone), int(BlockRegistry::Sandstone), int(BlockRegistry::Sandstone),
         0, 0, 0, 0, 0, 0 },
       int(BlockRegistry::SandstoneSlab), 6, 1, "sandstone_slab" },
+    // ── t1112 名册中件量批三行（复用同门配方形状；原料各异 → 多重集互不冲突）。
+    //   fence_gate：4 木棍 + 2 木板（两行「棒-板-棒」）→ 1 栅栏门（有序 3×3，仅工作台）。机制等价
+    //     MC 1.0 fence gate 配方（4 sticks + 2 planks → 1，Beta 1.6 起 1.0 基线内原值）。多重集
+    //     {Stick:4, Planks:2} 唯一（木栅栏行是 {Planks:4, Stick:2} 镜像料、木剑 {Planks:2, Stick:1}、
+    //     梯子 {Stick:7}）→ 不冲突；经板材族等价回退，云杉木板同合（橡木行兜底——门 1.0 仅橡木，
+    //     云杉板回退合入门是板材族既定通配口径，登记简化）。多重集唯一性核对在案。
+    { int(RecipeRegistry::Table3x3), false,
+      { kStickId,                    int(BlockRegistry::Planks), kStickId,
+        kStickId,                    int(BlockRegistry::Planks), kStickId,
+        0,                           0,                          0 },
+      int(BlockRegistry::FenceGate), 1, 1, "fence_gate" },
+    //   glass_pane：6 玻璃 2×3 满阵 → 16 玻璃板（有序 3×3，仅工作台）。机制等价 MC 1.0 glass pane
+    //     配方（6 glass → 16，Beta 1.8 起 1.0 基线内原值；产率 16 同源）。玻璃经熔炉烧沙产出
+    //     （smelting 在案）→ 生存链闭环。多重集 {Glass:6} 唯一（红石灯 {Redstone:4, Glass:1}）→ 不冲突。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Glass), int(BlockRegistry::Glass), int(BlockRegistry::Glass),
+        int(BlockRegistry::Glass), int(BlockRegistry::Glass), int(BlockRegistry::Glass),
+        0,                           0,                           0 },
+      int(BlockRegistry::GlassPane), 16, 1, "glass_pane" },
+    //   cake：3 牛奶桶（顶行）+ 2 糖 + 1 蛋（中行 糖-蛋-糖）+ 3 小麦（底行）→ 1 蛋糕（有序 3×3，
+    //     仅工作台）。机制等价 MC 1.0 cake 配方（3 milk bucket + 2 sugar + 1 egg + 3 wheat → 1，
+    //     Beta 1.2 起 1.0 基线内原值）。**派工勘误留痕**：派工稿「7 段每右键咬一口」按 1.0 实读裁定为
+    //     **六片**——每片 +2 饥饿 / 全蛋糕 12 饥饿（Beta 1.8 Pre-release 口径「restores 12 (× 6),
+    //     slice 2 (× 1)」，1.0.0 沿用；「7 片 14 饥饿」是 1.8/14w27a 改版越基线不取），state 位面
+    //     0..5（CakeBitesMax=5）——勘误如实登记。**空桶去向**：1.0.0 口径 = 合成后空桶**留在合成格**
+    //     （「moved to inventory」是 1.1 12w01a 改版）→ 经 Hotbar::recipeContainerSwap 单一权威在
+    //     合成格原位把牛奶桶转空桶（两处 QML 消费点同读， crafting 关包归还链自然把空桶带
+    //     回背包——1.0 观感逐位对齐）。牛奶桶生存链：空桶右键牛挤奶（playercontroller 挤奶分支，
+    //     1.0 无冷却）。多重集 {MilkBucket:3, Sugar:2, Egg:1, Wheat:3} 唯一 → 不冲突。
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::MilkBucketId, RecipeRegistry::MilkBucketId, RecipeRegistry::MilkBucketId,
+        RecipeRegistry::SugarId,      RecipeRegistry::EggId,        RecipeRegistry::SugarId,
+        RecipeRegistry::WheatId,      RecipeRegistry::WheatId,      RecipeRegistry::WheatId },
+      int(BlockRegistry::Cake), 1, 1, "cake" },
     // dispenser：7 圆石 + 中心 1 弓 + 底中 1 红石 → 1 发射器（有序 3×3，仅工作台）。机制等价 MC 1.0
     //   dispenser（7 cobble + bow + redstone；顶行圆石 / 中行 圆-弓-圆 / 底行 圆-红石-圆）。审计发现
     //   机关族不对称：投掷器（t626）可合成而发射器漏注册。弓为工具段物品（可入合成格，MC 语义发射器
@@ -1479,6 +1513,10 @@ static_assert(int(BlockRegistry::JackOLantern) == 152, "JackOLantern 方块 id �
 static_assert(int(BlockRegistry::SandstoneStairs) == 154, "SandstoneStairs 方块 id 须为 154（砂岩楼梯合成行产物锚；段尾追加，t1111）");
 static_assert(int(BlockRegistry::StoneSlab)       == 155, "StoneSlab 方块 id 须为 155（石台阶合成行 + 双半砖合并映射两端锚；段尾追加，t1111）");
 static_assert(int(BlockRegistry::SandstoneSlab)   == 156, "SandstoneSlab 方块 id 须为 156（砂岩台阶合成行 + 双半砖合并映射两端锚；段尾追加，t1111）");
+static_assert(int(BlockRegistry::FenceGate)       == 157, "FenceGate 方块 id 须为 157（栅栏门合成行产物锚；段尾追加，t1112）");
+static_assert(int(BlockRegistry::GlassPane)       == 158, "GlassPane 方块 id 须为 158（玻璃板合成行产物锚；段尾追加，t1112）");
+static_assert(int(BlockRegistry::Cake)            == 159, "Cake 方块 id 须为 159（蛋糕合成行产物锚；段尾追加，t1112）");
+static_assert(RecipeRegistry::MilkBucketId        == 0x28F, "MilkBucketId 物品 id 须为 0x28F（蛋糕合成行原料锚；材料段尾追加，t1112）");
 // 编译期互钉：金锭 0x21F ↔ 金粒 0x288 双向合成（t1103 双向行）+ 瓜块方块段 Melon=149 行在。
 static_assert(RecipeRegistry::GoldIngotId == 0x21F, "GoldIngotId 须为 0x21F（金粒双向行两端的锚）");
 static_assert(int(BlockRegistry::Melon) == 149, "Melon 方块 id 须为 149（瓜块存储行产物 + 生长结果面）；t1103");

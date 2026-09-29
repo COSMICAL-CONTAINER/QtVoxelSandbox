@@ -302,6 +302,83 @@ int PartialBlockGeometry::append(
             pushBox(verts, idx, lx, ly, lz, rTh0, rTh1, aY0, aY1, 0.0f, 0.4375f, tile, light, tileW, hx, hy, v0, v1);
         break;
     }
+    case BlockRegistry::FenceGate: { // t1112 栅栏门 —— 端柱双盒 + 双横档沿运行轴（开合态旋转）
+        // t1112 栅栏门几何（机制等价 MC 1.0 fence gate 门板形态；**编码镜像 blockregistry.cpp
+        //   fenceGatePanelBoxes / ShapeFenceGate 同源**，改编码两处同步）：
+        //   - state bit0=开合（FenceGateStateOpenFlag）、bit[2:1]=朝向（放置写 horizontalFacing）；
+        //     运行轴 = 朝向轴的垂直轴（朝向 0/1 ±X → 门板沿 Z 横铺，玩家沿 ±X 穿行；朝向 2/3 → 沿 X）。
+        //   - 合态：两端柱（4/16 见方 × 1.0 高，贴运行轴两端）+ 双横档（y 带同栅栏族 6..9/16 与
+        //     12..15/16，厚 2/16 满贯运行轴）。MC 门板 2px 厚 × 双档 + 端柱 2/16 的细化留候选池
+        //     （端柱取栅栏 4/16 族同值，视觉稳定性优先）。
+        //   - 开态：同一套柱 + 档旋转 90° 贴铰链侧（朝向轴负侧竖立——门板开位贴边，MC 口径）。
+        //   - 横档 / 端柱纯视觉（碰撞走 ShapeFenceGate：合=整格 1.5 高 / 开=零，blockregistry 同源）。
+        //   - 无邻居连接面（门板满贯自身格——相邻栅栏由其自身横档对接，视觉齐平即成线）。
+        const bool open = (state & BlockRegistry::FenceGateStateOpenFlag) != 0;
+        const int facing = (state & BlockRegistry::FenceGateStateFacingMask)
+                               >> BlockRegistry::FenceGateStateFacingShift;
+        const bool runZ = (facing < 2); // 朝向 ±X → 门板沿 Z 运行；朝向 ±Z → 沿 X
+        constexpr float kPost = 0.25f;         // 端柱半宽偏移（柱 4/16 见方：中心 ±1/8）
+        constexpr float kRail0 = 0.375f, kRail1 = 0.625f; // 横档厚向区间（4/16 居中——档截面与柱同宽）
+        constexpr float kY0a = 0.375f,  kY1a = 0.5625f;   // 下档 y（6..9/16，栅栏族同值）
+        constexpr float kY0b = 0.75f,   kY1b = 0.9375f;   // 上档 y（12..15/16，栅栏族同值）
+        // 端柱位置：运行轴两端各一（柱心距端 2/16）。开态整体旋到铰链侧：板面从运行轴位转到贴边位
+        //（铰链恒取朝向轴负侧——合/开共用柱位逻辑，仅运行轴与贴边位翻转）。
+        auto emitPanel = [&](bool alongZ, float thin0, float thin1, float span0, float span1) {
+            // alongZ=true：柱/档沿 Z 运行（thin = X 向厚区间 [thin0,thin1]，span = Z 贯区间）
+            const float pC0 = span0 + kPost, pC1 = span1 - kPost; // 两端柱中心
+            if (alongZ) {
+                pushBox(verts, idx, lx, ly, lz, thin0, thin1, 0.0f, 1.0f, pC0 - 0.125f, pC0 + 0.125f, tile, light, tileW, hx, hy, v0, v1);
+                pushBox(verts, idx, lx, ly, lz, thin0, thin1, 0.0f, 1.0f, pC1 - 0.125f, pC1 + 0.125f, tile, light, tileW, hx, hy, v0, v1);
+                pushBox(verts, idx, lx, ly, lz, thin0, thin1, kY0a, kY1a, span0, span1, tile, light, tileW, hx, hy, v0, v1);
+                pushBox(verts, idx, lx, ly, lz, thin0, thin1, kY0b, kY1b, span0, span1, tile, light, tileW, hx, hy, v0, v1);
+            } else {
+                pushBox(verts, idx, lx, ly, lz, pC0 - 0.125f, pC0 + 0.125f, 0.0f, 1.0f, thin0, thin1, tile, light, tileW, hx, hy, v0, v1);
+                pushBox(verts, idx, lx, ly, lz, pC1 - 0.125f, pC1 + 0.125f, 0.0f, 1.0f, thin0, thin1, tile, light, tileW, hx, hy, v0, v1);
+                pushBox(verts, idx, lx, ly, lz, span0, span1, kY0a, kY1a, thin0, thin1, tile, light, tileW, hx, hy, v0, v1);
+                pushBox(verts, idx, lx, ly, lz, span0, span1, kY0b, kY1b, thin0, thin1, tile, light, tileW, hx, hy, v0, v1);
+            }
+        };
+        if (!open) {
+            if (runZ) emitPanel(true,  kRail0, kRail1, 0.0f, 1.0f); // 合：门板沿 Z 居中
+            else      emitPanel(false, kRail0, kRail1, 0.0f, 1.0f); // 合：门板沿 X 居中
+        } else {
+            // 开：门板旋至铰链侧（朝向轴负侧贴边竖立）：±X 朝向 → 板贴 x[0, 4/16]；±Z → z[0, 4/16]。
+            constexpr float kOpen0 = 0.0f, kOpen1 = 0.25f; // 贴边薄位（4/16，fenceGatePanelBoxes 3/16 射线盒的视觉余量同源）
+            if (runZ) emitPanel(false, kOpen0, kOpen1, 0.0f, 1.0f); // 沿 X 贴边竖立
+            else      emitPanel(true,  kOpen0, kOpen1, 0.0f, 1.0f); // 沿 Z 贴边竖立
+        }
+        break;
+    }
+    case BlockRegistry::GlassPane: { // t1112 玻璃板 —— 中心细柱 + 横板连接（IronBars 同门几何家族）
+        // t1112 玻璃板几何（机制等价 MC 1.0 glass pane；**ShapeGlassPane / IronBars 同门**）：
+        //   中心细柱 4/16 见方 × 满格高 + 每连接向一道满高横板（4/16 厚向、从柱面伸到格边）——连接判定
+        //   R1 家族口径（isCollidable ∨ isFullCube）：邻玻璃板 / Glass / 实体方块连，空气 / 水 / cross
+        //   不连 → 孤立玻璃板 = 单柱。横板纯视觉（碰撞走 ShapeGlassPane 柱盒，铁栏杆 t998 同口径）。
+        //   贴图无需 UV 区间适配（整张玻璃瓦随面拉伸采样，iron_bars 同模式）。
+        pushBox(verts, idx, lx, ly, lz, 0.375f, 0.625f, 0.f, 1.0f, 0.375f, 0.625f, tile, light, tileW, hx, hy, v0, v1);
+        const auto connectsPane = [](quint8 blk) {
+            return BlockRegistry::isCollidable(blk, quint8(0)) || BlockRegistry::isFullCube(blk); // R1 家族口径
+        };
+        const float aT0 = 0.375f, aT1 = 0.625f; // 横板厚向区间（4/16 居中，柱同宽）
+        if (connectsPane(nb.posX)) pushBox(verts, idx, lx, ly, lz, 0.625f, 1.0f, 0.f, 1.0f, aT0, aT1, tile, light, tileW, hx, hy, v0, v1);
+        if (connectsPane(nb.negX)) pushBox(verts, idx, lx, ly, lz, 0.0f, 0.375f, 0.f, 1.0f, aT0, aT1, tile, light, tileW, hx, hy, v0, v1);
+        if (connectsPane(nb.posZ)) pushBox(verts, idx, lx, ly, lz, aT0, aT1, 0.f, 1.0f, 0.625f, 1.0f, tile, light, tileW, hx, hy, v0, v1);
+        if (connectsPane(nb.negZ)) pushBox(verts, idx, lx, ly, lz, aT0, aT1, 0.f, 1.0f, 0.0f, 0.375f, tile, light, tileW, hx, hy, v0, v1);
+        break;
+    }
+    case BlockRegistry::Cake: { // t1112 蛋糕 —— 分块食用矮盒（-X 侧随咬口收窄）
+        // t1112 蛋糕几何（机制等价 MC 1.0 cake 矮 hitbox + 咬口切片视觉；**ShapeCake 碰撞盒镜像**，
+        //   blockregistry.cpp ShapeCake case 同源，改编码两处同步）：
+        //   footprint 内缩 1px（1..15/16）× 高 8/16；-X 侧随咬口数每咬收 2px（x0 = (1+2×bites)/16）。
+        //   顶面霜瓦 topTile 207 / 侧·底瓦 208（kDefs per-face；pushBox topTile 承载）。
+        int bites = int(state & BlockRegistry::CakeStateBitesMask);
+        if (bites > BlockRegistry::CakeBitesMax) bites = BlockRegistry::CakeBitesMax; // 越界 clamp（同 ShapeCake）
+        const float x0 = (1.0f + 2.0f * float(bites)) / 16.0f;
+        const int topTile = BlockRegistry::tileIndex(blockId, BlockRegistry::Top);
+        pushBox(verts, idx, lx, ly, lz, x0, 15.0f / 16.0f, 0.f, 0.5f, 1.0f / 16.0f, 15.0f / 16.0f,
+                tile, light, tileW, hx, hy, v0, v1, topTile);
+        break;
+    }
     // t627 压力板家族五件（wood/cobble/stone/iron/gold 同 case）+ 踩下视觉：贴地薄板（1/16 厚 + 1/16 边距）；
     //   踩下态（state bit0 = PressurePlateStatePressedFlag，updatePressurePlates 踩下沿置位 / 离开沿清位）
     //   把板高压半到 1/32（机制等价 MC 1.0 压力板被压下变矮——「踩下去」的视觉反馈）。踩下不改水平边距/碰撞。

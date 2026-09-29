@@ -181,6 +181,15 @@ PARTIALS_3D_T1111 = [
     ("sandstone_stairs", "stairs", "default_sandstone_top", "default_sandstone_side"),
 ]
 
+# t1112 名册中件量批半方块 3D dimetric 立体图标：fence_gate / pane / cake 三个新 shape + 各自材质 fill
+#   （机制等价石砖变体 PARTIALS_3D_STONE_BRICK 流程）：栅栏门（木板 fill）/ 玻璃板（玻璃 fill）/
+#   蛋糕（顶=霜面 / 侧=蛋糕侧带，与放置态 kDefs 面 topTile 207 / side 208 同源）。
+PARTIALS_3D_T1112 = [
+    ("fence_gate", "fence_gate", "default_wood",      "default_wood"),
+    ("glass_pane", "pane",       "default_glass",     "default_glass"),
+    ("cake",       "cake",       "default_cake_top",  "default_cake_side"),
+]
+
 # t492 「正面有辨识特征」的方块（正面贴图, 顶面贴图, 侧面贴图）—— 走 render_front（正面为主的 dimetric 投影）。
 #   t676 工作台 / 熔炉 / 发射器 / 投掷器**全部移出**（用户点名「front 方案太扁平」→ 升 cube per-face 满立方
 #   dimetric：顶 + 右侧 + 前面三面独立贴图，见 FROM_PACK cube_front 段）。本表现空 —— 保留表结构 /
@@ -1019,8 +1028,28 @@ def _partial_shape_boxes(shape):
                 (0.0, 1.0, 0.0, 0.5, 0.0, 1.0)]  # 整步
     if shape == "fence":
         return [(6.0 / 16.0, 10.0 / 16.0, 0.0, 1.0, 6.0 / 16.0, 10.0 / 16.0),  # 立柱
-                (0.0, 1.0, 12.0 / 16.0, 15.0 / 16.0, 6.0 / 16.0, 10.0 / 16.0),  # 上横档
+                (0.0, 1.0, 12.0 / 16.0, 15.0/16.0, 6.0 / 16.0, 10.0 / 16.0),  # 上横档
                 (0.0, 1.0,  5.0 / 16.0,  8.0 / 16.0, 6.0 / 16.0, 10.0 / 16.0)]  # 下横档
+    if shape == "fence_gate":
+        # t1112 栅栏门：门板沿 X 运行（端柱双盒 + 双横档，与 PartialBlockGeometry FenceGate case
+        #   合态沿 X 朝向摆位同构——图标无朝向语义取沿 X 读感）。
+        return [(0.0, 0.25, 0.0, 1.0, 0.375, 0.625),   # -X 端柱
+                (0.75, 1.0, 0.0, 1.0, 0.375, 0.625),   # +X 端柱
+                (0.0, 1.0, 0.375, 0.5625, 0.375, 0.625),  # 下档
+                (0.0, 1.0, 0.75, 0.9375, 0.375, 0.625)]   # 上档
+    if shape == "pane":
+        # t1112 玻璃板：中心细柱 + 四向横板（十字）——与 PartialBlockGeometry GlassPane case
+        #   「柱 + 满连最大轮廓」邻接无关读感同构（IronBars 十字盒同门）。
+        return [(0.375, 0.625, 0.0, 1.0, 0.375, 0.625),   # 中心细柱
+                (0.625, 1.0, 0.0, 1.0, 0.375, 0.625),     # +X 横板
+                (0.0, 0.375, 0.0, 1.0, 0.375, 0.625),     # -X 横板
+                (0.375, 0.625, 0.0, 1.0, 0.625, 1.0),     # +Z 横板
+                (0.375, 0.625, 0.0, 1.0, 0.0, 0.375)]     # -Z 横板
+    if shape == "cake":
+        # t1112 蛋糕：内缩 1px × 半高矮盒（与 PartialBlockGeometry Cake case 满盒形态同源——
+        #   图标取未咬满盒；咬口视觉是世界内几何面，图标恒满盒读感）。
+        return [(0.0625, 0.9375, 0.0, 0.5, 0.0625, 0.9375)]
+    raise ValueError(f"unknown partial shape {shape}")
     raise ValueError(f"unknown partial shape {shape}")
 
 
@@ -1032,7 +1061,9 @@ def _partial_y_mid(shape):
         return 0.25
     if shape == "trapdoor":
         return 0.1875 / 2.0  # t723 薄板半高（竖直居中同 slab 公式）
-    return 0.5  # stairs / fence（多盒取整体包络中点，同 render_partial_3d）
+    if shape == "cake":
+        return 0.25  # t1112 矮盒半高（y[0,0.5] 包络中点，同 slab 公式）
+    return 0.5  # stairs / fence / fence_gate / pane（多盒取整体包络中点，同 render_partial_3d）
 
 
 def run_from_pack():
@@ -1227,7 +1258,14 @@ def main():
     #   顶=压实沙面 / 侧=层理带双 fill——与放置态 kDefs 砂岩面排布同源）。
     for out_name, shape, fill_top, fill_side in PARTIALS_3D_T1111:
         img = render_partial_3d(shape, fill_top, fill_side)
-        out_path = os.path.join(SRC, "icon_" + out_name + ".png")
+        out_path = os.path.join(SRC, "icon_{}.png".format(out_name))
+        img.save(out_path)
+        print("wrote", os.path.relpath(out_path, HERE), img.size)
+    # t1112 名册中件量批半方块 3D dimetric 立体图标（机制等价 t1111 流程；栅栏门=木板 / 玻璃板=
+    #   玻璃 / 蛋糕=霜面+侧带双 fill——与放置态 kDefs 蛋糕面 topTile 207 / side 208 同源）。
+    for out_name, shape, fill_top, fill_side in PARTIALS_3D_T1112:
+        img = render_partial_3d(shape, fill_top, fill_side)
+        out_path = os.path.join(SRC, "icon_{}.png".format(out_name))
         img.save(out_path)
         print("wrote", os.path.relpath(out_path, HERE), img.size)
     # t490/t662 手动 TNT 点火机关 3D dimetric 立体图标（button / lever shape + MECH_FILL 贴图；机制等价

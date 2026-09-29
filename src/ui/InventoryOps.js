@@ -746,6 +746,14 @@ function slotShiftLeftCraft(root) {
     // 一次性消耗 maxCrafts 次（每非空槽 -maxCrafts；归 0 清 id）。
     for (let i = 0; i < root.craftSlots.length; ++i) {
         if ((root.craftSlots[i] || 0) !== 0) {
+            // t1112 容器交换单点（1.0 口径：蛋糕合成后空桶留在合成格——1.1 12w01a 才改回包）：
+            // 命中容器原料 → 原位转空桶（关包归还链自然带回背包），跳过普通消耗。
+            const swapId = root.hotbar.recipeContainerSwap(r.outputId, root.craftSlots[i])
+            if (swapId !== 0) {
+                root.craftSlots[i] = swapId
+                root.craftCounts[i] = 1
+                continue
+            }
             const remain = (root.craftCounts[i] || 0) - maxCrafts
             if (remain <= 0) { root.craftSlots[i] = 0; root.craftCounts[i] = 0 }
             else root.craftCounts[i] = remain

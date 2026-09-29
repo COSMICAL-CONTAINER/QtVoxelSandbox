@@ -621,6 +621,13 @@ public:
     static constexpr int SlimeBallId        = 0x28C; // 史莱姆球：小史莱姆掉 0-2；1.0 无合成消费（候选池登记）
     static constexpr int SpawnEggSlimeId    = 0x28D; // 生物蛋（史莱姆）：右键 → 生成中档史莱姆（MobSlime）
     static constexpr int SpawnEggVillagerId = 0x28E; // 生物蛋（村民）：右键 → 生成村民（MobVillager）
+    // t1112 牛奶桶（材料段 0x28F，村民蛋 0x28E 之上**段尾追加**不插中间 = 存档安全铁律）。机制等价
+    //   MC 1.0 milk bucket（Beta 1.2 起 1.0 基线内）：空桶右键牛 → 挤奶得牛奶桶（**1.0 无挤奶冷却**
+    //   实读核实——派工稿「牛冷却面」按原版口径裁定不交付，重复右键恒可挤）；可饮（isDrinkableItem 面，
+    //   饮毕清全部状态效果——1.0 口径 milk 清效果）+ 返空桶（finishEating 特判，蘑菇汤返碗同门）；
+    //   蛋糕合成原料（3 奶顶行）。**maxStack=1 不可堆叠**（装液体食物，同蘑菇汤 / 铁桶族——Hotbar::
+    //   maxStackSize 特判；Core 层 maxStackSize 不特判——掉落物合并面按桶族既有口径，水桶 0x207 先例）。
+    static constexpr int MilkBucketId = 0x28F; // 牛奶桶：空桶右键牛挤奶；可饮清效果返空桶；蛋糕原料
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

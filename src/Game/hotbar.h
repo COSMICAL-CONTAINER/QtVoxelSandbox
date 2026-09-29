@@ -415,6 +415,11 @@ public:
     //     且累加不超 maxStack）。UI 点击结果槽前置判定。
     Q_INVOKABLE QVariantMap recipeMatch(const QVariantList &slotIds, int gridSize) const;
     Q_INVOKABLE bool recipeCanTake(int outId, int outCount, int heldId, int heldCount, int maxStack) const;
+    // t1112 合成容器交换单一权威（QML 两处消费点同读——工作台 craftOneResult / InventoryOps
+    //   slotShiftLeftCraft 的原料消耗循环内调用）：蛋糕合成时牛奶桶**原位转空桶**（1.0.0 口径——空桶
+    //   留在合成格，「moved to inventory」是 1.1 12w01a 改版越基线；关包归还链自然把空桶带回背包 = 1.0
+    //   观感逐位对齐）。非容器配方 / 非原料格 → 0（调用方按普通消耗路径清格）。
+    Q_INVOKABLE int recipeContainerSwap(int outputId, int gridItemId) const;
     // t87 冶炼 / 燃料桥接（QML 不能直接调 C++ 静态类 SmeltingRegistry，经 VM 透传；同 recipeMatch 模式）：
     //   - smeltResult(inputId)：输入物品 → 冶炼产物 id（0=不可冶炼）。
     //   - fuelBurnSeconds(fuelId)：燃料 → 燃烧秒数（0=不可燃；返回 int 秒，QML 友好且本表值均整数）。
