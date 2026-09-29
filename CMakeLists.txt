@@ -310,6 +310,13 @@ qt_add_executable(voxelsandbox
     #   持久化。形状 / 口径对齐 HopperStore / FurnaceStore 族（同族 per-block 方块内容器）。纯存储类。
     src/Game/brewingstore.cpp
     src/Game/brewingstore.h
+    # t1113 牌子文本存储 VM（Game 层）：按方块世界坐标键控的 4 行 × 15 字符文本（机制等价 MC 1.0 sign
+    #   文本存于方块；首个方块附挂文本面）。放置时编辑一次（placeBlock signPlaced 信号 → 呈现层编辑面板
+    #   读写）+ 破牌清孤儿（文本随破丢失，1.0 口径）+ Main.qml 装配 / 持久化（worldstore sign_texts 表，
+    #   saveAll 第 9 参 / loadSigns——hoppers/brewing 同门第 N 参追加先例）。形状 / 口径对齐 ChestStore
+    #   族（同族 per-block 方块附挂数据容器）。纯存储类（无光 / 无 World 依赖）。
+    src/Game/signstore.cpp
+    src/Game/signstore.h
     # progress 玩家进度系统（Game 层 ViewModel）：统计（时间/挖放/路程/击杀/死亡/合成/拾取）+ 成就解锁。
     #   跨世界持久化（同 ChestStore/FurnaceStore，存 worldstore progress 表）。各事件源经 QML 桥接调埋点。
     src/Game/playerprogress.cpp
@@ -716,6 +723,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_fence_gate.png             # t1112 栅栏门立方体图标（build_cube_icons.py PARTIALS_3D_T1112；3D 门板端柱+双档，木板纹）
         textures/icon_glass_pane.png             # t1112 玻璃板立方体图标（build_cube_icons.py PARTIALS_3D_T1112；3D 十字柱板，玻璃纹）
         textures/icon_cake.png                   # t1112 蛋糕立方体图标（build_cube_icons.py PARTIALS_3D_T1112；3D 矮盒，霜面+侧带）
+        textures/icon_sign.png                   # t1113 牌子立方体图标（build_cube_icons.py PARTIALS_3D_T1113；3D 立牌，立柱+板面——牌子/挂墙牌双 id 共用）
         textures/icon_lever.png                  # t490 杠杆立方体图标（build_cube_icons.py；pressure_plate shape+lever 贴图；手动点火机关）
         textures/icon_wood_button.png            # t490 木按钮立方体图标（build_cube_icons.py；pressure_plate shape+wood_button 贴图）
         textures/icon_stone_button.png           # t490 石按钮立方体图标（build_cube_icons.py；pressure_plate shape+stone_button 贴图）
@@ -1141,6 +1149,11 @@ add_executable(redstone_matrix_test
     #   食用状态机 + 挤奶 + 饮面清效果 + 容器交换单点] + 骑乘柱 + 结构钉族——零新 include 面，
     #   blockregistry/recipe/hotbar/entitymanager/playercontroller 均已列）。
     tools/matrix/section75_roster_mid_t1112.cpp
+    # t1113 名册大件批首单探针段（4 腿 r2083a-d，filter 词 r2083；站牌柱[合成命中 + 门族形状孪生
+    #   零污染 + def 逐字段 + 零碰撞/板面盒 + 放置朝向真链 + 拒放面] + 挂墙牌柱[真链侧面放置 + 挂墙
+    #   板面盒 + 失撑脱落] + 文本链柱[SignStore 读写/截断/清孤儿 + 放置→录入→读回 + 持久化桥接线]
+    #   + 结构钉族——零新 include 面，signstore/blockregistry/recipe/hotbar/world 系均已列）。
+    tools/matrix/section76_roster_sign_t1113.cpp
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
     #   确定性等价承重墙[8 形态快照 worker ≡ 同步直调逐位恒等：顶点/索引/统计三面]/队列纪律
     #   [容量压小满载 kErrQueueFull 可见拒绝 + 拒绝项不入账 + 接受项恰一产出按 requestId 对账]/
@@ -1458,6 +1471,10 @@ add_executable(redstone_matrix_test
     #   playercontroller.cpp scanBrewingStands 引用其符号——同 hopperstore/furnacestore 补列口径）。
     src/Game/brewingstore.cpp
     src/Game/brewingstore.h
+    # t1113 牌子文本探针附加：SignStore（4 行文本 + 读写/持久化形状；Main.qml / worldstore 引用其符号
+    #   ——同 brewingstore 补列口径）。
+    src/Game/signstore.cpp
+    src/Game/signstore.h
     src/Game/loottable.cpp
     src/Game/raycast.cpp
     src/Entities/xporbmanager.cpp

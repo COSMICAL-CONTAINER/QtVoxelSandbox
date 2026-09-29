@@ -289,7 +289,7 @@ void MatrixRun::section75_roster_mid_t1112()
                 && barsSel.size() == 2
                 && std::fabs(barsSel[0].minX - 0.4375f) < 1e-4f
                 && gd.id == int(BR::Glass) && gd.shape == BR::ShapeFull
-                && int(BR::IronBars) == 142 && int(BR::Count) == 160; // t1112 lawful 前移:157→160
+                && int(BR::IronBars) == 142 && int(BR::Count) == 162; // t1112 lawful 前移:157→160；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
             ok = ok && placeOk;
             if (!placeOk) diag += QStringLiteral("[place]");
         }
@@ -623,9 +623,9 @@ void MatrixRun::section75_roster_mid_t1112()
             const QString srcDir = srcRootForRosterMidPins();
             // 值面:id/段位/kMc/相邻族零污染。
             const bool enumOk = int(BR::FenceGate) == 157 && int(BR::GlassPane) == 158
-                && int(BR::Cake) == 159 && int(BR::Count) == 160
+                && int(BR::Cake) == 159 && int(BR::Count) == 162 // t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
                 && int(BR::SandstoneSlab) == 156 && int(BR::Cauldron) == 153
-                && int(BR::AtlasTileCount) == 209
+                && int(BR::AtlasTileCount) == 210 // t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
                 && BR::mcBlockId(int(BR::FenceGate)) == 107
                 && BR::mcBlockId(int(BR::GlassPane)) == 102
                 && BR::mcBlockId(int(BR::Cake)) == 92
@@ -638,8 +638,8 @@ void MatrixRun::section75_roster_mid_t1112()
                 SrcPin("gate id decl", "FenceGate        = 157,", 1),
                 SrcPin("pane id decl", "GlassPane        = 158,", 1),
                 SrcPin("cake id decl", "Cake             = 159,", 1),
-                SrcPin("count sentinel row", "Count           = 160,", 1),
-                SrcPin("atlas count", "AtlasTileCount = 209", 1),
+                SrcPin("count sentinel row", "Count           = 162,", 1), // t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
+                SrcPin("atlas count", "AtlasTileCount = 210", 1), // t1113 lawful 前移：209→210（牌板 tile 追加）,
                 SrcPin("gate state flags", "FenceGateStateOpenFlag  = 0x1;", 1),
                 SrcPin("cake bites mask", "CakeStateBitesMask = 0x7;", 1),
                 SrcPin("gate shape decl", "ShapeFenceGate = 14,", 1),
@@ -684,7 +684,8 @@ void MatrixRun::section75_roster_mid_t1112()
                 SrcPin("cake icon case", "case BlockRegistry::Cake:             return \"icon_cake.png\";", 1),
                 SrcPin("milk name row", "RecipeRegistry::MilkBucketId)       return QStringLiteral(\"牛奶桶\")", 1),
                 SrcPin("milk maxstack row", "RecipeRegistry::MilkBucketId) return 1;", 1),
-                SrcPin("palette tail row", "int(BlockRegistry::Cake) };", 1),
+                SrcPin("palette cake comma row", "int(BlockRegistry::Cake),", 1),
+                SrcPin("palette tail row", "int(BlockRegistry::WallSign) };", 1), // t1113 lawful 前移：牌子双 id 续尾追加，尾行钉随追加前移
                 SrcPin("container swap row", "outputId == int(BlockRegistry::Cake) && gridItemId == int(RecipeRegistry::MilkBucketId)", 1)});
             ok = ok && missHb.isEmpty();
             if (!missHb.isEmpty())

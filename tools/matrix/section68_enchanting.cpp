@@ -458,8 +458,8 @@ void MatrixRun::section68_enchanting()
         const bool idsOk = int(BR::EnchantingTable) == 94
             && mc116Rows == 1
             && BR::mcBlockId(quint8(BR::EnchantingTable)) == 116
-            && int(BR::Count) == 160                       // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1112 曾 157→160（栅栏门/玻璃板/蛋糕尾部追加）；t1105 曾 151→154
-            && int(BR::AtlasTileCount) == 209              // t1112 lawful 前移：207→209（蛋糕族 tile 207..208 追加）；t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加）
+            && int(BR::Count) == 162                       // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1112 曾 157→160（栅栏门/玻璃板/蛋糕尾部追加）；t1105 曾 151→154；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
+            && int(BR::AtlasTileCount) == 210              // t1112 lawful 前移：207→209（蛋糕族 tile 207..208 追加）；t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
             && RecipeRegistry::MelonSliceId == 0x28A       // 0x28A 原值（t1105 起 0x28B 南瓜种子续段尾——本钉钉「原值不插中间」非「段末位」）
             && RecipeRegistry::MundanePotionId == 0x287    // t1102 段尾原值
             && int(BR::BrewingStand) == 148                // t1097 邻族原值

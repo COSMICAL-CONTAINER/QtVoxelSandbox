@@ -3734,20 +3734,20 @@ void MatrixRun::section02_early_probes()
     //        t870/t889 源码钉先例）+ mesher trapdoor case 木/铁 sideTile 分流（planks/iron_block）。
     runLegMulti({ "t879 trapdoor pair fix: wood trapdoor def swaps large faces to tile 180 (four-hole plank board, "
         "alpha cutout - the old all-planks solid plate read as a wooden pressure plate) with plank thin e"
-        "dges, atlas regenerated (207 tiles since t1105 appended 201..206; t1103 appended 195..200 before; t1097 appended 193..194; t1077 appended 185; t1028 appended 184 before; t998 appended 181..183 before; stal"
+        "dges, atlas regenerated (210 tiles since t1113 appended 209; t1112 appended 207..208 before; t1105 appended 201..206 before; t1103 appended 195..200; t1097 appended 193..194; t1077 appended 185; t1028 appended 184 before; t998 appended 181..183 before; stal"
         "e pre-t879 atlas width still fails) with real alpha holes in tiles 178/180, and both trapdoors r"
         "oute to the cutout pass (source pin - holes need alphaCutoff to see through); iron side tiles us"
         "e iron_block / wood planks per family (mesher + runtime icon spec + offline icon)" }, [&]() {
         const BR::BlockDef &wtd = BR::def(BR::WoodTrapdoor);
         const bool okDef = wtd.topTile == 180 && wtd.bottomTile == 180
                            && wtd.sideTile == 8 && wtd.frontTile == 8;
-        bool okAtlas = BR::AtlasTileCount == 209; // t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加；t1103 曾 195→201、t1097 曾 193→195、t1095 曾 191→193、t1083 曾 189→191、t1080 曾 186→189、t1077 曾 185→186、t1028 184→185——追加不插中间存档契约，钉值随追加 lawful 前移）
+        bool okAtlas = BR::AtlasTileCount == 210; // t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加；t1103 曾 195→201、t1097 曾 193→195、t1095 曾 191→193、t1083 曾 189→191、t1080 曾 186→189、t1077 曾 185→186、t1028 184→185——追加不插中间存档契约，钉值随追加 lawful 前移）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
         // 测试二进制无 qrc（t815/t838 探针同因：图集资源不在测试 target）→ 直读源树 textures/atlas.png
         //   （构建机源树布局，与源码钉同根路径解析）。
         const QString exeDirA = QCoreApplication::applicationDirPath();
         const QString rootA = QDir(exeDirA + QStringLiteral("/..")).absolutePath();
         QImage atlas(QDir(rootA).absoluteFilePath(QStringLiteral("textures/atlas.png")));
-        if (atlas.isNull() || atlas.width() != 209 * 64) { // t1112 lawful 前移：209 瓦片 × 64px（蛋糕族 tile 207..208 追加）；沿革 t1105 曾 201→207 瓦片 × 64px（南瓜族 tile 201..205 + 炼药锅 206 追加；t1103 曾 195，钉值随追加 lawful 前移）
+        if (atlas.isNull() || atlas.width() != 210 * 64) { // t1112 lawful 前移：209 瓦片 × 64px（蛋糕族 tile 207..208 追加）；沿革 t1105 曾 201→207 瓦片 × 64px（南瓜族 tile 201..205 + 炼药锅 206 追加；t1103 曾 195，钉值随追加 lawful 前移）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
             okAtlas = false;
             qInfo().noquote() << "  t879 diag: atlas w =" << (atlas.isNull() ? -1 : atlas.width());
         } else {
