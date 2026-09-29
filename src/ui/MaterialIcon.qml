@@ -2015,6 +2015,23 @@ Item {
                 R(11, 10, 1, 1, "#ffffff")  // 位点白点
             }
 
+            // t1115 苹果（0x292）：红苹果形（深红果体 + 左上受光高光 + 棕果柄 + 绿叶一片，读作「红苹
+            //   果食物」）。机制等价 MC 苹果物品观感的工程原创面；纯原创自绘（§9a——果红 / 叶绿工程
+            //   自定，零 MC 资产）。pack 无映射（mcMaterialId 越表界 -1 → 回退本自绘，近期材料段同门）。
+            const drawApple = (body, bodyLite, bodyDark) => {
+                const stem = "#6b4a2a", leaf = "#4e8a2e"
+                R(6, 7, 8, 1, bodyDark)       // 果体顶缘
+                R(5, 8, 10, 6, body)          // 果体主体（rows 8..13）
+                R(6, 14, 8, 1, bodyDark)      // 果体底缘
+                R(4, 9, 1, 4, bodyDark)       // 左侧缘
+                R(15, 9, 1, 4, bodyDark)      // 右侧缘
+                R(6, 9, 3, 2, bodyLite)       // 左上受光高光
+                R(10, 4, 1, 3, stem)          // 果柄
+                R(11, 5, 3, 1, leaf)          // 叶片
+            }
+            const drawRedApple    = () => drawApple("#b02e26", "#d8504a", "#8a1f1a") // 红苹果（0x292）
+            const drawGoldenApple = () => drawApple("#d8a828", "#f0d060", "#a87818") // 金苹果（0x293）：金壳皮同形基座
+
             // t1092 可可豆（0x262）：地牢战利品 + 棕染料 1:1 转换原料。MC 可可豆物品图标 = 数粒棕豆
             //   斜置散布；本工程原创豆形 = 圆角豆体（深棕壳 + 主棕体 + 左上受光高光 + 中脊暗缝——豆形
             //   识别面）三粒三角散布（左上横置 / 右侧竖置 / 下方横置）。纯原创自绘（§9a）；pack 无映射
@@ -2453,6 +2470,10 @@ Item {
             //   双自绘（空 = 折叠空白纸面；填充 = 同纸面 + 地形色斑 + 位点白点，读作「已绘制的地图」）。
             case 0x290: drawMapBlank(); break  // 空地图：8 纸环合成；右键激活 → 填充地图
             case 0x291: drawMapFilled(); break // 填充地图：激活产物；手持显地图 overlay；随走随更新
+            // t1115 苹果 + 金苹果（0x292/0x293，填充地图之上段尾追加）：drawRedApple / drawGoldenApple
+            //   双自绘（同形苹果基座异色——红果食物 / 金壳食物，读作「掉落食物 + 金合成食物」）。
+            case 0x292: drawRedApple(); break    // 苹果：橡树叶 1/200 掉落；可食 +4；金苹果合成心
+            case 0x293: drawGoldenApple(); break // 金苹果：8 金锭环+苹果心合成；可食 +4 + 再生 I 30s
             // t788 染料 16 色（0x24B..0x25A，白→黑羊毛色序；三色参数取 build_wool.py 同源色板）
             case 0x24B: drawDye("#f0f0ee", "#f9f9f8", "#959594"); break // 白色染料（白花破坏掉落；染白羊毛/白床）
             case 0x24C: drawDye("#de781e", "#ee9f69", "#8a4a13"); break // 橙色染料

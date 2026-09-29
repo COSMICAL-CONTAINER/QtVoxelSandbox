@@ -125,6 +125,11 @@ int PlayerController::foodHungerAmount(int itemId)
     if (itemId == RecipeRegistry::CookedFishId)     return 4; // 熟鱼 +4 hunger（生鱼两倍；t836）
     // t1103 瓜片可食 +2 饥饿（机制等价 MC 1.0 melon slice 原值 +2 hunger；1.0 无饱和度细分面，取饥饿值口径）。
     if (itemId == RecipeRegistry::MelonSliceId)     return 2; // 瓜片 +2 饥饿（MC 1.0 melon slice）
+    // t1115 苹果 / 金苹果（机制等价 MC 1.0 apple / golden apple 各 +4 hunger；sat 2.4 / 9.6 为 1.0 实读
+    //   登记值——工程无饱和度细分面，取饥饿值口径，瓜片 t1103 同门）。金苹果食毕再生 I 30s 见 finishEating
+    //   （kGoldenAppleRegenDurationSec，applyStatusEffect 再生族同管线）。新增可食作物只在此追加一行（单一权威）。
+    if (itemId == RecipeRegistry::AppleId)       return 4; // 苹果 +4 饥饿（MC 1.0 apple；橡树叶 1/200 掉落）
+    if (itemId == RecipeRegistry::GoldenAppleId) return 4; // 金苹果 +4 饥饿（MC 1.0 golden apple；+ 再生 I 30s）
     return 0;
 }
 
@@ -2031,7 +2036,8 @@ void PlayerController::finishMiningAt(int x, int y, int z, bool drop)
             //   （表兜底无自掉），本特例分支覆盖通用 drop 路径（同 WheatCrop/TallGrass/双半砖模式）。自然衰减
             //   （decayLeavesAround）不走此（无掉落）。brokenState 不影响叶掉落（无 state 派生 —— PersistentLeafBit
             //   仅控衰减，破叶掉落同）。t714：云杉叶同分流（同族叶机制，掉同一橡树树苗——本工程树苗仅橡树一种）。
-            dropLeafDrops(x, y, z);
+            //   t1115：brokenId 随参下行（苹果面橡树叶单携门——云杉叶零苹果面，见 dropLeafDrops t1115 块注）。
+            dropLeafDrops(x, y, z, brokenId);
         } else if (brokenId == BlockRegistry::SnowLayer) {
             // t505 雪层铲挖掉雪球（机制等价 MC 1.0 snow layer 铲挖掉 (layer+1) 雪球；空手不掉落由 canHarvest
             //   requiresTool=true 守卫，到 drop=true 路径即已持铲）。每层雪球数 = state+1（state 0..7 → 1..8 雪球，
@@ -2412,7 +2418,8 @@ void PlayerController::dropUnsupportedDustAbove(int x, int y, int z)
 // t305 树叶掉落（见 playercontroller.h 头注释）。机制等价 MC 1.0 破叶掉落：t379 调高后 10% 树苗物品 / 8% 木棒。
 //   两次独立判定（可同时掉树苗 + 木棒）。两物品散布到破格 + 非实体水平邻格做视觉分离（同 WheatCrop / 双半砖
 //   模式：ItemEntityManager spawnItem 仅整数格坐标存格中心，故以邻格区分）。无邻格则同破格（仍两实体）。
-void PlayerController::dropLeafDrops(int x, int y, int z)
+//   t1115：签名 +quint8 leafId（苹果面橡树叶单携门）；苹果 1/200 见下方 t1115 块注。
+void PlayerController::dropLeafDrops(int x, int y, int z, quint8 leafId)
 {
     if (!m_world) return;
     // 找一个非实体水平邻格做第二物品的散布位（视觉分离）；无则同破格。
@@ -2427,6 +2434,16 @@ void PlayerController::dropLeafDrops(int x, int y, int z)
     // 木棒（8%）：独立判定（可与树苗同时掉）；落到散布邻格做视觉分离。
     if (QRandomGenerator::global()->bounded(100) < kLeafStickDropPct)
         emit spawnItem(sx, y, sz, RecipeRegistry::StickId, 1);
+    // t1115 苹果（1/kLeafAppleDropDenom = 1/200，MC 1.0 橡树叶苹果原值 0.5%）：仅**橡树叶**（Leaves）
+    //   携带（leafId 门——云杉叶 1.0 无苹果面，t714 云杉叶同分流族只共享树苗/木棒面，苹果不随族）。
+    //   独立判定（可与树苗/木棒同掉）。自然衰减不走本面（t305「自然衰减无掉落」既录简化——1.0 消亡路径
+    //   同表掉落，工程消亡面零掉落留痕，负面钉 world.cpp 零 AppleId）。
+    //   NEG 面登记：本块 emit 行 = t1115 NEG-1 恰红触达面（摘行后编译仍绿——块壳空转幸存，唯苹果
+    //   掉落面失 → r2085a 恰红）。
+    if (leafId == int(BlockRegistry::Leaves)
+        && QRandomGenerator::global()->bounded(kLeafAppleDropDenom) == 0) {
+        emit spawnItem(x, y, z, RecipeRegistry::AppleId, 1); // t1115 摘面行（NEG-1）
+    }
 }
 
 // t720 画作放置主体（见 playercontroller.h 头注释；placeBlock 画物品分支调）。机制等价 MC 1.0 painting：
@@ -3022,6 +3039,17 @@ void PlayerController::finishEating()
         && QRandomGenerator::global()->bounded(100) < kPoisonChancePct) {
         m_poisonTimer = kPoisonDuration;
         m_poisonDmgAccum = 0.0f;
+    }
+    // t1115 金苹果食毕效果面（机制等价 MC 1.0 golden apple：食毕 Regeneration I 30 秒）：applyStatusEffect
+    //   再生族接线（再生药水同管线——m_regenPotionTimer 每 kRegenPotionIntervalSec=2.5s emit healed(1)；
+    //   仅时长独立 kGoldenAppleRegenDurationSec=30s，与药水 45s 异值故新常量）。Survival 门内置
+    //   （applyStatusEffect 首行，创造无敌不挂——同药水族口径）。**进食时长无加成**（1.0 全食物统一
+    //   kEatDuration 1.6s；per-item 时长 1.9+ 面不取）。非可饮面（金苹果不进 isDrinkableItem——食毕
+    //   burp 走下方食物统一沿，不发 potionDrunk 不返瓶）。
+    //   NEG 面登记：下方块内 applyStatusEffect 行 = t1115 NEG-2 恰红触达面（摘行后编译仍绿——块壳
+    //   空转幸存，食物/饥饿/消耗面全数在，唯效果快照与再生脉冲面失 → r2085c 恰红）。
+    if (eatenId == RecipeRegistry::GoldenAppleId) {
+        applyStatusEffect(PlayerState::EffectRegeneration, kGoldenAppleRegenDurationSec, 1); // t1115 摘面行（NEG-2）
     }
     // t1097 药水饮用结算（长按右键喝满 kEatDuration → 到此分流）：水瓶 / 粗制药水 = 可饮无效果（MC 口径）；
     //   迅捷 / 力量药水 → applyStatusEffect 挂效果（Survival 专用门内置；效果时长 kPotionDurationSec=180s、

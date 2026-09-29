@@ -1448,6 +1448,19 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         RecipeRegistry::PaperId,  0,                       RecipeRegistry::PaperId,
         RecipeRegistry::PaperId,  0,                       RecipeRegistry::PaperId },
       RecipeRegistry::EmptyMapId, 1, 1, "empty_map" },
+    // ── t1115 金苹果合成一行（表尾追加；机制等价 MC 1.0）──
+    //   8 金锭环 + 1 苹果心 → 1 金苹果（有序 3×3 仅工作台；Beta 1.2 金块环初版 → Beta 1.9 pre2 改
+    //   8 金锭 + 1 苹果 = 1.0.0 在册形态，本单交付行——勘误裁定见 recipe.h GoldenAppleId 行 ③）。
+    //   多重集 {GoldIngot:8, Apple:1} 全表唯一：同形环行异料**逐格 id 比对**不冲突（熔炉 8 圆石缺心 /
+    //   地图 8 纸缺心 / 画作 8 棒+心毛 / 闪烁西瓜 8 金粒+心片——环料异 id + 心片异料，零遮蔽）。
+    //     [0]=金锭 [1]=金锭 [2]=金锭
+    //     [3]=金锭 [4]=苹果 [5]=金锭
+    //     [6]=金锭 [7]=金锭 [8]=金锭
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId,
+        RecipeRegistry::GoldIngotId, RecipeRegistry::AppleId,       RecipeRegistry::GoldIngotId,
+        RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId },
+      RecipeRegistry::GoldenAppleId, 1, 1, "golden_apple" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。
@@ -1476,6 +1489,9 @@ static_assert(RecipeRegistry::FireChargeId    == 0x25C, "FireChargeId 须为材�
 // t1114 地图段位契约（MaterialIcon case 0x290/0x291 同字面量互钉；段尾追加序 = 0x28F 牛奶桶之上）。
 static_assert(RecipeRegistry::EmptyMapId  == 0x290, "EmptyMapId 须为材料段 0x290（MaterialIcon case 0x290 同字面量互钉）");
 static_assert(RecipeRegistry::FilledMapId == 0x291, "FilledMapId 须为材料段 0x291（MaterialIcon case 0x291 同字面量互钉）");
+// t1115 苹果/金苹果段位契约（MaterialIcon case 0x292/0x293 同字面量互钉；段尾追加序 = 0x291 填充地图之上）。
+static_assert(RecipeRegistry::AppleId       == 0x292, "AppleId 须为材料段 0x292（MaterialIcon case 0x292 同字面量互钉）");
+static_assert(RecipeRegistry::GoldenAppleId == 0x293, "GoldenAppleId 须为材料段 0x293（MaterialIcon case 0x293 同字面量互钉）");
 // t1097 酿造链 id 段位钉（工程惯例）：0x264..0x26A = 蕴辉瓶 0x263 之上**段尾连续追加**（不插中间 = 存档
 //   安全铁律）。Core 层 resourcepackmanager / QML MaterialIcon case 用同字面量互钉。
 static_assert(RecipeRegistry::GlassBottleId    == 0x264, "GlassBottleId 须为材料段 0x264（蕴辉瓶 0x263 之上段尾追加）");

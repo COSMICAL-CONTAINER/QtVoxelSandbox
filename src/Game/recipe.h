@@ -650,6 +650,29 @@ public:
     //      惯例不接——近期材料段物品同模式，mcMaterialId 越表界 → -1 → 资源包回退自绘 MaterialIcon）。
     static constexpr int EmptyMapId  = 0x290; // 空地图：8 纸环合成；右键激活 → 填充地图（t1114）
     static constexpr int FilledMapId = 0x291; // 填充地图：激活产物；手持显地图 overlay；随走随更新（t1114）
+    // t1115 苹果 + 金苹果（材料段 0x292/0x293，填充地图 0x291 之上**段尾追加**不插中间 = 存档安全
+    //   铁律）。机制等价 MC 1.0 apple / golden apple（apple Beta 1.9 pre2 橡树叶掉落入版 = 1.0 基线内；
+    //   golden apple Beta 1.2 入版——两件均 1.0 基准内）。命名全通用词（§9 合法，零 MC 专名）。
+    //   **实读裁定留痕三面**（源码注 + r2085 腿文 + 提交注；t1111 候选池登记清偿——d 腿负面钉 lawful
+    //   修订沿革见 section74_roster_low_t1111.cpp D3）：
+    //   ① **1.0 定值**：apple hunger +4 / saturation 2.4；golden apple hunger +4 / saturation 9.6
+    //      （工程无饱和度细分面，取饥饿值口径——瓜片 t1103 同门）；golden apple 食毕**Regeneration I
+    //      30 秒**（applyStatusEffect 再生族接线——与再生药水 kRegenPotionDurationSec=45s 同管线不同
+    //      时长，独立常量 kGoldenAppleRegenDurationSec=30s，playercontroller.h）；Absorption 吸收面 =
+    //      1.1+ 越纪元不取（t1111 既录，负面钉锁 PlayerState 零 Absorption 符号）。**金苹果进食时长
+    //      无加成**（1.0 全食物统一 kEatDuration 1.6s——per-item 进食时长是 1.9+ 面，负面钉锁零特判）。
+    //   ② **获取面 = 橡树叶掉落**：MC 1.0 橡树叶 1/200（0.5%）掉苹果；1.0 消亡路径同表掉落——工程沿用
+    //      t305「自然衰减无掉落」既录简化（树苗/木棒同门），苹果只入**破坏路径**（PlayerController::
+    //      dropLeafDrops，kLeafAppleDropDenom=200）；且苹果面仅**橡树叶**携带（云杉叶 1.0 无苹果面
+    //      ——t714 云杉叶同分流族只共享树苗/木棒简化面，苹果不随族，dropLeafDrops leafId 门在案）。
+    //      1.0 地牢箱金苹果行不取（t484「矿物族替苹果」既录简化留痕——本单零 loot delta，候选池登记）。
+    //   ③ **合成 = 8 金锭环 + 1 苹果心**（Beta 1.2 金块环初版 → Beta 1.9 pre2 改 8 金锭 + 1 苹果 =
+    //      1.0.0 在册形态，本单交付行）：多重集 {GoldIngot:8, Apple:1} 全表唯一（同形环行异料逐格 id
+    //      比对——熔炉 8 圆石缺心 / 地图 8 纸缺心 / 画作 8 棒+心毛 / 闪烁西瓜 8 金粒+心片均不冲突）。
+    //      可堆叠 64（材料段默认零特判）；无 pack 映射（越表界 → -1 → 引擎自绘 MaterialIcon，近期
+    //      材料段物品同门；kMc 表不扩——mcMaterialId 越界恒 -1）。
+    static constexpr int AppleId       = 0x292; // 苹果：橡树叶 1/200 掉落；可食 +4 饥饿；金苹果合成心（t1115）
+    static constexpr int GoldenAppleId = 0x293; // 金苹果：8 金锭环+苹果心合成；可食 +4 饥饿 + 再生 I 30s（t1115）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。
