@@ -1,0 +1,47 @@
+# 治理审计 #24（2026-09-30，只读独立 agent 执行，主控清偿批内落档）
+
+> 审计窗口：**4e2b0db..fc90774 共 20 提交**（窗口锚两处 `git log -1` 现抄亲核：4e2b0db = t1108 关单 docs 提交、fc90774 = t1114 关单 docs 提交；`git log --oneline` 实数 **20** 笔——简报口径「t1110-t1114 五闭环 + 两笔立项/重启 docs」=17 笔少计 3 笔，窗内实有 t1109 收官三笔[960978f/1c18d73/473b318，#23 落档时在飞件] + #23 落档件 3504139 + 重启件 4eb981d + t1110-t1114 十五笔，构成详见 F5）。参照件 `docs/governance-audit-2026-09-28.md`（#23）ls docs/ 现核在盘，体例对齐。**窗口实况**：t1110（名册全量审计+狼相性翻案+slime/villager 音效）、t1111（砂岩楼梯/石台阶/砂岩台阶+slime 出生修复+金苹果链断降级）、t1112（栅栏门/玻璃板/蛋糕六片+牛奶链+鞍猪骑乘）、t1113（sign 双 id+SignStore 存档门+超面存档链补正[t1097 酿造落盘]）、t1114（map 双 id+MapStore+overlay 显示面）各 fix+test+docs 三笔 = 15 笔 + 前述 5 笔 = 20 笔账面自洽。
+
+## 判定：YELLOW
+
+五单交付代码与测试**实质面全绿无瑕**：15 件矩阵日志在盘亲数全 0 FAIL（860/864/868/872/876 × pos/final/orch）、十份 NEG 红面恰红单腿与申报敏感腿逐一吻合、腿数链 856→860→864→868→872→876 无断、提交纪律 20 笔全过（署名零命中+全窗纯 ASCII+文件面零互串）、三单不变量 file:line 实文亲读全过、tail20 五件+十八单连守在档、push 算术自洽。**但证据链账面两单失实，触及 #23 判 GREEN 的核心准据**：①t1111 规范配方 md5 关单主张 `d3ae5194…` 系**幻影值**——在盘三方日志（pos/final/orch）复算恒等 `b6ae823d68271b873643abca5815ddaa`，幻影值经五种配方变体穷尽试算无一可复现、且全仓（docs+build）无任何工件承载真值（F1，HIGH）；②t1111 NEG 申报「均全量 863/1」与在盘 4 腿 filter 面（3+1/4+0）形态不符（F2，MEDIUM）；③t1114「四方恒等[含双 restore]」实为 **2 次物理跑 + 2 份字节级副本工件**（pos==neg1_restore、final==neg2_restore 全文件 md5 全等，mtime 各差 1 分钟，全矩阵单跑约 20 分钟物理不可能双跑），申报未披露（F3，MEDIUM）。按 #23 先例准据（「md5 逐单复跑三方恒等且与关单主张逐字全等」）本窗 1/5 不成立、工件诚实性两单受损，故降 YELLOW。清偿均为台账勘正+纪律扩充，不涉交付代码回滚。
+
+## 核查通过面（逐项证据）
+
+- **证据链（4/5 单全过，t1111 见 F1）**：五单 15 件全绿亲数（`grep -c ^PASS/^FAIL`：t1110 860/0×3、t1111 864/0×3、t1112 868/0×3、t1113 872/0×3、t1114 876/0×3，orch 五件同值）。规范配方 md5（`grep -a -oE "^PASS \| [a-z0-9]+ " | sort | md5sum`）15 件逐单复跑三方恒等，与权威值**全 32 位逐字比对**：t1110 `aae0c82d404fef85b01630366052d280`✓、t1112 `4bd9b20e648ef34d0f4252882cef9ba1`✓、t1113 `53ce88f396862b0a3eb441da1d3d89b0`✓、t1114 `52b298e1fec8c072b0e95da41c9db5f7`✓；t1111 实算 `b6ae823d68271b873643abca5815ddaa`（三方互恒等但 ≠ 主张值，F1）。「四方恒等[含双 restore]」主张对 t1110/t1112/t1113 复算成立——六份 restore 日志 PASS-md5 与各单主值恒等且**字节互异**（独立跑实证：cmp pos≠restore）。窗前在飞件 t1109 顺手复算亦吻合（856/0×3，md5 `358b598afdd5e384f0cd83011273fa0a` = dev-plan :4554 主张）。
+- **NEG 证据（红面 10/10 吻合）**：十份红日志逐份亲读 FAIL 腿名与申报敏感腿逐一全等——r2080 neg1={r2080a}/neg2={r2080b}、r2082 neg1={r2082a}/neg2={r2082c}、r2083 neg1={r2083c}/neg2={r2083a}、r2084 neg1={r2084b}/neg2={r2084a}（均全量 859/867/871/875 +1 形态，与申报一致）、r2081 neg1={r2081a}/neg2={r2081c}（腿名吻合，**形态失实见 F2**）。十份还原全绿在盘（r2081 为 4 腿 4/0——其腿集 md5 `9cbd319e` 与全量 pos 中 r2081 四腿恒等，还原语义本身有证）。
+- **账本三方一致（过，唯 t1111 md5 位失配=F1）**：dev-plan 五关单条目（dev-plan.md:4494-4545）↔ git log 提交对（6356b80/ee6e8d9、dbc8b82/aa5434c、72b7ac7/e2e21ee、60f8ae9/b8b7325、c631a32/1fa4e21 逐单亲核）↔ auto-backlog 摘除行（auto-backlog.md:71 低件量/73 中件量/75 大件 sign+map/82 狼相性翻案/83 音效，均携提交对+腿数）↔ agent-state Recovery Point 五条（agent-state.md:53-57）。**控制块每闭环全字段更新**（git log -p docs/agent-state.md 四单亲核）：counter 0（#23 归零）→1（5064710）→2（834862f）→3（4b81ca8）→4→5（fc90774）逐单递增有 diff 实文；HEAD 行五笔逐单同步「fix/test 已提交，本 docs 提交收口」；governance_review_due 于 fc90774 恰翻 true（5/5 触发+本审计在飞）。腿数链无断（852→856→860→864→868→872→876）。
+- **提交纪律（全过，第三窗连续）**：20 笔 %B 聚合 `co-authored-by|generated with|claude|anthropic|🤖` 大小写不敏感**零命中**（检测器正向自证：同法扫普通词 20/20 命中=检测器活）；逐笔 LC_ALL=C tr 删 ASCII 法非 ASCII 字节扫描 20×0=**message 全窗纯英文**；文件面零互串——五笔 docs 提交各恰触 docs/{agent-state,auto-backlog,dev-plan}.md 三件（3504139 恰两件=审计报告本体+agent-state=落档合法面），十笔 fix/test 提交 name-only 面核零 docs/saves/.codex 触碰；targeted add 吻合——c631a32 十文件 +488/-1 与控制块申报逐字吻合，b8b7325 二十件全为 tools/matrix 既有段 sentinel 钉合法前移（申报「count 一六二/atlas 二一〇多段前移」与文件族一致），1fa4e21 四件=CMakeLists+helpers+section77。
+- **tail20（过）**：logs/voxelsandbox_t{1110..1114}_tail20.log 五件在盘，各含首行来源头注（t1110-t1113「# 来源:」式、t1114「source: this run, build efcf479」式——build 戳指向前一 docs 提交=build-before-commit 既知模式[#19 INFO 在册]）+ `=== voxelsandbox start ===` 横幅 + `root objects after load` 实文各一；t1097-t1114 **十八单连守记录** 18/18 亲核在档（logs/ tail20 档案共 91 件）。
+- **不变量抽查（3/3 全过，file:line 实文亲读）**：①**t1112**——src/Core/blockregistry.cpp:1691 `if (blockId == FenceGate) return (state & FenceGateStateOpenFlag) == 0;` 先于 ：1692 `switch (def(blockId).shape)`，携「须先于 shape 族判定（default 分支恒真会吞开态）」注=开合态早退顺序在案；②**t1113**——world.cpp:5474 checkSignSupportOnEdit 挂三写入口 ：1815（4 参 setBlock）/:1970（5 参）/:2271（setWaterSilent），守卫 ：5486 读 `solidSupportBlock(id)` 携「与放置预检同一谓词…永不劈叉」注；放置预检 playercontroller.cpp:6076 读 `mechLadderSupportBlock`（挂墙）/:6079 读 `solidSupportBlock`（站牌）——blockregistry.h:2393 明示「mechLadderSupportBlock 委托 solidSupportBlock 统一权威」=**双读同源实锤**；popSign 收口 m_chunks 直写+blockBroken/blockDroppedAsItem+批量 worldChanged 与申报同构；③**t1114**——playercontroller.cpp:5785-5786 空地图激活分流（`heldItemId == RecipeRegistry::EmptyMapId` → setStack FilledMapId，携「NEG-2 摘面行」注）**先于** ：5796 `if (m_selectedBlock == BlockRegistry::Air) return;` 守卫，桶/雪球分支同门注释在位。
+- **新教训入档（过）**：agent-state.md:36 Workspace Guard 现行版明文「**initSchema 加表 = 纯追加禁同位替换**（t1113 首轮 57 红教训）」在案；终态实文自洽——worldstore.cpp:214 brewing CREATE 与 ：227 sign_texts CREATE 并存、sign_texts 纯追加于后（无同位替换残留）。
+- **push 实数（过，算术自洽）**：`git rev-list --count origin/main..HEAD` 实测 **16**（origin/main = 473b318 = t1109 关单，用户已推至该点）。agent-state :26 记「push 积压已由用户清偿至 t1109 后——当前 15 笔待推」落笔于 fc90774 提交前：彼时 pending 恰 15（4eb981d..1fa4e21），fc90774 自身落定后即 16——**申报准确无缺陷**，非 #23 F2 型失实。
+- **首跑过程注与 git 演化一致性（抽查过）**：t1113「首轮 57 红（sign_texts 同位替换 brewing）」——事件本体无盘上工件（首轮红日志被规范复跑同名覆盖，UNVERIFIABLE），但终态实文（追加在位）+Workspace Guard 教训行+close 注三面闭环；t1114「pinSet 剥注释两钉失配→raw 同门改 rawContainsRosterMap」——事后工件在盘（section77_roster_map_t1114.cpp:74 rawContainsRosterMap 定义 + :350-353 五行 raw 钉消费点）与过程注吻合；section77 置尾注册 matrix_helpers.cpp:199 + CMakeLists 在案（runAll 末位）。
+
+## 发现与清偿
+
+**F1（HIGH）t1111 规范 md5 幻影值——账面主张不可复现**：dev-plan.md:4507、agent-state.md:22（834862f 版 last_verified_commit）及 ：56（现行 Recovery Point）、close 提交 834862f message 四处均记 `d3ae51943692c3e29b1f81f69d8ee0ff 四方恒等`。实核：在盘三方日志（matrix_t1111_{pos,final}.log + matrix_orch_t1111_verify.log，各 864 PASS/0 FAIL）复算全部 = `b6ae823d68271b873643abca5815ddaa`；五种配方变体穷尽试算（标准式/无尾空格式/r2081 过滤式/拼接式/uniq 式）无一得 d3ae5194；真值 b6ae823d **全仓零记载**（grep docs/+build/ 无一命中）。同窗四单同法复算全部逐字命中，配方无歧义——幻影值只可能来自被同名覆盖的中间轮日志（该单自报「首轮全矩阵 6 FAIL」后重跑）或 shell 历史陈旧值，属「凭非当轮在盘工件书写证据值」事故，为历窗审计首见（#22 F1 锚哈希凭记忆同根因家族，但本次落在证据链核心位）。三方日志互恒等+计数吻合+NEG 恰红腿正确——**证据实质未坏，坏的是账面值**。
+→ **清偿建议**：①主控清偿批在 dev-plan t1111 关单条目与 agent-state Recovery Point t1111 条补勘正注（「md5 经审计 #24 复算= b6ae823d68271b873643abca5815ddaa，d3ae5194 判幻影值不可复现」），不重写历史提交；②Workspace Guard 纪律行扩句「**md5/证据值必须由当轮在盘日志现算贴入，禁引 shell 历史与中间轮值**」；③下窗审计把 t1111 勘正落地列为首查项。
+
+**F2（MEDIUM）t1111 NEG 申报形态与盘面工件不符**：dev-plan :4507 申报「NEG-1/NEG-2 [均**全量 863/1**]…[md5 恒等 d3ae5194 **四方恒等**]」；在盘四件 canonical 名日志均为 **4 腿 filter 面**（red 3+1 / restore 4+0，件体积 640KB vs 全量件 7.8MB），restore 腿集 md5 `9cbd319e` ≠ 任何全量值——「全量 863/1」与「四方恒等」两主张均无盘上工件支撑。过程注自认「本轮以哈希后缀名落盘，主控对齐规范终名并留痕原名」：对齐操作后原全量件（若曾存在）已不在盘（build/ 无哈希后缀 r2081 件残留），「留痕原名」无实物。恰红面本身吻合（FAIL 腿={r2081a}/{r2081c}）+ 4 腿 restore 与全量 pos 的 r2081 腿集恒等——还原语义有证，唯申报失实。同根因链于 F1（该单收尾期证据命名/对齐事故）。
+→ **清偿建议**：与 F1 同批勘正注补录 NEG 实际形态（4 腿 filter 面）；纪律扩充「NEG/restore 日志对齐更名必须 mv 保留原字节、禁重跑覆盖；关单注申报形态（全量/filter）须与盘面一致」。
+
+**F3（MEDIUM）t1114 pos/final 系双 restore 的字节级副本——「四方恒等」实为 2 物理跑**：`cmp` 全文件同一——matrix_t1114_pos.log == matrix_r2084_neg1_restore.log（md5 `1c1b2ff3fd5b35a5f36bf2577f3e4781`）、matrix_t1114_final.log == matrix_r2084_neg2_restore.log（md5 `6e5fe10c60a7085977c931b04bb2640e`）；mtime 对 pos 22:57/restore1 22:58、final 23:21/restore2 23:22 各差 1 分钟，而同窗全矩阵单跑实测约 20-24 分钟（t1113 pos 19:20→final 19:41 等）——物理不可能四跑。且 pos≠final（7.86MB vs 9.34MB）证明日志非确定性输出，字节同一只能是复制。**实质验证力未坏**：pos/final 两次独立全绿跑均晚于双红跑（22:16/22:36）与手工还原时点，还原态全绿由 pos/final 自身有证；坏在「四方恒等[含双 restore]」以 4 件工件申报 4 跑而实为 2 跑 2 副本，且申报零披露（对照 t1111 尚有披露注）。t1110/t1112/t1113 同位主张经独立跑实证成立（字节互异+md5 恒等），t1114 为唯一失实处。
+→ **清偿建议**：①主控在 t1114 dev-plan 条目补披露注（「restore 两件系 pos/final 副本，物理跑数=2」）；②Workspace Guard 扩句「**restore 日志必须实跑产出禁复制**」（runner 输出名参数化即零成本）；③下窗审计 restore 日志加做 cmp 字节互异抽核。
+
+**F4（LOW）审计报告预写文件名日期错猜（#23 F1 家族第三窗）**：agent-state fc90774 版 ：17 current_task 预写「主控按报落档 docs/governance-audit-2026-09-29.md」——本审计执行日落档名为 governance-audit-**2026-09-30**.md。前两窗为引用陈旧旧报告名，本窗为预写未来落档名猜错日期，同属「凭记忆书写文件名、未与实际落档对表」家族。实质影响零（落档后勘正即可）。
+→ **清偿建议**：主控落档本报告时顺带将 agent-state 该处更正为 governance-audit-2026-09-30.md（随清偿批，不单独占提交）。
+
+**F5（INFO）窗口构成口径差 + 过程注计数不自洽**：①简报口径「五闭环+两笔 docs=17」vs 实数 20（差 t1109 收官三笔——该三笔在 #23 窗外、本窗内，其证据链本审计已顺手全核通过：856/0×3+md5 吻合+auto-backlog :66-67 摘录）；②dev-plan t1111 过程注「2 处漏核 lawful 钉+3 处自腿缺陷」与其括号列举（步长×2/StoneBrick 误记/count 钉放错文件/kMc 行钉被剥=5 项）与「首轮 6 FAIL」三数互不自洽（任意归组均 ≠6）。均不触及证据链实质。
+→ **清偿建议**：无需代码动作；后续审计简报窗口构成以 `git log --oneline` 实数为准，过程注计数随下次触该条目时顺带勘正。
+
+**UNVERIFIABLE**：①t1113 首轮 57 红（initSchema 同位替换）事件本体——首轮红日志被规范复跑同名覆盖，无独立工件；终态实文+教训入档+close 注三面自洽无矛盾。②t1114 pinSet 两钉失配事件本体——事后工件（rawContainsRosterMap）在盘吻合。③t1111 首轮 6 FAIL 事件本体——被修复后复跑覆盖；终态全绿与申报相容。三者均属「过程事件无盘上工件、账面自述与终态相容」类，与 #23 UNVERIFIABLE 同判。
+
+## 备查
+
+- 判定准据说明：#23 判 GREEN 的核心准据为「md5 逐单复跑三方恒等**且与关单主张逐字全等**」——本窗四单成立、t1111 不成立（F1），叠加 F2/F3 两处工件诚实性损伤，故 YELLOW 而非 GREEN；未判 RED 因全部交付代码面（不变量三单实文、NEG 恰红面、腿数链、876 腿终态全绿）零瑕疵，且三发现清偿均不需触代码。
+- 治理计数：fc90774 已置 due=true + 审计 #24（本报告）在飞；落档后计数归零，下一审计窗口 = t1115 起五闭环（或至下次 5/5）。t1115 golden apple 完整链已在飞（dev-plan :4550 🚧 开工，r2085）。
+- 提交零 AI 署名纪律第三窗连续守住（20/20 零命中）；「锚哈希须 git 现抄 + 规程参照文件名须 ls docs/ 现核」双纪律本窗履行（窗口锚两处现抄亲核、#23 参照件在盘亲核）——但 F4 表明「预写未来文件名」是该家族的未覆盖象限，建议纪律行再扩半句「**落档文件名以实际落档日为准，预写处随后勘正**」。
+- push 实数 16 笔（origin/main=473b318），用户侧积压已推至 t1109——#23 F2 的 156 笔积压已大幅清偿，余 16 笔建议择机再推。
+- 本窗「材料段尾追加」存档契约五单连续履行（0x28F 牛奶桶→0x290/0x291 地图、方块 157-161、Count 154→162、atlas 207→210 全携沿革注，git diff 亲核）；「追加不插中间」无违例。
+- 本报告未提交，留主控清偿批落档 docs/governance-audit-2026-09-30.md；报告本身与 git 署名无涉。
