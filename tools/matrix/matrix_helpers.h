@@ -71,6 +71,7 @@
 #include "dispenserstore.h"       // t814 发射器/投掷器 per-block 库存（分派 + 扣减断言源）
 #include "cheststore.h"           // t1013 箱子矿车内容键存储（转正 / 回生 / 掉落链断言源）
 #include "signstore.h"            // t1113 牌子文本存储（写读回 / 截断 / round-trip 探针源）
+#include "mapstore.h"             // t1114 map 数据集（建库/写列/读列/出图/清库 探针源）
 #include "loottable.h"            // t1035 豹猫驯服分化探针（fishingPool 直调：生鱼=驯服道具来源钉）
 #include "mobmodel.h"             // review24 低危收尾（#35）：Renderer 白名单长度 ↔ Entities MobType 上界互钉
                                    //   （Renderer 在 Entities 之下，mobmodel.cpp 不得 include entitymanager.h——
@@ -695,4 +696,13 @@ private:
                               //   →读回真链 + Main.qml 接线 raw 钉(NEG-1 摘面行本腿持有)]，r2083d
                               //   结构钉族[值面 + 源钉族——NEG 双摘面豁免不钉 + 无再编辑/16 向不取
                               //   负面钉]。fresh 48×48×96 s83，rig 世界零接触，接 section75）
+    void section77_roster_map_t1114(); // t1114 名册大件批第二单探针段（置尾先例沿用：r2084a 激活链柱
+                              //   [8 纸环合成命中 + 熔炉/画作环孪生零污染 + 双 id 段位/名面/调色板/
+                              //   maxStack 64 + 空地图右键激活真链(槽内转换 + 建库 + 首绘中心区)]，
+                              //   r2084b 探索填充柱[MapStore 行为面 + 持图探索 tick 真链双 rig 盒扫
+                              //   + 不持图不扫描负例 + 清库惰性重建(会话口径重探索面)]，r2084c 显示
+                              //   面柱[Main.qml overlay 接线 raw 钉 + main.cpp provider 钉 + 注入行
+                              //   钉]，r2084d 结构钉族[源钉族——NEG 双摘面豁免不钉 + 罗盘芯/缩放克
+                              //   隆/不可堆叠/存档表四负面钉]。fresh 48×48×96 s84，rig 世界零接触，
+                              //   接 section76）
 };
