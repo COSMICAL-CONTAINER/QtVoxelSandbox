@@ -1351,9 +1351,38 @@ public:
         //   经 Hotbar::recipeContainerSwap 单一权威在合成格原位转空桶）。hardness=0.5 / NoTool 空手
         //   即采 / 破坏零掉落（MC 口径）/ 音色 GroupWood（羊毛软闷族口径——Wool 行同门）。
         Cake             = 159, // 蛋糕：右键分块食用（1.0 六片 ×2 饥饿）；3 奶+2 糖+蛋+3 麦 3×3 合成
-        Count           = 160, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
-                                 //   t1112 lawful 前移：157→160（FenceGate=157/GlassPane=158/Cake=159
-                                 //   尾部追加；t1111 曾 154→157、t1105 曾 151→154、t1103 曾 149→151、
+        // ── t1113 名册大件批首单两件（段尾追加；同门先例 WoodDoor=19 附着渲染 / Painting=134 贴墙文本面）。
+        //   牌子（standing sign 站牌）：机制等价 MC 1.0 sign id 63（Alpha 入版 = 1.0 基线内）。solid=false /
+        //   **ShapeNone（无碰撞——玩家可穿过，MC 口径牌子 hitbox 不挡人）**，但选中/射线走**板面盒**（板面
+        //   12/16 宽 × 12/16 高 × 2/16 厚，贴格顶——selectionAABBs/raycastAABBs 特例给形状，Painting 同门
+        //   「ShapeNone + id 特例盒」模式；非零盒：射线/选中要能点中牌子）。state 低 2 位 = 板面朝向 0=+X
+        //   1=-X 2=+Z 3=-Z（SignStateFacing*；chestFrontFace 同源编码）。**MC 1.0 站牌是 16 向旋转（4 bit
+        //   metadata 0..15）实读留痕**：本工程登记简化取 4 向（工程既有惯例同 painting/door/chest 全族——
+        //   16 向斜置板面需非轴对齐 quad 渲染面，越本工程 mesher 轴对齐盒几何面；斜向观感差登记待实机，
+        //   非静默偏离）。放置写朝向（ny=0 侧面点击走 WallSign 挂墙变体；ny≠0 → 站牌写 horizontalFacing^1
+        //   板面朝玩家，chest/furnace 同门）。**放置时编辑一次**（1.0 口径：牌子放下即开编辑界面，关界面
+        //   即存文本；已放牌子右键无再编辑——再编辑是 1.8+ 面实读留痕不取）4 行 × 15 字符（1.0 口径），
+        //   文本存 SignStore（Game 层按坐标键控，本表 state 仅 8 bit 放不下——方块附挂数据非 state 面）。
+        //   破坏掉牌子物品（dropId=自身；**文本随破丢失**——1.0 口径掉落物无文本面）。hardness=1.0（MC 1.0
+        //   sign 硬度）/ Axe 加速（requiresTool=false 空手可采且掉落）。光照全透（default 0）。音色
+        //   GroupWood（木牌，门族木音同门）。**合成面降级裁定（t1113 派工勘误留痕）**：MC 1.0 sign
+        //   配方 = 6 木板 2×3 满阵 → 1，但该网格与 1.0 活板门配方（6 板 2×3 → 2）**模式全等**——
+        //   vanilla 自身即同格对（靠匹配器注册序裁定）；工程匹配器先答先得 + t802 禁遮蔽审计 → 两行
+        //   不可共存 → {Planks:6} 2×3 归属维持早注册活板门行，牌子合成面降级候选池（获取面 = 创造
+        //   调色板），全文见 recipe.cpp t1113 注。仅橡木（1.0 口径——云杉等木种牌 1.14+ 才有，越基线
+        //   不取）。
+        StandingSign     = 160, // 牌子：放置时编辑一次（4 行×15 字符）；无碰撞可穿过 + 板面选中盒；获取=创造调色板
+        //   挂墙牌子（wall sign 挂墙变体）：机制等价 MC 1.0 wall sign id 68（Alpha 入版 = 1.0 基线内；
+        //   kMc 68——**两 id 都取**，kMc 63/68 双行：MC 1.0 站牌/挂墙牌本就是两个方块 id，工程方块段按
+        //   id 族惯例拆两 id 承载，放置时 ny=0 侧面点击自动选挂墙形态，玩家侧单物品语义保持）。除「贴墙
+        //   附着」外全字段与站牌同：solid=false / ShapeNone + 板面盒（贴所附墙面，2/16 厚）/ state 低 2 位
+        //   = 板面朝向（= 所附墙面外法线方向；墙在朝向反向侧）。放置支撑：站牌须下方完整立方（蛋糕/铁轨
+        //   同门）；挂墙牌须命中格完整立方墙面（木梯/机关同门）。**失撑掉落**：支撑被破 → 牌子当场脱落
+        //   成物品（World::checkSignSupportOnEdit 写入钩子族，checkPaintingSupportOnEdit 同门）。
+        WallSign         = 161, // 挂墙牌子：贴墙附着（命中格完整立方墙面）；板面盒贴墙；kMc 68
+        Count           = 162, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+                                 //   t1113 lawful 前移：160→162（StandingSign=160/WallSign=161 尾部追加；
+                                 //   t1112 曾 157→160、t1111 曾 154→157、t1105 曾 151→154、t1103 曾 149→151、
                                  //   t1097 曾 148→149——追加不插中间存档契约，钉值随追加前移）。
     };
 
@@ -1375,6 +1404,16 @@ public:
     static constexpr int CakeStateBitesMask = 0x7;
     static constexpr int CakeBitesMax       = 5;
 
+    // t1113 牌子 state 编码（站牌 StandingSign / 挂墙牌 WallSign 同一套低 2 位； chestFrontFace 同源
+    //   编码 0=+X 1=-X 2=+Z 3=-Z）。**文本不在 state 面**——文本是方块附挂数据（4 行 × 15 字符，
+    //   state 仅 8 bit 放不下），存 Game 层 SignStore 按坐标键控（cheststore 容器同门）：
+    //   bit[1:0] = 板面朝向。站牌：板面（文字面）所朝方向 = 放置时玩家反向（horizontalFacing ^ 1，
+    //   chest/furnace 同门）；挂墙牌：板面朝向 = 所附墙面外法线方向（墙在朝向反向侧）。
+    //   板面盒几何单一权威 = blockregistry.cpp signBoardBoxes（选中 / 射线同源；partialblockgeometry
+    //   渲染 case 按同一编码镜像摆位，改编码两处同步——fenceGatePanelBoxes 同门纪律）。
+    static constexpr int SignStateFacingShift = 0;
+    static constexpr int SignStateFacingMask  = 0x3;
+
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
     //   [FirstExtraBed, LastExtraBed]（white/light_blue/lime/pink/gray/light_gray/purple/brown）。isBed(id) 单一权威
     //   谓词供 t388 睡觉机制（右键床 → 跳清晨 + 重生点）判定「命中格是否床」，覆盖**两个**连续段（既存 8 色 + 新 8 色），
@@ -1388,6 +1427,11 @@ public:
     // t1112 栅栏门统一谓词（单一权威，同 isDoor / isTrapdoor 单 id 模式）：placeBlock 右键开合分支 /
     //   碰撞开合态判定（shapeBoxesInto 合=满 / 开=零）统一读本谓词，避免各处硬编码 id。
     static bool isFenceGate(quint8 blockId);
+
+    // t1113 牌子族统一谓词（站牌 StandingSign ∪ 挂墙牌 WallSign 双 id 并判，isBed 段不连续并判同门）：
+    //   placeBlock 放置形态分流（ny=0 侧面 → 挂墙 / 否则站牌）+ 支撑预检 + 失撑掉落钩子
+    //   （World::checkSignSupportOnEdit）+ 音色/谓词路由统一读本谓词，避免各处硬编码双 id。
+    static bool isSign(quint8 blockId);
 
     // t457 床低 3D 模型几何常量（cell-local [0,1]）—— PartialBlockGeometry 渲染 + shapeBoxes 碰撞共用同一组值，
     //   保证「碰撞盒顶 = 渲染床垫顶」（玩家立于床垫顶）。kBedMattressTop=床垫顶高（~0.31 = 5/16，低床，碰撞盒顶）；
@@ -2190,7 +2234,9 @@ public:
     //   206=cauldron 炼药锅壁（暗铸铁 + 顶部沿口亮带 + 三足足影；Cauldron 全盒体 + 内水面 tile 复用
     //   静水 19，水面高由 PartialBlockGeometry Cauldron case 据 state 水位算）。tools/build_pumpkin_stem.py /
     //   build_jackolantern.py / build_cauldron.py 程序生成原创像素图 §9a）。**追加不插中间**（同上）。
-    static constexpr int AtlasTileCount = 209; // t1112 起 207→209（蛋糕族 tile 207..208 尾部追加；t1105 起
+    //   209=sign_board 牌板面（橡木板底 + 暗边框 + 四行淡文本带；StandingSign/WallSign 板面同瓦——挂墙
+    //   变体仅几何摆位异，贴图同源）。tools/build_sign.py 程序生成原创像素图 §9a。
+    static constexpr int AtlasTileCount = 210; // t1113 起 209→210（牌子板面 tile 209 尾部追加；t1112 起
                                                //   201→207（南瓜族 tile 201..205 + 炼药锅 206 尾部
                                                //   追加：南瓜茎 4 阶段/南瓜灯点亮刻脸/炼药锅壁，不插中间
                                                //   存档契约；t1103 曾 195→201——钉值随追加 lawful 前移）

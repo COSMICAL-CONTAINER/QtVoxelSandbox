@@ -1063,6 +1063,12 @@ signals:
     //   同 hopperOpened 模式：Game 层发语义事件（携坐标供 BrewingStore 寻址该台的 5 槽），呈现层只消费
     //   （PLAN §2 分层；QML 单向消费增量，零 QML 玩法路径迁移）。
     void brewingStandOpened(int x, int y, int z);
+    // t1113 牌子放置完成（sign placed）：placeBlock 成功写入牌子方块（站牌/挂墙牌任一形态）后发，携
+    //   落点世界坐标 → 呈现层 Connections 打开牌子文本编辑面板（1.0 口径：放置时编辑一次——牌子放下
+    //   即开录入界面，关界面即存文本；已放牌子无再编辑面，右键再编辑是 1.8+ 面实读留痕不取）。同
+    //   chestOpened/hopperOpened 单向事件流模式：Game 层发语义事件（坐标供 SignStore 寻址该牌的
+    //   4 行文本），呈现层只消费（PLAN §2 分层）。
+    void signPlaced(int x, int y, int z);
     // 火把放置（t125 朝向修正）：placeBlock 成功放置 Torch 后发，携带玩家点击面的外法线（指向玩家侧，
     //   = m_hitNx/Ny/Nz）。呈现层（torchHost）据此把火把定向为「柄嵌玩家所点墙面」——替代旧 recomputeOrient
     //   固定优先级（下>-X>+X>-Z>+Z）：旧逻辑在「墙+地并存」（墙插火把下方恰有地面）时误判垂直立柱，

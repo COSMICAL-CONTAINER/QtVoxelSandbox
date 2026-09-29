@@ -46,7 +46,8 @@ bool SaveBridge::saveViaCoordinator(WorldStore *store, const QString &worldFile,
                                     const QVariantList &furnaces,
                                     const QVariantList &dispensers, const QVariantMap &worldTime,
                                     const QVariantMap &bedSpawn, const QVariantMap &playerData,
-                                    const QVariantMap &progress, const QVariantList &hoppers)
+                                    const QVariantMap &progress, const QVariantList &hoppers,
+                                    const QVariantList &brewingStands, const QVariantList &signs)
 {
     if (!store || !store->isOpen() || worldFile.isEmpty()) {
         qWarning() << "SaveBridge::saveViaCoordinator: store not open / no world file - refusing";
@@ -67,6 +68,8 @@ bool SaveBridge::saveViaCoordinator(WorldStore *store, const QString &worldFile,
     req.furnaces = furnaces;
     req.dispensers = dispensers;
     req.hoppers = hoppers; // t1080 漏斗内容透传（SaveRequest 字段序 = 签名形参序同构）
+    req.brewingStands = brewingStands; // t1113 补正：酿造内容透传（t1097 链缺口——下游第 8 参此前无载荷源）
+    req.signs = signs;                 // t1113 牌子文本透传（载荷字段序 = 签名形参序同构）
     req.worldTime = worldTime;
     req.bedSpawn = bedSpawn;
     req.playerData = playerData;

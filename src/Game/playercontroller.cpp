@@ -5836,6 +5836,20 @@ void PlayerController::placeBlock()
         //   放置即合）。运行轴 = 朝向轴垂直轴（几何解码见 partialblockgeometry FenceGate case）：
         //   玩家面 +X 放门 → 门板沿 Z 横铺，玩家沿 +X 穿行（MC fence gate 朝向语义）。
         placeState = quint8((horizontalFacing() & 3) << BlockRegistry::FenceGateStateFacingShift);
+    } else if (BlockRegistry::isSign(quint8(m_selectedBlock))) {
+        // t1113 牌子朝向写入 state 低 2 位（SignStateFacingMask；供 mesher 板面摆位 + 射线/选中板面
+        //   盒解码，signBoardBoxes 单一权威）。放置形态由命中面分流（写入段同口径选 id）：
+        //   - ny==0 侧面点击 → 挂墙形态：板面朝向 = 所附墙面外法线（= 命中面外法线的水平向，
+        //     chestFrontFace 同源 4 向编码；墙在朝向反向侧）。MC 1.0 wall sign metadata 2..5 同语义。
+        //   - ny≠0 顶/底面点击 → 站牌形态：板面（文字面）朝玩家 = horizontalFacing ^ 1（chest/furnace
+        //     同门）。**MC 1.0 站牌 16 向旋转（4 bit metadata）实读留痕**：本工程登记简化取 4 向
+        //     （painting/door/chest 全族惯例——16 向斜置板面需非轴对齐 quad 渲染面，越 mesher 轴对齐
+        //     盒几何面；斜向观感差登记待实机，非静默偏离）。
+        if (m_hitNy == 0)
+            placeState = quint8(m_hitNx > 0 ? 0 : m_hitNx < 0 ? 1 : m_hitNz > 0 ? 2 : 3);
+        else {
+            placeState = quint8((horizontalFacing() & 3) ^ 1);
+        }
     } else if (m_selectedBlock == BlockRegistry::Chest) {
         // t225 箱子前面（锁面）朝玩家侧：state = horizontalFacing ^ 1（玩家朝向的反向 = 箱子前面所朝方向，
         //   机制等价 MC 1.0 箱子放置锁面朝玩家）。编码与 horizontalFacing 同源（0=+X 1=-X 2=+Z 3=-Z）；
@@ -6019,6 +6033,22 @@ void PlayerController::placeBlock()
     //   支撑蛋糕即掉）→ 候选池登记（同门压力板失撑钩子 checkPressurePlateOnEdit 家族可后接）。
     if (m_selectedBlock == BlockRegistry::Cake) {
         if (!BlockRegistry::solidSupportBlock(m_world->blockAt(tx, ty - 1, tz))) return; // 悬空 / 侧放 → 拒（不挥）
+    }
+    // t1113 牌子放置支撑预检（站牌 / 挂墙牌两形态各守其门；机制等价 MC 1.0 sign 须附着支撑面）：
+    //   - 挂墙形态（ny==0 侧面点击）：命中格须**完整立方墙面**（木梯 / 机关同门——mechLadderSupportBlock
+    //     单一权威，排除仙人掌缩体面；草丛 / 门 / 半砖等非完整立方侧拒挂）。
+    //   - 站牌形态（顶/底面点击）：目标格正下方须**完整立方地面**（蛋糕 / 铁轨同门——solidSupportBlock
+    //     单一权威排除仙人掌；点方块底面（天花板）时目标格下方常为空气 → 自然拒，机制等价 MC 1.0
+    //     「天花板下放站牌因无地面而失败」）。失撑掉落反应面 = World::checkSignSupportOnEdit 钩子族
+    //     （checkPaintingSupportOnEdit 同门——支撑被破牌子当场脱落成物品）。
+    if (BlockRegistry::isSign(quint8(m_selectedBlock))) {
+        if (m_hitNy == 0) {
+            if (!BlockRegistry::mechLadderSupportBlock(m_world->blockAt(m_hitBx, m_hitBy, m_hitBz)))
+                return; // 命中格非完整立方墙面 → 挂墙拒（不挥）
+        } else {
+            if (!BlockRegistry::solidSupportBlock(m_world->blockAt(tx, ty - 1, tz)))
+                return; // 目标格下方悬空 / 非完整支撑 → 站牌拒（不挥）
+        }
     }
     // t198 水中可放方块（排开水）/ t351 岩浆同理（排开岩浆）：目标格为空气 / 水 / 岩浆均可放置；流体被
     //   方块直接覆盖 → World::setBlock 内 oldId=Water/Lava → newId=实体走「放置」分支（仅发 blockPlaced，
@@ -6338,6 +6368,18 @@ void PlayerController::placeBlock()
         m_world->setBlock(tx, ty, tz, idByte, bedFacing);                  // foot: bit3=0 bit[1:0]=朝向
         m_world->setWaterSilent(hx, ty, hz, idByte, quint8(bedFacing | 8)); // head: bit3=1（静默，免双耗）
         if (m_mode == Survival) m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // t669 消耗收口
+    } else if (BlockRegistry::isSign(idByte)) {
+        // t1113 牌子放置：命中面分流选形态 id——**MC 1.0 单一牌子物品两形态通放**（点侧面 → 挂墙牌
+        //   WallSign 附所点墙面；点顶/底面 → 站牌 StandingSign 立于目标格）。工程方块段按 MC 63/68 双
+        //   id 族惯例拆两方块，形态选择收在本处单一权威（isSign 双 id 通放 = 玩家侧单物品语义保持，
+        //   手持任一牌子 id 均按命中面自动选形态）。state = 上方牌子分支写好的朝向位（挂墙 = 墙面外
+        //   法线 / 站牌 = horizontalFacing ^ 1）。牌子 ShapeNone 零碰撞 → overlapsPlayerAABB 恒假
+        //   （可放入玩家自身格，机制等价 MC 牌子不挡人）。
+        const quint8 placeId = (m_hitNy == 0) ? quint8(BlockRegistry::WallSign)
+                                              : quint8(BlockRegistry::StandingSign);
+        m_world->setBlock(tx, ty, tz, placeId, placeState);
+        // t669 放置消耗收口：生存放置消耗 1 件（同常规分支；1 牌 = 1 物品单格写入单耗）。
+        if (m_mode == Survival) m_hotbar->takeStack(m_hotbar->selectedSlot(), 1);
     } else {
         // fence / pressure_plate / trapdoor：placeState=0（trapdoor 默认水平合）。
         m_world->setBlock(tx, ty, tz, idByte, placeState);
@@ -6480,6 +6522,9 @@ void PlayerController::placeBlock()
     //   确定、此处不变；按值传出无后效依赖（即便下一帧 raycast 改向也不影响本火把）。
     if (m_selectedBlock == BlockRegistry::Torch)
         emit torchPlaced(tx, ty, tz, m_hitNx, m_hitNy, m_hitNz);
+    // t1113 牌子放置完成 → 呈现层开文本编辑面板（1.0 口径放置时编辑一次；见 signPlaced 信号注）。
+    if (BlockRegistry::isSign(idByte))
+        emit signPlaced(tx, ty, tz);
     emit swingArm(); // 放块成功 → 第一人称手挥动（t29）
     emit blockPlaced(); // progress 统计：放置方块 +1
 }

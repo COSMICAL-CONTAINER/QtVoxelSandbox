@@ -220,6 +220,19 @@ bool WorldStore::initSchema()
         qCCritical(lcSave) << "create brewing failed:" << q.lastError().text();
         return false;
     }
+    // t1113 牌子文本表：同 brewing 模式 —— 每块牌子（按方块世界坐标键控）一行，data 列存
+    //   {lines:[4 行文本]} 的 JSON 文本（自描述；首个方块附挂文本面）。纯加表 —— 旧库 IF NOT EXISTS
+    //   幂等补建，无迁移负担；schema 版本不 bump（纯加表对老库向前兼容）。
+    if (!q.exec(QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS sign_texts ("
+            "  x INTEGER NOT NULL,"
+            "  y INTEGER NOT NULL,"
+            "  z INTEGER NOT NULL,"
+            "  data TEXT NOT NULL,"
+            "  PRIMARY KEY (x, y, z))"))) {
+        qCCritical(lcSave) << "create sign_texts table failed:" << q.lastError().text();
+        return false;
+    }
     // progress 表（progress 新系统）：玩家进度（统计 + 成就）单行表，key 固定 'main'，data 存 PlayerProgress::toVariant()
     //   的 JSON。IF NOT EXISTS 幂等补建（schema 版本不 bump，同 chests/furnaces，纯加表对老库向前兼容）。
     if (!q.exec(QStringLiteral(
@@ -470,7 +483,7 @@ void WorldStore::closeWorld()
 
 bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const QVariantList &furnaces, const QVariantList &dispensers,
                          const QVariantMap &worldTime, const QVariantMap &bedSpawn, const QVariantList &hoppers,
-                         const QVariantList &brewingStands)
+                         const QVariantList &brewingStands, const QVariantList &signs)
 {
     if (!m_open || !m_world) {
         qCWarning(lcSave) << "saveAll: no open db or world";
@@ -589,6 +602,11 @@ bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const 
     }
     // t1097 酿造内容同事务落盘（brewing 表 DELETE 全量 + INSERT；与 chunks / meta / 前述容器表原子提交）。
     if (!writeBrewing(brewingStands)) {
+        db.rollback();
+        return false;
+    }
+    // t1113 牌子文本同事务落盘（sign_texts 表 DELETE 全量 + INSERT；与 chunks / meta / 前述容器表原子提交）。
+    if (!writeSigns(signs)) {
         db.rollback();
         return false;
     }
@@ -950,6 +968,63 @@ QVariantList WorldStore::loadBrewingStands() const
         hm.insert(QStringLiteral("progress"), data.value(QStringLiteral("progress")));
         hm.insert(QStringLiteral("fuelOps"), data.value(QStringLiteral("fuelOps")));
         out.append(hm);
+    }
+    return out;
+}
+
+// t1113 牌子文本落盘：DELETE 全量 + INSERT 每块牌子（坐标列 + lines JSON 文本）。调用方（saveAll）已开
+//   事务，本方法不 BEGIN/COMMIT（同事务原子）。signs 形状 = SignStore::allSigns() 产物：每项
+//   {x,y,z,lines:[l0..l3]}。坐标缺 / 非法 → 跳过该牌（不写残条目）。
+bool WorldStore::writeSigns(const QVariantList &signs)
+{
+    QSqlDatabase db = QSqlDatabase::database(kConn);
+    QSqlQuery del(db);
+    if (!del.exec(QStringLiteral("DELETE FROM sign_texts"))) {
+        qCCritical(lcSave) << "saveAll: sign_texts delete failed:" << del.lastError().text();
+        return false;
+    }
+    QSqlQuery iq(db);
+    iq.prepare(QStringLiteral("INSERT INTO sign_texts (x, y, z, data) VALUES (?, ?, ?, ?)"));
+    for (const QVariant &v : signs) {
+        const QVariantMap sm = v.toMap();
+        bool okx = false, oky = false, okz = false;
+        const int x = sm.value(QStringLiteral("x")).toInt(&okx);
+        const int y = sm.value(QStringLiteral("y")).toInt(&oky);
+        const int z = sm.value(QStringLiteral("z")).toInt(&okz);
+        if (!okx || !oky || !okz) continue;
+        const QJsonDocument doc = QJsonDocument::fromVariant(sm.value(QStringLiteral("lines")));
+        iq.addBindValue(x);
+        iq.addBindValue(y);
+        iq.addBindValue(z);
+        iq.addBindValue(QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
+        if (!iq.exec()) {
+            qCCritical(lcSave) << "saveAll: sign_texts insert failed at" << x << y << z
+                               << ":" << iq.lastError().text();
+            return false;
+        }
+    }
+    return true;
+}
+
+// t1113 读 sign_texts 表为 QVariantList（形状同 writeSigns 入参 = allSigns 产物形）。未打开 → 空列表。
+//   caller（Main.qml.enterWorld）转交 signStore.loadAll 整体替换内存（清旧世界残留 + 填本世界牌子）。
+QVariantList WorldStore::loadSigns() const
+{
+    QVariantList out;
+    if (!m_open) return out;
+    QSqlQuery q(QSqlDatabase::database(kConn));
+    if (!q.exec(QStringLiteral("SELECT x, y, z, data FROM sign_texts"))) {
+        qCWarning(lcSave) << "loadSigns: select failed:" << q.lastError().text();
+        return out;
+    }
+    while (q.next()) {
+        QVariantMap sm;
+        sm.insert(QStringLiteral("x"), q.value(0).toInt());
+        sm.insert(QStringLiteral("y"), q.value(1).toInt());
+        sm.insert(QStringLiteral("z"), q.value(2).toInt());
+        const QJsonDocument doc = QJsonDocument::fromJson(q.value(3).toString().toUtf8());
+        sm.insert(QStringLiteral("lines"), doc.toVariant());
+        out.append(sm);
     }
     return out;
 }

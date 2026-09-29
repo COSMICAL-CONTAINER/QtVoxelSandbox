@@ -190,6 +190,12 @@ PARTIALS_3D_T1112 = [
     ("cake",       "cake",       "default_cake_top",  "default_cake_side"),
 ]
 
+# t1113 名册大件批首单 3D dimetric 立体图标：sign 形状（立柱+板面），fill = sign_board 瓦（与放置态
+#   kDefs 牌板 tile 209 同源）。牌子/挂墙牌双 id 共用 icon_sign.png（物品剪影同构，族惯例）。
+PARTIALS_3D_T1113 = [
+    ("sign", "sign", "default_sign_board", "default_sign_board"),
+]
+
 # t492 「正面有辨识特征」的方块（正面贴图, 顶面贴图, 侧面贴图）—— 走 render_front（正面为主的 dimetric 投影）。
 #   t676 工作台 / 熔炉 / 发射器 / 投掷器**全部移出**（用户点名「front 方案太扁平」→ 升 cube per-face 满立方
 #   dimetric：顶 + 右侧 + 前面三面独立贴图，见 FROM_PACK cube_front 段）。本表现空 —— 保留表结构 /
@@ -577,6 +583,15 @@ def render_partial_3d(shape, fill_top="default_wood", fill_side="default_wood"):
         ]
         y_min, y_max = 0.0, 2.0
         scale = 0.7
+    elif shape == "sign":
+        # t1113 牌子：中央立柱 + 板面（与 PartialBlockGeometry StandingSign case 同构——图标取
+        #   站牌形态读感；挂墙牌物品剪影同构共用本图标，仅世界内几何摆位异）。depth buffer 解
+        #   立柱与板面相交遮挡（板面 y[4/16,1] 覆柱上段）。
+        boxes = [
+            (7.0 / 16.0, 9.0 / 16.0, 0.0, 0.375, 7.0 / 16.0, 9.0 / 16.0),  # 立柱（2/16 见方 × 6/16 高）
+            (2.0 / 16.0, 14.0 / 16.0, 0.25, 1.0, 7.0 / 16.0, 9.0 / 16.0),  # 板面（12/16 宽 × y[4/16,1] × 2/16 厚）
+        ]
+        y_min, y_max = 0.0, 1.0
     else:
         img = Image.fromarray(canvas.astype(np.uint8), "RGBA")
         return img.resize((OUT, OUT), Image.LANCZOS)
@@ -1049,6 +1064,11 @@ def _partial_shape_boxes(shape):
         # t1112 蛋糕：内缩 1px × 半高矮盒（与 PartialBlockGeometry Cake case 满盒形态同源——
         #   图标取未咬满盒；咬口视觉是世界内几何面，图标恒满盒读感）。
         return [(0.0625, 0.9375, 0.0, 0.5, 0.0625, 0.9375)]
+    if shape == "sign":
+        # t1113 牌子：中央立柱 + 板面（与 PartialBlockGeometry StandingSign case 同构——图标取
+        #   站牌形态读感；挂墙牌物品剪影同构共用本图标，仅世界内几何摆位异）。
+        return [(0.4375, 0.5625, 0.0, 0.375, 0.4375, 0.5625),   # 立柱（2/16 见方 × 6/16 高）
+                (0.125, 0.875, 0.25, 1.0, 0.4375, 0.5625)]      # 板面（12/16 宽 × y[4/16,1] × 2/16 厚）
     raise ValueError(f"unknown partial shape {shape}")
     raise ValueError(f"unknown partial shape {shape}")
 
@@ -1264,6 +1284,13 @@ def main():
     # t1112 名册中件量批半方块 3D dimetric 立体图标（机制等价 t1111 流程；栅栏门=木板 / 玻璃板=
     #   玻璃 / 蛋糕=霜面+侧带双 fill——与放置态 kDefs 蛋糕面 topTile 207 / side 208 同源）。
     for out_name, shape, fill_top, fill_side in PARTIALS_3D_T1112:
+        img = render_partial_3d(shape, fill_top, fill_side)
+        out_path = os.path.join(SRC, "icon_{}.png".format(out_name))
+        img.save(out_path)
+        print("wrote", os.path.relpath(out_path, HERE), img.size)
+    # t1113 名册大件批首单 3D dimetric 立体图标（机制等价 t1112 流程；sign 形状 = 立柱+板面，fill
+    #   = sign_board 瓦——与放置态 kDefs 牌板 tile 209 同源；牌子/挂墙牌双 id 共用 icon_sign.png）。
+    for out_name, shape, fill_top, fill_side in PARTIALS_3D_T1113:
         img = render_partial_3d(shape, fill_top, fill_side)
         out_path = os.path.join(SRC, "icon_{}.png".format(out_name))
         img.save(out_path)

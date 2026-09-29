@@ -95,7 +95,9 @@ public:
                                         const QVariantMap &bedSpawn,
                                         const QVariantMap &playerData,
                                         const QVariantMap &progress,
-                                        const QVariantList &hoppers = {}); // t1080 漏斗内容（缺省空 = 旧 caller 零改动兼容）
+                                        const QVariantList &hoppers = {}, // t1080 漏斗内容（缺省空 = 旧 caller 零改动兼容）
+                                        const QVariantList &brewingStands = {}, // t1113 补正：酿造内容透传（t1097 曾只加下游参未跟桥链 → 第 12 参被旧 11 参签名静默丢弃）
+                                        const QVariantList &signs = {}); // t1113 牌子文本（缺省空 = 旧 caller 零改动兼容）
     // 恢复状态读面（台账只读；库缺席 = fresh；读不了 = open-error——#5② 可区分态，不谎报）。
     Q_INVOKABLE QString recoveryState(const QString &worldFile) const;
     // t1064 探锁退避（QML 消费面第三件；退出存档首试失败后调，选型立证见实现头注）：

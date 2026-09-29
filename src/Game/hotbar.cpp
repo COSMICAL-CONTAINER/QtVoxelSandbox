@@ -81,6 +81,11 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::FenceGate:        return "icon_fence_gate.png";        // 栅栏门：3D 门板（木板纹端柱+双档）
     case BlockRegistry::GlassPane:        return "icon_glass_pane.png";        // 玻璃板：3D 十字柱板（玻璃纹）
     case BlockRegistry::Cake:             return "icon_cake.png";              // 蛋糕：3D 矮盒（霜面+侧纹）
+    // t1113 名册大件批首单图标（build_cube_icons.py PARTIALS_3D_T1113 程序生成；sign 形状投影 =
+    //   立柱+板面 dimetric）：牌子 / 挂墙牌子双 id 共用一张 icon_sign.png（族惯例——两形态仅世界内
+    //   几何摆位异，物品剪影同构；同门先例 MonsterEgg 复用 icon_stone_brick.png）。
+    case BlockRegistry::StandingSign:     return "icon_sign.png";              // 牌子：3D 立牌（立柱+板面，木牌纹）
+    case BlockRegistry::WallSign:         return "icon_sign.png";              // 挂墙牌子：复用牌子剪影（两形态物品剪影同构）
     case BlockRegistry::Cactus:        return "icon_cactus.png";         // t394 仙人掌立方体图标（顶=绿截面环纹 / 侧=棱脊+刺点）
     case BlockRegistry::SnowLayer:    return "icon_snow_layer.png";    // t395 积雪层立方体图标（各面=冷白冰晶噪点）
     case BlockRegistry::SpruceLog:    return "icon_spruce_log.png";    // t395 云杉原木立方体图标（顶=年轮截面 / 侧=深棕树皮）
@@ -1085,7 +1090,12 @@ QVariantList Hotbar::creativeBlocks() const
              //   （瓜块/南瓜灯植物食物族尾）。三件归方块 tab（非红石机关件）。
              int(BlockRegistry::FenceGate),                                  // 栅栏门（右键开合 合挡/开通；4 木棍+2 木板合成）
              int(BlockRegistry::GlassPane),                                  // 玻璃板（薄板连接拼接；6 玻璃合成 16；破坏零掉落）
-             int(BlockRegistry::Cake) };                                     // 蛋糕（右键分块食用 1.0 六片×2 饥饿；3 奶+2 糖+蛋+3 麦合成）
+             int(BlockRegistry::Cake),                                       // 蛋糕（右键分块食用 1.0 六片×2 饥饿；3 奶+2 糖+蛋+3 麦合成）
+             // t1113 名册大件批首单两件（表尾追加不插中间——t1112 三件连续性零触碰）：牌子双 id 紧随
+             //   门族/薄板连接族语义（附着渲染族）；两 id 归方块 tab（非红石机关件）。合成面降级裁定
+             //   见 recipe.cpp t1113 注（{Planks:6} 2×3 与活板门行模式全等）→ 获取面 = 本调色板。
+             int(BlockRegistry::StandingSign),                               // 牌子（放置时编辑一次 4 行×15 字符；获取=创造调色板）
+             int(BlockRegistry::WallSign) };                                 // 挂墙牌子（贴墙附着；侧面放置自动选形态）
 }
 
 // ── t965 形态按钮组支持表（hotbar.h 声明处注释为完整契约）──
