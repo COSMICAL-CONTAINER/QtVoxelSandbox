@@ -14,16 +14,16 @@
 ```yaml
 project: QtMinecraft
 state: IN_PROGRESS
-current_task: **t1112 IN_PROGRESS（名册中件量批：fence gate + glass pane + cake[连带挤奶面核实] + saddle 猪骑乘——t1110 名册审计中件量清偿）**：三新件一交互面[开合门族/多格拼接族/蛋糕分块食用/骑乘控制架构核实]。串行 voxel-dev，filter 词 r2082。
+current_task: **t1113 IN_PROGRESS（sign 牌子大件：方块+文字编辑 UI+存档文本三面——t1110 名册审计大件批首单，首个方块附挂文本面[chest 持久化门同门核实]）**：串行 voxel-dev，filter 词 r2083。
 current_task_status: IN_PROGRESS
-last_completed_task: t1111 名册低件量批（2026-09-29 闭环；矩阵 860→864——砂岩楼梯 154[**纪元重定代勘误**=1.2.1 越基线 kMc-1 既成族]+石台阶 155[Alpha]+砂岩台阶 156[Beta 1.3]+slime 出生错位修复[落位面单一权威化]；**golden apple 原料链断降级登记**[AppleId 工程显式无]；两处派工勘误留痕；首轮 6 FAIL 全数修复过程注；NEG 四件哈希后缀名主控对齐规范终名。详录 = dev-plan t1111 关单条目）
-last_completed_task_prev: t1110 名册审计+小缺口清偿（2026-09-29 闭环，矩阵 856→860；详录 = dev-plan t1110 关单条目）
-last_completed_task_commits: fix(t1111)（dbc8b82：三新方块+三合成行+slime setY 修复+三图标，17 文件）+ test(t1111)（aa5434c：section74_roster_low_t1111.cpp 新段 r2081a-d，8 文件）
-last_verified_commit: test(t1111)（矩阵 **864 PASS / 0 FAIL ×2**：matrix_t1111_{pos,final}.log；腿集合 md5[规范配方]四方恒等 d3ae51943692c3e29b1f81f69d8ee0ff；NEG-1 恰红 {r2081a} / NEG-2 恰红 {r2081c}[均全量 863/1] 双还原 864/0；冒烟 tail20 logs/voxelsandbox_t1111_tail20.log；主控独立脱离式复跑 864/0 同 md5 三方恒等 matrix_orch_t1111_verify.log）
+last_completed_task: t1112 名册中件量批（2026-09-29 闭环；矩阵 864→868——FenceGate=157[首个 state 敏感碰撞形 kMc 107]+GlassPane=158[IronBars 同门 kMc 102]+Cake=159[1.0 六片×2 饥饿，两新瓦 207/208 kMc 92]+MilkBucketId=0x28F 全链[挤奶无冷却/饮清效果返空桶]+鞍猪骑乘[游荡骑乘/鞍死不掉翻案负面钉]；两处派工勘误+两小裁定三面留痕；NEG 规范终名直接落盘；首轮 6 FAIL 过程注[kMc/调色板尾钉前移+准星眼位根因]。详录 = dev-plan t1112 关单条目）
+last_completed_task_prev: t1111 名册低件量批（2026-09-29 闭环，矩阵 860→864；详录 = dev-plan t1111 关单条目）
+last_completed_task_commits: fix(t1112)（72b7ac7：三新方块+牛奶链+鞍猪骑乘+三图标+build_cake.py+两新瓦图集重生成，24 文件）+ test(t1112)（e2e21ee：section75_roster_mid_t1112.cpp 新段 r2082a-d + lawful 钉修订 14 处，18 文件）
+last_verified_commit: test(t1112)（矩阵 **868 PASS / 0 FAIL ×2**：matrix_t1112_{pos,final}.log；腿集合 md5[规范配方]四方恒等 4bd9b20e648ef34d0f4252882cef9ba1[含双 restore]；NEG-1 恰红 {r2082a}[craft got=-1] / NEG-2 恰红 {r2082c}[bite1 st=0]，四件规范终名 matrix_r2082_neg{1,2}_{red,restore}.log；主控独立脱离式复跑 868/0 同 md5 = 三方恒等 matrix_orch_t1112_verify.log）
 last_governance_review: 2026-09-28（audit #23 GREEN——窗口 84bafc1..4e2b0db 14 提交/t1104-t1108 五闭环证据链全实核[五单 md5 三方恒等 005f5365/dd52e1a8/d8e9ca6f/54b5d3cb/b9ad4689 + NEG 十份恰红十份还原吻合 + 腿数链 832→852 无断]；提交纪律 14 笔署名零命中[检测器正反验证]+全窗纯 ASCII；tail20 来源头注 5/5 全应用=#22 F4 整改首窗落地；控制块第四窗连续守住[counter 1..5+HEAD 行同步]；「锚哈希 git 现抄」整改生效=本窗锚零记误；不变量五单 file:line 级实文亲读全过[含 t1108 三笔 bug 门实文]；**F1[LOW] 规程参照文件名陈旧**[governance-audit-2026-09-25-b.md 实为 #20 报告，应为 2026-09-27.md=#22——连续两窗同根因，清偿=本批更正+「规程参照文件名须 ls docs/ 现核」纪律扩充] + F2[INFO push 积压实数 156 笔[原记 100+]以实数汇报] + F3[INFO CJK 载体=矩阵段注释既有惯例免]；详见 governance-audit-2026-09-28.md）
 governance_review_due: false（审计 #23 GREEN 落档清零——待机期不累计）
-completed_tasks_since_governance_review: 2（t1110 + t1111 闭环；审计 #23 GREEN 于 2026-09-28——下一审计窗口 = 再 3 闭环 → 审计 #24）
-next_task: **t1112 名册中件量批（在飞）→ 之后大件批（sign/map）+ golden apple 完整链（苹果根缺口前置）+ 长线停放待用户：下界/蘑菇岛维度级/§30/§31/P5 实机清单/push 156+ 笔**
+completed_tasks_since_governance_review: 3（t1110 + t1111 + t1112 闭环；审计 #23 GREEN 落档清零——下一审计窗口 = 再 2 闭环 → 审计 #24）
+next_task: **t1113 sign 牌子大件（在飞）→ 之后 map 地图 + golden apple 完整链（苹果根缺口前置）+ 长线停放待用户：下界/蘑菇岛维度级/§30/§31/P5 实机清单/push 156+ 笔**
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -33,7 +33,7 @@ needs_human: false
 
 ## Workspace Guard
 
-- HEAD = t1111 名册低件量批代码终态（fix(t1111) dbc8b82 + test(t1111) aa5434c 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 864 腿满绿（74 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**池面真底待机**（t1097-t1109 十三连单收官；唤醒条件见控制块）。**每闭环控制块全字段更新**（t1097-t1111 十五单全过）。**git 提交禁任何 AI 署名尾注**（审计 #21 F1 入档纪律——派工简报恒带此句）。**审计窗口锚哈希须 git 现抄 + 规程参照文件名须 ls docs/ 现核**（审计 #22 F1/#23 F1 两教训）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（横幅+root objects 实文+组合件带来源头注，主控核对）。**NEG 四件终名日志必须落盘**（t1099 件教训）。
+- HEAD = t1112 名册中件量批代码终态（fix(t1112) 72b7ac7 + test(t1112) e2e21ee 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 868 腿满绿（75 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（t1097-t1112 十六单全过）。**git 提交禁任何 AI 署名尾注**（审计 #21 F1 入档纪律——派工简报恒带此句）。**审计窗口锚哈希须 git 现抄 + 规程参照文件名须 ls docs/ 现核**（审计 #22 F1/#23 F1 两教训）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（横幅+root objects 实文+组合件带来源头注，主控核对）。**NEG 四件终名日志必须落盘**（t1099 件教训）。**NEG 变异选址 = 摘调用点非摘守卫体 + position() 是眼位[feet+1.62]——方块/实体射线同用眼位**（t1051/t1112 两教训）。
 - 纪律①-⑨全在案；**大 TU 编译一律 -j 1**（09-13 蓝屏教训；分段后单段增量 -j 4 实测安全）。**矩阵测试为 tools/matrix/ 分层结构**：改探针只重编对应段 TU（秒级）+ `--filter <substring>` 只跑本任务腿；新腿落对应段文件，新段置尾 runAll 末执行、须 ≤500KB；section11 起「自建 fresh 小世界」先例（48×48×96 seed 82 + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)）。
 - **R20.06 起值类型纪律**：src/Core/ 新值类型一律 result.h QObjectFree 编译期钉 + 头内 static_assert；命令/事件队列满载拒绝与快照队列覆盖最老是两域容量策略分化，勿「统一」。
 - **R20.07 起编排壳纪律**：GameSession 只做编排（命令 → 整 tick 边界 → World::setBlock 权威），禁复制游戏逻辑；**QML 现行玩法路径零变化是 R20 主线不变量**（Main.qml 含 "GameSession" 即违零迁移阴性钉 r2007b）。
@@ -50,6 +50,7 @@ needs_human: false
 
 ## Recovery Point
 
+- 2026-09-29（三）：t1112 名册中件量批闭环（矩阵 864→868，md5 4bd9b20e 四方恒等；72b7ac7/e2e21ee；三新方块[栅栏门 state 敏感碰撞形/玻璃板 IronBars 同门/蛋糕六片]+牛奶桶 0x28F 全链+鞍猪骑乘；两处派工勘误[蛋糕六片勘误/鞍死不掉翻案]+两小裁定[挤奶无冷却/游荡骑乘]；NEG 规范终名直接落盘；首轮 6 FAIL 过程注。恢复点 = 本条；在飞 = t1113 sign 牌子（r2083）。
 - 2026-09-29（二）：t1111 名册低件量批闭环（矩阵 860→864，md5 d3ae5194 四方恒等；dbc8b82/aa5434c；三新方块+slime 出生修复+金苹果链断降级；两处派工勘误[阶梯形/纪元重定代]）。恢复点 = 本条；在飞 = t1112 名册中件量批（r2082）。
 - 2026-09-29：t1110 名册审计+小缺口清偿闭环（矩阵 856→860，md5 aae0c82d 四方恒等；6356b80/ee6e8d9；名册全表落档+缺口分级登记；剪刀定谳勘误；狼相性翻案零改动收口；音效交付）。恢复点 = 本条；在飞 = t1111 名册低件量批（r2081）。
 - 2026-09-28（五）：t1109 残项收官批闭环——**候选池真底，自治循环如实待机**（矩阵 852→856，md5 358b598a 四方恒等；960978f/1c18d73；两处派工预期实读纠正；四份兼容日志全绿）。恢复点 = 本条；待机唤醒 = P0 反馈/用户裁决停放候选/push。
