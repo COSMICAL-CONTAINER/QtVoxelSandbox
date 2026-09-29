@@ -1435,6 +1435,19 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
     { int(RecipeRegistry::Inventory2x2), true,
       { int(BlockRegistry::Pumpkin), int(BlockRegistry::Torch), 0, 0, 0, 0, 0, 0, 0 },
       int(BlockRegistry::JackOLantern), 1, 1, "jack_o_lantern" },
+    // ── t1114 地图合成一行（表尾追加；机制等价 MC 1.0）──
+    //   8 纸环（中空 3×3）→ 1 空地图（有序 3×3 仅工作台，机制等价 MC 1.0 map 配方 8 paper——
+    //   **罗盘芯 12w34a/1.4.2+ 面实读留痕不取**，勘误裁定见 recipe.h EmptyMapId 行 ②）。
+    //   多重集 {Paper:8} 唯一：全表 8 件环行仅熔炉（8 圆石缺心）与画作（8 棒 + 心毛）与闪烁西瓜
+    //   （8 金粒 + 心片）——异料 shaped 逐格 id 比对不冲突（中心空 + 八纸满环与熔炉同形但 id 全异）。
+    //     [0]=paper [1]=空    [2]=paper
+    //     [3]=paper [4]=空    [5]=paper
+    //     [6]=paper [7]=空    [8]=paper
+    { int(RecipeRegistry::Table3x3), false,
+      { RecipeRegistry::PaperId,  0,                       RecipeRegistry::PaperId,
+        RecipeRegistry::PaperId,  0,                       RecipeRegistry::PaperId,
+        RecipeRegistry::PaperId,  0,                       RecipeRegistry::PaperId },
+      RecipeRegistry::EmptyMapId, 1, 1, "empty_map" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。
@@ -1460,6 +1473,9 @@ static_assert(RecipeRegistry::LapisId         == 0x236, "LapisId 须与 BlockReg
 // t891② 烈焰弹 id 钉位（工程惯例）：0x25C = 熟鱼 0x25B 之上首个空闲号（不重排既有材料段——存档权威）。
 //   Core 层 resourcepackmanager.cpp itemFilenameMap 与 QML MaterialIcon case 用同一字面量 → 三处互钉。
 static_assert(RecipeRegistry::FireChargeId    == 0x25C, "FireChargeId 须为材料段 0x25C（itemFilenameMap / MaterialIcon case 0x25C 同字面量互钉）");
+// t1114 地图段位契约（MaterialIcon case 0x290/0x291 同字面量互钉；段尾追加序 = 0x28F 牛奶桶之上）。
+static_assert(RecipeRegistry::EmptyMapId  == 0x290, "EmptyMapId 须为材料段 0x290（MaterialIcon case 0x290 同字面量互钉）");
+static_assert(RecipeRegistry::FilledMapId == 0x291, "FilledMapId 须为材料段 0x291（MaterialIcon case 0x291 同字面量互钉）");
 // t1097 酿造链 id 段位钉（工程惯例）：0x264..0x26A = 蕴辉瓶 0x263 之上**段尾连续追加**（不插中间 = 存档
 //   安全铁律）。Core 层 resourcepackmanager / QML MaterialIcon case 用同字面量互钉。
 static_assert(RecipeRegistry::GlassBottleId    == 0x264, "GlassBottleId 须为材料段 0x264（蕴辉瓶 0x263 之上段尾追加）");

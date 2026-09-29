@@ -790,7 +790,13 @@ QVariantList Hotbar::creativeMaterials() const
         // t1112 牛奶桶一件（0x28F，史莱姆球之上段尾追加不插中间 = 存档安全铁律）：获取面 = 空桶右键牛
         //   挤奶（1.0 无冷却；创造调色板行为兜底获取面，同族口径）。maxStack=1 不可堆叠（装液态食物，
         //   同蘑菇汤 / 铁桶族——maxStackSize 特判）。MaterialIcon 自绘白液桶（§9 原创）。
-        int(RecipeRegistry::MilkBucketId)        // 牛奶桶：空桶右键牛挤奶；可饮清效果返空桶；蛋糕原料
+        int(RecipeRegistry::MilkBucketId),       // 牛奶桶：空桶右键牛挤奶；可饮清效果返空桶；蛋糕原料
+        // t1114 空地图 + 填充地图两件（0x290/0x291，牛奶桶之上段尾追加不插中间 = 存档安全铁律）：
+        //   获取面 = 8 纸环合成空地图（罗盘芯 1.4.2+ 面不取）+ 右键激活转填充地图（创造调色板行为
+        //   兜底获取面，同族口径）。全员 maxStack 64 可堆叠（1.0 实读：地图不可堆叠是 12w34a/1.4.2+
+        //   面，翻案留痕见 recipe.h 行 ③——材料段默认零特判）。MaterialIcon 自绘双地图（§9 原创）。
+        int(RecipeRegistry::EmptyMapId),         // 空地图：8 纸环合成；右键激活 → 填充地图
+        int(RecipeRegistry::FilledMapId)         // 填充地图：激活产物；手持显地图 overlay（会话数据集）
     };
 }
 
@@ -1420,6 +1426,9 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::SpawnEggVillagerId) return QStringLiteral("生物蛋（村民）");   // 右键 → 村民（被动游荡）
         // t1112 牛奶桶（0x28F，村民蛋之上段尾追加）：名面一件（通用描述词，§9 合法）。
         if (blockId == RecipeRegistry::MilkBucketId)       return QStringLiteral("牛奶桶");         // 空桶右键牛挤奶；可饮清效果返空桶；蛋糕原料
+        // t1114 空地图 + 填充地图（0x290/0x291，牛奶桶之上段尾追加）：名面两件（通用描述词，§9 合法）。
+        if (blockId == RecipeRegistry::EmptyMapId)         return QStringLiteral("空地图");         // 8 纸环合成；右键激活 → 填充地图
+        if (blockId == RecipeRegistry::FilledMapId)        return QStringLiteral("填充地图");       // 激活产物；手持显地图 overlay；随走随更新
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落；打火石配方原料。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::FlintId) return QStringLiteral("燧石"); // 挖沙砾概率掉落；打火石配方原料
         // t891② 烈焰弹（材料段 0x25C；机制等价 MC fire charge）：燃烬粉+煤/炭+火药合成 3 发；右键发射火球

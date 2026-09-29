@@ -1068,6 +1068,10 @@ Window {
         //   enterWorld 时整体替换（清旧世界残留 + 填本世界牌子文本——存档 sign_texts 表 round-trip）。
         //   存档 signs 由 saveAndExitToWorldList 经 saveAll(name, ..., signStore.allSigns()) 第 9 参落盘。
         signStore.loadAll(worldStore.loadSigns())
+        // t1114 地图数据集按会话清理（跨世界泄漏收口——signStore.loadAll 同门位置）：地图数据是会话
+        //   口径（无存档门，mapstore.h 头注裁定表），进世界清旧数据集；持填充地图时 player 探索 tick
+        //   惰性重建（重探索再填充面）。
+        mapStore.clearAll()
         // progress 按世界持久化：进世界前 loadVariant 整体替换内存（清旧世界残留 + 填本世界进度）。无存档
         //   progress 表 → 空 map → 重置默认（全 0 统计 + 全未解锁成就）。存档由 saveAndExit saveProgress 落盘。
         progress.loadVariant(worldStore.loadProgress())
@@ -3001,6 +3005,12 @@ Window {
     //   放置时编辑一次 + 破牌清孤儿[文本随破丢失 1.0 口径] + 失撑脱落孤儿清扫；SignEdit 面板单向读写）。
     //   持久化经 worldstore sign_texts 表（saveAll 第 9 参 / loadSigns——brewing 同门第 N 参追加先例）。
     SignStore { id: signStore }
+    // t1114 map 数据集 VM（每会话单份全幅 1bpp 地图像素；机制面 = placeBlock 空地图激活建库 +
+    //   player 探索 tick 周界写入，overlay 只单向消费——t177 三轮教训的 C++ 侧终局形态同门）。
+    //   存档面 = 会话口径（t1013 箱车 / t1112 鞍面 / t1113 牌面先例族——背包物品栈无 id 外附加面
+    //   [normalizeDurability 材料段恒 0 实读]，地图内容不可持久；进世界 clearAll + 持图惰性重建 =
+    //   重探索再填充面如实登记，mapstore.h 头注裁定表）。
+    MapStore { id: mapStore }
     // progress 玩家进度系统 VM（统计 + 成就；跨世界持久化存 worldstore progress 表）。各事件源经 QML 桥接
     //   调埋点（onBlockMined/onCraft/onMobKilled 等）；成就解锁弹 toast（achievementUnlocked 信号）。
     PlayerProgress { id: progress }
@@ -3568,6 +3578,8 @@ Window {
         furnaceStore: furnaceStore
         // t1097：注入酿造内容存储（scanBrewingStands 机制面的读写；同 peer VM 注入模式）。
         brewingStore: brewingStore
+        // t1114：注入 map 数据集存储（激活建库 + tickMapExploration 探索 tick 周界写入；同 peer VM 注入模式）。
+        mapStore: mapStore
         // t1022：注入键位映射表（setKey 入口 canonicalKey 规范化 —— 运动键重映射全局生效的引擎侧权威）。
         keybinds: keybindsMgr
         // t889：世界模拟总闸绑 window.worldRunning —— 硬档 tickImpl 早退（实体桶 / step 全停）+ 复跑顺延
@@ -15220,6 +15232,57 @@ Window {
                 hoverEnabled: true
                 onClicked: window.closeSignEdit()
             }
+        }
+    }
+
+    // t1114 手持地图 overlay（1.0 口径实读留痕：Beta 1.8→1.0 持图显大幅地图视图——工程 QML 面板选型，
+    //   牌子编辑面板 / 画作 paintingHost 同门[纯 QtQuick 呈现层]；第一人称 3D 手部模型不涉）。显示条件 =
+    //   playing 且捕获且选中槽恰为填充地图（0x291 字面量——Main.qml 物品 id 字面量约定同门[t1099 蛛眼
+    //   掉落先例]）且数据集在库。纹理 = image://mapstore/<revision>（main.cpp 注册的 MapAtlasProvider；
+    //   revision 变更换 URL → QML 源缓存自动重取）。玩家位点小点（白芯黑描）按世界坐标比例投影（全幅
+    //   数据集恒覆全域——图无锚点偏移，坐标即比例）。z=50（HUD 层；面板族 150+ 之上被覆盖的从属面）。
+    Item {
+        id: mapOverlay
+        visible: window.appState === "playing" && player.captured
+                 && hotbarVM.selectedItemId === 0x291 && mapStore.hasMap
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.rightMargin: 24
+        anchors.bottomMargin: 24
+        width: mapStore.mapWidth * 2
+        height: mapStore.mapDepth * 2
+        z: 50
+        Image {
+            id: mapImage
+            anchors.fill: parent
+            source: mapStore.hasMap ? ("image://mapstore/m" + mapStore.revision) : ""
+            fillMode: Image.Stretch
+            smooth: false
+        }
+        // 纸框（深棕外描 + 米黄内描——§9a 原创纸面色；读作「手持的纸质地图」）。
+        Rectangle {
+            anchors.fill: parent
+            color: "transparent"
+            border.color: "#6b5636"
+            border.width: 3
+        }
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: 3
+            color: "transparent"
+            border.color: "#d8cfae"
+            border.width: 1
+        }
+        // 玩家位点（白芯黑描小点；feetPosition = 脚底世界坐标，除以世界尺寸 = 图上比例位置）。
+        Rectangle {
+            width: 7
+            height: 7
+            radius: 3
+            color: "#ffffff"
+            border.color: "#222222"
+            border.width: 1
+            x: mapImage.width * (player.feetPosition.x / Math.max(1, theWorld.width)) - 3.5
+            y: mapImage.height * (player.feetPosition.z / Math.max(1, theWorld.depth)) - 3.5
         }
     }
 

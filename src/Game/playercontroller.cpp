@@ -497,6 +497,13 @@ void PlayerController::setBrewingStore(BrewingStore *s)
     emit brewingStoreChanged();
 }
 
+void PlayerController::setMapStore(MapStore *s)
+{
+    if (m_mapStore == s) return;
+    m_mapStore = s;
+    emit mapStoreChanged();
+}
+
 // t1013 矿井箱 → 箱子矿车转正（Q_INVOKABLE；Main.qml enterWorld 在 chestStore.loadAll（存档键条目就位）+
 //   carts.clearAll（槽表清空）之后调，两路合一）。实现面（头注释见 .h）：
 //   路 (a) worldgen 标记箱转正：collectBlocksOfId(Chest) 全图扫（~19ms 一次性，t691 同族）→ 标记位过滤 →
@@ -1351,6 +1358,10 @@ void PlayerController::tickImpl()
     //   计时冻结，机制等价 MC 暂停一切 / 暂停时唱片不推进）。dt 推进每台播放中唱片机剩余时长；
     //   到期自动吐盘。
     tickJukeboxes(dt);
+    // t1114 map 探索 tick（机关扫描族同门——常开、内自检 + 节流相位；硬暂停不达此行 = 暂停期地图
+    //   冻结，机制等价 MC 暂停一切 / 暂停时地图不推进）。dt 推进 kMapExploreIntervalSec 相位，到期
+    //   对持填充地图玩家周界做列扫描写 MapStore（激活建库 / 首绘走 placeBlock 分支不经此行）。
+    tickMapExploration(dt);
     // t569 红石矿石点亮触发（玩家走近红石矿即微弱红光，机制等价 MC 触发发光）：与拾取同级常开（玩家走过
     //   红石矿旁即触发，独立于捕获态）。内自检 + 死亡门控；点亮表到期自熄。dt 用于倒计时递减。
     scanRedstoneOre(dt);
@@ -5762,6 +5773,25 @@ void PlayerController::placeBlock()
         }
         return; // 睡莲（放置成功 / 水未中 / 非静水）均不再走方块放置路径
     }
+    // t1114 空地图激活（机制等价 MC 1.0「地图持于手即开始绘制」的两形态工程面：空地图右键 → 即刻
+    //   变填充地图 + 建库 + 首绘玩家周界中心区）。**实读裁定留痕**（1.0 三面勘误，详注 recipe.h
+    //   EmptyMapId 行）：①1.0 无「空地图」独立物品（唯一地图物品 358 合成即得持手即绘；空地图 id
+    //   395 = 1.6+ 面不取）——两形态拆分 = 工程激活链简化（负面钉锁非 1.0 原生面）；②合成无罗盘芯
+    //   （12w34a/1.4.2+ 面不取）；③数据集 = 每会话单份全幅（Beta 1.6-1.7.3「全图共享一份数据」期
+    //   口径 + ItemStack 无 id 外附加面[normalizeDurability 材料段恒 0 实读]——per-map 数据 1.4.2+
+    //   不取）。空地图非方块（材料段）→ 须在 `m_selectedBlock == Air` 守卫之前分流（同桶 / 雪球分支
+    //   模式）；右键无命中要求（激活不依赖视线，同 beginEating 非视线语义）。生存 / 创造同转换
+    //   （创造调色板取的空地图 count 恒 1，转换后仍 1 件不耗）。
+    if (m_hotbar && m_world && heldItemId == RecipeRegistry::EmptyMapId) {
+        m_hotbar->setStack(m_hotbar->selectedSlot(), int(RecipeRegistry::FilledMapId), 1); // t1114 激活转换行（NEG-2 摘面行——摘行 → 激活腿 r2084a 恰红）
+        if (m_mapStore && !m_mapStore->hasMap()) {
+            m_mapStore->initialize(m_world->width(), m_world->depth()); // 全幅定版（1bpp 单缩放；有限世界全幅先例）
+            refreshMapAroundPlayer(kMapInitialRadius);                  // 首绘玩家周界（「即刻绘制中心区域」面）
+        }
+        m_lastPlaceMs = now;
+        emit swingArm();
+        return; // 空地图（激活成功）不再走方块放置路径
+    }
     if (!m_hasHit) return; // t174：放块路径需命中（桶分支已 return；至此为非桶手持方块）
     if (m_selectedBlock == BlockRegistry::Air) return; // 空栈 → 右键不放置（也不挥手，t32）
     const int tx = m_hitBx + m_hitNx, tz = m_hitBz + m_hitNz;
@@ -7916,6 +7946,98 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
     //   仅此库存路径发（神殿陷阱 fallback 算 worldgen 机关非玩家成就）。
     emit dispenserFired();
     return true;
+}
+
+// t1114 map 探索 tick（机关扫描族同门——常开、内自检 + 节流相位；见 playercontroller.h 头注释）。
+//   1.0 口径实读留痕：vanilla 地图机制 = 持图玩家的周界列随移动逐格绘入地图数据（探索面），未到过的
+//   列保持未绘底色——工程同构：持 FilledMapId 时按 kMapExploreIntervalSec 相位对玩家周界
+//   kMapExploreRadius 半径做列扫描写 MapStore（随走随更新 + 按探索度绘制面）。空地图不扫描（未激活
+//   无数据集）；数据集缺失（跨世界 clearAll 后重持 / 换世界重进）→ 惰性建库（存档面会话口径：探索
+//   面可重探索再填充，t1013 箱车 / t1112 鞍面先例；建库恒全幅定版 = 世界尺寸，无中心丢失面）。
+void PlayerController::tickMapExploration(float dt)
+{
+    if (!m_world || !m_mapStore || !m_hotbar) return;
+    if (m_hotbar->selectedItemId() != int(RecipeRegistry::FilledMapId)) return; // 仅持填充地图时推进（1.0 持图者周界面）
+    if (!m_mapStore->hasMap())                                                 // 惰性建库（重探索再填充面）
+        m_mapStore->initialize(m_world->width(), m_world->depth());
+    m_mapExploreTimer += dt;
+    if (m_mapExploreTimer < kMapExploreIntervalSec) return;
+    m_mapExploreTimer = 0.0f;
+    refreshMapAroundPlayer(kMapExploreRadius);
+}
+
+// t1114 玩家周界列扫描写入（激活首绘 / 探索 tick 共用体）：以玩家脚底列（m_pos 为脚底，非眼位）为
+//   心、2R+1 方形盒逐列算顶面色写 MapStore（越界列跳过）+ 一批一次 commitColumns（revision 单次
+//   bump，免逐列抖 QML overlay）。色调 = 地形顶块定族色 + 群系 tint + 高度明暗（mapColumnColor）。
+void PlayerController::refreshMapAroundPlayer(int radius)
+{
+    if (!m_world || !m_mapStore || !m_mapStore->hasMap()) return;
+    const int cx = int(std::floor(double(m_pos.x())));
+    const int cz = int(std::floor(double(m_pos.z())));
+    for (int dz = -radius; dz <= radius; ++dz) {
+        for (int dx = -radius; dx <= radius; ++dx) {
+            const int x = cx + dx;
+            const int z = cz + dz;
+            if (x < 0 || z < 0 || x >= m_world->width() || z >= m_world->depth())
+                continue; // 盒过界列跳过（有限世界边缘；MapStore::writeColumn 侧再双保险）
+            m_mapStore->writeColumn(x, z, mapColumnColor(x, z));
+        }
+    }
+    m_mapStore->commitColumns();
+}
+
+// t1114 单列地图顶面色（1bpp 单缩放列色调；§9 原创色板——工程自然色词 + 工程自定色值，零 MC 资产）：
+//   顶面高度 = heightmapAt（当前列首个非空，含水面）→ 顶块 id 定族色 + 群系 tint（biomeIdAt 七群系
+//   枚举序：0 平原 / 1 丘陵 / 2 沙漠 / 3 森林 / 4 雪原 / 5 沼泽 / 6 丛林）+ 高度明暗（越高越亮，机制
+//   等价 MC 地图逐列高度明暗面——基准 0.82 起步 + 满高 +0.36，钳 1.15 上限防过曝）。水列（顶块 =
+//   Water）→ 水面蓝（水深微暗差省略——单色简化登记；机制等价 MC 水色列）。非族内顶块 → 通用土色。
+quint32 PlayerController::mapColumnColor(int x, int z)
+{
+    const int topY = m_world->heightmapAt(x, z);
+    const quint8 top = (topY >= 0 && topY < m_world->height()) ? m_world->blockAt(x, topY, z)
+                                                              : quint8(BlockRegistry::Stone);
+    const int biome = m_world->biomeIdAt(x, z);
+    // 族色（§9a 原创自然色调）：
+    auto shade = [topY, h = m_world->height()](quint32 c) {
+        float f = 0.82f + 0.36f * float(topY) / float(h > 1 ? h - 1 : 1);
+        if (f > 1.15f) f = 1.15f; // 防过曝钳制
+        const auto chan = [f](quint32 v) { return qMin(255, int(float(v) * f)); }; // int(f*v) 截断即可（明暗面非精度面）
+        const int r = chan((c >> 16) & 0xFF);
+        const int g = chan((c >> 8) & 0xFF);
+        const int b = chan(c & 0xFF);
+        return 0xFF000000u | (quint32(r) << 16) | (quint32(g) << 8) | quint32(b);
+    };
+    // 群系 tint（草系 / 通用土族共用；沙漠 / 雪原列由顶块族色自明，tint 不再叠——单调自然）。
+    auto tinted = [biome](quint32 c) {
+        static constexpr quint32 kBiomeTint[7] = {
+            0xFF79b356, // 平原（草绿）
+            0xFF82b95e, // 丘陵（亮草绿）
+            0xFFc9bd72, // 沙漠（干草黄）
+            0xFF4e8f3c, // 森林（深草绿）
+            0xFFa8c096, // 雪原（淡灰绿）
+            0xFF5f7345, // 沼泽（橄榄绿）
+            0xFF3e9134, // 丛林（浓绿）
+        };
+        if (biome < 0 || biome > 6) return c;
+        const quint32 t = kBiomeTint[biome];
+        // 50/50 混合（族色与群系色各半——单次混合免调参，观感自然即可）。
+        const int r = (int((c >> 16) & 0xFF) + int((t >> 16) & 0xFF)) / 2;
+        const int g = (int((c >> 8) & 0xFF) + int((t >> 8) & 0xFF)) / 2;
+        const int b = (int(c & 0xFF) + int(t & 0xFF)) / 2;
+        return 0xFF000000u | (quint32(r) << 16) | (quint32(g) << 8) | quint32(b);
+    };
+    switch (top) {
+    case BlockRegistry::Water:     return shade(0xFF3b6cb0); // 水面蓝（高度明暗同样适用——岸线读感）
+    case BlockRegistry::Grass:     return shade(tinted(0xFF6fae4a)); // 草顶（群系 tint 主消费族）
+    case BlockRegistry::Sand:      return shade(0xFFd9cf9c);         // 沙滩 / 沙漠（暖沙色自明，不叠 tint）
+    case BlockRegistry::SnowLayer:
+    case BlockRegistry::Snow:      return shade(0xFFe9eef2);         // 积雪 / 雪块（冷白）
+    case BlockRegistry::Log:
+    case BlockRegistry::Planks:    return shade(0xFF7a5c38);         // 木族（树干 / 建筑）
+    case BlockRegistry::Leaves:    return shade(tinted(0xFF3f7a30)); // 树冠（群系 tint 深绿族）
+    case BlockRegistry::Dirt:      return shade(tinted(0xFF8a6a4a)); // 泥土（土族 tint）
+    default:                       return shade(tinted(0xFF857f6a)); // 通用土石（Stone/Cobble 等， tint 弱化土感）
+    }
 }
 
 // t569 红石矿石置亮 / 熄（机制等价 MC 1.0 redstone ore 发光翻转；见 playercontroller.h 头注释）。
