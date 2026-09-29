@@ -1167,6 +1167,16 @@ public:
     //   驱动完整 tickImpl（两档暂停语义行为级断言需要整帧路径 —— 软档 step / 硬档早退都住在 tickImpl 内，
     //   单独调 step 绕不过门控）。公开化仅扩大可见性，运行期唯一 caller 仍是 QTimer 与测试。
     void tick();
+    // t305 树叶掉落产出（玩家破叶专用）：破 Leaves 时按概率掉树苗物品（SaplingItemId）+ 木棒（StickId）
+    //   + 苹果（AppleId 0x292，t1115——仅橡树叶携带，leafId 门见参注；kLeafAppleDropDenom=1/200）。
+    //   机制等价 MC 1.0 破叶掉落（5% 树苗 / 2% 木棒；本工程对齐概率。自然衰减（decayLeavesAround）不掉落
+    //   （spec「树叶消失」），仅玩家破叶走本分支——t1115 苹果同门（1.0 消亡路径同表掉落，工程沿 t305
+    //   既录简化零 delta）。两物品散布到破格 + 非实体水平邻格做视觉分离（同 WheatCrop / 双半砖模式）。
+    //   概率走 QRandomGenerator（玩家交互掉落随机性，非 worldgen 确定性范畴 §2-K）。同
+    //   dropCropDrops 模式：特例掉落在通用 BlockDef 表之上提前分流（Leaves.dropId=0 兜底，本分支覆盖）。
+    //   t1115：签名 +quint8 leafId（苹果面橡树叶单携门——云杉叶 1.0 无苹果面）；public 暴露 =
+    //   scanHoppers 同门（矩阵探针直调等价掉落驱动——概率腿多次采样）。
+    void dropLeafDrops(int x, int y, int z, quint8 leafId);
 
 protected:
     void componentComplete() override;
@@ -1384,12 +1394,8 @@ private:
     //   永返 0 → WheatCrop 成熟判定失效，须先读）。分层同 spawnItem（Game/Physics 发语义事件，呈现层 /
     //   ViewModel 只消费）。
     void dropCropDrops(int x, int y, int z, quint8 id, quint8 state);
-    // t305 树叶掉落产出（玩家破叶专用）：破 Leaves 时按概率掉树苗物品（SaplingItemId）+ 木棒（StickId）。
-    //   机制等价 MC 1.0 破叶掉落（5% 树苗 / 2% 木棒；本工程对齐概率）。自然衰减（decayLeavesAround）不掉落
-    //   （spec「树叶消失」），仅玩家破叶走本分支。两物品散布到破格 + 非实体水平邻格做视觉分离（同 WheatCrop
-    //   / 双半砖模式）。概率走 QRandomGenerator（玩家交互掉落随机性，非 worldgen 确定性范畴 §2-K）。同
-    //   dropCropDrops 模式：特例掉落在通用 BlockDef 表之上提前分流（Leaves.dropId=0 兜底，本分支覆盖）。
-    void dropLeafDrops(int x, int y, int z);
+    // t1115 沿革：树叶掉落产出（dropLeafDrops，t305）声明移 **public 段**（scanHoppers / tick 同门——
+    //   矩阵探针直调等价掉落驱动：苹果掉落面 1/200 概率腿须直调多次采样；注释与签名见 public 段）。
     // t247 草丛 / 小麦作物失撑掉落（spec「挖底方块→其上草方块/小麦应掉落（现悬空）；草根+作物须依附
     //   下方实体方块」）：破块后查**正上方格**，若为 TallGrass / WheatCrop（其唯一支撑 = 下方实体方块，
     //   刚被破为 Air）→ 作物直接掉落为对应产出（setBlock(Air) + dropCropDrops），不再悬空。机制等价 MC
@@ -2036,6 +2042,18 @@ private:
     //   非 worldgen 确定性范畴 §2-K。自然衰减（decayLeavesAround）不走本路径（无掉落，spec「树叶消失」）。
     static constexpr int kLeafSaplingDropPct = 10; // 10%（t379 由 MC 原值 5% 调高，反馈掉落偏少）
     static constexpr int kLeafStickDropPct   = 8;  // 8%（t379 由 MC 原值 2% 调高，反馈掉落偏少）
+    // t1115 苹果掉落概率（机制等价 MC 1.0 橡树叶掉苹果）：finishMiningAt 破橡树叶（Leaves）时以
+    //   1/kLeafAppleDropDenom 概率掉 1 苹果（AppleId 0x292，MC 1.0 原值 1/200 = 0.5%）。仅橡树叶携带
+    //   （dropLeafDrops leafId 门——云杉叶 1.0 无苹果面，t714 云杉叶同分流族只共享树苗/木棒面）；1.0
+    //   消亡路径同表掉落——工程沿用上行 t305「自然衰减无掉落」既录简化（树苗/木棒同门），苹果只入
+    //   破坏路径。玩家交互掉落随机性（QRandomGenerator），非 worldgen 确定性范畴 §2-K
+    //   （同 kLeafSaplingDropPct / kTallGrassSeedDropDenom）。
+    static constexpr int kLeafAppleDropDenom = 200; // 1/200 = 0.5%（MC 1.0 橡树叶掉苹果原值）
+    // t1115 金苹果食毕再生时长（机制等价 MC 1.0 golden apple Regeneration I 30 秒）：独立常量——与
+    //   再生药水 kRegenPotionDurationSec=45s 同管线（applyStatusEffect EffectRegeneration，再生脉冲
+    //   kRegenPotionIntervalSec=2.5s 同源）不同时长（1.0 原值 0:30）。Absorption 吸收面 1.1+ 越纪元
+    //   不取（PlayerState 零 Absorption 符号，负面钉锁）；金苹果进食时长无加成（全食物统一 kEatDuration）。
+    static constexpr float kGoldenAppleRegenDurationSec = 30.0f; // MC 1.0 golden apple Regen I 0:30
     // t211 水流推动玩家（机制等价 MC 1.0 流水冲走实体）：
     //   kWaterFlowPush：流水水平推力速度（blocks/sec；脚位在流水格 state>0 时沿离源方向叠入水平速度）。
     //     低于 kWalk(4.3) → 玩家仍可逆流游（净速 ≈ 走速 − 推力），但松手会被流走。spec「创造非飞 + 生存」。
