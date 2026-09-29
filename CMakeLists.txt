@@ -710,6 +710,9 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_spawner.png                # t760 刷怪笼立方体图标（build_cube_icons.py；各面=铁灰栅栏笼格，cutout 孔被均值色填实；创造背包/中键复制 item 用）
         textures/icon_stone_brick_slab.png       # t487 石砖台阶立方体图标（build_cube_icons.py；3D 半高盒，砖纹）
         textures/icon_stone_brick_stairs.png     # t487 石砖楼梯立方体图标（build_cube_icons.py；3D L 阶，砖纹）
+        textures/icon_stone_slab.png             # t1111 石台阶立方体图标（build_cube_icons.py PARTIALS_3D_T1111；3D 半高盒，石纹）
+        textures/icon_sandstone_slab.png         # t1111 砂岩台阶立方体图标（build_cube_icons.py PARTIALS_3D_T1111；3D 半高盒，砂岩面排布）
+        textures/icon_sandstone_stairs.png       # t1111 砂岩楼梯立方体图标（build_cube_icons.py PARTIALS_3D_T1111；3D L 阶，砂岩面排布）
         textures/icon_lever.png                  # t490 杠杆立方体图标（build_cube_icons.py；pressure_plate shape+lever 贴图；手动点火机关）
         textures/icon_wood_button.png            # t490 木按钮立方体图标（build_cube_icons.py；pressure_plate shape+wood_button 贴图）
         textures/icon_stone_button.png           # t490 石按钮立方体图标（build_cube_icons.py；pressure_plate shape+stone_button 贴图）

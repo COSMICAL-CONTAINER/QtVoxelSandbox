@@ -1295,10 +1295,33 @@ public:
                                 //   state 低 2 位 = 刻脸朝向（chestFrontFace 同源编码，放置朝玩家——南瓜
                                 //   t638 完全同门；接棒修正吸收稿「固定朝向」注，沿革注见 kDefs 行）
         Cauldron         = 153, // 炼药锅：瓶取水 -1 级 / 桶灌满 3 级；外壁环异形渲染；破坏掉本体
-        Count           = 154, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
-                                 //   t1105 lawful 前移：151→154（PumpkinStem=151/JackOLantern=152/
-                                 //   Cauldron=153 尾部追加；t1103 曾 149→151、t1097 曾 148→149——
-                                 //   追加不插中间存档契约，钉值随追加前移）。
+        // ── t1111 名册低件量批三件（段尾追加；同门先例 StoneBrickSlab=109 / StoneBrickStairs=110）。
+        //   砂岩楼梯（SandstoneStairs）：整步+背墙（机制等价 MC sandstone stairs——12w21a/Java 1.2.1
+        //   入版，越 1.0 基线，同 CutSandstone「1.2.4+ 内容取同语义补族」先例登记）；复用 ShapeStairs
+        //   几何 + 砂岩贴图（topTile=52 sandstone_top / 其余=sandstone_side 53，与 Sandstone 本块面
+        //   排布同源）。solid=false / hardness=0.8（Sandstone 同档）/ Pickaxe / requiresTool=true /
+        //   minTier1 / dropId=自身、dropCount=1、maxStack=64。state[1:0]=朝向 bit2=倒置（WoodStairs
+        //   / CobbleStairs / StoneBrickStairs 同编码）。经 isStairs 谓词并入异形路由（段外）。
+        //   音色 GroupStone。进创造调色板 + 合成行 4 砂岩 2×2（recipe.cpp）。
+        SandstoneStairs  = 154, // 砂岩楼梯：6 砂岩阶梯合成（勘误注：派工稿「4 砂岩 2×2」与切制砂岩
+                                //   行 {Sandstone:4} 2×2 多重集冲突不可行，见 recipe.cpp 派工勘误
+                                //   留痕）；整步+背墙（ShapeStairs 复用同门）
+        //   石台阶（StoneSlab）：半高（机制等价 MC 1.0 stone slab id 44 metadata 0——Alpha 入版 =
+        //   1.0 基线内）。半砖族同门（WoodSlab=15/CobbleSlab=58/SpruceSlab=87/StoneBrickSlab=109
+        //   **独立方块 id 按族惯例**——工程无单方块多 SlabType 架构，SlabType state 面以族惯例独立
+        //   id 承载，state bit0=上半/下半与全族同编码）。solid=false / ShapeSlab（PartialBlockGeometry
+        //   异形渲染）+ 石贴图（stone tile 3 六面）。hardness=1.5 / Pickaxe / minTier1 / dropId=自身。
+        //   双半砖合并 → Stone（slabFullBlock）/ Stone 满格双砖源 → 破块掉 2 石台阶
+        //   （fullBlockSlabDrop）。音色 GroupStone。进创造调色板 + 合成行 3 石 1×3。
+        StoneSlab        = 155, // 石台阶：3 石 1×3 合成；半高（ShapeSlab 同门；石贴图）
+        //   砂岩台阶（SandstoneSlab）：半高（机制等价 MC 1.0 slab id 44 metadata 1——Beta 1.3 入版 =
+        //   1.0 基线内；1.0 石台阶 id 44 数据值 1=砂岩）。同门砂材质行 + 砂岩贴图（topTile=52 /
+        //   其余=53）。双半砖合并 → Sandstone / 逆掉落同门。合成行 3 砂岩 1×3。
+        SandstoneSlab    = 156, // 砂岩台阶：3 砂岩 1×3 合成；半高（ShapeSlab 同门；砂岩贴图）
+        Count           = 157, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+                                 //   t1111 lawful 前移：154→157（SandstoneStairs=154/StoneSlab=155/
+                                 //   SandstoneSlab=156 尾部追加；t1105 曾 151→154、t1103 曾 149→151、
+                                 //   t1097 曾 148→149——追加不插中间存档契约，钉值随追加前移）。
     };
 
     // t1105 炼药锅 state 编码（复用 chunk m_states，存档 round-trip 保真——水位是方块持久态）：
