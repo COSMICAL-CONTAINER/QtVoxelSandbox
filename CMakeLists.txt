@@ -317,6 +317,13 @@ qt_add_executable(voxelsandbox
     #   族（同族 per-block 方块附挂数据容器）。纯存储类（无光 / 无 World 依赖）。
     src/Game/signstore.cpp
     src/Game/signstore.h
+    # t1114 map 地图数据集（Game 层 ViewModel）：每会话单份全幅 1bpp 地图像素存储（激活建库 / 探索写列
+    #   / renderImage 出图 / clearAll 跨世界收口）。机制面在 PlayerController（激活分支 + 探索 tick +
+    #   mapColumnColor 色板——有 m_world 读栅格，本类零 World 依赖）；显示面经 main.cpp 胶水 provider
+    #   （image://mapstore）交给 Main.qml 手持地图 overlay。纯存储类（无光 / 无 World 依赖，SignStore
+    #   同门形态）。
+    src/Game/mapstore.cpp
+    src/Game/mapstore.h
     # progress 玩家进度系统（Game 层 ViewModel）：统计（时间/挖放/路程/击杀/死亡/合成/拾取）+ 成就解锁。
     #   跨世界持久化（同 ChestStore/FurnaceStore，存 worldstore progress 表）。各事件源经 QML 桥接调埋点。
     src/Game/playerprogress.cpp
@@ -1154,6 +1161,13 @@ add_executable(redstone_matrix_test
     #   板面盒 + 失撑脱落] + 文本链柱[SignStore 读写/截断/清孤儿 + 放置→录入→读回 + 持久化桥接线]
     #   + 结构钉族——零新 include 面，signstore/blockregistry/recipe/hotbar/world 系均已列）。
     tools/matrix/section76_roster_sign_t1113.cpp
+    # t1114 名册大件批第二单探针段（4 腿 r2084a-d，filter 词 r2084；激活链柱[8 纸环合成命中 + 熔炉/
+    #   画作环孪生零污染 + 双 id 段位/名面/调色板/maxStack 64 + 空地图右键激活真链(转换 + 建库 + 首绘
+    #   中心区)] + 探索填充柱[MapStore 行为面 + 持图探索 tick 真链双 rig 盒扫 + 不持图不扫描负例 +
+    #   清库惰性重建] + 显示面柱[Main.qml overlay 接线 raw 钉 + main.cpp provider 钉 + 注入行钉] +
+    #   结构钉族[源钉族——NEG 双摘面豁免不钉 + 罗盘芯/缩放克隆/不可堆叠/存档表负面钉]——新 include
+    #   面 = mapstore（两目标补列）；recipe/hotbar/playercontroller 系均已列）。
+    tools/matrix/section77_roster_map_t1114.cpp
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
     #   确定性等价承重墙[8 形态快照 worker ≡ 同步直调逐位恒等：顶点/索引/统计三面]/队列纪律
     #   [容量压小满载 kErrQueueFull 可见拒绝 + 拒绝项不入账 + 接受项恰一产出按 requestId 对账]/
@@ -1475,6 +1489,10 @@ add_executable(redstone_matrix_test
     #   ——同 brewingstore 补列口径）。
     src/Game/signstore.cpp
     src/Game/signstore.h
+    # t1114 map 地图探针附加：MapStore（数据集建库/写列/读列/出图/清库；playercontroller 引用其符号
+    #   ——同 signstore 补列口径）。
+    src/Game/mapstore.cpp
+    src/Game/mapstore.h
     src/Game/loottable.cpp
     src/Game/raycast.cpp
     src/Entities/xporbmanager.cpp
