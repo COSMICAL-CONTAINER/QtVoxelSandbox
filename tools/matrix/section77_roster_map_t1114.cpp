@@ -434,8 +434,10 @@ void MatrixRun::section77_roster_map_t1114()
             if (!missHb.isEmpty())
                 diag += QStringLiteral("[hb %1]").arg(missHb.join(QLatin1Char(',')));
             // 调色板填充地图行（行尾注释体锚——pinSet 剥注释失配，raw 含同门）。
+            //   [lawful 修订 t1115/r2085] 行尾自「无逗号形」改「逗号行」——苹果/金苹果（0x292/0x293）
+            //   t1115 段尾追加，填充地图行让出数组尾位（r2073d/r2075d 砂岩楼梯尾行同门先例）。
             const bool palFilledRow = rawContainsRosterMap(srcDir + QStringLiteral("/Game/hotbar.cpp"),
-                                                           QStringLiteral("int(RecipeRegistry::FilledMapId)         // 填充地图：激活产物；手持显地图 overlay（会话数据集）"));
+                                                           QStringLiteral("int(RecipeRegistry::FilledMapId),        // 填充地图：激活产物；手持显地图 overlay（会话数据集）"));
             ok = ok && palFilledRow;
             if (!palFilledRow) diag += QStringLiteral("[hbPalFilled]");
             const QStringList missPcH = pinSet(srcDir + QStringLiteral("/Game/playercontroller.h"), {
