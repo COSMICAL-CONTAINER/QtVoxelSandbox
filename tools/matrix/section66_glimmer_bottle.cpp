@@ -408,7 +408,7 @@ void MatrixRun::section66_glimmer_bottle()
             diag += QStringLiteral("[face name=%1 palette=%2/%3 stack=%4]")
                         .arg(nameOk).arg(cocoaIdx).arg(bottleIdx).arg(stackOk);
         // (3) 零方块 / 零图集反探（t1092/t1095 同门）：方块总数与图集瓦片数原值不动。
-        const bool zeroWorld = int(BR::Count) == 157 && int(BR::AtlasTileCount) == 207; // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加；tile 207 不动）；t1105 曾 151→154 / 201→207（南瓜族 + 炼药锅方块 + tile 追加——本反探钉随段尾追加前移；t1103 曾 149→151 / 195→201）
+        const bool zeroWorld = int(BR::Count) == 160 && int(BR::AtlasTileCount) == 209; // t1112 lawful 前移：157→160 / 207→209（栅栏门/玻璃板/蛋糕方块 + tile 追加——本反探钉随段尾追加前移）；t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1105 曾 151→154 / 201→207（南瓜族 + 炼药锅方块 + tile 追加；t1103 曾 149→151 / 195→201）
         ok = ok && zeroWorld;
         if (!zeroWorld) diag += QStringLiteral("[zeroWorld count=%1 tiles=%2]")
                                     .arg(int(BR::Count)).arg(int(BR::AtlasTileCount));
