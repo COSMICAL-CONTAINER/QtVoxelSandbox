@@ -1213,6 +1213,19 @@ public:
     //   自管，防嵌套 BFS）。
     void checkPaintingSupportOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
 
+    // t1113 牌子失撑脱落复检（写入钩子族，checkPaintingSupportOnEdit 同门模式）：本格 (x,y,z) 刚发生
+    //   编辑且新内容已非完整立方支撑 → 扫牌附着位：
+    //   - 正上方格为站牌（StandingSign）→ 脱落（下方支撑被破——solidSupportBlock 同一权威判「非支撑」，
+    //     与放置预检同谓词零漂移）；
+    //   - 4 水平邻为挂墙牌（WallSign）且其板面朝向反向侧（= 所附墙面）== 本格 → 脱落。
+    //   脱落 = setWaterSilent 清 Air + emit blockBroken（破块粒子/音）+ emit blockDroppedAsItem（掉牌子
+    //   物品 dropId=自身；**文本随破丢失**——1.0 口径掉落物无文本面，SignStore 条目由呈现层 onWorldChanged
+    //   孤儿清扫回收，画 host cleanupVis 同门）。机制等价 MC「牌子支撑破坏 → 牌子当场掉落成物品」。
+    //   置换为另一完整立方（木板→石头）→ 牌保留（支撑仍有效）；纯放置（Air 格写入）天然 no-op（牌子
+    //   附着位恒非 Air）。挂 4/5 参数 setBlock / setWaterSilent（含焚毁 / 蒸发 / 爆炸静默写路径）末尾
+    //   各一次，checkPaintingSupportOnEdit 同位同序。
+    void checkSignSupportOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
+
     // ── t656/t657/t658 红石电力系统 v1（机制等价 MC 1.0 redstone 的纵切简化；World 层局部重算）──
     //
     // 模型（事件驱动局部重算，非全图扫描 —— lessons perf-fluid-scan 反模式教训）：

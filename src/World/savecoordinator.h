@@ -184,7 +184,13 @@ struct SaveRequest
     QVariantList chests;
     QVariantList furnaces;
     QVariantList dispensers;
-    QVariantList hoppers; // t1080 漏斗内容（缺省空 = 不写 hoppers 表，旧构造 caller 向前兼容）
+    QVariantList hoppers;        // t1080 漏斗内容（缺省空 = 不写 hoppers 表，旧构造 caller 向前兼容）
+    QVariantList brewingStands;  // t1113 补行（t1097 接线缺口同单补正——见下）：酿造内容（缺省空 = 不写
+                                 //   brewing 表）。t1097 曾给 WorldStore::saveAll 加第 8 参但 SaveRequest /
+                                 //   SaveBridge 链未跟——Main.qml 传的第 12 参在旧 11 参签名下被静默丢弃，
+                                 //   酿造内容实际从未经统一保存链落盘。本单接牌子文本同门顺带补正（载荷
+                                 //   加字段 + 桥加缺省参 + 转发行补齐，旧 caller 逐位不变）。
+    QVariantList signs;          // t1113 牌子文本（缺省空 = 不写 sign_texts 表，旧构造 caller 向前兼容）
     QVariantMap worldTime;
     QVariantMap bedSpawn;
     QVariantMap playerData;

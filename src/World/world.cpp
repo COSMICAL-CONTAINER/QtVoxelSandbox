@@ -1812,6 +1812,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
     if (oldId != BlockRegistry::Air)
         breakEmberGatesAround(x, y, z);
     checkPaintingSupportOnEdit(x, y, z, oldId, id); // t837①：画作支撑墙失撑 → 整画掉落（钩子族同口径）
+    checkSignSupportOnEdit(x, y, z, oldId, id); // t1113：牌子失撑脱落（下方站牌 / 贴墙挂墙牌，钩子族同口径）
     notePowerWrite(x, y, z, oldId, id);       // t656：红石电力脏标记（红石族编辑 / 邻粉 → 局部重算入队）
     return true;
 }
@@ -1965,7 +1966,8 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     if (oldId != BlockRegistry::Air && oldId != id)
         breakEmberGatesAround(x, y, z);
     checkPaintingSupportOnEdit(x, y, z, oldId, id); // t837①：画作支撑墙失撑 → 整画掉落（钩子族同口径；
-    //   画格自清重入由 m_inRemovePainting 守卫，放置入 Air 格的画锚写天然 no-op——墙格恒非 Air）
+    //   画格自清重入由 m_inRemovePainting 守卫，放置入 Air 格的画锚写直写无重入——墙格恒非 Air）
+    checkSignSupportOnEdit(x, y, z, oldId, id); // t1113：牌子失撑脱落（5 参数版同 4 参数版钩子族收口）
     notePowerWrite(x, y, z, oldId, id);       // t656：红石电力脏标记（红石族编辑 / 邻粉 → 局部重算入队；state-only 写亦触发——拉杆 / 按钮翻位即此路径）
     return true;
 }
@@ -2266,6 +2268,7 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
     if (lightOldId != BlockRegistry::Air && lightOldId != id) {
         breakEmberGatesAround(x, y, z);
         checkPaintingSupportOnEdit(x, y, z, lightOldId, id);
+        checkSignSupportOnEdit(x, y, z, lightOldId, id); // t1113：牌子失撑脱落（焚毁/蒸发静默写路径同收口）
     }
     if (m_batchFluid) return true; // t350 流体 tick 批量写：累积栅格写 + 重光照，末尾由 caller 统一 emit + clearDirty
     emit worldChanged(); // 驱动 mesh 重建（水流是系统模拟，非玩家破/放 → 不发 broken/placed）
@@ -5464,6 +5467,65 @@ void World::checkPaintingSupportOnEdit(int x, int y, int z, quint8 oldId, quint8
         if (px + wx == x && pz + wz == z)
             removePaintingAt(px, py, pz, face, /*drop=*/true); // 恒掉（含创造，t571 自然失撑语义）
     }
+}
+
+// t1113 牌子失撑脱落复检（声明见 .h 注——checkPaintingSupportOnEdit 同门模式；本格编辑后非完整立方
+//   支撑 → 正上站牌 / 贴本格挂墙牌当场脱落成物品）。
+void World::checkSignSupportOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
+{
+    Q_UNUSED(oldId); // 守卫按「编辑后本格是否仍完整立方支撑」（id 谓词）判——oldId 保留供钩子族签名一致
+    // 域门（checkPaintingSupportOnEdit 同款两模式分流）：sparse x/z 无界（y 域两模式同构）。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || z < 0 || x >= m_width || z >= m_depth || y < 0 || y >= m_height) return;
+    } else {
+        if (y < 0 || y >= m_height) return; // y 域两模式同构（有限高）；x/z 无界
+    }
+    // 本格新内容仍是完整立方支撑 → 两附着位皆有效（置换为另一实心块 / state-only 写不动支撑）→ 牌保留。
+    //   与放置预检同一谓词（solidSupportBlock = isFullCube 且非仙人掌——缩体柱面不作支撑，t945/t1017
+    //   家族口径），改谓词只改一处、放置面与失撑面永不劈叉（t847 收口同门纪律）。
+    if (BlockRegistry::solidSupportBlock(id)) return;
+    // 单格脱落收口（dropUnsupportedDoorsAbove 同款写入族：m_chunks 直写无重入 + note*Write 同族一致
+    //   + blockBroken/blockDroppedAsItem + recomputeLightAround；本函数末尾统一 1 次 worldChanged）。
+    const auto popSign = [&](int sx, int sy, int sz, quint8 signId) {
+        m_chunks.setBlock(sx, sy, sz, BlockRegistry::Air); // 静默直写 + 标脏（不经 World::setBlock 无重入）
+        noteGrowthWrite(sx, sy, sz, signId, BlockRegistry::Air); // 非生长方块 → no-op，同族写入一致
+        noteFluidWrite(sx, sy, sz, signId, BlockRegistry::Air);
+        noteIceWrite(sx, sy, sz, signId, BlockRegistry::Air);
+        noteFireWrite(sx, sy, sz, signId, BlockRegistry::Air);
+        emit blockBroken(sx, sy, sz, int(signId));               // 破块粒子 / 音
+        emit blockDroppedAsItem(sx, sy, sz, BlockRegistry::dropId(signId)); // 掉牌子物品（文本随破丢失）
+        recomputeLightAround(sx, sy, sz, signId, BlockRegistry::Air);
+    };
+    bool any = false;
+    // ① 正上方站牌：下方支撑被破 → 脱落。
+    if (m_chunks.blockAt(x, y + 1, z) == BlockRegistry::StandingSign) {
+        popSign(x, y + 1, z, BlockRegistry::StandingSign);
+        any = true;
+    }
+    // ② 4 水平邻挂墙牌：板面朝向反向侧（= 所附墙面）== 本格 → 脱落。
+    constexpr int kHoriz[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+    for (const auto &o : kHoriz) {
+        const int sx = x + o[0], sy = y, sz = z + o[1];
+        // 邻扫域门（checkPaintingSupportOnEdit 同款）：sparse x/z 无界，Fixed 越界跳过。
+        if (m_chunks.mode() == WorldMode::Fixed
+            && (sx < 0 || sz < 0 || sx >= m_width || sz >= m_depth)) continue;
+        if (m_chunks.blockAt(sx, sy, sz) != BlockRegistry::WallSign) continue;
+        const int facing = int(m_chunks.stateAt(sx, sy, sz) & BlockRegistry::SignStateFacingMask);
+        int wx = 0, wz = 0;
+        switch (facing) { // 墙在朝向反向侧（signBoardBoxes 挂墙分支同源编码，改编码两处同步）
+        case 0: wx = -1; break; // 板面朝 +X → 墙在 -X
+        case 1: wx = 1;  break; // 板面朝 -X → 墙在 +X
+        case 2: wz = -1; break; // 板面朝 +Z → 墙在 -Z
+        default: wz = 1; break; // 板面朝 -Z → 墙在 +Z
+        }
+        if (sx + wx == x && sz + wz == z) {
+            popSign(sx, sy, sz, BlockRegistry::WallSign);
+            any = true;
+        }
+    }
+    if (!any) return;
+    emit worldChanged();      // 驱动 mesh 重建（N 写 1 emit 批量收口，同 dropUnsupportedDoorsAbove）
+    m_chunks.clearAllDirty(); // 两段重建完统一清脏（同 setBlock 末尾）
 }
 
 // ── t656/t657/t658 红石电力系统 v1（见 world.h notePowerWrite / tickRedstone 头注释）──

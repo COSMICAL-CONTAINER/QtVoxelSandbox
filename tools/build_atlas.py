@@ -453,6 +453,10 @@ TILES = [
     #   ShapeCake 盒 + PartialBlockGeometry case 同源），零 per-bite 贴图。
     "default_cake_top",              # 207 cake_top（蛋糕顶面霜面：乳白霜 + 暗边框 + 对角高光 + 红果饰点阵；Cake 顶）
     "default_cake_side",             # 208 cake_side（蛋糕侧面：上霜带 + 下海绵糕体 + 霜滴落；Cake 侧·底·前）
+    # t1113 牌板面一张（机制等价 MC 1.0 sign board；名称/贴图纯原创自绘 §9a——「牌子」为通用词）。
+    #   tools/build_sign.py 程序生成原创像素图（§9 override (a)）。站牌/挂墙牌两 id 同瓦（挂墙变体仅
+    #   几何摆位异）。文本不在瓦面（文本是 SignStore 方块附挂数据；瓦面 = 未写字的空行刻线板）。
+    "default_sign_board",            # 209 sign_board（橡木板底 + 暗框 + 对角高光 + 四行淡文本带；牌子两 id 板面同瓦）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

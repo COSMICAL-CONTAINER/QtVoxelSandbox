@@ -111,6 +111,15 @@ Window {
     property int brewingX: 0
     property int brewingY: 0
     property int brewingZ: 0
+    // t1113 牌子编辑面板子态：牌子放置成功 → player.signPlaced(x,y,z) → 显牌子文本编辑面板
+    //   （4 行 TextInput，1.0 口径放置时编辑一次——关面板即存文本含空文本，无独立取消语义；
+    //   已放牌子无再编辑面）+ 释放指针（Done 按钮可点）+ 键盘归 TextInput（打字期间玩家静止，
+    //   chatInput 同款焦点搬移）。与其它背包面板互斥；Done / Esc 关 → 存文本 + 恢复 grab。
+    //   signX/Y/Z 记所放牌子的方块世界坐标（SignStore 据此寻址该牌的 4 行文本）。
+    property bool signEditOpen: false
+    property int signX: 0
+    property int signY: 0
+    property int signZ: 0
     property int hopperX: 0
     property int hopperY: 0
     property int hopperZ: 0
@@ -1055,6 +1064,10 @@ Window {
         // t1097 酿造台按世界持久化 + 跨世界泄漏收口：brewingStore 跨世界长驻（同 hopperStore 族），
         //   enterWorld 时整体替换（清旧世界残留 + 填本世界酿造台）。
         brewingStore.loadAll(worldStore.loadBrewingStands())
+        // t1113 牌子文本按世界持久化 + 跨世界泄漏收口：signStore 跨世界长驻（同 brewingStore 族），
+        //   enterWorld 时整体替换（清旧世界残留 + 填本世界牌子文本——存档 sign_texts 表 round-trip）。
+        //   存档 signs 由 saveAndExitToWorldList 经 saveAll(name, ..., signStore.allSigns()) 第 9 参落盘。
+        signStore.loadAll(worldStore.loadSigns())
         // progress 按世界持久化：进世界前 loadVariant 整体替换内存（清旧世界残留 + 填本世界进度）。无存档
         //   progress 表 → 空 map → 重置默认（全 0 统计 + 全未解锁成就）。存档由 saveAndExit saveProgress 落盘。
         progress.loadVariant(worldStore.loadProgress())
@@ -1233,6 +1246,8 @@ Window {
         if (dispenserOpen) closeDispenser()               // t650：发射器面板光标栈 → 背包
         if (hopperOpen) closeHopper()
         if (brewingOpen) closeBrewing()               // t650：漏斗面板光标栈 → 背包（t1093 同门互斥收口）
+        if (signEditOpen) closeSignEdit()             // t1113：牌子编辑面板开着 → 关面板即存文本（写入链
+                                                      //   先关后存 = 正在编辑的文本进本次存档，防丢稿）
         // t690(c)：三处合成格材料回背包（工作台 3×3 / 生存背包 2×2 / 创造背包生存 tab 2×2）——直调
         //   归还而非裸置 visible（绑定重求值可被引擎推迟，晚于 gatherPlayerState = §t650 同竞态）。
         craftingTablePanel.returnCraftToHotbar()
@@ -1284,7 +1299,10 @@ Window {
                                                  : { valid: false },
                                              gatherPlayerState(), progress.toVariant(),
                                              hopperStore.allHoppers(),
-                                             brewingStore.allBrewingStands())
+                                             // t1113：酿造（t1097 桥链缺口补正——第 12 参此前被旧 11 参
+                                             //   签名静默丢弃）+ 牌子文本随统一保存链同事务落盘。
+                                             brewingStore.allBrewingStands(),
+                                             signStore.allSigns())
     }
     // t1064 退出存档失败退避重试（review0901 登记清偿，出处见 saveAndExitToWorldList 重试段注释）：
     //   「保存并退出」按钮与 onClosing 关窗两路径**共用唯一实现**（禁第二份退避逻辑散写；两处
@@ -1398,6 +1416,8 @@ Window {
         progressOpen = false    // pause-menu：退出世界关进度面板（防遗留）
         statsOpen = false       // pause-menu：退出世界关统计面板（防遗留）
         resourceBrowserOpen = false   // t458：退出世界时关资源查看器（防遗留）
+        signEditOpen = false          // t1113：退出世界关牌子编辑面板（防遗留；不存稿——退出世界本就是
+                                      //   显式放弃点，同聊天草稿口径）
         itemEntities.clearAll()
         entityManager.clearAll()
         xpOrbs.clearAll()   // t402 经验球同族实体，切世界必清
@@ -1429,6 +1449,7 @@ Window {
         if (dispenserOpen) closeDispenser()
         if (hopperOpen) closeHopper()
         if (brewingOpen) closeBrewing()   // t1093：回菜单也关漏斗（t650 同门：归还确定性同步，防光标栈遗留）
+        if (signEditOpen) closeSignEdit() // t1113：回菜单也关牌子编辑面板（不存稿——显式放弃点，同聊天草稿口径）
         chestLidAngle = 0    // t196：复位盖子角（防回菜单 / 再进世界残留半开盖子）
         settingsOpen = false           // t139：回菜单时关设置面板（防遗留）
         progressOpen = false           // pause-menu：回菜单关进度面板（防遗留）
@@ -1837,6 +1858,49 @@ Window {
         // t196：触发盖子合回动画（chestLidAngle→0）；可见性绑定让合盖期间盖子仍显，到位后自动隐。
         chestLidAngle = 0
         returnHeldToHotbar()           // t56：关包归还光标手持栈（同 closeInventory / closeCraftingTable / closeFurnace）
+        player.grab()
+        keyInput.forceActiveFocus()
+    }
+    // t1113 牌子编辑面板行焦点搬运（i=0..3；越界 no-op——键盘归该行输入框，movement 键不透传，
+    //   chatInput 同款焦点搬移）。signLinesRepeater.itemAt(i) 可能瞬时 null（面板首开建帧期）→ 判空。
+    function signFocusLine(i) {
+        if (i < 0 || i > 3) return
+        const f = signLinesRepeater.itemAt(i)
+        if (f) f.forceActiveFocus()
+    }
+    // t1113 打开 / 关闭牌子文本编辑面板。打开 → 四行输入框清空（1.0：编辑界面出生恒空白——牌子是
+    //   刚放置的新牌，无已有文本可回填）+ release（光标可见点 Done）+ 焦点进首行（键盘独占，打字
+    //   期间玩家静止，chatInput 同款焦点搬移）。与其它背包面板互斥（开面板前关既有面板）。
+    //   x/y/z = 所放牌子的方块世界坐标（player.signPlaced 携带 → SignStore 据此寻址该牌的 4 行文本）。
+    function openSignEdit(x, y, z) {
+        if (appState !== "playing" || signEditOpen) return
+        if (inventoryOpen) closeInventory()
+        if (craftingTableOpen) closeCraftingTable()
+        if (furnaceOpen) closeFurnace()
+        if (chestOpen) closeChest()
+        if (enchantingTableOpen) closeEnchantingTable()
+        if (anvilOpen) closeAnvil()
+        if (dispenserOpen) closeDispenser()
+        if (hopperOpen) closeHopper()
+        if (brewingOpen) closeBrewing()
+        signX = x; signY = y; signZ = z
+        // 四行清空（1.0 编辑界面出生恒空白；上一牌残留的输入草稿一并清，防串文本）。
+        for (let li = 0; li < 4; ++li) {
+            const f = signLinesRepeater.itemAt(li)
+            if (f) f.text = ""
+        }
+        signEditOpen = true
+        signFocusLine(0)  // 键盘归首行输入框（chatInput 同款焦点搬移；movement 键不透传）
+    }
+    // t1113 关牌子编辑面板（Done 按钮 / Esc / Enter 尾行三路同门）：**关面板即存文本**（1.0 口径——
+    //   无独立取消语义，关界面即保存含空文本；牌子无论是否打字都保持放置）。四行全空 → setText 内部
+    //   清条目（不落孤儿空键）。无光标手持栈面（面板无槽位）→ 不走 returnHeldToHotbar，直接 grab 回。
+    function closeSignEdit() {
+        if (!signEditOpen) return
+        signEditOpen = false
+        signStore.setText(signX, signY, signZ,
+                          signLinesRepeater.itemAt(0).text, signLinesRepeater.itemAt(1).text,
+                          signLinesRepeater.itemAt(2).text, signLinesRepeater.itemAt(3).text)
         player.grab()
         keyInput.forceActiveFocus()
     }
@@ -2933,6 +2997,10 @@ Window {
     // t1097 酿造内容存储 VM（按方块世界坐标键控的 5 槽：3 瓶 + 原料 + 燃料 + 酿造进度 / 燃料计量；
     //   机制面 = PlayerController::scanBrewingStands，破酿造台清孤儿掉内容；BrewingUI 单向消费）。
     BrewingStore { id: brewingStore }
+    // t1113 牌子文本存储 VM（按方块世界坐标键控的 4 行 × 15 字符；机制面 = placeBlock signPlaced
+    //   放置时编辑一次 + 破牌清孤儿[文本随破丢失 1.0 口径] + 失撑脱落孤儿清扫；SignEdit 面板单向读写）。
+    //   持久化经 worldstore sign_texts 表（saveAll 第 9 参 / loadSigns——brewing 同门第 N 参追加先例）。
+    SignStore { id: signStore }
     // progress 玩家进度系统 VM（统计 + 成就；跨世界持久化存 worldstore progress 表）。各事件源经 QML 桥接
     //   调埋点（onBlockMined/onCraft/onMobKilled 等）；成就解锁弹 toast（achievementUnlocked 信号）。
     PlayerProgress { id: progress }
@@ -3674,6 +3742,10 @@ Window {
         //   坐标供 BrewingStore 寻址该台的 5 槽 + 酿造进度。C++ scanBrewingStands 机制 tick 权威，
         //   面板只单向消费（读 store + 槽往返；不推进酿造——t177 三轮教训的 C++ 侧终局形态）。
         function onBrewingStandOpened(x, y, z) { window.openBrewing(x, y, z) }
+        // t1113：牌子放置成功 → player 发 signPlaced(x,y,z) → 开牌子文本编辑面板（1.0 口径：放置时
+        //   编辑一次，关面板即存文本；已放牌子无再编辑面——右键再编辑是 1.8+ 面不取）。坐标供
+        //   SignStore 寻址该牌的 4 行文本。
+        function onSignPlaced(x, y, z) { window.openSignEdit(x, y, z) }
         // t152：右键门 / 活版门 useBlock → player 发 doorToggled(open) → 路由到 AudioManager 开门 / 关门音。
         //   一次开合动作 = 一次音（门两格同翻 player 只发一次）。音频层只消费，PLAN §2 分层。
         function onDoorToggled(open) { open ? audio.playDoorOpen() : audio.playDoorClose() }
@@ -12725,6 +12797,12 @@ Window {
                 }
                 brewingStore.clearBrewing(x, y, z)
             }
+            // t1113：牌子被破 → signStore.clearSign 清文本条目（**文本随破丢失**——1.0 口径掉落物无
+            //   文本面，掉的是全新牌子物品 [dropId=自身，C++ 侧]；无内容物 dump 循环——文本非物品栈，
+            //   同容器族「先掉内容再清条目」的 dump 半边不适用）。id=160/161=BlockRegistry::StandingSign/
+            //   WallSign（字面量 + 注释，同 furnace=10 / chest=22 既有模式）。
+            if (id === 160 || id === 161)
+                signStore.clearSign(x, y, z)
             // t799：沙/沙砾失撑坍落改由 World 层 checkGravityBlockOnEdit（写入口全收口：放置 / 挖掘 / 爆炸 /
             //   TNT 点火 / 焚毁 / 流体静默写同一谓词判定）发 gravityBlockFell → 下方 onGravityBlockFell 转实体。
             //   旧 maybeTriggerFallingBlock（消费 blockBroken/blockPlaced 在呈现层嵌套 setBlock+spawn）已退役
@@ -15043,6 +15121,106 @@ Window {
         font.pixelSize: 12
         style: Text.Outline
         styleColor: "#000000"
+    }
+
+    // t1113 牌子文本编辑面板（1.0 口径放置时编辑一次）：居中小面板 = 标题 + 4 行 TextInput + Done。
+    //   输入用 TextInput（纯 QtQuick——Main.qml 顶层 import QtQuick.Controls 是硬加载期依赖，chatInput
+    //   同款选型立证；maximumLength 15 = MC 1.0 每行 15 字符口径）。Done 按钮 / Esc / 尾行 Enter 三路
+    //   同门 closeSignEdit（关面板即存文本，无独立取消语义——1.0 实读留痕）。焦点：openSignEdit 置
+    //   首行持焦（键盘独占，movement 键不透传 player）；行间 Enter 跳下一行（MC 牌子编辑同款）。
+    //   纯呈现层：文本只在 closeSignEdit 一处写 SignStore（PLAN §2 分层——面板不持副本）。
+    Item {
+        id: signEditPanel
+        visible: window.appState === "playing" && window.signEditOpen
+        anchors.centerIn: parent
+        width: 300
+        height: 230
+        z: 172
+        Rectangle {
+            anchors.fill: parent
+            color: "#c6c6c6"
+            border.color: "#555555"
+            border.width: 2
+            radius: 3
+        }
+        Text {
+            id: signEditTitle
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
+            anchors.topMargin: 10
+            text: "牌子"
+            color: "#3f3f3f"
+            font.pixelSize: 15
+            font.bold: true
+        }
+        // 四行输入 Repeater（maximumLength=15 双保险之一；C++ setText 侧 left(15) 截断为二）。
+        //   行间 Enter 经 signFocusLine(i+1) 跳下一行；尾行 Enter = 确认关面板（Done 同门）。
+        Repeater {
+            id: signLinesRepeater
+            model: 4
+            delegate: TextInput {
+                property int lineIndex: index
+                anchors.left: parent.left
+                anchors.leftMargin: 20
+                anchors.right: parent.right
+                anchors.rightMargin: 20
+                y: signEditTitle.y + signEditTitle.height + 10 + index * 28
+                height: 24
+                color: "#2b2b2b"
+                font.pixelSize: 15
+                maximumLength: 15
+                clip: true
+                selectByMouse: true
+                verticalAlignment: Text.AlignVCenter
+                Rectangle {  // 行底线（输入区可视边界；编辑区无框线会像死面板）
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: 1
+                    color: "#8b8b8b"
+                }
+                Keys.onPressed: (event) => {
+                    if (event.isAutoRepeat) return
+                    if (event.key === Qt.Key_Escape) {       // Esc = 关面板即存（1.0 无独立取消语义）
+                        window.closeSignEdit()
+                        event.accepted = true
+                    } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                        if (lineIndex < 3) signFocusLine(lineIndex + 1)  // 行间跳下一行
+                        else window.closeSignEdit()                      // 尾行 Enter = 确认
+                        event.accepted = true
+                    }
+                }
+            }
+        }
+        // Done 按钮（面板已 release 光标 → 可点；灰底凸边自绘，同工程面板按钮风格）。
+        Item {
+            id: signDoneButton
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 10
+            width: 120
+            height: 30
+            Rectangle {
+                anchors.fill: parent
+                color: signDoneMa.containsMouse ? "#d8d8d8" : "#bbbbbb"
+                border.color: "#3f3f3f"
+                border.width: 1
+                radius: 3
+            }
+            Text {
+                anchors.centerIn: parent
+                text: "完成"
+                color: "#2b2b2b"
+                font.pixelSize: 14
+                font.bold: true
+            }
+            MouseArea {
+                id: signDoneMa
+                anchors.fill: parent
+                hoverEnabled: true
+                onClicked: window.closeSignEdit()
+            }
+        }
     }
 
     // 准星（仅 playing 且捕获时）：中心十字，白色核心 + 黑色描边 → 亮/暗背景均可见。

@@ -833,6 +833,12 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     /* fence_gate          */ {int(BlockRegistry::FenceGate),           8,  8,  8,  8, false, BlockRegistry::ShapeFenceGate, 2.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::FenceGate),         1, 64, "fence_gate",      "栅栏门"},
     /* glass_pane          */ {int(BlockRegistry::GlassPane),           68, 68, 68, 68, false, BlockRegistry::ShapeGlassPane, 0.3f, int(BlockRegistry::Pickaxe), 0, false, 0,                                     1, 64, "glass_pane",      "玻璃板"},
     /* cake                */ {int(BlockRegistry::Cake),                207,208,208,208, false, BlockRegistry::ShapeCake,     0.5f, int(BlockRegistry::NoTool),  0, false, 0,                                     1, 64, "cake",           "蛋糕"},
+    // ── t1113 名册大件批首单两件（表尾追加；属性注释见 blockregistry.h Id 枚举 StandingSign / WallSign 行）。
+    //   牌板 tile 209（tools/build_sign.py 程序自绘 §9a；AtlasTileCount lawful 前移 209→210）。ShapeNone
+    //   （无碰撞可穿过）+ 选中/射线 id 特例板面盒（selectionAABBs/raycastAABBs Painting 同门）。站牌/
+    //   挂墙牌全字段同表行（仅 id/名异），MC 1.0 sign id 63 / wall sign id 68 双方块族惯例。
+    /* standing_sign        */ {int(BlockRegistry::StandingSign),      209,209,209,209, false, BlockRegistry::ShapeNone,    1.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::StandingSign),    1, 64, "standing_sign",   "牌子"},
+    /* wall_sign            */ {int(BlockRegistry::WallSign),          209,209,209,209, false, BlockRegistry::ShapeNone,    1.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::WallSign),        1, 64, "wall_sign",       "挂墙牌子"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -1074,6 +1080,13 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* fence_gate              */ 107,
     /* glass_pane              */ 102,
     /* cake                    */ 92,
+    // t1113 名册大件批首单两行（表尾追加；机制等价 MC 1.0 对齐口径）：牌子 → **63**（standing sign，
+    //   Alpha 入版 = 1.0 基线内真实 id）/ 挂墙牌子 → **68**（wall sign，Alpha 入版 = 1.0 基线内真实 id）。
+    //   **两 id 都取**（MC 1.0 站牌/挂墙牌本就是两个方块 id，工程方块段按 id 族惯例拆两 id 承载——
+    //   放置时 ny=0 侧面点击自动选挂墙形态，玩家侧单物品语义保持；kMc 63/68 双行）。
+    //   本行追加后全表行数与 Count 162 一致（t691 教训：一行一条目 + 行内注释，防聚合初始化零填充回归）。
+    /* standing_sign           */ 63,
+    /* wall_sign               */ 68,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -1158,6 +1171,10 @@ bool BlockRegistry::isStairs(quint8 blockId)         { return blockId == WoodSta
 bool BlockRegistry::isFence(quint8 blockId)          { return blockId == WoodFence || blockId == CobbleFence || blockId == SpruceFence; }
 // t1112 栅栏门统一谓词（声明见 .h 注释）：右键开合分支 / 碰撞开合态统一读它（同 isDoor 单 id 模式）。
 bool BlockRegistry::isFenceGate(quint8 blockId)      { return blockId == FenceGate; }
+
+// t1113 牌子族谓词（站牌 + 挂墙牌双 id 并判；声明见 .h isSign 注——放置形态分流 / 支撑预检 / 失撑
+//   掉落钩子 / 音色路由统一读本谓词）。
+bool BlockRegistry::isSign(quint8 blockId)           { return blockId == StandingSign || blockId == WallSign; }
 // t627 扩展：压力板族五件（wood/cobble/stone/iron/gold——后三件为 t627 家族扩展）。放置放宽 / 失撑掉落 /
 //   mesher plate case / 触发扫描统一读本谓词。
 bool BlockRegistry::isPressurePlate(quint8 blockId)
@@ -2146,8 +2163,38 @@ float BlockRegistry::collisionTopY(quint8 blockId, quint8 state)
     }
     return -1.0f; // 未知 shape → 空（兜底，同 shapeBoxes）
 }
+// t1113 牌子板面盒单一解码（selectionAABBs / raycastAABBs 双消费同源；文件内静态——Core 外渲染层在
+//   partialblockgeometry.cpp StandingSign/WallSign case 按同一编码镜像摆位，改编码两处同步——
+//   fenceGatePanelBoxes 同门纪律）。板面 = 12/16 高 × 2/16 厚，贴格顶（y[4/16,1]）：
+//   站牌（wall=false）：板面垂直于朝向轴居中——朝向 0/1（±X）→ 厚向 X 居中 x[7/16,9/16]、宽向 Z
+//   z[2/16,14/16]（12/16 宽）；朝向 2/3（±Z）→ 镜像。挂墙牌（wall=true）：板面贴所附墙面（朝向
+//   反向侧格边）+ **宽向满贯格**（MC wall sign 满宽薄板口径）——朝向 0（+X，墙在 -X）→ 板贴
+//   x[0,2/16]、宽向 Z 满格；朝向 1（-X，墙在 +X）→ x[14/16,1]；朝向 2（+Z，墙在 -Z）→ z[0,2/16]；
+//   朝向 3（-Z，墙在 +Z）→ z[14/16,1]。
+static std::vector<BlockRegistry::BlockAABB> signBoardBoxes(quint8 state, bool wall)
+{
+    const int facing = int(state & BlockRegistry::SignStateFacingMask);
+    constexpr float kHalfW = 2.0f / 16.0f;               // 半宽（宽向 12/16 → 中心 ±6/16）
+    constexpr float kTh0 = 7.0f / 16.0f, kTh1 = 9.0f / 16.0f; // 站牌厚向居中区间（2/16 厚）
+    const float y0 = 4.0f / 16.0f, y1 = 1.0f;            // 板面贴格顶（下沿 4/16）
+    float x0 = 0.0f, x1 = 1.0f, z0 = 0.0f, z1 = 1.0f;
+    if (wall) {
+        switch (facing) {
+        case 0: x0 = 0.0f; x1 = kTh1 - kTh0; break;      // +X 朝向 → 墙在 -X → 板贴 x[0,2/16]
+        case 1: x0 = 1.0f - (kTh1 - kTh0); x1 = 1.0f; break; // -X 朝向 → 墙在 +X → 板贴 x[14/16,1]
+        case 2: z0 = 0.0f; z1 = kTh1 - kTh0; break;      // +Z 朝向 → 墙在 -Z → 板贴 z[0,2/16]
+        default: z0 = 1.0f - (kTh1 - kTh0); z1 = 1.0f; break; // -Z 朝向 → 墙在 +Z → 板贴 z[14/16,1]
+        }
+    } else {
+        switch (facing) {
+        case 0: case 1: x0 = kTh0; x1 = kTh1; z0 = kHalfW; z1 = 1.0f - kHalfW; break; // ±X 朝向 → 厚向 X 居中
+        default:        z0 = kTh0; z1 = kTh1; x0 = kHalfW; x1 = 1.0f - kHalfW; break; // ±Z 朝向 → 厚向 Z 居中
+        }
+    }
+    return {BlockRegistry::BlockAABB{x0, y0, z0, x1, y1, z1}};
+}
+
 // t1112 栅栏门门板盒单一解码（selectionAABBs / raycastAABBs 双消费同源；文件内静态——Core 外渲染层在
-//   partialblockgeometry.cpp FenceGate case 按同一编码镜像摆位，改编码两处同步）：
 //   合 = 整格 footprint × 1.5 高门板（挡通路全高，碰撞同盒）；
 //   开 = 门板旋至铰链侧竖立（铰链恒取朝向轴负侧）：朝向 0/1（±X）→ 运行轴 Z，板贴 x[0, 3/16]；
 //        朝向 2/3（±Z）→ 运行轴 X，板贴 z[0, 3/16]。板厚 3/16（WoodDoor 门板同厚）。
@@ -2213,6 +2260,10 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::selectionAABBs(quint8 block
     if (blockId == GlassPane)
         return std::vector<BlockAABB>{BlockAABB{0.4375f, 0, 0.0f, 0.5625f, 1.0f, 1.0f},   // Z 向条带
                                       BlockAABB{0.0f, 0, 0.4375f, 1.0f, 1.0f, 0.5625f}};  // X 向条带
+    // t1113 牌子选中框 = 板面盒（signBoardBoxes 单一解码，射线同源——「选中框贴实际形状」口径同门；
+    //   ShapeNone 零碰撞但非零选中：板面 12/16 × 12/16 × 2/16，站牌居中 / 挂墙牌贴墙，state 朝向驱动）。
+    if (isSign(blockId))
+        return signBoardBoxes(state, blockId == WallSign);
     return shapeBoxes(def(blockId).shape, state);
 }
 
@@ -2411,6 +2462,10 @@ std::vector<BlockRegistry::BlockAABB> BlockRegistry::raycastAABBs(quint8 blockId
     if (blockId == GlassPane)
         return {BlockAABB{0.4375f, 0.0f, 0.0f, 0.5625f, 1.0f, 1.0f},   // Z 向条带
                 BlockAABB{0.0f, 0.0f, 0.4375f, 1.0f, 1.0f, 0.5625f}};  // X 向条带
+    // t1113 牌子射线命中盒 = 与 selectionAABBs 同源的板面盒（signBoardBoxes 单一解码）：瞄准板身命中、
+    //   板周空气穿过命中后方方块（ShapeNone + id 特例盒，Painting 同门「非零盒可点中」模式）。
+    if (isSign(blockId))
+        return signBoardBoxes(state, blockId == WallSign);
     const Shape sh = def(blockId).shape;
     if (sh == ShapeFull)
         return {BlockAABB{0, 0, 0, 1, 1, 1}}; // 整格：射线进格即中（等同旧行为）
@@ -3142,6 +3197,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Log: case Planks: case CraftingTable:
     case WoodSlab: case WoodStairs: case WoodFence:
     case FenceGate: // t1112 栅栏门 → 木质音色（门族木音，WoodDoor/WoodFence 同门；机制等价 MC fence gate wood SoundType）
+    case StandingSign: case WallSign: // t1113 牌子族 → 木质音色（木牌，planks 族同门；机制等价 MC sign wood SoundType）
     case WoodPressurePlate: case WoodDoor: case WoodTrapdoor: // t134 木制半方块 → 木质音色
     case Chest: // t173 箱子 → 木质音色
     case Wool: // t300 羊毛 → 木质音色（软质闷击，最接近 MC 1.0 羊毛 cloth SoundType）

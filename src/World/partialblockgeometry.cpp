@@ -366,6 +366,50 @@ int PartialBlockGeometry::append(
         if (connectsPane(nb.negZ)) pushBox(verts, idx, lx, ly, lz, aT0, aT1, 0.f, 1.0f, 0.0f, 0.375f, tile, light, tileW, hx, hy, v0, v1);
         break;
     }
+    case BlockRegistry::StandingSign: { // t1113 站牌 —— 中央立柱 + 板面（朝向 4 向）
+        // t1113 牌子几何（机制等价 MC 1.0 sign 站牌形态；**编码镜像 blockregistry.cpp signBoardBoxes
+        //   同源**，改编码两处同步）：
+        //   - 中央立柱：2/16 见方 × 6/16 高（柱顶接板面下沿——板面 y[4/16,1] 覆柱上段，剪影即「立牌」）。
+        //   - 板面：12/16 宽 × 12/16 高 × 2/16 厚，贴格顶（signBoardBoxes 站牌分支同值）。朝向 state
+        //     低 2 位（SignStateFacingMask）：±X 朝向 → 板厚向 X 居中 x[7/16,9/16]、宽向 Z z[2/16,14/16]；
+        //     ±Z 朝向 → 镜像（厚向 Z 居中、宽向 X）。板面文字视觉 = sign_board 瓦四行淡文本带（文本
+        //     本体是 SignStore 方块附挂数据，瓦面呈现为空白待写板——登记简化，3D 字面渲染候选池）。
+        //   - 无邻居连接面（牌子是独立附着件）。立柱/板面纯视觉（碰撞 ShapeNone 零盒；选中/射线走
+        //     signBoardBoxes 板面盒，blockregistry 同源）。
+        constexpr float kPost0 = 7.0f / 16.0f, kPost1 = 9.0f / 16.0f; // 立柱 2/16 见方（厚向同板面居中位）
+        pushBox(verts, idx, lx, ly, lz, kPost0, kPost1, 0.0f, 0.375f, kPost0, kPost1,
+                tile, light, tileW, hx, hy, v0, v1); // 立柱（y[0,6/16]，柱顶接板面下沿）
+        const int facing = int(state & BlockRegistry::SignStateFacingMask);
+        float bx0 = 0.0f, bx1 = 1.0f, bz0 = 0.0f, bz1 = 1.0f;
+        if (facing == 0 || facing == 1) { // ±X 朝向 → 板厚向 X 居中、宽向 Z
+            bx0 = 7.0f / 16.0f; bx1 = 9.0f / 16.0f;
+            bz0 = 2.0f / 16.0f; bz1 = 14.0f / 16.0f;
+        } else {                          // ±Z 朝向 → 板厚向 Z 居中、宽向 X
+            bz0 = 7.0f / 16.0f; bz1 = 9.0f / 16.0f;
+            bx0 = 2.0f / 16.0f; bx1 = 14.0f / 16.0f;
+        }
+        pushBox(verts, idx, lx, ly, lz, bx0, bx1, 0.25f, 1.0f, bz0, bz1,
+                tile, light, tileW, hx, hy, v0, v1); // 板面（y[4/16,1] 贴格顶）
+        break;
+    }
+    case BlockRegistry::WallSign: { // t1113 挂墙牌 —— 板面贴墙（朝向反向侧格边）
+        // t1113 挂墙牌几何（signBoardBoxes 挂墙分支同源镜像；除「板面贴所附墙面」外与站牌同构——
+        //   无立柱，板面 2/16 厚贴朝向反向侧格边：朝向 0（+X，墙在 -X）→ 板贴 x[0,2/16]，余向镜像）。
+        const int facing = int(state & BlockRegistry::SignStateFacingMask);
+        float bx0 = 0.0f, bx1 = 1.0f, bz0 = 0.0f, bz1 = 1.0f;
+        switch (facing) {
+        case 0: bx0 = 0.0f;            bx1 = 2.0f / 16.0f; break; // 墙在 -X → 板贴 x[0,2/16]
+        case 1: bx0 = 14.0f / 16.0f;   bx1 = 1.0f;         break; // 墙在 +X → 板贴 x[14/16,1]
+        case 2: bz0 = 0.0f;            bz1 = 2.0f / 16.0f; break; // 墙在 -Z → 板贴 z[0,2/16]
+        default: bz0 = 14.0f / 16.0f;  bz1 = 1.0f;         break; // 墙在 +Z → 板贴 z[14/16,1]
+        }
+        // 宽向满贯格（板面横铺所附墙面整宽 [0,1]——挂墙牌命中盒 signBoardBoxes 挂墙分支同值：
+        //   厚向 2/16 贴墙、宽向满格、y[4/16,1]， MC wall sign 满宽薄板口径的轴对齐投影）。
+        //   （宽向不做 12/16 内缩——选中/射线盒与渲染盒同源同值，改一处两处同步。）
+        pushBox(verts, idx, lx, ly, lz, bx0, bx1, 0.25f, 1.0f, bz0, bz1,
+                tile, light, tileW, hx, hy, v0, v1); // 板面（y[4/16,1] 贴格顶）
+        break;
+    }
     case BlockRegistry::Cake: { // t1112 蛋糕 —— 分块食用矮盒（-X 侧随咬口收窄）
         // t1112 蛋糕几何（机制等价 MC 1.0 cake 矮 hitbox + 咬口切片视觉；**ShapeCake 碰撞盒镜像**，
         //   blockregistry.cpp ShapeCake case 同源，改编码两处同步）：

@@ -277,7 +277,8 @@ SaveReceipt SaveCoordinator::saveAll(const SaveRequest &req)
 
     // 步⑤ world 部分（下游事务性写：chunks+meta+containers 原子）。
     r.worldSaved = m_store->saveAll(req.name, req.chests, req.furnaces, req.dispensers,
-                                    req.worldTime, req.bedSpawn, req.hoppers);
+                                    req.worldTime, req.bedSpawn, req.hoppers,
+                                    req.brewingStands, req.signs); // t1113：酿造（t1097 缺口补正）+ 牌子文本同事务转发
 
     // 步⑥ player 部分（短路：world 失败则不试——杜绝新版 player 压旧版 world 的混合写）。
     const bool playerNeeded = !req.playerData.isEmpty();

@@ -1145,6 +1145,17 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         RecipeRegistry::SugarId,      RecipeRegistry::EggId,        RecipeRegistry::SugarId,
         RecipeRegistry::WheatId,      RecipeRegistry::WheatId,      RecipeRegistry::WheatId },
       int(BlockRegistry::Cake), 1, 1, "cake" },
+    // ── t1113 牌子合成面裁定（**派工勘误留痕——配方不交付，degradation 同门 t1111 金苹果**）：
+    //   MC 1.0 sign 配方实读 = 6 木板 2 行 × 3 列满阵 → 1（Alpha 入版原值；「6 → 3」产率是 1.3/12w18a
+    //   改版越基线不取）。**该网格与 1.0 活板门配方模式全等**（6 木板 2×3 → 2，本表 trapdoor 行
+    //   t134 实读在册）——vanilla 自身即是一对同格配方，靠匹配器注册序裁定归属（现代版手工摆 6 板
+    //   2×3 答牌子、活板门被遮于后）。工程匹配器 = 先答先得（matchExact 包围盒归一化 + 首行命中）+
+    //   t802 全表自匹配审计**禁遮蔽行**（任一行须被自身 pattern 答回）→ 两行不可能共存：牌子行注册
+    //   在后永不可达；前置则活板门行被遮蔽 → t802 红。**裁定**：{Planks:6} 2×3 网格归属维持早注册
+    //   的活板门行（追加不插行 + 不动他人行存档纪律），牌子**合成面如实降级候选池**（获取面 = 创造
+    //   调色板双 id 在册），生存链配方待匹配器法演进（配方优先级位 / 同格多产物消歧）后接回。负面钉
+    //   由 r2083a 反证面承载（6 板 2×3 恒答活板门 = 勘误在案）。
+
     // dispenser：7 圆石 + 中心 1 弓 + 底中 1 红石 → 1 发射器（有序 3×3，仅工作台）。机制等价 MC 1.0
     //   dispenser（7 cobble + bow + redstone；顶行圆石 / 中行 圆-弓-圆 / 底行 圆-红石-圆）。审计发现
     //   机关族不对称：投掷器（t626）可合成而发射器漏注册。弓为工具段物品（可入合成格，MC 语义发射器
@@ -1516,6 +1527,10 @@ static_assert(int(BlockRegistry::SandstoneSlab)   == 156, "SandstoneSlab 方块 
 static_assert(int(BlockRegistry::FenceGate)       == 157, "FenceGate 方块 id 须为 157（栅栏门合成行产物锚；段尾追加，t1112）");
 static_assert(int(BlockRegistry::GlassPane)       == 158, "GlassPane 方块 id 须为 158（玻璃板合成行产物锚；段尾追加，t1112）");
 static_assert(int(BlockRegistry::Cake)            == 159, "Cake 方块 id 须为 159（蛋糕合成行产物锚；段尾追加，t1112）");
+// t1113 牌子双 id 编译期互钉（放置形态分流两端同源锚；段尾追加不插中间。合成面降级裁定见配方表
+//   t1113 注——{Planks:6} 2×3 与活板门行模式全等，牌子行不注册）。
+static_assert(int(BlockRegistry::StandingSign)    == 160, "StandingSign 方块 id 须为 160（牌子放置链 canonical id 锚；段尾追加，t1113）");
+static_assert(int(BlockRegistry::WallSign)        == 161, "WallSign 方块 id 须为 161（挂墙牌放置形态分流锚；段尾追加，t1113）");
 static_assert(RecipeRegistry::MilkBucketId        == 0x28F, "MilkBucketId 物品 id 须为 0x28F（蛋糕合成行原料锚；材料段尾追加，t1112）");
 // 编译期互钉：金锭 0x21F ↔ 金粒 0x288 双向合成（t1103 双向行）+ 瓜块方块段 Melon=149 行在。
 static_assert(RecipeRegistry::GoldIngotId == 0x21F, "GoldIngotId 须为 0x21F（金粒双向行两端的锚）");
