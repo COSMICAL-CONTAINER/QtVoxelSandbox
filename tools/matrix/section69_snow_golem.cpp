@@ -510,7 +510,7 @@ void MatrixRun::section69_snow_golem()
         const bool neighOk = int(BR::PumpkinStem) == 151
             && int(BR::JackOLantern) == 152
             && int(BR::Cauldron) == 153
-            && int(BR::Count) == 154
+            && int(BR::Count) == 157 // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）
             && int(BR::AtlasTileCount) == 207
             && RecipeRegistry::MelonSliceId == 0x28A
             && RecipeRegistry::PumpkinSeedsId == 0x28B

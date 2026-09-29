@@ -635,7 +635,7 @@ void MatrixRun::section72_t1109_closeout()
         if (!anchors) diag += QStringLiteral("[anchors]");
 
         // (D3) 相邻族零污染(值面)。
-        const bool neighOk = int(BR::Count) == 154
+        const bool neighOk = int(BR::Count) == 157 // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）
             && int(BR::AtlasTileCount) == 207
             && int(BR::Melon) == 149
             && int(BR::MelonStem) == 150

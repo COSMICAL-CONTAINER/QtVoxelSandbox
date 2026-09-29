@@ -299,7 +299,7 @@ void MatrixRun::section65_repeater()
         ok = ok && d1;
         if (!d1) diag += QStringLiteral("[d1]");
         // (2) id / kMcBlockId 行 / 图集容量（t691 一行一条目纪律的行为级对齐）。
-        const bool d2 = int(BR::Repeater) == 147 && int(BR::Count) == 154 // t1105 lawful 前移：151→154（PumpkinStem/JackOLantern/Cauldron 尾部追加；t1103 曾 149→151、t1097 曾 148→149）
+        const bool d2 = int(BR::Repeater) == 147 && int(BR::Count) == 157 // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1105 曾 151→154（PumpkinStem/JackOLantern/Cauldron 尾部追加；t1103 曾 149→151、t1097 曾 148→149）
             && BR::mcBlockId(quint8(BR::Repeater)) == 93
             && BR::AtlasTileCount == 207; // t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加；t1103 曾 195→201、t1097 曾 193→195）
         ok = ok && d2;

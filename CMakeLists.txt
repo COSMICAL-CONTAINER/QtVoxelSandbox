@@ -1129,6 +1129,10 @@ add_executable(redstone_matrix_test
     #   史莱姆弹跳着地信号柱 + 受击信号计数柱 + 结构钉族——零新 include 面，entitymanager/hotbar/
     #   playercontroller 均已列）。
     tools/matrix/section73_audio_t1110.cpp
+    # t1111 名册低件量批探针段（4 腿 r2081a-d，filter 词 r2081；砂岩楼梯柱[合成命中 + 勘误对面] +
+    #   石/砂岩台阶双柱[合成/双半砖合并/def/光照] + 史莱姆出生位柱[三档贴地出生位] + 结构钉族与
+    #   金苹果负面钉——零新 include 面，blockregistry/recipe/hotbar/entitymanager 均已列）。
+    tools/matrix/section74_roster_low_t1111.cpp
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
     #   确定性等价承重墙[8 形态快照 worker ≡ 同步直调逐位恒等：顶点/索引/统计三面]/队列纪律
     #   [容量压小满载 kErrQueueFull 可见拒绝 + 拒绝项不入账 + 接受项恰一产出按 requestId 对账]/

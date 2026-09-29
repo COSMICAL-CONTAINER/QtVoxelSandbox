@@ -43,6 +43,10 @@
 //     下界同步失守; hurt 计数面 r2080c / 结构钉面 r2080d 不在摘面 = 对照腿幸存)。摘面行豁免不钉
 //     (r2080d 不含 emit 行; AudioManager 侧声明/注册/路由钉全数幸存 = 「摘 Entities 发射面, 音频
 //     层消费面原样在」的分层归因面)。
+//   [t1111 lawful 注] spawnSlime 出生错位已修复(entitymanager.cpp:盒精化后重置 pos.y)——本段
+//     r2080b 注文中「出生错位 (r2077a 既有口径)」「空中出生避开嵌地」两处描述自此为历史沿革
+//     (修复后贴地出生亦不嵌坪); 腿场景不变已复绿(空中出生底沿仍悬空, 首落沿恰 1 语义零变),
+//     原注释就地保留作沿革留痕。
 namespace {
 
 // fixed 宿主小世界 incantation(section69/70 同款四 setter)。
@@ -470,7 +474,7 @@ void MatrixRun::section73_audio_t1110()
             && int(EntityManager::MobVillager) == 22
             && RecipeRegistry::SlimeBallId == 0x28C
             && RecipeRegistry::SpawnEggVillagerId == 0x28E
-            && int(BR::Count) == 154;
+            && int(BR::Count) == 157; // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）
         ok = ok && enumOk;
         if (!enumOk) diag += QStringLiteral("[enum]");
         const QStringList missNb = pinSet(

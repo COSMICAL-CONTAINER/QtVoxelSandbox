@@ -521,7 +521,7 @@ void MatrixRun::section67_brewing()
                          && RecipeRegistry::SugarId == 0x26A
                          && RecipeRegistry::GlimmerBottleId == 0x263
                          && int(BR::BrewingStand) == 148
-                         && int(BR::Count) == 154 // t1105 lawful 前移：151→154（PumpkinStem=151/JackOLantern=152/Cauldron=153 尾部追加；t1103 曾 149→151、t1097 曾 148→149）
+                         && int(BR::Count) == 157 // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1105 曾 151→154
                          && int(BR::ShapeBrewingStand) == 13
                          && BR::mcBlockId(int(BR::BrewingStand)) == 117;
         ok = ok && ids;
@@ -615,7 +615,7 @@ void MatrixRun::section67_brewing()
             SrcPin("effect enum tail", "EffectNone = 0, EffectPoison, EffectSlowness, EffectFire, EffectSpeed, EffectStrength", 1)});
         const QStringList missBrH = pinSet(srcRoot + QStringLiteral("/Core/blockregistry.h"), {
             SrcPin("id row", "BrewingStand     = 148,", 1),
-            SrcPin("count row", "Count           = 154,", 1),
+            SrcPin("count row", "Count           = 157,", 1), // t1111 lawful 前移：钉文 154→157 随源行前移
                 //   t1105 lawful 前移：151→154（PumpkinStem=151/JackOLantern=152/Cauldron=153 尾部追加；
                 //   t1103 曾 149→151、t1097 曾 148→149——追加不插中间存档契约，钉值随追加前移）。
             SrcPin("shape row", "ShapeBrewingStand = 13,", 1),
@@ -1042,7 +1042,7 @@ void MatrixRun::section67_brewing()
                          && RecipeRegistry::SugarId == 0x26A
                          && RecipeRegistry::GlimmerBottleId == 0x263
                          && int(BR::BrewingStand) == 148
-                         && int(BR::Count) == 154; // t1105 lawful 前移：151→154（PumpkinStem/JackOLantern/Cauldron 尾部追加；t1103 曾 149→151）
+                         && int(BR::Count) == 157; // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1105 曾 151→154
         ok = ok && ids;
         if (!ids) diag += QStringLiteral("[ids]");
         // (2) 枚举尾追加序（t1097 序不变 + t1099 三连）。
@@ -1467,7 +1467,7 @@ void MatrixRun::section67_brewing()
                          && RecipeRegistry::SugarId == 0x26A
                          && RecipeRegistry::GlimmerBottleId == 0x263
                          && int(BR::BrewingStand) == 148
-                         && int(BR::Count) == 154; // t1105 lawful 前移：151→154（PumpkinStem/JackOLantern/Cauldron 尾部追加；t1103 曾 149→151）
+                         && int(BR::Count) == 157; // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1105 曾 151→154
         ok = ok && ids;
         if (!ids) diag += QStringLiteral("[ids]");
         // (2) 延长常量族（六新 [四常量] + t1097/t1099 族不动）。
@@ -3085,7 +3085,7 @@ void MatrixRun::section67_brewing()
             && RecipeRegistry::MelonSliceId == 0x28A
             && RecipeRegistry::MundanePotionId == 0x287 // 邻族零污染（t1102 段尾原值）
             && int(BR::Melon) == 149 && int(BR::MelonStem) == 150
-            && int(BR::Count) == 154 // t1105 lawful 前移：151→154（南瓜族 + 炼药锅三件尾部追加；t1103 曾 149→151）
+            && int(BR::Count) == 157 // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1105 曾 151→154
             && int(BR::AtlasTileCount) == 207 // t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加；t1103 曾 195→201）
             && BR::mcBlockId(quint8(BR::Melon)) == 103
             && BR::mcBlockId(quint8(BR::MelonStem)) == 105
@@ -3152,14 +3152,14 @@ void MatrixRun::section67_brewing()
             SrcPin("name slice", "return QStringLiteral(\"瓜片\")", 1),
             SrcPin("palette nugget", "int(RecipeRegistry::GoldNuggetsId),", 1),
             SrcPin("blocks melon row", "int(BlockRegistry::Melon),", 1), // t1105 lawful 前移：瓜块行让位表尾（炼药锅行续尾追加），存在性钉不钉「最末」位
-            SrcPin("blocks cauldron row", "int(BlockRegistry::Cauldron) };", 1),
+            SrcPin("blocks cauldron row", "int(BlockRegistry::Cauldron),", 1), // t1111 lawful 前移：炼药锅行让位表尾（砂岩楼梯行续尾追加 t1111），改「逗号行」存在性钉——t1105 瓜块行同门
             SrcPin("stem variant case", "case BlockRegistry::MelonStem:", 1)});
         const QStringList missMi = pinSet(srcRootForPins() + QStringLiteral("/ui/MaterialIcon.qml"), {
             SrcPin("icon 288", "case 0x288: drawGoldNugget(); break", 1),
             SrcPin("icon 289", "case 0x289: drawMelonSeeds(); break", 1),
             SrcPin("icon 28A", "case 0x28A: drawMelonSlice(); break", 1)});
         const QStringList missBrH = pinSet(srcRootForPins() + QStringLiteral("/Core/blockregistry.h"), {
-            SrcPin("count sentinel", "Count           = 154", 1), // t1105 lawful 前移：151→154（南瓜族+炼药锅三件尾部追加）
+            SrcPin("count sentinel", "Count           = 157", 1), // t1111 lawful 前移：钉文 154→157 随源行前移；t1105 曾 151→154
             SrcPin("atlas sentinel", "AtlasTileCount = 207", 1), // t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加）
             SrcPin("melon enum", "Melon            = 149", 1),
             SrcPin("stem enum", "MelonStem        = 150", 1)});
@@ -3682,7 +3682,7 @@ void MatrixRun::section67_brewing()
         }
         const bool idsOk = RecipeRegistry::PumpkinSeedsId == 0x28B
             && int(BR::PumpkinStem) == 151 && int(BR::JackOLantern) == 152
-            && int(BR::Cauldron) == 153 && int(BR::Count) == 154
+            && int(BR::Cauldron) == 153 && int(BR::Count) == 157 // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）
             && int(BR::AtlasTileCount) == 207
             && mc104Rows == 1 && mc91Rows == 1 && mc118Rows == 1
             && BR::mcBlockId(quint8(BR::PumpkinStem)) == 104
@@ -3744,8 +3744,12 @@ void MatrixRun::section67_brewing()
         //   沿革注）；尾行钉改 SlimeBallId。原 `int(RecipeRegistry::PumpkinSeedsId)  ` 段尾形退役。
         const QString hbCpp = rawSource(srcRootForPins() + QStringLiteral("/Game/hotbar.cpp"));
         const QString iconQml = rawSource(srcRootForPins() + QStringLiteral("/ui/MaterialIcon.qml"));
+        //   [lawful 修订 t1111/r2081] 调色板方块段尾前移：炼药锅行自「段尾无逗号形」改「逗号行」
+        //   （t1111 砂岩楼梯行续尾追加为新尾行——t1107 史莱姆球材料段同门沿革注）；尾行钉改
+        //   SandstoneStairs。原 `int(BlockRegistry::Cauldron) }` 段尾形退役。
         const bool pres = hbCpp.contains(QLatin1String("int(BlockRegistry::JackOLantern),"))
-            && hbCpp.contains(QLatin1String("int(BlockRegistry::Cauldron) }"))
+            && hbCpp.contains(QLatin1String("int(BlockRegistry::Cauldron),"))
+            && hbCpp.contains(QLatin1String("int(BlockRegistry::SandstoneStairs) }"))
             && hbCpp.contains(QLatin1String("int(RecipeRegistry::PumpkinSeedsId),"))
             && hbCpp.contains(QLatin1String("int(RecipeRegistry::SlimeBallId)"))
             && hbCpp.contains(QStringLiteral("南瓜种子")) // 中文 needle 须 UTF-16（QLatin1String 装不下汉字恒失配）
