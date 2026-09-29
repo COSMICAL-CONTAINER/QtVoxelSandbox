@@ -1168,6 +1168,13 @@ add_executable(redstone_matrix_test
     #   结构钉族[源钉族——NEG 双摘面豁免不钉 + 罗盘芯/缩放克隆/不可堆叠/存档表负面钉]——新 include
     #   面 = mapstore（两目标补列）；recipe/hotbar/playercontroller 系均已列）。
     tools/matrix/section77_roster_map_t1114.cpp
+    # t1115 golden apple 完整链探针段(5 腿 r2085a-e,filter 词 r2085;苹果掉落柱[橡树叶 1/200 直调
+    #   大样本 + 族面幸存 + 云杉零苹果门 + 消亡路径负钉] + 苹果食物柱[食面单一权威 + 非可饮面 + 真链
+    #   进食 rig] + 金苹果食物柱[Regen I 30s 效果快照 + 2.5s 再生脉冲 + 创造门面] + 合成柱[8 金锭环
+    #   命中 + 四环孪生零污染 + 心片权威负例] + 结构钉族[源钉族——NEG 双摘面豁免不钉 + 无 Absorption/
+    #   无 kMc/无时长加成/战利品零苹果负面钉]——零新 include 面,recipe/hotbar/playercontroller/
+    #   playerstate 系均已列)。
+    tools/matrix/section78_golden_apple_t1115.cpp
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
     #   确定性等价承重墙[8 形态快照 worker ≡ 同步直调逐位恒等：顶点/索引/统计三面]/队列纪律
     #   [容量压小满载 kErrQueueFull 可见拒绝 + 拒绝项不入账 + 接受项恰一产出按 requestId 对账]/

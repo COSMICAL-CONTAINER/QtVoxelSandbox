@@ -33,6 +33,8 @@
 //     **8 金锭环+1 苹果**,hunger +4 / saturation 9.6 / **Regeneration I 30 秒**(Absorption 为 1.1+
 //     越纪元不取;d 腿负面钉面锁零在册)。d 腿四负面钉:GoldenAppleId 常量不存在 / 0x28F 段位空 /
 //     食面权威表尾行仍是瓜片(foodHungerAmount 无金苹果行)/ 合成表无金苹果行。
+//     [t1115 清偿留痕] 候选池三件已交付(AppleId=0x292 / GoldenAppleId=0x293,橡树叶 1/200 掉落 +
+//     食面 +4 + 金锭环合成;1.0 定值逐项落地,零降级)——d 腿负面钉 lawful 修订沿革见本文件 D3。
 //   ⑤ slime 出生错位修复(t1110 登记新发现):spawnSlime 显式档路径 = spawnMobCore 以缺省中档
 //     halfH=0.30 落位(pos.y=y+0.30)→ 槽位写回盒精化(大档 halfH=0.60)后不重落位 → 盒底=pos.y−
 //     halfH=y−0.30 **出生嵌坪 0.30 格**(伪着地沿:首拍 collision 顶起 settle 产生伪反弹沿——r2080b
@@ -407,22 +409,23 @@ void MatrixRun::section74_roster_low_t1111()
             << (ok ? QString() : diag);
     });
 
-    // ── r2081d:结构钉族 + 金苹果负面钉(NEG 双摘面全豁免 = 结构钉对照腿)────────────────────────
+    // ── r2081d:结构钉族 + 金苹果段位钉(NEG 双摘面全豁免 = 结构钉对照腿)────────────────────────
     //   id/段位钉(154/155/156/Count + 相邻族原值)+ kMc 三行 + def/谓词/合并/光照/音色/
     //   配方/图标/调色板/CMake 行源钉族(**NEG 豁免面不钉:stairs 合成行与 spawnSlime setY 行
-    //   不在本钉族**)+ 金苹果负面钉(常量名面三文件不存在/食面尾行仍瓜片/合成表无行——
-    //   [lawful 修订 t1112] 旧「0x28F 段位空」面随牛奶桶段尾占位退役, 沿革注在 D3)+
-    //   0x28E 蛋环原值。Count/图集钉值随 t1112 前移 160/209(本腿 enumOk 行沿革:157→160/207→209)。
-    runLeg("r2081d structure pin family with the golden apple absence pins (the three new"
+    //   不在本钉族**)+ 金苹果段位钉([lawful 修订 t1115/r2085] t1111 候选池清偿——旧「GoldenAppleId
+    //   三文件缺席」负面面随苹果/金苹果 0x292/0x293 段尾交付退役, 沿革注在 D3;1.0 不取面仍钉:
+    //   无 Absorption + 食面权威表瓜片行幸存)+ 0x28E 蛋环原值。Count/图集钉值随 t1112 前移
+    //   160/209(本腿 enumOk 行沿革:157→160/207→209)。
+    runLeg("r2081d structure pin family with the golden apple segment pins (the three new"
         " block ids answer one fifty four one fifty five and one fifty six with the count"
         " sentinel moved to one sixty by the later roster batch and the mc mapping answering"
         " minus one for the stairs and forty four for both slabs while the neighbouring"
         " cauldron sandstone cut sandstone slab ids and the villager egg at hex twenty"
         " eight E keep their values, the definition and predicate and merge and light and"
         " audio and recipe and icon and palette and cmake rows are pinned on file with the"
-        " two negative lesion faces exempt, and the golden apple stays absent with no id"
-        " constant no food table row and no recipe row while the melon slice food tail row"
-        " survives)", [&]() {
+        " two negative lesion faces exempt, and the golden apple rides the segment tail at"
+        " hex two nine two and two nine three since the later clearance batch with no"
+        " absorption symbol on file while the melon slice food row survives)", [&]() {
         bool ok = true;
         QString diag;
         const QString srcDir = srcRootForRosterPins();
@@ -506,18 +509,24 @@ void MatrixRun::section74_roster_low_t1111()
         if (!missCm.isEmpty())
             diag += QStringLiteral("[cm %1]").arg(missCm.join(QLatin1Char(',')));
 
-        // (D3) 金苹果负面钉(裁定登记候选池 = 零生产 delta 的如实锁面)。
+        // (D3) 金苹果段位钉([lawful 修订 t1115/r2085] t1111 候选池清偿 = 交付面的如实锁面)。
         //   [lawful 修订 t1112/r2082] 「0x28F 段位空」负面面退役——牛奶桶（MilkBucketId=0x28F）本单
-        //   段尾占位（蛋糕链原料；MaterialIcon.qml 0x28F case 在案），「no hex two eight F slot」面
-        //   自此收口（金苹果 id 常量缺席面仍全数在钉——GoldenAppleId 名面三文件负面钉不受扰）。
-        const bool noApple = !rawContainsRoster(srcDir + QStringLiteral("/Game/recipe.h"),
-                                                QStringLiteral("GoldenAppleId"))
-            && !rawContainsRoster(srcDir + QStringLiteral("/Game/recipe.cpp"),
-                                  QStringLiteral("GoldenAppleId"))
-            && !rawContainsRoster(srcDir + QStringLiteral("/Game/playercontroller.cpp"),
-                                  QStringLiteral("GoldenApple"));
-        ok = ok && noApple;
-        if (!noApple) diag += QStringLiteral("[noApple]");
+        //   段尾占位（蛋糕链原料；MaterialIcon.qml 0x28F case 在案）。
+        //   [lawful 修订 t1115/r2085] 「GoldenAppleId 三文件缺席」负面面退役——苹果/金苹果
+        //   （AppleId=0x292 / GoldenAppleId=0x293）t1115 段尾交付（橡树叶掉落/食面/金锭环合成三件，
+        //   见 section78_golden_apple_t1115.cpp），缺席钉自此收口改钉交付面：双 id 常量 decl
+        //   （recipe.h 段尾）+ Absorption 越纪元不取面仍钉（playerstate.h 零 Absorption 符号）。
+        const bool appleDelivered =
+            rawContainsRoster(srcDir + QStringLiteral("/Game/recipe.h"),
+                              QStringLiteral("static constexpr int AppleId       = 0x292;"))
+            && rawContainsRoster(srcDir + QStringLiteral("/Game/recipe.h"),
+                                 QStringLiteral("static constexpr int GoldenAppleId = 0x293;"));
+        ok = ok && appleDelivered;
+        if (!appleDelivered) diag += QStringLiteral("[appleDelivered]");
+        const bool noAbsorption = !rawContainsRoster(srcDir + QStringLiteral("/Game/playerstate.h"),
+                                                      QStringLiteral("Absorption"));
+        ok = ok && noAbsorption;
+        if (!noAbsorption) diag += QStringLiteral("[noAbsorption]");
         // 食面权威表尾行仍瓜片(食面未被金苹果行改写)+ 蛋环合成先例行在场(t1109 闪烁西瓜)。
         const QStringList missPc = pinSet(srcDir + QStringLiteral("/Game/playercontroller.cpp"), {
             SrcPin("food tail row", "if (itemId == RecipeRegistry::MelonSliceId)     return 2;", 1)});
@@ -531,7 +540,7 @@ void MatrixRun::section74_roster_low_t1111()
 
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-            << "| r2081d structure pin family with the golden apple absence pins (the three"
+            << "| r2081d structure pin family with the golden apple segment pins (the three"
                " new block ids answer one fifty four one fifty five and one fifty six with"
                " the count sentinel moved to one sixty by the later roster batch and the mc"
                " mapping answering minus one for the stairs and forty four for both slabs"
@@ -539,8 +548,9 @@ void MatrixRun::section74_roster_low_t1111()
                " villager egg at hex twenty eight E keep their values, the definition and"
                " predicate and merge and light and audio and recipe and icon and palette"
                " and cmake rows are pinned on file with the two negative lesion faces"
-               " exempt, and the golden apple stays absent with no id constant no food"
-               " table row and no recipe row while the melon slice food tail row survives)"
+               " exempt, and the golden apple rides the segment tail at hex two nine two and"
+               " two nine three since the later clearance batch with no absorption symbol"
+               " on file while the melon slice food row survives)"
             << (ok ? QString() : diag);
     });
 }
