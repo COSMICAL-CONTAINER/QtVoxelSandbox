@@ -68,7 +68,9 @@
 
 ## 名册审计缺口分级登记（t1110 件一产出——派工前逐一核实，分级排单）
 
-- **低件量批 → t1111 立项在飞 2026-09-29**：sandstone stairs（Beta 1.3）/stone slab（Alpha）/sandstone slab（Beta 1.3）/golden apple（1.0 在册 8 金锭环）+ slime 出生错位修复（t1110 登记新发现）
+- ~~低件量批~~（**t1111 闭环摘除 2026-09-29**——dbc8b82/aa5434c，矩阵 860→864；SandstoneStairs=154[**纪元重定代勘误**=1.2.1 越基线 kMc-1 既成登记族]+StoneSlab=155[Alpha kMc 44]+SandstoneSlab=156[Beta 1.3 kMc 44]+slime 出生错位修复[落位面单一权威化]；**golden apple 原料链断降级**[AppleId 工程显式无——1.0 定值留痕备后单]；两处派工勘误留痕[6 块阶梯形/纪元重定代]）
+- **golden apple 完整链**（t1111 降级登记——前置=苹果根缺口[apple worldgen/橡树叶掉落面]+金苹果 id/合成/食面三件；1.0 定值已实读留痕[8 金锭环+hunger+4/sat 9.6/Regen I 30s]）
+- **中件量批 → t1112 立项在飞 2026-09-29**：fence gate/glass pane/cake[连带挤奶交互面核实]/saddle 猪骑乘
 - **中件量**（后续单）：fence gate（Beta 1.8，开合门族同门）/glass pane（Beta 1.8，IronBars=142 多格拼接先例同门）/cake（Beta 1.5）/saddle 猪骑乘面（骑乘交互）
 - **大件**：sign 牌子（Alpha——方块+文字编辑 UI+存档文本三面）/map 地图（Beta 1.8——探索渲染+克隆放大 UI）
 - **parked**：巨型蘑菇（仅蘑菇岛生成——挂蘑菇岛维度门）
