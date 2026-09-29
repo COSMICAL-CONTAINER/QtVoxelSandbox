@@ -4549,7 +4549,18 @@ audit #5（docs/governance-audit-2026-09-12.md）：方向无问题，但 Review
 
 ### t1115（2026-09-29 立项[名册清偿批收尾——golden apple 完整链]，golden apple 完整链[苹果根缺口前置]；filter 词 r2085）
 
-→ **🚧 开工（2026-09-29，串行 voxel-dev）**：golden apple 完整链三件（t1111 降级登记清偿；1.0 定值已留痕[8 金锭环+1 苹果心+hunger+4/sat 9.6/Regen I 30s；Absorption 1.1+ 不取]）：**件一 apple 根物品**（材料段尾追加；食物面 hunger+4/sat 2.4 实读定夺；**获取面 = 橡树叶掉落**——1/200 口径实读定夺[破坏/消亡两路径实读留痕；工程橡树叶既有掉落面实读核实]）；**件二 golden apple 物品**（段尾追加+食物面+Regen I 30s 效果面——applyStatusEffect 再生族接线核实）；**件三 8 金锭环+1 苹果心合成**（多重集唯一性核实留痕）。NEG 双摘面（摘橡树叶苹果掉落行/摘金苹果 Regen 接线行）。腿 = 行为柱+结构钉，NEG 恰红。状态 = IN_PROGRESS。
+→ **✅ 落地（2026-09-30）：fix(t1115) 1b0eed4 + test(t1115) 94bf9f6 + 本 docs 提交；矩阵 876→881。三件零降级全交付（t1111 降级登记清偿）**：
+- **件一/件二 双 id**：AppleId=0x292 / GoldenAppleId=0x293 材料段尾追加（0x291 之上，存档契约）。三面裁定注：1.0 定值 hunger+4/sat 2.4|9.6（工程取饥饿口径——瓜片 t1103 同门）；金苹果 Regen I 30s = 独立常量 kGoldenAppleRegenDurationSec（与药水 45s 同管线不同时长，applyStatusEffect 再生族接线）；Absorption 1.1+ 不取（负面钉锁 PlayerState 零符号）；进食时长无加成（1.0 统一 1.6s，per-item 时长 1.9+ 负面钉）。**获取面 = 橡树叶破坏路径 1/200**（kLeafAppleDropDenom；leafId 门仅橡叶携带——云杉叶 1.0 无苹果面；消亡路径沿 t305 既录简化留痕+world.cpp 零 AppleId 负面钉）；地牢箱金苹果行不取（t484 既录+两处陈旧注释沿革修正零行为，候选池登记）。
+
+- **件三 合成**：8 金锭环+1 苹果心（Beta 1.2 金块环初版 → Beta 1.9 pre2 改 8 金锭+苹果 = 1.0.0 在册形态）。多重集 {GoldIngot:8, Apple:1} 全表唯一（熔炉 8 圆石缺心/地图 8 纸缺心/画作 8 棒+心毛/闪烁西瓜 8 金粒+心片——四环异料逐格 id 比对零冲突**零降级**，t1113 sign 先例不触发）；名面双行+调色板尾双行+MaterialIcon drawApple 参数化基座 drawRedApple/drawGoldenApple 双 case（§9a 原创）；kMc 不扩（越界 -1 自绘回退，近期材料段同门）。
+- **腿（section78_golden_apple_t1115.cpp 新段，r2085a-e）**：苹果掉落柱（6000 直调采样 λ=30 带 [1,90]+树苗/木棒族面幸存+云杉 600 采样恒零+消亡路径零 AppleId 负钉+常量值面）/ 苹果食物柱（食面单一权威+非可饮面+真链进食 rig 饥饿+4 精确/耗 1 件/foodBurped 恰一/potionDrunk 零+名面）/ 金苹果食物柱（真链进食+Regen I 快照[type/level 1/seconds 带 25-30]+healed 2.5s 首脉冲+创造门面[挂零不耗]）/ 合成柱（8 金锭环命中+2×2 负例+四环孪生零污染+心片权威负例）/ 结构钉族（值面+源钉+四负面钉——NEG 双摘面豁免）。
+- **验证链（#24 新纪律首单全程履行）**：-j1 全量构建零警告 → NEG-1 摘苹果 emit 行→恰红恰 {r2085a}（880/1）+ NEG-2 摘 applyStatusEffect 行→恰红恰 {r2085c}（880/1）双手工 Edit 还原、四件终名规范名直落无更名 → 全矩阵 pos/final 881/0 ×2 + 双 restore **实跑**产出——**六日志字节互异 cmp 实证 + 规范配方 md5 五方恒等 b10e05445a3794dee7d5ccf4e14a249f**（整文件 md5 与配方 md5 双轨申报；物理跑数 6 全跑如实）→ 冒烟 tail20（来源头注 build d470123+横幅+root objects）→ 相邻族复绿 r2084/r2083 各 4/4 + r2081d 修订面复绿。**首轮 filter 1F 过程注**：r2085e 枚举 verbatim 钉误放 playercontroller.h（StatusEffect 单点权威在 playerstate.h）移位后全绿——放错文件的钉非实现缺陷；finishEating 分支改花括号块壳（NEG 摘行后空块编译绿零语义残留）。
+- **主控验收（2026-09-30 亲核）**：diff 亲读（三面裁定注/多重集四环逐格比对/leafId 门/regen 分支花括号块壳/dropLeafDrops 公开化 scanHoppers 同门）；证据链亲核（**配方 md5 五方恒等亲算 + 六日志 cmp 字节互异抽核**——双轨 md5 口径 [整文件=字节互异证明 / 配方=腿集恒等证明] 双核对）；**主控独立脱离式复跑 881/0 同 md5 = 三方恒等**（matrix_orch_t1115_verify.log）。**待实机确认**：双苹果图标观感/橡树叶 0.5% 掉苹果体感（1.0 原值口径）/金苹果 Regen I 30s HUD 效果图标+2.5s 回血观感/创造进食无效果不消耗面/食 tab 归类（苹果留材料 tab 瓜片同门）。**下一任务 = t1116 名册后小缺口批（IronBars 缺图标补齐[先例存量]+蛋糕失撑自动破坏[压力板失撑钩子家族同门]+地牢箱金苹果行[t484 矿物族替代面解除]——三件皆既有登记候选，r2086）**。
+
+
+### t1116（2026-09-30 立项[池面真底后 §14-④ 重新盘点产出——名册后小缺口批]，IronBars 图标补齐 + 蛋糕失撑自动破坏 + 地牢箱金苹果行；filter 词 r2086）
+
+→ **🚧 开工（2026-09-30，串行 voxel-dev）**：三件小缺口（皆既有登记候选，盘点产出）：**件一 IronBars 缺图标补齐**（icon_iron_bars.png 缺失 = t1112 登记先例存量——调色板空图标观感缺口；build_cube_icons.py 族程序生成补齐）；**件二 蛋糕失撑自动破坏**（t1112 登记候选——失撑掉落钩子家族同门接线：checkSignSupportOnEdit/checkPaintingSupportOnEdit 同位挂 setBlock/setWaterSilent 写入口；蛋糕失撑 → 当场破块 + 零掉落[1.0 蛋糕破坏零掉落口径同门]）；**件三 地牢箱金苹果行**（t1115 登记候选——t484 矿物族替代面解除：mineshaftChestPool 增金苹果条目[1.0 地牢箱金苹果原值口径 web 实读定夺]；loottable.h 沿革注更新；loot 权重面 r2038 家族腿回归）。NEG 双摘面（摘图标注册行→恰红调色板钉腿；摘蛋糕失撑钩子挂点行→恰红失撑腿）。腿 = 行为柱+结构钉，NEG 恰红。状态 = IN_PROGRESS。
 
 ### t1109（2026-09-28 立项[§14 常设授权候选池——池面收官批]，残项小批合集三：完整瓜茎茎蔓原型 + 矿井野生瓜 patch + 沙漠村庄变体；filter 词 r2079）
 
