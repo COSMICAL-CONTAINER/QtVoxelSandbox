@@ -22,6 +22,7 @@
 #include "hopperstore.h"        // t1080 漏斗 per-block 5 槽容腔（机制 tick 读写 + 破块清孤儿掉内容）
 #include "furnacestore.h"       // t1080 漏斗挂接容器族（熔炉抽取只认 out / 推入按面定向 in/fuel）
 #include "brewingstore.h"       // t1097 酿造台 per-block 5 槽（机制 tick 读写 + 破块清孤儿掉内容）
+#include "mapstore.h"           // t1114 map 数据集（激活建库 + 探索写入 + 显示面图像源；Q_PROPERTY(MapStore*) 需完整定义）
 #include "entitymanager.h"      // 统一实体管理器（t95 测试生物 / 玩家推动）
 #include "hotbar.h"             // Hotbar VM（t36 拾取 addStack / 丢弃 takeStack）
 #include "itementitymanager.h"  // 掉落实体管理器（t36 拾取扫描 / removeAt）
@@ -108,6 +109,8 @@ class PlayerController : public QQuickItem
     //   null 防御：酿造机制整体跳过（方块仍在、酿造静默——同 hopperStore null 降级口径）。
     //   分层：BrewingStore 属 Game/ViewModel 纯存储，PlayerController 同层直调，无向上依赖。
     Q_PROPERTY(BrewingStore *brewingStore READ brewingStore WRITE setBrewingStore NOTIFY brewingStoreChanged)
+    // t1114 map 数据集注入面（同 brewingStore 模式）：激活建库 + 探索 tick 周界写入 + 显示面图像源。
+    Q_PROPERTY(MapStore *mapStore READ mapStore WRITE setMapStore NOTIFY mapStoreChanged)
     Q_PROPERTY(QVector3D position READ position NOTIFY positionChanged) // 眼睛位置（相机绑它）
     Q_PROPERTY(float yaw READ yaw NOTIFY yawChanged)
     Q_PROPERTY(float pitch READ pitch NOTIFY pitchChanged)
@@ -370,11 +373,25 @@ public:
     // t1097 酿造存储注入面（同 hopperStore 模式）：getter / setter + brewingStoreChanged 信号。
     BrewingStore *brewingStore() const { return m_brewingStore; }
     void setBrewingStore(BrewingStore *s);
+    // t1114 map 数据集注入面（同 brewingStore 模式）：getter / setter + mapStoreChanged 信号。
+    MapStore *mapStore() const { return m_mapStore; }
+    void setMapStore(MapStore *s);
     // t1097 酿造机制 tick（scanHoppers / tickJukeboxes 机关扫描族同门；C++ 直调）：每帧按 dt 推进每台
     //   酿造台进度（原料合格判定 + 燃烬粉燃料计量 + 瓶原位转换 + state 亮标跨 0 边界写）。public 暴露 =
     //   scanHoppers 同门（矩阵探针直调等价驱动；UI 面只读 store 不推进——t177 三轮「tick 直读 store」
     //   教训的 C++ 侧终局形态）。
     void scanBrewingStands(float dt);
+    // t1114 map 探索 tick（tickJukeboxes 机关扫描族同门；C++ 直调）：持填充地图时按 kMapExploreIntervalSec
+    //   相位对玩家周界做列扫描写 MapStore（随走随更新 + 按探索度绘制面；NEG-1 摘面 = 本方法在
+    //   tickImpl 的调用行，摘行 → 探索填充腿 r2084b 恰红）。public = scanBrewingStands 同门（矩阵
+    //   探针直调等价驱动）。数据集缺失 → 惰性建库（重探索再填充面，MapStore 头注存档口径）。
+    void tickMapExploration(float dt);
+    // t1114 玩家周界列扫描写入（激活首绘 / 探索 tick 共用体）：以脚底列为中心 2R+1 方形盒逐列算顶面
+    //   色写 MapStore（越界列跳过）+ 一批一次 commitColumns。
+    void refreshMapAroundPlayer(int radius);
+    // t1114 单列地图顶面色（地形顶块定族色 + 群系 tint + 高度明暗；§9 原创色板零 MC 资产——自然色
+    //   词，色值工程自定）。要求 m_world 非空。
+    quint32 mapColumnColor(int x, int z);
     // t1080 漏斗机制 tick（scanDispenserTraps 机关扫描族同门；C++ 直调）：每帧按 dt 推进每漏斗冷却，
     //   冷却到点跑一轮「输出 → 抽取 → 收集」；红石锁停（isReceivingPower）本轮全停。public 暴露 =
     //   scanDispenserTraps review24 #9 先例（矩阵探针直调等价递减驱动——探针无 16ms 定时器，须直调推进）。
@@ -637,6 +654,12 @@ public:
     static constexpr float kSplashTickFloorSec  = 0.05f; // 喷溅时长 +1 tick 底数（MC 1.0 int(d×d1)+1 秒化）
     // t1100 效果粒子发射周期（机制等价 MC 药水旋涡粒子近似节奏；简化口径登记见 tickImpl 发射点注释）。
     static constexpr float kEffectParticleIntervalSec = 0.5f;
+    // t1114 map 探索节奏（1.0 口径实读留痕：vanilla 地图数据每 ~5 game tick（~0.25s）对持图玩家周界
+    //   做一次列扫描（探索面推进节拍）——工程取 0.5s 相位（kEffectParticleIntervalSec / 漏斗 0.4s 同
+    //   量级），随走随更新面读感一致；派工勘误裁定面见 recipe.h EmptyMapId 行）：
+    static constexpr float kMapExploreIntervalSec = 0.5f; // 探索扫描相位（秒）
+    static constexpr int   kMapExploreRadius      = 16;   // 探索扫描半径（列盒半宽；1bpp 单缩放面）
+    static constexpr int   kMapInitialRadius      = 24;   // 激活首绘半径（「即刻绘制中心区域」面）
     // 中键拾取方块（t37 pick block）：取当前射线命中格的方块 id → 装入 hotbar。仅指针捕获时生效
     // （与破/放同窗口级 MouseButtonPress 路径）。
     // spec：「无论背包开关」—— captured=true 蕴含背包已关，故等价于「游戏内中键」；命中空气 / 无
@@ -824,6 +847,7 @@ signals:
     void hopperStoreChanged();     // t1080 漏斗内容存储注入变更
     void furnaceStoreChanged();    // t1080 熔炉内容存储注入变更
     void brewingStoreChanged();    // t1097 酿造内容存储注入变更
+    void mapStoreChanged();        // t1114 map 数据集注入变更
     void positionChanged();
     // t567 出生点 / 重生点变更（睡床设床位后 emit；初值 kSpawn 常量 → 启动不发）。HUD 指南针据此重算指针。
     void spawnPointChanged();
@@ -1577,6 +1601,8 @@ private:
     HopperStore *m_hopperStore = nullptr;         // t1080 漏斗 per-block 5 槽容腔（机制 tick 读写 + 破块清孤儿，Q_PROPERTY 绑定）
     FurnaceStore *m_furnaceStore = nullptr;       // t1080 漏斗挂接容器族（熔炉抽取/推入，Q_PROPERTY 绑定）
     BrewingStore *m_brewingStore = nullptr;       // t1097 酿造台 per-block 5 槽（机制 tick 读写 + 破块清孤儿，Q_PROPERTY 绑定）
+    MapStore *m_mapStore = nullptr;               // t1114 map 数据集（激活建库 + 探索写入，Q_PROPERTY 绑定）
+    float m_mapExploreTimer = 0.0f;               // t1114 距下次地图探索扫描的 dt 累积（kMapExploreIntervalSec 相位）
     // t1083 唱片机播放状态机表（运行期，不进存档——存档只保「盘在机+盘号」state 位）：坐标键
     //   （x/z 21 位偏移打包 + y 10 位，同 m_dispenserCooldowns 编码）→ 剩余音轨秒数。写入点 =
     //   useBlock 放入 / 续播沿；消亡点 = tickJukeboxes 到期吐盘 / useBlock 吐盘 / finishMiningAt

@@ -18,6 +18,8 @@
 
 #include "frameprofiler.h"
 #include "resourcepackmanager.h"
+// t1114 map 图像 provider 依赖（Game 层数据集；QtQuick 依赖留此 app 胶水层——MapStore 本体零 QtQuick）。
+#include "mapstore.h"
 // t813 构建版本戳（Core 叶子）：启动日志自报家门 —— 每份 logs/voxelsandbox.log 首段即可
 //   核对「该日志由哪个构建产出」，与主菜单角落 / F3 显示同源（BuildInfo 单一权威出口）。
 #include "buildinfo.h"
@@ -34,6 +36,27 @@ public:
         Q_UNUSED(id);
         Q_UNUSED(requestedSize);
         QImage img = ResourcePackManager::compositeAtlas();
+        if (size)
+            *size = img.size();
+        return img;
+    }
+};
+
+// t1114 map 图像 provider（image://mapstore/<rev>）：把 MapStore 会话地图数据集导出 QImage 给 Main.qml
+//   手持地图 overlay 的 Image（QtQuick Image 支持 image:// —— t414 rp provider 同门胶水；QtQuick 依赖
+//   留此 app 胶水层，Game 层 MapStore 只出 QImage 不沾 QtQuick）。id 携 MapStore::revision——revision
+//   变更即换 URL → QML 源缓存自动失效重取（探索 tick 一批一 bump，重取节奏 ≈ 2Hz 上限，开销可忽略）。
+//   MapStore 实例生于 QML 装配期、provider 建于 engine 装配期（更早）——以 MapStore::active() 静态
+//   指针桥接两生命周期（构造注册 / 析构注销；未装配 → 空图兜底）。
+class MapAtlasProvider : public QQuickImageProvider
+{
+public:
+    MapAtlasProvider() : QQuickImageProvider(QQuickImageProvider::Image) {}
+    QImage requestImage(const QString &id, QSize *size, const QSize &requestedSize) override
+    {
+        Q_UNUSED(id);
+        Q_UNUSED(requestedSize);
+        const QImage img = MapStore::active() ? MapStore::active()->renderImage() : QImage();
         if (size)
             *size = img.size();
         return img;
@@ -116,6 +139,9 @@ int main(int argc, char *argv[])
     // t414：注册资源包图集 image provider（image://rp/atlas）。必须在 loadFromModule 之前注册，
     //   供 Main.qml 的 terrain Texture（voxelAtlas）按需拉取合成图集。engine 接管 provider 生命周期。
     engine.addImageProvider(QStringLiteral("rp"), new ResourcePackAtlasProvider);
+    // t1114 map 图像 provider（image://mapstore/<rev>）：手持地图 overlay 纹理源（必须在 loadFromModule
+    //   之前注册；engine 接管 provider 生命周期）。id 携 revision 失效键（见 MapAtlasProvider 头注）。
+    engine.addImageProvider(QStringLiteral("mapstore"), new MapAtlasProvider);
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed,
                      &app, []() { qCritical("QML objectCreationFailed"); QCoreApplication::exit(-1); },
                      Qt::QueuedConnection);
