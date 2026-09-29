@@ -635,8 +635,8 @@ void MatrixRun::section72_t1109_closeout()
         if (!anchors) diag += QStringLiteral("[anchors]");
 
         // (D3) 相邻族零污染(值面)。
-        const bool neighOk = int(BR::Count) == 160 // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1112 曾 157→160（栅栏门/玻璃板/蛋糕尾部追加）
-            && int(BR::AtlasTileCount) == 209
+        const bool neighOk = int(BR::Count) == 162 // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1112 曾 157→160（栅栏门/玻璃板/蛋糕尾部追加）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
+            && int(BR::AtlasTileCount) == 210 // t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
             && int(BR::Melon) == 149
             && int(BR::MelonStem) == 150
             && int(BR::PumpkinStem) == 151

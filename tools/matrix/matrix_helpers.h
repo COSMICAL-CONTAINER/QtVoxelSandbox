@@ -70,6 +70,7 @@
 #include "billboarddropinstancing.h" // t1041 批 4 探针（billboard 图标族双池 / 朝相机旋转 / 空转门）
 #include "dispenserstore.h"       // t814 发射器/投掷器 per-block 库存（分派 + 扣减断言源）
 #include "cheststore.h"           // t1013 箱子矿车内容键存储（转正 / 回生 / 掉落链断言源）
+#include "signstore.h"            // t1113 牌子文本存储（写读回 / 截断 / round-trip 探针源）
 #include "loottable.h"            // t1035 豹猫驯服分化探针（fishingPool 直调：生鱼=驯服道具来源钉）
 #include "mobmodel.h"             // review24 低危收尾（#35）：Renderer 白名单长度 ↔ Entities MobType 上界互钉
                                    //   （Renderer 在 Entities 之下，mobmodel.cpp 不得 include entitymanager.h——
@@ -685,4 +686,13 @@ private:
                               //   互斥 + 鞍死不掉负面钉(1.4.2+ 纪元) + id/段位/kMc/def/谓词/合成/图标/
                               //   调色板/CMake 源钉族——NEG 双摘面豁免不钉]。fresh 48×48×96 s82，
                               //   rig 世界零接触，接 section74）
+    void section76_roster_sign_t1113(); // t1113 名册大件批首单探针段（置尾先例沿用：r2083a 站牌柱
+                              //   [6 板 2×3 合成命中 + 木门形状孪生零污染 + def 逐字段 + 零碰撞/列顶
+                              //   + 板面盒双朝向 + 放置真链(horizontalFacing^1 + signPlaced) + 底面
+                              //   悬空拒放]，r2083b 挂墙牌柱[def + 贴墙满宽板面盒双朝向 + 真链侧面
+                              //   放置 + 失撑脱落 + 非完整立方拒放 + 相邻族零污染]，r2083c 文本链柱
+                              //   [SignStore 写读回/截断/全空清条目/双牌独立/round-trip + 放置→录入
+                              //   →读回真链 + Main.qml 接线 raw 钉(NEG-1 摘面行本腿持有)]，r2083d
+                              //   结构钉族[值面 + 源钉族——NEG 双摘面豁免不钉 + 无再编辑/16 向不取
+                              //   负面钉]。fresh 48×48×96 s83，rig 世界零接触，接 section75）
 };
