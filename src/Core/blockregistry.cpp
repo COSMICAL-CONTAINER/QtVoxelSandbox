@@ -819,6 +819,14 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   口径空手可采且掉落）；dropId=自身（破坏掉锅 + 水随方块消失）；贴图六面=206 锅壁（内水面复用
     //   静水 tile 19，渲染层选择非 def 字段）；音色 GroupStone（铸铁锅体）；进创造调色板。
     /* cauldron            */ {int(BlockRegistry::Cauldron),            206,206,206,206, false, BlockRegistry::ShapeFull,     2.0f, int(BlockRegistry::Pickaxe), 0, false, int(BlockRegistry::Cauldron), 1, 64, "cauldron",      "炼药锅"},
+    // ── t1111 名册低件量批三件（表尾追加；属性注释见 blockregistry.h Id 枚举 SandstoneStairs /
+    //   StoneSlab / SandstoneSlab 行）。贴图全复用既有族 tile：砂岩两件 topTile=52 sandstone_top /
+    //   侧·底·前=53 sandstone_side（Sandstone 本块面排布同源——异形半方块 mesher 经 tileIndex
+    //   per-face 取 tile，与 StoneBrickSlab 复用 128 同门）+ 石台阶六面=3 stone（Stone 本块）。
+    //   **零新 tile**（AtlasTileCount 207 不动；computeMaxTile 静态守卫自然过）。
+    /* sandstone_stairs    */ {int(BlockRegistry::SandstoneStairs),     52, 53, 53, 53, false, BlockRegistry::ShapeStairs,   0.8f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::SandstoneStairs),1, 64, "sandstone_stairs", "砂岩楼梯"},
+    /* stone_slab          */ {int(BlockRegistry::StoneSlab),           3,  3,  3,  3, false, BlockRegistry::ShapeSlab,     1.5f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::StoneSlab),      1, 64, "stone_slab",    "石台阶"},
+    /* sandstone_slab      */ {int(BlockRegistry::SandstoneSlab),       52, 53, 53, 53, false, BlockRegistry::ShapeSlab,     0.8f, int(BlockRegistry::Pickaxe), 1, true,  int(BlockRegistry::SandstoneSlab),  1, 64, "sandstone_slab", "砂岩台阶"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -1045,6 +1053,14 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* pumpkin_stem            */ 104,
     /* jack_o_lantern          */ 91,
     /* cauldron                */ 118,
+    // t1111 名册低件量批三行（表尾追加；机制等价 MC 1.0 对齐口径）：砂岩楼梯 → **-1**（12w21a /
+    //   Java 1.2.1 入版，越 1.0 基线——同 anvil=-1 / cut_sandstone 越纪元登记先例，资源包回退引擎
+    //   自绘）/ 石台阶 → 44（1.0 stone slab id 44 metadata 0——Alpha 入版 = 1.0 基线内；CobbleSlab
+    //   同取 44 的「统一取 slab id」先例）/ 砂岩台阶 → 44（1.0 slab id 44 metadata 1 = 砂岩——
+    //   Beta 1.3 入版 = 1.0 基线内，同取 slab id）。本行追加后全表行数与 Count 157 一致（t691 教训）。
+    /* sandstone_stairs        */ -1,
+    /* stone_slab              */ 44,
+    /* sandstone_slab          */ 44,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -1113,14 +1129,16 @@ bool BlockRegistry::isPartialBlock(quint8 blockId)
     if (blockId == IronDoor) return true; // t722 段外铁门（与 WoodDoor 同几何：ShapeDoor 满高薄板 + state 开合朝向）
     if (blockId == IronTrapdoor) return true; // t723 段外铁活板门（与 WoodTrapdoor 同几何：ShapeTrapdoor 水平/竖直薄板）
     if (blockId == StoneBrickSlab || blockId == StoneBrickStairs) return true; // t487 段外石砖台阶/楼梯（与 WoodSlab/WoodStairs 同几何）
+    if (blockId == SandstoneStairs) return true; // t1111 段外砂岩楼梯（ShapeStairs 同门；StoneBrickStairs 先例）
+    if (blockId == StoneSlab || blockId == SandstoneSlab) return true; // t1111 段外石/砂岩台阶（ShapeSlab 同门；StoneBrickSlab 先例）
     if (blockId == IronBars) return true; // t998 段外铁栏杆（薄杆异形：ShapeIronBars 细柱 + 运行期连接横板，同 CobbleFence 段外并入模式）
     if (blockId == Lever || blockId == WoodButton || blockId == StoneButton) return true; // t490 段外手动点火机关（t662 几何重做：贴附着面小钮 / 底座+棍，mechBoxes 单一几何源）
     if (blockId == StonePressurePlate || blockId == IronPressurePlate
         || blockId == GoldPressurePlate) return true; // t627 段外压力板家族扩展（与 WoodPressurePlate 同几何：贴地薄板）
     return blockId >= FirstPartial && blockId <= LastPartial;
 }
-bool BlockRegistry::isSlab(quint8 blockId)           { return blockId == WoodSlab || blockId == CobbleSlab || blockId == SpruceSlab || blockId == StoneBrickSlab; }
-bool BlockRegistry::isStairs(quint8 blockId)         { return blockId == WoodStairs || blockId == CobbleStairs || blockId == StoneBrickStairs; }
+bool BlockRegistry::isSlab(quint8 blockId)           { return blockId == WoodSlab || blockId == CobbleSlab || blockId == SpruceSlab || blockId == StoneBrickSlab || blockId == StoneSlab || blockId == SandstoneSlab; }
+bool BlockRegistry::isStairs(quint8 blockId)         { return blockId == WoodStairs || blockId == CobbleStairs || blockId == StoneBrickStairs || blockId == SandstoneStairs; }
 bool BlockRegistry::isFence(quint8 blockId)          { return blockId == WoodFence || blockId == CobbleFence || blockId == SpruceFence; }
 // t627 扩展：压力板族五件（wood/cobble/stone/iron/gold——后三件为 t627 家族扩展）。放置放宽 / 失撑掉落 /
 //   mesher plate case / 触发扫描统一读本谓词。
@@ -1253,6 +1271,8 @@ quint8 BlockRegistry::slabFullBlock(quint8 slabId)
     if (slabId == CobbleSlab)     return Cobble;
     if (slabId == SpruceSlab)     return SprucePlanks;
     if (slabId == StoneBrickSlab) return StoneBrick; // t487 石砖双半砖合并 → 石砖满格
+    if (slabId == StoneSlab)      return Stone;      // t1111 石双半砖合并 → 石满格（StoneBrick 同门）
+    if (slabId == SandstoneSlab)  return Sandstone;  // t1111 砂岩双半砖合并 → 砂岩满格（同门）
     return Air;
 }
 quint8 BlockRegistry::fullBlockSlabDrop(quint8 fullId)
@@ -1261,6 +1281,8 @@ quint8 BlockRegistry::fullBlockSlabDrop(quint8 fullId)
     if (fullId == Cobble)           return CobbleSlab;
     if (fullId == SprucePlanks)     return SpruceSlab;
     if (fullId == StoneBrick)       return StoneBrickSlab; // t487 石砖满格双砖源 → 破块掉 2 石砖台阶
+    if (fullId == Stone)            return StoneSlab;      // t1111 石满格双砖源 → 破块掉 2 石台阶（同门）
+    if (fullId == Sandstone)        return SandstoneSlab;  // t1111 砂岩满格双砖源 → 破块掉 2 砂岩台阶（同门）
     return 0;
 }
 
@@ -2168,6 +2190,8 @@ quint8 BlockRegistry::lightOpacity(quint8 blockId, quint8 state)
     case CobbleSlab:   return 7;                      // t412 圆石台阶半遮光（同 WoodSlab，半高占空比 0.5）
     case SpruceSlab:   return 7;                      // t466 云杉台阶半遮光（同 WoodSlab/CobbleSlab，半高占空比 0.5）
     case StoneBrickSlab: return 7;                    // t487 石砖台阶半遮光（同 WoodSlab/CobbleSlab/SpruceSlab，半高占空比 0.5）
+    case StoneSlab:      return 7;                    // t1111 石台阶半遮光（同全族半高占空比 0.5）
+    case SandstoneSlab:  return 7;                    // t1111 砂岩台阶半遮光（同族；砂岩楼梯走 default 全透同 stairs 族口径）
     case Farmland:     return 15;                     // t408 耕地 solid=false（矮盒渲染）但仍是 opaque 土块 → 满遮光
     case Cactus:       return 0;                      // t985 翻案（修仙人掌底接触阴影）：旧 t445「0.8 细柱仍是 opaque 实体植物 →
                                                        //   满遮 15」令天光种子列在仙人掌格截断 + BFS 进入衰减 max(1,15)=15 → 仙人掌格
@@ -3004,6 +3028,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Dropper: // t609 投掷器 → 石质音色（石质机关盒，同发射器 / furnace 族）
     case StoneBrick: // t487 石砖 → 石质音色（石质整立方，同 stone 族）
     case StoneBrickSlab: case StoneBrickStairs: // t487 石砖台阶/楼梯 → 石质音色（同 stone 族）
+    case SandstoneStairs: case StoneSlab: case SandstoneSlab: // t1111 砂岩楼梯/石·砂岩台阶 → 石质音色（砂岩同 Sandstone/CutSandstone 族；石同 Stone 族）
     case MossyStoneBrick: case CrackedStoneBrick: // t998 石砖变体 → 石质音色（同 stone brick 族，风化 / 开裂不改材质）
     case AbyssGate: // t487 暗渊门框架 → 石质兜底音色（不可破，仅创造敲响兜底）
     case AbyssGateSurface: // t664 门面 → 石质兜底音色（瞬破薄平面轻响）

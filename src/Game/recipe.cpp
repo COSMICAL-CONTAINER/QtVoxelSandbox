@@ -1084,6 +1084,33 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         int(BlockRegistry::StoneBrick), int(BlockRegistry::StoneBrick), 0,
         int(BlockRegistry::StoneBrick), int(BlockRegistry::StoneBrick), int(BlockRegistry::StoneBrick) },
       int(BlockRegistry::StoneBrickStairs), 4, 1, "stone_brick_stairs" },
+    // ── t1111 名册低件量批三行（复用同门配方形状；原料各异 → 多重集互不冲突）。
+    //   sandstone_stairs：6 砂岩阶梯（顶一 / 中两 / 底三）→ 4 砂岩楼梯（有序 3×3，仅工作台）。
+    //     **派工勘误留痕**：派工稿「4 砂岩 2×2」经现场核实不可行——{Sandstone:4} 2×2 多重集已被
+    //     cut_sandstone 行（4 砂岩方阵 → 4 切制砂岩）占用，同形同料必先命中切制行（楼梯永不可合）；
+    //     且楼梯族三先例（wood/cobble/stone_brick stairs）与 MC 原版（1.2.1 12w21a 同 6 块阶梯式）
+    //     一律 6 块阶梯形 → 按族惯例落 6 块阶梯行（勘误如实登记，非自创口径）。
+    //     多重集 {Sandstone:6} 唯一 → 不冲突。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Sandstone), 0,                      0,
+        int(BlockRegistry::Sandstone), int(BlockRegistry::Sandstone), 0,
+        int(BlockRegistry::Sandstone), int(BlockRegistry::Sandstone), int(BlockRegistry::Sandstone) },
+      int(BlockRegistry::SandstoneStairs), 4, 1, "sandstone_stairs" },
+    //   stone_slab：3 石头横排 → 6 石台阶（有序 3×3，仅工作台；最小包围盒 3×1）。复用半砖族配方形状
+    //     （机制等价 MC 1.0 stone slab：3 smooth stone → 6；石头经圆石熔炼产出 smelting 在案 → 生存链
+    //     闭环）。多重集 {Stone:3} 唯一（石按钮 {石:1} / 石压力板 {石:2} / 石砖 {石:4}）→ 不冲突。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Stone), int(BlockRegistry::Stone), int(BlockRegistry::Stone),
+        0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::StoneSlab), 6, 1, "stone_slab" },
+    //   sandstone_slab：3 砂岩横排 → 6 砂岩台阶（有序 3×3，仅工作台；最小包围盒 3×1）。机制等价
+    //     MC 1.0 slab id 44 metadata 1（Beta 1.3 起 3 砂岩 → 3 台阶，本工程取族惯例产 6——与石/圆石/
+    //     云杉/石砖台阶产率统一，登记简化）。多重集 {Sandstone:3} 唯一（切制砂岩 {Sandstone:4}）→
+    //     不冲突。
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Sandstone), int(BlockRegistry::Sandstone), int(BlockRegistry::Sandstone),
+        0, 0, 0, 0, 0, 0 },
+      int(BlockRegistry::SandstoneSlab), 6, 1, "sandstone_slab" },
     // dispenser：7 圆石 + 中心 1 弓 + 底中 1 红石 → 1 发射器（有序 3×3，仅工作台）。机制等价 MC 1.0
     //   dispenser（7 cobble + bow + redstone；顶行圆石 / 中行 圆-弓-圆 / 底行 圆-红石-圆）。审计发现
     //   机关族不对称：投掷器（t626）可合成而发射器漏注册。弓为工具段物品（可入合成格，MC 语义发射器
@@ -1447,6 +1474,11 @@ static_assert(RecipeRegistry::SpawnEggSlimeId    == 0x28D, "SpawnEggSlimeId 须�
 static_assert(RecipeRegistry::SpawnEggVillagerId == 0x28E, "SpawnEggVillagerId 须为材料段 0x28E（史莱姆蛋 0x28D 之上段尾追加，t1107）");
 static_assert(int(BlockRegistry::PumpkinStem)  == 151, "PumpkinStem 方块 id 须为 151（南瓜种子种植产物 + dropId 0x28B 兜底契约）；t1105");
 static_assert(int(BlockRegistry::JackOLantern) == 152, "JackOLantern 方块 id 须为 152（南瓜+火把无序合成行产物锚）；t1105");
+// t1111 名册低件量批三件方块 id 编译期互钉（合成行产物锚；段尾追加不插中间）：砂岩楼梯 154 /
+//   石台阶 155 / 砂岩台阶 156（合成行与双半砖合并映射两端同源，重排忘了同步 → 编译失败）。
+static_assert(int(BlockRegistry::SandstoneStairs) == 154, "SandstoneStairs 方块 id 须为 154（砂岩楼梯合成行产物锚；段尾追加，t1111）");
+static_assert(int(BlockRegistry::StoneSlab)       == 155, "StoneSlab 方块 id 须为 155（石台阶合成行 + 双半砖合并映射两端锚；段尾追加，t1111）");
+static_assert(int(BlockRegistry::SandstoneSlab)   == 156, "SandstoneSlab 方块 id 须为 156（砂岩台阶合成行 + 双半砖合并映射两端锚；段尾追加，t1111）");
 // 编译期互钉：金锭 0x21F ↔ 金粒 0x288 双向合成（t1103 双向行）+ 瓜块方块段 Melon=149 行在。
 static_assert(RecipeRegistry::GoldIngotId == 0x21F, "GoldIngotId 须为 0x21F（金粒双向行两端的锚）");
 static_assert(int(BlockRegistry::Melon) == 149, "Melon 方块 id 须为 149（瓜块存储行产物 + 生长结果面）；t1103");

@@ -1306,6 +1306,13 @@ void EntityManager::spawnPassiveMob(int x, int y, int z, int mobType)
 // t1107 史莱姆生成入口（见头文件注释）：spawnMobTyped(MobSlime) 生成（spawnMobCore 缺省中档 + 血量=
 //   档）→ 槽位写回显式尺寸档 + 盒精化（size ∈ {1,2,4}，非法值防御回退中档——同 spawnHostileMob 回退
 //   Shambler 模式）。返槽索引；达 kCap → -1（spawnMobTyped 内静默）。
+//   **t1111 出生错位修复**（t1110 登记新发现）：spawnMobCore 落位时读的是缺省中档 halfH=0.30（pos.y
+//   = y+0.30），槽位写回把盒精化到显式档（大档 halfH=0.60）后若不重落位，盒底 = pos.y − halfH =
+//   y−0.30 → **出生嵌坪 0.30 格**（伪着地沿：首拍 collision 顶起 settle 产生伪反弹/伪着地信号）。
+//   修法 = 盒精化**后**按精化盒重置 pos.y（落位面单一权威化：spawnMobCore「pos.y 读 e.halfH 贴地」
+//   同一式在槽位写回端复走一遍——大档 y+0.60 / 中档 y+0.30（与修复前恒等）/ 小档 y+0.15）。兼容面
+//   核实：r2077a 血量=档 + 盒=档契约腿不读 pos.y（修复零触达）；r2080b 冻结空投首落沿腿以**空中
+//   出生**（y=83 上空）避开嵌地——修复只改贴地出生位（83 上空恒在空中），场景不变已实测回归绿。
 int EntityManager::spawnSlime(int x, int y, int z, int size)
 {
     const int slot = spawnMobTyped(x, y, z, MobSlime, QStringLiteral("#5fa83a"), 0);
@@ -1313,6 +1320,8 @@ int EntityManager::spawnSlime(int x, int y, int z, int size)
     Entity &e = m_entities[size_t(slot)];
     e.slimeSize = (size == 1 || size == 2 || size == 4) ? size : kSlimeDefaultSpawnSize;
     applySlimeSizeBox(e);     // 盒随档精化（spawnMobCore 落的是缺省中档盒）
+    e.pos.setY(float(y) + e.halfH); // t1111 落位面单一权威：盒精化后重置贴地位（pos.y 读精化后 halfH
+                                    //   ——修复出生嵌坪伪着地沿；中档与修复前值恒等，大/小档贴地不嵌坪）
     e.maxHealth = e.slimeSize; // 血量=尺寸档（spawnMobCore 缺省中档血量 → 显式档覆盖）
     e.health = e.maxHealth;
     qCInfo(lcEnt) << "spawned slime size" << e.slimeSize << "at" << x << y << z;

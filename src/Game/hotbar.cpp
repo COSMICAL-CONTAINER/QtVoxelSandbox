@@ -70,6 +70,12 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::MonsterEgg:       return "icon_stone_brick.png";       // t665 怪物蛋：外表与石砖完全相同（复用石砖图标；瞬破出虫）
     case BlockRegistry::StoneBrickSlab:   return "icon_stone_brick_slab.png";  // 石砖台阶：3D 半高盒（砖纹）
     case BlockRegistry::StoneBrickStairs: return "icon_stone_brick_stairs.png";// 石砖楼梯：3D L 阶（背墙 + 整步，砖纹）
+    // t1111 名册低件量批半方块图标（build_cube_icons.py PARTIALS_3D_T1111 程序生成；slab/stairs
+    //   形状投影，机制等价石砖变体流程）：石台阶（石纹半高盒）/ 砂岩台阶（半高盒顶=压实沙面
+    //   侧=层理带）/ 砂岩楼梯（L 阶砂岩双面）。
+    case BlockRegistry::StoneSlab:        return "icon_stone_slab.png";        // 石台阶：3D 半高盒（石纹）
+    case BlockRegistry::SandstoneSlab:    return "icon_sandstone_slab.png";    // 砂岩台阶：3D 半高盒（砂岩面排布）
+    case BlockRegistry::SandstoneStairs:  return "icon_sandstone_stairs.png";  // 砂岩楼梯：3D L 阶（砂岩面排布）
     case BlockRegistry::Cactus:        return "icon_cactus.png";         // t394 仙人掌立方体图标（顶=绿截面环纹 / 侧=棱脊+刺点）
     case BlockRegistry::SnowLayer:    return "icon_snow_layer.png";    // t395 积雪层立方体图标（各面=冷白冰晶噪点）
     case BlockRegistry::SpruceLog:    return "icon_spruce_log.png";    // t395 云杉原木立方体图标（顶=年轮截面 / 侧=深棕树皮）
@@ -1058,7 +1064,13 @@ QVariantList Hotbar::creativeBlocks() const
              //   的整立方光源（lightEmission 15，刻脸放置朝玩家）；炼药锅 = 瓶取水/桶灌水的异形容水方块
              //   （外壁环渲染，state 低 2 位水位）。两件均整格可放置 / 空手可采。
              int(BlockRegistry::JackOLantern),                               // 南瓜灯（南瓜+火把合成；光 15 光源）
-             int(BlockRegistry::Cauldron) };                                 // 炼药锅（瓶取水 -1 级/桶灌满 3 级）
+             int(BlockRegistry::Cauldron),                                   // 炼药锅（瓶取水 -1 级/桶灌满 3 级）
+             // t1111 名册低件量批三件（表尾追加不插中间——t1105 三件连续性零触碰）：石/砂岩台阶
+             //   紧随石砖台阶族语义（半砖族同门），砂岩楼梯紧随石砖楼梯（楼梯族同门）；两岩两石
+             //   归方块 tab（非红石机关件）。
+             int(BlockRegistry::StoneSlab),                                  // 石台阶（半高；3 石合成；可放置）
+             int(BlockRegistry::SandstoneSlab),                              // 砂岩台阶（半高；3 砂岩合成；可放置）
+             int(BlockRegistry::SandstoneStairs) };                          // 砂岩楼梯（整步+背墙；6 砂岩阶梯合成——见 recipe.cpp 派工勘误注）
 }
 
 // ── t965 形态按钮组支持表（hotbar.h 声明处注释为完整契约）──
