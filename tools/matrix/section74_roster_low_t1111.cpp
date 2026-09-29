@@ -166,7 +166,7 @@ void MatrixRun::section74_roster_low_t1111()
                                int(BR::Planks), int(BR::Planks), int(BR::Planks) };
         const RecipeRegistry::Recipe *rw = RecipeRegistry::match(gWood, 3);
         const bool neighOk = int(BR::WoodStairs) == 16 && int(BR::CobbleStairs) == 59
-            && int(BR::StoneBrickStairs) == 110 && int(BR::Count) == 157
+            && int(BR::StoneBrickStairs) == 110 && int(BR::Count) == 160 // t1112 lawful 前移：157→160（栅栏门/玻璃板/蛋糕尾部追加）
             && rw && rw->outputId == int(BR::WoodStairs) && rw->outputCount == 4;
         ok = ok && neighOk;
         if (!neighOk) diag += QStringLiteral("[neigh]");
@@ -287,7 +287,7 @@ void MatrixRun::section74_roster_low_t1111()
             && int(BR::CutSandstone) == 105 && int(BR::Sandstone) == 41
             && int(BR::WoodSlab) == 15 && int(BR::CobbleSlab) == 58
             && int(BR::SpruceSlab) == 87 && int(BR::StoneBrickSlab) == 109
-            && int(BR::Count) == 157;
+            && int(BR::Count) == 160; // t1112 lawful 前移：157→160（栅栏门/玻璃板/蛋糕尾部追加）
         ok = ok && neighOk;
         if (!neighOk) diag += QStringLiteral("[neigh]");
 
@@ -408,32 +408,33 @@ void MatrixRun::section74_roster_low_t1111()
     });
 
     // ── r2081d:结构钉族 + 金苹果负面钉(NEG 双摘面全豁免 = 结构钉对照腿)────────────────────────
-    //   id/段位钉(154/155/156/Count 157 + 相邻族原值)+ kMc 三行 + def/谓词/合并/光照/音色/
+    //   id/段位钉(154/155/156/Count + 相邻族原值)+ kMc 三行 + def/谓词/合并/光照/音色/
     //   配方/图标/调色板/CMake 行源钉族(**NEG 豁免面不钉:stairs 合成行与 spawnSlime setY 行
-    //   不在本钉族**)+ 金苹果四负面钉(常量不存在/0x28F 段位空/食面尾行仍瓜片/合成表无行)+
-    //   0x28E 蛋环原值。
+    //   不在本钉族**)+ 金苹果负面钉(常量名面三文件不存在/食面尾行仍瓜片/合成表无行——
+    //   [lawful 修订 t1112] 旧「0x28F 段位空」面随牛奶桶段尾占位退役, 沿革注在 D3)+
+    //   0x28E 蛋环原值。Count/图集钉值随 t1112 前移 160/209(本腿 enumOk 行沿革:157→160/207→209)。
     runLeg("r2081d structure pin family with the golden apple absence pins (the three new"
         " block ids answer one fifty four one fifty five and one fifty six with the count"
-        " sentinel moved to one fifty seven and the mc mapping answering minus one for the"
-        " stairs and forty four for both slabs while the neighbouring cauldron sandstone"
-        " cut sandstone slab ids and the villager egg at hex twenty eight E keep their"
-        " values, the definition and predicate and merge and light and audio and recipe and"
-        " icon and palette and cmake rows are pinned on file with the two negative lesion"
-        " faces exempt, and the golden apple stays absent with no id constant no hex two"
-        " eight F slot no food table row and no recipe row while the melon slice food tail"
-        " row survives)", [&]() {
+        " sentinel moved to one sixty by the later roster batch and the mc mapping answering"
+        " minus one for the stairs and forty four for both slabs while the neighbouring"
+        " cauldron sandstone cut sandstone slab ids and the villager egg at hex twenty"
+        " eight E keep their values, the definition and predicate and merge and light and"
+        " audio and recipe and icon and palette and cmake rows are pinned on file with the"
+        " two negative lesion faces exempt, and the golden apple stays absent with no id"
+        " constant no food table row and no recipe row while the melon slice food tail row"
+        " survives)", [&]() {
         bool ok = true;
         QString diag;
         const QString srcDir = srcRootForRosterPins();
 
         // (D1) id/段位/kMc/相邻族零污染(值面)。
         const bool enumOk = int(BR::SandstoneStairs) == 154 && int(BR::StoneSlab) == 155
-            && int(BR::SandstoneSlab) == 156 && int(BR::Count) == 157
+            && int(BR::SandstoneSlab) == 156 && int(BR::Count) == 160
             && int(BR::Cauldron) == 153 && int(BR::JackOLantern) == 152
             && int(BR::PumpkinStem) == 151 && int(BR::Melon) == 149 && int(BR::MelonStem) == 150
             && int(BR::Sandstone) == 41 && int(BR::CutSandstone) == 105
             && int(BR::Stone) == 3 && int(BR::StoneBrick) == 108
-            && int(BR::AtlasTileCount) == 207
+            && int(BR::AtlasTileCount) == 209
             && BR::mcBlockId(int(BR::SandstoneStairs)) == -1
             && BR::mcBlockId(int(BR::StoneSlab)) == 44
             && BR::mcBlockId(int(BR::SandstoneSlab)) == 44
@@ -474,7 +475,7 @@ void MatrixRun::section74_roster_low_t1111()
             SrcPin("stairs id decl", "SandstoneStairs  = 154,", 1),
             SrcPin("stone slab id decl", "StoneSlab        = 155,", 1),
             SrcPin("sandstone slab id decl", "SandstoneSlab    = 156,", 1),
-            SrcPin("count sentinel row", "Count           = 157,", 1)});
+            SrcPin("count sentinel row", "Count           = 160,", 1)});
         ok = ok && missHdr.isEmpty();
         if (!missHdr.isEmpty())
             diag += QStringLiteral("[hdr %1]").arg(missHdr.join(QLatin1Char(',')));
@@ -490,7 +491,9 @@ void MatrixRun::section74_roster_low_t1111()
             SrcPin("stone slab icon case", "case BlockRegistry::StoneSlab:        return \"icon_stone_slab.png\";", 1),
             SrcPin("sandstone slab icon case", "case BlockRegistry::SandstoneSlab:    return \"icon_sandstone_slab.png\";", 1),
             SrcPin("sandstone stairs icon case", "case BlockRegistry::SandstoneStairs:  return \"icon_sandstone_stairs.png\";", 1),
-            SrcPin("palette rows", "int(BlockRegistry::SandstoneStairs) };", 1)});
+            // [lawful 修订 t1112/r2082] 调色板方块段尾前移：砂岩楼梯行自「段尾无逗号形」改「逗号行」
+            // （FenceGate=157/GlassPane=158/Cake=159 尾部追加——r2073d/r2075d 炼药锅尾行同门先例）。
+            SrcPin("palette rows", "int(BlockRegistry::SandstoneStairs),", 1)});
         ok = ok && missHb.isEmpty();
         if (!missHb.isEmpty())
             diag += QStringLiteral("[hb %1]").arg(missHb.join(QLatin1Char(',')));
@@ -503,17 +506,16 @@ void MatrixRun::section74_roster_low_t1111()
         if (!missCm.isEmpty())
             diag += QStringLiteral("[cm %1]").arg(missCm.join(QLatin1Char(',')));
 
-        // (D3) 金苹果负面钉四件(裁定登记候选池 = 零生产 delta 的如实锁面)。
+        // (D3) 金苹果负面钉(裁定登记候选池 = 零生产 delta 的如实锁面)。
+        //   [lawful 修订 t1112/r2082] 「0x28F 段位空」负面面退役——牛奶桶（MilkBucketId=0x28F）本单
+        //   段尾占位（蛋糕链原料；MaterialIcon.qml 0x28F case 在案），「no hex two eight F slot」面
+        //   自此收口（金苹果 id 常量缺席面仍全数在钉——GoldenAppleId 名面三文件负面钉不受扰）。
         const bool noApple = !rawContainsRoster(srcDir + QStringLiteral("/Game/recipe.h"),
                                                 QStringLiteral("GoldenAppleId"))
             && !rawContainsRoster(srcDir + QStringLiteral("/Game/recipe.cpp"),
                                   QStringLiteral("GoldenAppleId"))
             && !rawContainsRoster(srcDir + QStringLiteral("/Game/playercontroller.cpp"),
-                                  QStringLiteral("GoldenApple"))
-            && !rawContainsRoster(srcDir + QStringLiteral("/Game/hotbar.cpp"),
-                                  QStringLiteral("0x28F"))
-            && !rawContainsRoster(srcDir + QStringLiteral("/ui/MaterialIcon.qml"),
-                                  QStringLiteral("0x28F"));
+                                  QStringLiteral("GoldenApple"));
         ok = ok && noApple;
         if (!noApple) diag += QStringLiteral("[noApple]");
         // 食面权威表尾行仍瓜片(食面未被金苹果行改写)+ 蛋环合成先例行在场(t1109 闪烁西瓜)。
@@ -531,15 +533,14 @@ void MatrixRun::section74_roster_low_t1111()
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
             << "| r2081d structure pin family with the golden apple absence pins (the three"
                " new block ids answer one fifty four one fifty five and one fifty six with"
-               " the count sentinel moved to one fifty seven and the mc mapping answering"
-               " minus one for the stairs and forty four for both slabs while the"
-               " neighbouring cauldron sandstone cut sandstone slab ids and the villager"
-               " egg at hex twenty eight E keep their values, the definition and predicate"
-               " and merge and light and audio and recipe and icon and palette and cmake"
-               " rows are pinned on file with the two negative lesion faces exempt, and the"
-               " golden apple stays absent with no id constant no hex two eight F slot no"
-               " food table row and no recipe row while the melon slice food tail row"
-               " survives)"
+               " the count sentinel moved to one sixty by the later roster batch and the mc"
+               " mapping answering minus one for the stairs and forty four for both slabs"
+               " while the neighbouring cauldron sandstone cut sandstone slab ids and the"
+               " villager egg at hex twenty eight E keep their values, the definition and"
+               " predicate and merge and light and audio and recipe and icon and palette"
+               " and cmake rows are pinned on file with the two negative lesion faces"
+               " exempt, and the golden apple stays absent with no id constant no food"
+               " table row and no recipe row while the melon slice food tail row survives)"
             << (ok ? QString() : diag);
     });
 }

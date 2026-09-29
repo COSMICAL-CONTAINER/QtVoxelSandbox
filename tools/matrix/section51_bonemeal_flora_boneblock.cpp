@@ -303,8 +303,8 @@ void MatrixRun::section51_bonemeal_flora_boneblock()
             //   t1097 四次同门修订：BrewingStand=148 尾部追加 → 148→149 / 193→195。
             //   t1103 五次同门修订：Melon=149/MelonStem=150 尾部追加 → 149→151 / 195→201。
             //   t1105 六次同门修订：南瓜族+炼药锅三件尾部追加 → 151→154 / 201→207。
-            SrcPin("Count sentinel", "Count           = 157", 1), // t1111 lawful 前移：钉文 154→157 随源行前移（SandstoneStairs=154/StoneSlab=155/SandstoneSlab=156 尾部追加；t1105 曾 151→154）
-            SrcPin("atlas tile count", "AtlasTileCount = 207", 1)});
+            SrcPin("Count sentinel", "Count           = 160", 1), // t1112 lawful 前移：钉文 157→160 随源行前移（栅栏门/玻璃板/蛋糕尾部追加）；沿革 t1111 lawful 前移：钉文 154→157 随源行前移（SandstoneStairs=154/StoneSlab=155/SandstoneSlab=156 尾部追加；t1105 曾 151→154）
+            SrcPin("atlas tile count", "AtlasTileCount = 209", 1)});
         ok = ok && missBrH.isEmpty();
         if (!missBrH.isEmpty()) diag += QStringLiteral("[br.h %1] ").arg(missBrH.join(QLatin1Char(',')));
         // kMcBlockId 双行（音符盒对齐补行 25 + 骨块行 0）——行注释后缀形态 → 裸读文件口径（raw contains）。
@@ -321,6 +321,8 @@ void MatrixRun::section51_bonemeal_flora_boneblock()
         //   存在性钉保持、不钉「最末」位。
         //   t1111 八次同门修订：炼药锅后尾部追加名册低件量三行（sandstone_stairs -1 / stone_slab 44 /
         //   sandstone_slab 44）→ 表尾现为「*/ 44,\n};」；炼药锅行（*/ 118,）存在性钉保持、不钉「最末」位。
+        //   t1112 九次同门修订：砂岩台阶后尾部追加名册中件量三行（fence_gate 107 / glass_pane 102 /
+        //   cake 92）→ 表尾现为「*/ 92,\n};」；石/砂岩台阶行（*/ 44,）存在性钉保持、不钉「最末」位。
         const bool brCppRows = brCppTxt.contains(QLatin1String("*/ 25,")) // note_block 行（音符盒 MC 1.0 id 25）
             && brCppTxt.contains(QLatin1String("*/ 0,"))
             && brCppTxt.contains(QLatin1String("*/ 84,"))
@@ -328,7 +330,8 @@ void MatrixRun::section51_bonemeal_flora_boneblock()
             && brCppTxt.contains(QLatin1String("*/ 117,")) // 酿造台行（t1097；存在性钉，非表尾钉）
             && brCppTxt.contains(QLatin1String("*/ 105,")) // 瓜茎行（t1103；存在性钉，非表尾钉）
             && brCppTxt.contains(QLatin1String("*/ 118,")) // 炼药锅行（t1105；存在性钉，非表尾钉）
-            && brCppTxt.contains(QLatin1String("*/ 44,\n};")); // 石台阶行（表尾最后一条目，t1111；双 44 尾同文）
+            && brCppTxt.contains(QLatin1String("*/ 44,")) // 石/砂岩台阶行（t1111；存在性钉，非表尾钉）
+            && brCppTxt.contains(QLatin1String("*/ 92,\n};")); // 蛋糕行（表尾最后一条目，t1112；九次同门修订随段尾追加前移）
         ok = ok && brCppRows;
         if (!brCppRows) diag += QStringLiteral("[br.cpp rows] ");
         // 配方两行 / 调色板 / 图标 / pack 映射 / 派生链工具表。

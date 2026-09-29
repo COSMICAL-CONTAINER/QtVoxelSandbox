@@ -446,8 +446,8 @@ void MatrixRun::section70_slime_villager()
         const bool neighOk = RecipeRegistry::MelonSliceId == 0x28A
             && RecipeRegistry::PumpkinSeedsId == 0x28B
             && RecipeRegistry::MundanePotionId == 0x287
-            && int(BR::Count) == 157 // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）
-            && int(BR::AtlasTileCount) == 207
+            && int(BR::Count) == 160 // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1112 曾 157→160（栅栏门/玻璃板/蛋糕尾部追加）
+            && int(BR::AtlasTileCount) == 209
             && int(BR::Pumpkin) == 100;
         ok = ok && neighOk;
         if (!neighOk) diag += QStringLiteral("[neigh]");
