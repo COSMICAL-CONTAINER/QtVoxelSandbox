@@ -153,6 +153,7 @@ bool PlayerController::isDrinkableItem(int itemId)
     return itemId == RecipeRegistry::WaterBottleId
         || itemId == RecipeRegistry::AwkwardPotionId
         || itemId == RecipeRegistry::MundanePotionId // t1102 凡庸：可饮无效果（同粗制口径；饮毕走 potionDrunk 统一沿 + 返空瓶）
+        || itemId == RecipeRegistry::MilkBucketId    // t1112 牛奶桶：可饮零饥饿（1.0 口径 milk 清效果不回饥饿）
         || itemId == RecipeRegistry::SpeedPotionId
         || itemId == RecipeRegistry::StrengthPotionId
         || itemId == RecipeRegistry::FireResistancePotionId
@@ -703,6 +704,9 @@ void PlayerController::respawn()
     if (m_minecartManager && m_minecartManager->ridingIndex() >= 0) {
         QVector3D dummyFeet; m_minecartManager->dismount(m_world, dummyFeet);
     }
+    // t1112：重生下猪（清骑乘态 + 推挤豁免收口；猪保留在世界继续游荡——m_pos 由下方出生点重置接管）。
+    if (ridingPigActive())
+        dismountPig();
     m_leftDown = false;       // 清左键按下态（防 respawn 后 updateMining 误续挖）
     m_rightDown = false;      // t267：清右键按下态（防 respawn 后 updateEating 误续食）
     m_dead = false;           // t175：清死亡态镜像 → pickupScan 恢复（重生后玩家已离开死亡点，可正常拾取）
@@ -3046,11 +3050,32 @@ void PlayerController::finishEating()
             applyStatusEffect(PlayerState::EffectPoison, kPoisonExtPotionDurationSec, 1);
         else if (eatenId == RecipeRegistry::ExtendedWeaknessPotionId)
             applyStatusEffect(PlayerState::EffectWeakness, kWeaknessExtDurationSec, 1);
+        // t1112 牛奶桶饮毕分流（1.0 口径：milk 清**药水状态效果**——中毒 / 缓慢 / 迅捷 / 力量 / 火抗 /
+        //   再生 / 虚弱计时器归零 + 中毒伤害累积器清零；零饥饿——foodHungerAmount 无行默认 0）+
+        //   返空桶（蘑菇汤返碗同门；MC 口径喝完留空桶）。**不灭身上火**（m_fireTimer / m_burning 不动——
+        //   clearStatusEffects 含火面是重生 / 读档家族口径，milk 1.0 只清药水效果；fireTimer 由既有 tick
+        //   自然走完）。分支先行于药水族（milk 非药水无 apply 面），potionDrunk 信号照发（饮毕统一沿——
+        //   呈现层 playBurp，MC 喝牛奶同样有饮用反馈音）。
+        if (eatenId == RecipeRegistry::MilkBucketId) {
+            m_poisonTimer = 0.0f;   m_poisonDmgAccum = 0.0f;
+            m_slowTimer = 0.0f;     m_slowLevel = 0;
+            m_speedTimer = 0.0f;    m_speedLevel = 0;
+            m_strengthTimer = 0.0f; m_strengthLevel = 0;
+            m_fireResTimer = 0.0f;
+            m_regenPotionTimer = 0.0f; m_regenPotionAccum = 0.0f; m_regenPotionLevel = 0;
+            m_weakTimer = 0.0f;     m_weakLevel = 0;
+            m_effectParticleAccum = 0.0f;
+            emit potionDrunk(eatenId);
+            if (m_mode == Survival) {
+                m_hotbar->addStack(int(RecipeRegistry::BucketEmptyId), 1); // 喝完留空桶（MC 口径）
+            }
+        } else {
         // t1100 饮毕信号（可饮面统一沿：水瓶 / 粗制 / 基础 / 延长药水饮毕各发一次）→ 呈现层
         //   playBurp（机制等价 MC 饮毕随机 burp）。
         emit potionDrunk(eatenId);
         if (m_mode == Survival) {
             m_hotbar->addStack(int(RecipeRegistry::GlassBottleId), 1); // 喝完留空瓶（MC 口径）
+        }
         }
     }
     // t1102 食物完成 burp（机制等价 MC 1.0 食毕随机 burp——进食完成通用反馈音，wiki 2026 实读口径；
@@ -4172,6 +4197,22 @@ void PlayerController::placeBlock()
             emit swingArm();
             return;
         }
+        // t1112 右键栅栏门 → 翻 state 开合（useBlock 语义；活板门 bit0 开合同门编码）。优先于放置
+        //   （同门 / 活板门模式：右键已放的栅栏门即开合，不另放块）。空手亦可（开合是「使用」语义，
+        //   与手持何物无关）。id 不变只 state 变 → World::setBlock 5 参数版走重网格化路径（发
+        //   worldChanged 不发 broken/placed）。单格门板无配对格（区别两格高 WoodDoor）→ 无配对面。
+        //   开合音走 doorToggled 信号（门族共用链：开/合两音，t152 同门——栅栏门 MC 1.0 亦用木门
+        //   SoundType 开合音，信号复用零新音频面）。经 isFenceGate 谓词（单一权威，同 isDoor 门族模式）。
+        //   review0909 / t1050 同门：补 !sneakPlaceBlock 门——潜行持方块右键 = 旁路开合走放置路径。
+        if (!sneakPlaceBlock && BlockRegistry::isFenceGate(hitId)) {
+            const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
+            const quint8 ns = quint8(st ^ BlockRegistry::FenceGateStateOpenFlag); // 翻 bit0（开合；朝向位原样保留）
+            m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, hitId, ns);
+            m_lastPlaceMs = now;
+            emit doorToggled((ns & BlockRegistry::FenceGateStateOpenFlag) != 0); // 开合双音（门族共用链）
+            emit swingArm();
+            return;
+        }
         // t1028 右键音符盒 → 循环调音 + 播放新音（useBlock 语义，MC 同款：右键 = 调音并发声）。
         //   review0909 #2：补 !sneakPlace 门（对齐同函数工作台/熔炉/箱子/附魔台/铁砧/发射器/投掷器
         //   各分支模式——潜行持方块右键 = 旁路 useBlock 走下方放置路径，放置语义不被调音吞）。
@@ -4288,6 +4329,36 @@ void PlayerController::placeBlock()
             m_lastPlaceMs = now;
             emit swingArm(); // 采摘也是一次「使用」动作 → 挥手（t29）
             return; // 采摘成功 → 不再走放置路径
+        }
+    }
+    // t1112 蛋糕分块食用 useBlock（1.0 口径六片 ×2 饥饿；机制等价 MC 1.0 cake 右键即食一片——区别于
+    //   手持食物的长按进食链，蛋糕点击即食、逐片递减）。右键命中蛋糕格（useBlock 语义，优先于放置，
+    //   同工作台 / 门模式）→ 饱食门（m_hunger >= kMaxHunger 无效应——MC 口径饱食不食）→ 饥饿 +2
+    //   （kCakeSliceHungerAmount，Beta 1.8 Pre-release「slice 2 (× 1)」原值，1.0.0 沿用；「7 片 14」
+    //   是 1.8/14w27a 改版不取）+ state 咬口 +1（CakeStateBitesMask 位面，存档 round-trip 保真）；
+    //   bites==CakeBitesMax(5) 再咬 → 方块消失（MC「五咬之蛋糕再吃即尽」—— setBlock(Air) 走常规
+    //   broken 路径发破块粒子音）。空手亦可（吃是「使用」语义，与手持何物无关）；潜行持方块右键 =
+    //   旁路食用走放置路径（review0909 / t1050 同门口径）。蛋糕放置即方块形态（1.0 无物品形态——
+    //   实读留痕见 blockregistry.h Cake 行注），无物品段进食链入口。
+    //   分层（PLAN §2）：食用属 Game/Physics（读射线 + 写 World state + 推进 Physics 层饥饿权威）。
+    if (!sneakPlaceBlock && m_world->blockAt(m_hitBx, m_hitBy, m_hitBz) == BlockRegistry::Cake) {
+        const quint8 st = m_world->stateAt(m_hitBx, m_hitBy, m_hitBz);
+        if (m_hunger < int(kMaxHunger)) { // 饱食门（MC 口径饱食不食；满 → fall-through 无效应）
+            const int bites = int(st & BlockRegistry::CakeStateBitesMask);
+            if (bites >= BlockRegistry::CakeBitesMax) {
+                // 末片：方块消失（bites=5 再咬即尽——走 broken 路径，破块粒子 / 音随 setBlock 链）。
+                m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Air, 0);
+            } else {
+                // 普通片：咬口 +1（id 不变只 state 变 → 5 参数 setBlock 走重网格化路径，同门 / 音符盒口径）。
+                m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Cake,
+                                  quint8(quint8(st & ~quint8(BlockRegistry::CakeStateBitesMask))
+                                         | quint8(bites + 1)));
+            }
+            const int nv = std::clamp(m_hunger + kCakeSliceHungerAmount, 0, int(kMaxHunger));
+            if (nv != m_hunger) { m_hunger = nv; emit hungerUpdated(m_hunger); } // 呈现层 → PlayerState.setHunger
+            m_lastPlaceMs = now;
+            emit swingArm();
+            return;
         }
     }
     // t487/t664 暗渊之眼激活暗渊门（t664 正确形态：12 格**暗渊门框架**（AbyssGate=111）环 +
@@ -4451,6 +4522,62 @@ void PlayerController::placeBlock()
             emit swingArm();
         }
         return; // 水桶 + 锅（灌满 / 已满）均不再走倒水路径
+    }
+    // t1112 牛 / 猪实体交互面（挤奶 / 上鞍 / 骑乘；机制等价 MC 1.0 mob interact——实体 use 先于方块放置，
+    //   同剪刀剪羊 / 喂食的独立 mob 命中射线模式 findMobHit）。**不要求 m_hasHit**（瞄的是实体非方块格；
+    //   悬空 mob 亦可交互）。三分支按 mobType 分流：
+    //   ① 挤奶：空桶（BucketEmptyId）右键牛（MobCow）→ 扣 1 空桶 + 予 1 牛奶桶（MilkBucketId 0x28F）。
+    //      **1.0 无挤奶冷却**（实读核实——派工稿「牛冷却面」按原版裁定不交付，重复右键恒可挤）。
+    //      命中非牛 / 无命中 → 落回下方桶分支走舀水路径（桶语义不被吞）。
+    //   ② 上鞍：鞍（SaddleId 0x225 地牢战利品在案）右键未鞍猪（MobPig 且 !saddledAt）→ EntityManager::
+    //      saddlePig（翻 saddled=true 持久带鞍——**会话内口径如实登记 t1013 箱车先例：mob 无存档序列化
+    //      面，重进世界鞍消失**）+ 生存消耗 1 鞍（创造不耗）。命中已鞍猪持鞍 → 落 ③ 骑乘（MC 语义：
+    //      interact 先试装鞍，已鞍即骑）。
+    //   ③ 骑乘：右键已鞍猪（任意持物，含空手 / 方块——MC pig.interact 对已鞍猪恒返 true；潜行持方块
+    //      旁路 heldPlaceableSneak 门保持放置语义优先，t1050 同门）→ mount：PlayerController 记
+    //      m_ridingPig 槽位 + 代际 serial（槽复用防误骑新生物，snowballThrower 快照同门）+
+    //      EntityManager::setRideExclusion 免除骑乘中 resolvePlayerPush 的推挤（否则骑乘钉位与推挤
+    //      逐帧互搏、猪被永久顶飞）。骑乘中再右键同猪 → no-op（不重复 mount）。
+    //   分层（PLAN §2）：实体交互属 Game/Physics（读射线 + 调 EntityManager + 写 Hotbar VM），不改栅格。
+    if (m_entityManager && !heldPlaceableSneak()) {
+        const QVector3D eye = position();
+        const QVector3D look = lookDirection();
+        float mobDist = 0.0f;
+        const int mobIdx = m_entityManager->findMobHit(eye, look, kReach, &mobDist);
+        if (mobIdx >= 0) {
+            const int mt = m_entityManager->mobTypeAt(mobIdx);
+            // ① 挤奶（空桶 + 牛；1.0 无冷却）。
+            if (m_hotbar && heldItemId == RecipeRegistry::BucketEmptyId && mt == EntityManager::MobCow) {
+                m_hotbar->takeStack(m_hotbar->selectedSlot(), 1);               // 扣 1 空桶
+                m_hotbar->addStack(int(RecipeRegistry::MilkBucketId), 1);       // 予 1 牛奶桶（同 id 合并）
+                m_lastPlaceMs = now;
+                emit swingArm();
+                return;
+            }
+            // ② 上鞍（鞍 + 未鞍猪；装备后猪持久带鞍——会话内口径）。
+            if (m_hotbar && heldItemId == RecipeRegistry::SaddleId
+                && mt == EntityManager::MobPig && !m_entityManager->saddledAt(mobIdx)) {
+                m_entityManager->saddlePig(mobIdx);
+                if (m_mode == Survival)
+                    m_hotbar->takeStack(m_hotbar->selectedSlot(), 1);           // 生存消耗 1 鞍（创造不耗）
+                m_lastPlaceMs = now;
+                emit swingArm();
+                return;
+            }
+            // ③ 骑乘（任意持物 + 已鞍猪；潜行持方块已在上门旁路——保留放置语义）。
+            if (mt == EntityManager::MobPig && m_entityManager->saddledAt(mobIdx)
+                && !(m_ridingPig == mobIdx
+                     && m_ridingPigSerial == m_entityManager->serialAt(mobIdx))) {
+                m_ridingPig = mobIdx;
+                m_ridingPigSerial = m_entityManager->serialAt(mobIdx);
+                m_entityManager->setRideExclusion(m_ridingPig, m_ridingPigSerial);
+                m_vel = QVector3D(0, 0, 0);
+                m_lastPlaceMs = now;
+                emit swingArm();
+                return;
+            }
+            // 命中非牛非猪 / 未鞍猪持非鞍物 / 已骑同猪 → 落回下方通用路径（桶舀水 / 放置语义不被吞）。
+        }
     }
     if (m_hotbar && (heldItemId == RecipeRegistry::WaterBucketId
                      || heldItemId == RecipeRegistry::LavaBucketId
@@ -5427,6 +5554,7 @@ void PlayerController::placeBlock()
         //   rider 残留成幽灵骑乘态）。守卫：骑矿车中 → 跳过上船（先 shift 下车才能换乘，机制等价 MC 同一
         //   时刻只能骑一个载具）。
         if (!(m_minecartManager && m_minecartManager->ridingIndex() >= 0)
+            && !ridingPigActive() // t1112 骑乘互斥：骑猪中不得再上船（同骑矿车守卫口径——先下猪再上船）
             && m_boatManager->tryMount(position(), lookDirection(), kReach)) {
             m_lastPlaceMs = now;
             emit swingArm();
@@ -5574,6 +5702,7 @@ void PlayerController::placeBlock()
         //   上车，t1052 提交注自证矛盾点随本修消除）。
         if (!(m_boatManager && m_boatManager->ridingIndex() >= 0)
             && !m_keys.value(Qt::Key_Shift)
+            && !ridingPigActive() // t1112 骑乘互斥：骑猪中不得再上车（同骑矿车守卫口径——先下猪再上车）
             && m_minecartManager->tryMount(position(), lookDirection(), kReach)) {
             m_lastPlaceMs = now;
             emit swingArm();
@@ -5701,6 +5830,12 @@ void PlayerController::placeBlock()
         const int ma = BlockRegistry::mechAttachFromNormal(m_hitNx, m_hitNy, m_hitNz);
         placeState = quint8(((ma < 0) ? BlockRegistry::MechAttachFloor : ma)
                             << BlockRegistry::MechAttachShift);
+    } else if (BlockRegistry::isFenceGate(quint8(m_selectedBlock))) {
+        // t1112 栅栏门朝向写入 state bit[2:1]（FenceGateStateFacingShift；供 mesher 门板运行轴摆位 +
+        //   射线 / 选中开合面板解码）。state = horizontalFacing << 1（bit0 开合恒 0 合态出生——MC 口径
+        //   放置即合）。运行轴 = 朝向轴垂直轴（几何解码见 partialblockgeometry FenceGate case）：
+        //   玩家面 +X 放门 → 门板沿 Z 横铺，玩家沿 +X 穿行（MC fence gate 朝向语义）。
+        placeState = quint8((horizontalFacing() & 3) << BlockRegistry::FenceGateStateFacingShift);
     } else if (m_selectedBlock == BlockRegistry::Chest) {
         // t225 箱子前面（锁面）朝玩家侧：state = horizontalFacing ^ 1（玩家朝向的反向 = 箱子前面所朝方向，
         //   机制等价 MC 1.0 箱子放置锁面朝玩家）。编码与 horizontalFacing 同源（0=+X 1=-X 2=+Z 3=-Z）；
@@ -5878,6 +6013,12 @@ void PlayerController::placeBlock()
             || (below == BlockRegistry::SnowLayer
                 && m_world->stateAt(tx, ty - 1, tz) == BlockRegistry::SnowLayerStageMax);
         if (!belowSupport) return; // 下方非完整立方 / 非满层雪 → 悬空 / 侧放 → 拒（不挥）
+    }
+    // t1112 蛋糕放置需实体支撑（机制等价 MC 1.0 cake 需下方实体方块——candy 块族支撑语义同门）。
+    //   读 solidSupportBlock 统一权威（雪层同门：排除仙人掌缩体面）。失撑自动破坏面未接线（MC 破
+    //   支撑蛋糕即掉）→ 候选池登记（同门压力板失撑钩子 checkPressurePlateOnEdit 家族可后接）。
+    if (m_selectedBlock == BlockRegistry::Cake) {
+        if (!BlockRegistry::solidSupportBlock(m_world->blockAt(tx, ty - 1, tz))) return; // 悬空 / 侧放 → 拒（不挥）
     }
     // t198 水中可放方块（排开水）/ t351 岩浆同理（排开岩浆）：目标格为空气 / 水 / 岩浆均可放置；流体被
     //   方块直接覆盖 → World::setBlock 内 oldId=Water/Lava → newId=实体走「放置」分支（仅发 blockPlaced，
@@ -8575,6 +8716,42 @@ void PlayerController::tickSuffocation(float dt)
     }
 }
 
+// t1112 骑乘猪对账谓词（实现；契约见 .h）：槽位有效 + 活体 + 代际快照匹配。猪死（aliveAt false）/
+//   槽被复用（serialAt != 快照）→ false → step 分支不进 / mount 互斥门放行（可再骑新猪）。
+bool PlayerController::ridingPigActive() const
+{
+    if (m_ridingPig < 0 || !m_entityManager) return false;
+    if (!m_entityManager->aliveAt(m_ridingPig)) return false;
+    return m_entityManager->serialAt(m_ridingPig) == m_ridingPigSerial;
+}
+
+// t1112 下猪（Shift 按下沿 / 显式 API 双入口）：清骑乘态 + 推挤豁免收口 + 玩家摆猪侧安全位。
+//   四向探针（矿车 dismount 同门）：取首个「邻格可站」（格内无碰撞方块；脚底 Y = 猪中心同高，下一帧
+//   重力落到支撑面）。全堵 → 原地（猪背上，下一帧重力/推挤自然落位）。
+void PlayerController::dismountPig()
+{
+    if (!ridingPigActive() || !m_entityManager || !m_world) return;
+    const QVector3D pigPos = m_entityManager->posAt(m_ridingPig);
+    const int px = qFloor(pigPos.x()), py = qFloor(pigPos.y()), pz = qFloor(pigPos.z());
+    QVector3D feet(pigPos.x(), pigPos.y(), pigPos.z());
+    constexpr int kDirs[4][2] = {{1,0},{-1,0},{0,1},{0,-1}};
+    for (const auto &d : kDirs) {
+        const int nx = px + d[0], nz = pz + d[1];
+        if (py < 0 || py >= m_world->height()) continue; // Y 越界防御（世界边界外不探）
+        if (!m_world->pointBlockedByCollision(float(nx) + 0.5f, float(py) + 0.5f, float(nz) + 0.5f)) {
+            feet = QVector3D(float(nx) + 0.5f, pigPos.y(), float(nz) + 0.5f);
+            break;
+        }
+    }
+    m_entityManager->setRideExclusion(-1, 0);
+    m_ridingPig = -1;
+    m_ridingPigSerial = 0;
+    m_pos = feet;
+    m_vel = QVector3D(0, 0, 0);
+    if (m_onGround) { m_onGround = false; emit onGroundChanged(); }
+    emit positionChanged();
+}
+
 void PlayerController::step(qreal dt)
 {
     const QVector3D posBefore = m_pos; // t159：出口算实际水平速度（speed 属性）的位移基准
@@ -8585,6 +8762,28 @@ void PlayerController::step(qreal dt)
     const bool shiftEdge = shift && !m_shiftPrev; // t469 下船边沿：骑乘期 Shift 按下沿 → dismount（长按只一次）
     m_shiftPrev = shift;
 
+    // t1112 猪骑乘分支（机制等价 MC 1.0 saddled pig：可骑乘但**无方向控制**——胡萝卜钓竿 1.4.2/12w36a
+    //   才引入控制面，越基线不取如实登记；猪继续自身 AI 游荡 = 「游荡骑乘」派工稿实读裁定）。
+    //   优先于船 / 矿车分支（mount 侧已互斥：骑猪中船 / 矿车 tryMount 被跳过）。骑乘期禁玩家自身移动
+    //   （重力 / 跳跃 / 走路动画全停，坐姿观感由脚底 = 猪背给出）；**WASD 不消费**（1.0 无控制面）；玩家
+    //   脚底 = 猪中心 + kPigSeatLift；Shift 按下沿 → 下猪（dismountPig 四向安全位）；猪死 / 槽复用 →
+    //   对账失效自动脱骑（不含 shift 路径——下一 tick ridingPigActive false 自动走正常重力分支）。
+    //   分层（PLAN §2）：骑乘钉位属 Game/Physics（读 EntityManager 位置 + 写玩家 pos），猪 AI 面不触碰。
+    if (ridingPigActive()) {
+        if (m_moveSpeed != 0.0f) { m_moveSpeed = 0.0f; emit moveSpeedChanged(); } // 禁走路动画（同船 / 矿车）
+        if (shiftEdge) { // Shift 按下沿 → 下猪（长按只下一次，t469 同门口径）
+            dismountPig();
+            reportHorizSpeed(posBefore, dt);
+            return;
+        }
+        // 玩家随猪钉位（脚底 = 猪中心 + 0.25 骑猪背；眼位 / 相机自动跟随 position()）。
+        const QVector3D pigPos = m_entityManager->posAt(m_ridingPig);
+        m_pos = QVector3D(pigPos.x(), pigPos.y() + kPigSeatLift, pigPos.z());
+        m_vel = QVector3D(0, 0, 0);
+        reportHorizSpeed(posBefore, dt);
+        emit positionChanged();
+        return;
+    }
     // t469 船骑乘分支（spec「骑乘时禁用玩家自身移动，由船位移带动玩家」；机制等价 MC 1.0 船骑乘）。
     //   优先于 Spectator / Creative-飞 / 走路分支 —— 骑乘期一律走船物理（无视走路 / 飞行物理，机制等价 MC 骑船）。
     //   Shift 按下沿 → 下船（dismount，玩家摆船侧安全位）；WASD（wish）驱动船（tickRiddenBoat：水上快移 + 冰面加速）；

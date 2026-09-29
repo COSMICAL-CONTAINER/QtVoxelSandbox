@@ -309,6 +309,16 @@ Item {
                 R(13, 9, 2, 1, lavaHot) // 另一鼓泡
             }
 
+            // 牛奶桶（0x28F，t1112）：同空桶 + 桶内乳白牛奶液面（表「装满牛奶到桶口」）。奶白色与蛋糕霜面
+            //   同族（#ece8dc 乳白 + #f8f6ef 受光高光）。机制等价 MC 牛奶桶图标；纯原创自绘（§9a）。
+            const drawMilkBucket = () => {
+                drawBucketEmpty() // 桶身（同空桶）
+                const milk = "#ece8dc", milkLight = "#f8f6ef"
+                // 桶口椭圆内的牛奶液面（覆盖 mouth 阴影，表「装满奶到桶口」）
+                R(6, 9, 12, 1, milk)
+                R(7, 9, 4, 1, milkLight) // 奶面高光（左上受光）
+            }
+
             // 小麦种子（0x208，t235）：几粒黄褐色麦种（椭圆粒 + 胚芽细尖）。机制等价 MC 小麦种子图标
             //   （麦粒形）；纯原创自绘（§9a）。配色：seed #c8a868（麦粒暖黄褐）/ light #e0c890（受光高光）/
             //   dark #8a6c38（阴影 + 胚沟）/ tip #6a8a3a（胚芽尖淡绿，表「将萌发」）。3 粒聚拢呈种子堆。
@@ -2414,6 +2424,8 @@ Item {
                 break
             case 0x28D: drawSpawnEgg("slime"); break    // t1107 生物蛋（史莱姆）：绿壳深绿斑
             case 0x28E: drawSpawnEgg("villager"); break // t1107 生物蛋（村民）：棕壳长袍纹
+            // t1112 牛奶桶（0x28F，村民蛋之上段尾追加）：空桶 + 乳白牛奶液面（drawMilkBucket，§9 原创）。
+            case 0x28F: drawMilkBucket(); break // 牛奶桶：空桶右键牛挤奶；可饮清效果返空桶；蛋糕原料
             // t788 染料 16 色（0x24B..0x25A，白→黑羊毛色序；三色参数取 build_wool.py 同源色板）
             case 0x24B: drawDye("#f0f0ee", "#f9f9f8", "#959594"); break // 白色染料（白花破坏掉落；染白羊毛/白床）
             case 0x24C: drawDye("#de781e", "#ee9f69", "#8a4a13"); break // 橙色染料

@@ -76,6 +76,11 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::StoneSlab:        return "icon_stone_slab.png";        // 石台阶：3D 半高盒（石纹）
     case BlockRegistry::SandstoneSlab:    return "icon_sandstone_slab.png";    // 砂岩台阶：3D 半高盒（砂岩面排布）
     case BlockRegistry::SandstoneStairs:  return "icon_sandstone_stairs.png";  // 砂岩楼梯：3D L 阶（砂岩面排布）
+    // t1112 名册中件量批图标（build_cube_icons.py PARTIALS_3D_T1112 程序生成；fence_gate/pane/cake
+    //   形状投影，机制等价石砖变体流程）：栅栏门（门板端柱+双档）/ 玻璃板（十字柱板）/ 蛋糕（矮盒霜面）。
+    case BlockRegistry::FenceGate:        return "icon_fence_gate.png";        // 栅栏门：3D 门板（木板纹端柱+双档）
+    case BlockRegistry::GlassPane:        return "icon_glass_pane.png";        // 玻璃板：3D 十字柱板（玻璃纹）
+    case BlockRegistry::Cake:             return "icon_cake.png";              // 蛋糕：3D 矮盒（霜面+侧纹）
     case BlockRegistry::Cactus:        return "icon_cactus.png";         // t394 仙人掌立方体图标（顶=绿截面环纹 / 侧=棱脊+刺点）
     case BlockRegistry::SnowLayer:    return "icon_snow_layer.png";    // t395 积雪层立方体图标（各面=冷白冰晶噪点）
     case BlockRegistry::SpruceLog:    return "icon_spruce_log.png";    // t395 云杉原木立方体图标（顶=年轮截面 / 侧=深棕树皮）
@@ -776,7 +781,11 @@ QVariantList Hotbar::creativeMaterials() const
         // t1107 史莱姆球一件（0x28C，南瓜种子 0x28B 之上段尾追加不插中间 = 存档安全铁律）：获取面 =
         //   小史莱姆掉 0-2（创造调色板行为兜底获取面，同族口径）。双蛋入蛋区（0x28D/0x28E，
         //   t785 蛋区连续同列契约）。MaterialIcon 自绘（§9 原创）。
-        int(RecipeRegistry::SlimeBallId)         // 史莱姆球：小史莱姆掉 0-2；收藏 / 候选池原料
+        int(RecipeRegistry::SlimeBallId),        // 史莱姆球：小史莱姆掉 0-2；收藏 / 候选池原料
+        // t1112 牛奶桶一件（0x28F，史莱姆球之上段尾追加不插中间 = 存档安全铁律）：获取面 = 空桶右键牛
+        //   挤奶（1.0 无冷却；创造调色板行为兜底获取面，同族口径）。maxStack=1 不可堆叠（装液态食物，
+        //   同蘑菇汤 / 铁桶族——maxStackSize 特判）。MaterialIcon 自绘白液桶（§9 原创）。
+        int(RecipeRegistry::MilkBucketId)        // 牛奶桶：空桶右键牛挤奶；可饮清效果返空桶；蛋糕原料
     };
 }
 
@@ -1070,7 +1079,13 @@ QVariantList Hotbar::creativeBlocks() const
              //   归方块 tab（非红石机关件）。
              int(BlockRegistry::StoneSlab),                                  // 石台阶（半高；3 石合成；可放置）
              int(BlockRegistry::SandstoneSlab),                              // 砂岩台阶（半高；3 砂岩合成；可放置）
-             int(BlockRegistry::SandstoneStairs) };                          // 砂岩楼梯（整步+背墙；6 砂岩阶梯合成——见 recipe.cpp 派工勘误注）
+             int(BlockRegistry::SandstoneStairs),                            // 砂岩楼梯（整步+背墙；6 砂岩阶梯合成——见 recipe.cpp 派工勘误注）
+             // t1112 名册中件量批三件（表尾追加不插中间——t1111 三件连续性零触碰）：栅栏门紧随门族
+             //   语义（WoodDoor 开合同门）；玻璃板紧随玻璃/铁栏杆（薄板连接族）；蛋糕紧随食物链
+             //   （瓜块/南瓜灯植物食物族尾）。三件归方块 tab（非红石机关件）。
+             int(BlockRegistry::FenceGate),                                  // 栅栏门（右键开合 合挡/开通；4 木棍+2 木板合成）
+             int(BlockRegistry::GlassPane),                                  // 玻璃板（薄板连接拼接；6 玻璃合成 16；破坏零掉落）
+             int(BlockRegistry::Cake) };                                     // 蛋糕（右键分块食用 1.0 六片×2 饥饿；3 奶+2 糖+蛋+3 麦合成）
 }
 
 // ── t965 形态按钮组支持表（hotbar.h 声明处注释为完整契约）──
@@ -1393,6 +1408,8 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::SlimeBallId)        return QStringLiteral("史莱姆球");       // 小史莱姆掉 0-2；收藏 / 候选池原料
         if (blockId == RecipeRegistry::SpawnEggSlimeId)    return QStringLiteral("生物蛋（史莱姆）"); // 右键 → 中档史莱姆（敌对弹跳）
         if (blockId == RecipeRegistry::SpawnEggVillagerId) return QStringLiteral("生物蛋（村民）");   // 右键 → 村民（被动游荡）
+        // t1112 牛奶桶（0x28F，村民蛋之上段尾追加）：名面一件（通用描述词，§9 合法）。
+        if (blockId == RecipeRegistry::MilkBucketId)       return QStringLiteral("牛奶桶");         // 空桶右键牛挤奶；可饮清效果返空桶；蛋糕原料
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落；打火石配方原料。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::FlintId) return QStringLiteral("燧石"); // 挖沙砾概率掉落；打火石配方原料
         // t891② 烈焰弹（材料段 0x25C；机制等价 MC fire charge）：燃烬粉+煤/炭+火药合成 3 发；右键发射火球
@@ -1819,7 +1836,7 @@ int Hotbar::maxStackSize(int id) const
     //   须在通用材料段判定**之前**特判（否则落 64）。桶是非堆叠功能性物品（同工具段语义），仅因归材料段
     //   才在此分流。与 isMaterial 不冲突（MaterialIcon 仍画桶图标）。
     if (id == RecipeRegistry::BucketEmptyId || id == RecipeRegistry::WaterBucketId
-        || id == RecipeRegistry::LavaBucketId) return 1;
+        || id == RecipeRegistry::LavaBucketId || id == RecipeRegistry::MilkBucketId) return 1; // t1112 牛奶桶入桶族（装液态食物不可叠，同蘑菇汤）
     // t615 附魔书（EnchantedBookId=0x227）：**不可堆叠**（maxStack=1，机制等价 MC 1.0 enchanted book——
     //   每本携带独立附魔列表（enchants 元数据），两本内容不同不可叠；铁砧「两本合并」走 activeOp=combine
     //   而非堆叠）。须在通用材料段判定**之前**特判（否则落 64 → 两本不同附魔的书叠一槽会丢一本的附魔）。
@@ -2000,6 +2017,15 @@ bool Hotbar::recipeCanTake(int outId, int outCount, int heldId, int heldCount, i
     r.outputId = outId;
     r.outputCount = outCount;
     return RecipeRegistry::canTake(r, heldId, heldCount, maxStack);
+}
+
+// t1112 合成容器交换单一权威（实现；契约见 .h 注释）：蛋糕合成行内牛奶桶 → 空桶原位保留（1.0 口径）。
+//   单点收口（recipe.cpp 配方行的容器语义注释同源；QML 两消费点同读本方法——新增容器配方只改本表）。
+int Hotbar::recipeContainerSwap(int outputId, int gridItemId) const
+{
+    if (outputId == int(BlockRegistry::Cake) && gridItemId == int(RecipeRegistry::MilkBucketId))
+        return int(RecipeRegistry::BucketEmptyId);
+    return 0;
 }
 
 // t87 冶炼 / 燃料桥接：透传 SmeltingRegistry 静态查询给 QML（FurnaceUI 的 tick / 槽校验消费）。

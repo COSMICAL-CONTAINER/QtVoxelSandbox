@@ -799,6 +799,16 @@ public:
     //   镜像，使两层数据一致、 depletion 从存档值起算）。无变化（值 == 当前）静默。
     Q_INVOKABLE void setHunger(int value);
 
+    // t1112 猪骑乘状态面（矩阵探针 + QML 坐姿切换预留读口，同 moveSpeedAt 模式）：骑乘中 → true 且
+    //   ridingPigIndex 返骑乘猪槽位（对账失效自动脱骑 → -1）。serial 快照面同暴露（槽复用审计）。
+    Q_INVOKABLE bool isRidingPig() const { return ridingPigActive(); }
+    Q_INVOKABLE int ridingPigIndex() const { return ridingPigActive() ? m_ridingPig : -1; }
+    // t1112 猪骑乘脱骑（矩阵探针 / 呈现层预留直调面；Shift 下猪走 step() 内 shiftEdge，本方法为显式 API）。
+    Q_INVOKABLE void dismountPig();
+    // t1112 饥饿只读口（矩阵探针读缝——Physics 层 m_hunger 权威显值；与 setHunger 配对，无 NOTIFY
+    //   面由 hungerUpdated 信号承载，读口专供探针/调试直读）。
+    Q_INVOKABLE int hunger() const { return m_hunger; }
+
 signals:
     void worldChanged();
     void hotbarChanged();
@@ -1261,6 +1271,9 @@ private:
     //   m_selectedBlock 经 hotbar 对非方块物品槽已归 Air（见 12 门判据注释），故合取恰为
     //   「手持可放置方块」；键态同源 §2-D m_keys 单一输入路径。
     bool heldPlaceableSneak() const;
+    // t1112 骑乘猪对账谓词（mount 互斥门 / step 钉位 / QML 读口三消费）：槽位有效 + 活体 + 代际快照
+    //   失配即 false（猪死 / 槽被新生物复用 → 自动脱骑面，重力接手）。实现在 .cpp（读 EntityManager）。
+    bool ridingPigActive() const;
     // 持续挖掘（t34）：每 tick 累积进度 / 检目标变更 / 完成时破块。由 tick() 调（captured 时）。
     void updateMining(float dt);
     // 清掉累积态（松开 / 换目标 / 失焦 / 完成）。无变化时静默（不发信号）。
@@ -1574,6 +1587,11 @@ private:
     static constexpr qreal kEquipPickupScanInterval = 0.5; // 扫描窗长（秒；任务口径「每 0.5s 一带」低频）
     static constexpr float kEquipPickupRadiusXZ = 1.0f;    // 水平拾取半径（格；「经过」= 同格 + 贴身邻格沿）
     bool m_shiftPrev = false;                    // t469 下船边沿触发（骑乘期 Shift 按下沿 → dismount；长按只下一次）
+    // t1112 猪骑乘态（骑乘猪槽位 + 代际快照；槽复用防误骑新生物——snowballThrower slot+serial 同门）。
+    //   骑乘中 EntityManager::resolvePlayerPush 按快照免除推挤（否则钉位与推挤逐帧互搏、猪被顶飞）；
+    //   猪死亡 / 槽复用 → ridingPigActive 失配自动脱骑（重力接手）。mob 无存档序列化 → 会话内口径。
+    int     m_ridingPig = -1;       // 骑乘猪槽位（-1 = 未骑乘）
+    quint32 m_ridingPigSerial = 0;  // 骑乘猪代际快照（mount 时 serialAt 捕获）
     QQuickWindow *m_window = nullptr;
     QTimer m_timer;
     QElapsedTimer m_clock;
@@ -2053,6 +2071,13 @@ private:
     static constexpr int kBreadHungerAmount = 5;
     // t467 甜浆果一次恢复的饥饿值（2 = 1 鼓腿；机制等价 MC 1.0 sweet berries +2 hunger）。小于面包（5），同 MC 量级。
     static constexpr int kSweetBerryHungerAmount = 2;
+    // t1112 蛋糕单片恢复的饥饿值（2 = 1 鼓腿；机制等价 MC 1.0 cake **每片 +2 饥饿**——Beta 1.8
+    //   Pre-release「slice 2 (× 1)」原值，1.0.0 沿用；「7 片 14 饥饿」是 1.8/14w27a 改版越基线不取，
+    //   勘误登记见 recipe.cpp cake 配方行注）。蛋糕走 useBlock 点击即食（非长按进食链），每片经本值。
+    static constexpr int kCakeSliceHungerAmount = 2;
+    // t1112 猪骑乘座位抬升（玩家脚底相对猪中心上移量；机制等价 MC 骑猪坐猪背——猪 halfH 0.45、
+    //   顶面 +0.45，座位 +0.25 → 玩家脚底沉入猪背 0.2 = 坐姿观感，矿车 kCartSeatDrop 负向镜像同门）。
+    static constexpr float kPigSeatLift = 0.25f;
     // t507 蘑菇汤一次恢复的饥饿值（10 = 5 鼓腿；机制等价 MC 1.0 mushroom_stew +10 hunger）。
     //   同 MC 量级最高档食物之一（仅次金苹果 8 鼓腿）。食用后 finishEating 特判返空碗（消耗 1 蘑菇汤 + 给回 1 空碗物品）。
     static constexpr int kMushroomStewHungerAmount = 10;

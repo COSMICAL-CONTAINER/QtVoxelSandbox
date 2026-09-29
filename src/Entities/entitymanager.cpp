@@ -2450,6 +2450,42 @@ bool EntityManager::shearedAt(int i) const
     return e.sheared;
 }
 
+// t1112 猪鞍座态读口（实现；契约见 .h 注释）：仅 MobPig 用，其余 mob 恒 false。
+bool EntityManager::saddledAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return false;
+    const Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobPig) return false; // 仅 pig 有鞍座态
+    return e.saddled;
+}
+
+// t1112 上鞍（实现；契约见 .h 注释）：未鞍活体 pig → 翻 saddled=true + bump revision（呈现层刷新）。
+void EntityManager::saddlePig(int i)
+{
+    if (i < 0 || i >= int(m_entities.size())) return;
+    Entity &e = m_entities[size_t(i)];
+    if (e.kind != Mob || e.mobType != MobPig) return; // 仅 pig 可上鞍
+    if (e.dead || !e.alive) return;                   // 尸体 / 空槽不可上鞍
+    if (e.saddled) return;                            // 已鞍 → 无反应（caller 不消耗鞍）
+    e.saddled = true;
+    qCInfo(lcEnt) << "pig saddled at slot" << i << "pos" << e.pos;
+    notifyEntitiesChanged(); // bump → 呈现层鞍座状态面刷新（同 shearSheep 模式）
+}
+
+// t1112 代际序号读口（实现；契约见 .h 注释）：spawnSerial 快照（骑乘 / 投掷者排除同门）。越界 → 0。
+quint32 EntityManager::serialAt(int i) const
+{
+    if (i < 0 || i >= int(m_entities.size())) return 0;
+    return m_entities[size_t(i)].spawnSerial;
+}
+
+// t1112 骑乘推挤豁免（实现；契约见 .h 注释）：resolvePlayerPush 按槽位 + 代际双键跳过。
+void EntityManager::setRideExclusion(int idx, quint32 serial)
+{
+    m_rideExcludeIdx = idx;
+    m_rideExcludeSerial = serial;
+}
+
 // t300 剪羊毛（spec「玩家右键羊 + 持剪刀 → 羊变裸 + 掉羊毛物品」；机制等价 MC 1.0 剪羊毛）。
 //   未剪羊毛的活体 sheep → 翻 sheared=true + 设 regrowCooldown（防刚剪完立即吃草长回，spec「加重新长毛冷却」）+
 //   emit sheepSheared(坐标, 毛色下标) 让呈现层 Connections 转发 ItemEntityManager.spawnItem 生成**对应色**
@@ -6183,8 +6219,12 @@ void EntityManager::resolvePlayerPush(const QVector3D &playerFeet, float halfW, 
     const float px = playerFeet.x(), pz = playerFeet.z();
     const float pminY = playerFeet.y(), pmaxY = playerFeet.y() + height;
     bool dirty = false;
-    for (auto &e : m_entities) {
+    for (size_t idx = 0; idx < m_entities.size(); ++idx) {
+        Entity &e = m_entities[idx];
         if (!e.alive || !e.pushable || e.dead) continue; // t256 空槽 + 掉落物等非推动 + t239 dead mob 跳过
+        // t1112 骑乘推挤豁免（槽位 + 代际双键）：被骑的猪位置由骑乘钉位权威接管（PlayerController step
+        //   每帧把玩家钉到猪背），推解会把钉位实体逐帧顶飞（骑乘不可持续）——载具乘员豁免同门语义。
+        if (int(idx) == m_rideExcludeIdx && e.spawnSerial == m_rideExcludeSerial) continue;
         // t811 载具骑乘态跳过：mob 位置钉载具座位（tickVehicleRiding 权威），玩家推挤会把钉位实体推出
         //   车斗 → 视觉脱离 + 下帧钉回的反复拉扯；骑乘期玩家从旁走过不应扰动乘员（同 dead 不推语义）。
         //   t952 mob-on-mob 挂载组合同口径：骑士被驮 / 载具驮人，位置由 tickMobMounts 钉位权威接管，推挤

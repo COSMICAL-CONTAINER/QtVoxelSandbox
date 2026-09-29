@@ -711,8 +711,11 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_stone_brick_slab.png       # t487 石砖台阶立方体图标（build_cube_icons.py；3D 半高盒，砖纹）
         textures/icon_stone_brick_stairs.png     # t487 石砖楼梯立方体图标（build_cube_icons.py；3D L 阶，砖纹）
         textures/icon_stone_slab.png             # t1111 石台阶立方体图标（build_cube_icons.py PARTIALS_3D_T1111；3D 半高盒，石纹）
-        textures/icon_sandstone_slab.png         # t1111 砂岩台阶立方体图标（build_cube_icons.py PARTIALS_3D_T1111；3D 半高盒，砂岩面排布）
+        textures/icon_sandstone_slab.png         # t1111 砂岩台阶立方体图标（build_cube_icons.py PARTIALS_3D_T1111；3D 半高盒，砂石纹）
         textures/icon_sandstone_stairs.png       # t1111 砂岩楼梯立方体图标（build_cube_icons.py PARTIALS_3D_T1111；3D L 阶，砂岩面排布）
+        textures/icon_fence_gate.png             # t1112 栅栏门立方体图标（build_cube_icons.py PARTIALS_3D_T1112；3D 门板端柱+双档，木板纹）
+        textures/icon_glass_pane.png             # t1112 玻璃板立方体图标（build_cube_icons.py PARTIALS_3D_T1112；3D 十字柱板，玻璃纹）
+        textures/icon_cake.png                   # t1112 蛋糕立方体图标（build_cube_icons.py PARTIALS_3D_T1112；3D 矮盒，霜面+侧带）
         textures/icon_lever.png                  # t490 杠杆立方体图标（build_cube_icons.py；pressure_plate shape+lever 贴图；手动点火机关）
         textures/icon_wood_button.png            # t490 木按钮立方体图标（build_cube_icons.py；pressure_plate shape+wood_button 贴图）
         textures/icon_stone_button.png           # t490 石按钮立方体图标（build_cube_icons.py；pressure_plate shape+stone_button 贴图）
@@ -1133,6 +1136,11 @@ add_executable(redstone_matrix_test
     #   石/砂岩台阶双柱[合成/双半砖合并/def/光照] + 史莱姆出生位柱[三档贴地出生位] + 结构钉族与
     #   金苹果负面钉——零新 include 面，blockregistry/recipe/hotbar/entitymanager 均已列）。
     tools/matrix/section74_roster_low_t1111.cpp
+    # t1112 名册中件量批探针段（4 腿 r2082a-d，filter 词 r2082；栅栏门柱[合成命中 + 开合碰撞分面 +
+    #   开合态读回 + 门族零污染] + 玻璃板柱[合成/def/十字条带/零掉落] + 蛋糕牛奶链柱[真 pc rig 分块
+    #   食用状态机 + 挤奶 + 饮面清效果 + 容器交换单点] + 骑乘柱 + 结构钉族——零新 include 面，
+    #   blockregistry/recipe/hotbar/entitymanager/playercontroller 均已列）。
+    tools/matrix/section75_roster_mid_t1112.cpp
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
     #   确定性等价承重墙[8 形态快照 worker ≡ 同步直调逐位恒等：顶点/索引/统计三面]/队列纪律
     #   [容量压小满载 kErrQueueFull 可见拒绝 + 拒绝项不入账 + 接受项恰一产出按 requestId 对账]/

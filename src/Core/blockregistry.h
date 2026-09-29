@@ -1318,15 +1318,62 @@ public:
         //   1.0 基线内；1.0 石台阶 id 44 数据值 1=砂岩）。同门砂材质行 + 砂岩贴图（topTile=52 /
         //   其余=53）。双半砖合并 → Sandstone / 逆掉落同门。合成行 3 砂岩 1×3。
         SandstoneSlab    = 156, // 砂岩台阶：3 砂岩 1×3 合成；半高（ShapeSlab 同门；砂岩贴图）
-        Count           = 157, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
-                                 //   t1111 lawful 前移：154→157（SandstoneStairs=154/StoneSlab=155/
-                                 //   SandstoneSlab=156 尾部追加；t1105 曾 151→154、t1103 曾 149→151、
+        // ── t1112 名册中件量批三件（段尾追加；同门先例 IronBars=142 / WoodDoor=19 开合双音 / IronDoor=71）。
+        //   栅栏门（FenceGate）：薄门板横档双栅（机制等价 MC 1.0 fence gate id 107——Beta 1.6 入版 =
+        //   1.0 基线内）。solid=false / ShapeFenceGate（合=整 footprint × 1.5 高碰撞盒挡通路 / 开=零碰撞
+        //   可穿行，state bit0 分——WoodTrapdoor 开合碰撞语义同门但反向：活板门合也挡）；bit[2:1]=朝向
+        //   （放置写 horizontalFacing，几何解码面板走向 = 朝向轴的垂直轴——玩家面 +X → 门板沿 Z 横铺，
+        //   玩家沿 +X 穿行）。右键开合（placeBlock 块用分发段）翻 bit0 + doorToggled 双音（木门 t152
+        //   同门信号，开/合两音与门族共用）。贴图复用木板 tile 8（无专瓦——门板木质同源；**零新 tile**
+        //   面，图集另由蛋糕两瓦承担，见 Cake 行）。合成 {Stick:4, Planks:2} → 1（MC 同料有序 3×3，配方
+        //   行见 recipe.cpp）。**仅橡木**（1.0 口径——云杉栅栏门 1.4.6 才入，越基线不取；WoodFence 橡木
+        //   + CobbleFence 石墙双族在案，门单橡木如实登记）。音色 GroupWood（门族木音）。
+        FenceGate        = 157, // 栅栏门：右键开合（合挡 / 开通）；4 木棍+2 木板合成；仅橡木（1.0 口径）
+        //   玻璃板（GlassPane）：薄板异形连接渲染（机制等价 MC 1.0 glass pane id 102——Beta 1.8 入版 =
+        //   1.0 基线内；kMc 102）。solid=false / ShapeGlassPane（中心细柱 4/16 见方 × 满格高——IronBars
+        //   同门几何家族：碰撞=柱盒、选中/射线=十字条带双盒、横板连接**纯视觉**运行期邻居判定）。
+        //   **连接判定家族同门**：相邻玻璃板 / Glass / 实体方块 R1 口径（isCollidable ∨ isFullCube）横向
+        //   拼接，空气 / 水 / cross 不连。**破坏零掉落**（dropId=0——1.0 玻璃板破坏无掉落，Glass 本块同门；
+        //   派工稿「6 玻璃 2×3 合成」核实落定）。光照全透（default 0，栅栏 / 铁栏杆族口径）。音色
+        //   GroupStone（玻璃质，Glass/Ice 族）。合成 6 玻璃 2×3 → 16 板（MC 同料同形同产率）。
+        GlassPane        = 158, // 玻璃板：薄板连接拼接（IronBars 同门几何）；6 玻璃 2×3 → 16；破坏零掉落
+                                //   （1.0 口径——玻璃板破坏无掉落如实登记；本工程 Glass 方块自身是「可回收」
+                                //   自掉特例，玻璃板按派工核实走 1.0 原版零掉落，两块口径分离留痕）
+        //   蛋糕（Cake）：放置即方块形态（**1.0 无物品形态核实留痕**——cake 1.0 即方块 id 92，物品形态
+        //   是 1.14+ flattening 面；工程物品段无蛋糕行，放置链走合成产物直落方块 id，派工稿「方块+食面
+        //   无独立物品 id」实读成立）。分块食用：state bit[2:0]=咬口数 0..5（**1.0 口径六片**——每片
+        //   +2 饥饿 / 全蛋糕 12 饥饿；「7 片 14 饥饿」是 1.8/14w27a 改版，越基线不取，勘误登记见 recipe.cpp
+        //   配方行注）。右键咬一口（placeBlock 块用分发段；饥饿满 ≥20 无效应——MC 口径饱食不食），
+        //   bites=5 再咬 → 方块消失（MC「五咬之蛋糕再吃即尽」）。几何随咬口收窄（-X 侧每咬收 2px——
+        //   MC 咬口切片视觉口径）。贴图**两新瓦**：top=207 蛋糕霜面 / side=208 蛋糕侧（tools/build_cake.py
+        //   程序自绘原创 §9a；AtlasTileCount 207→209 lawful 前移，图集尾追加携沿革注）。合成 3 牛奶桶 +
+        //   2 糖 + 1 蛋 + 3 小麦 3×3 → 1（MC 同料同形；空桶 1.0 口径**留在合成格**——12w01a 才改回包，
+        //   经 Hotbar::recipeContainerSwap 单一权威在合成格原位转空桶）。hardness=0.5 / NoTool 空手
+        //   即采 / 破坏零掉落（MC 口径）/ 音色 GroupWood（羊毛软闷族口径——Wool 行同门）。
+        Cake             = 159, // 蛋糕：右键分块食用（1.0 六片 ×2 饥饿）；3 奶+2 糖+蛋+3 麦 3×3 合成
+        Count           = 160, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+                                 //   t1112 lawful 前移：157→160（FenceGate=157/GlassPane=158/Cake=159
+                                 //   尾部追加；t1111 曾 154→157、t1105 曾 151→154、t1103 曾 149→151、
                                  //   t1097 曾 148→149——追加不插中间存档契约，钉值随追加前移）。
     };
 
     // t1105 炼药锅 state 编码（复用 chunk m_states，存档 round-trip 保真——水位是方块持久态）：
     //   bit[1:0] = 水位 0..3（0=空锅[玩家放置默认] / 1..3=逐级水量）。瓶取水 -1 / 桶灌满置 3。
     static constexpr int CauldronStateLevelMask = 0x3;
+
+    // t1112 栅栏门 state 编码（复用 chunk m_states，存档 round-trip 保真——开合是方块持久态；活板门
+    //   bit0 开合同门编码，WoodDoor bit2 开合族内分离是门两格面承 bit3 所致，门板单格无此负担）：
+    //   bit0 = 开(1)/合(0)（FenceGateStateOpenFlag）；bit[2:1] = 朝向 0=+X 1=-X 2=+Z 3=-Z（放置写
+    //   horizontalFacing；几何解码 = 面板沿朝向轴的**垂直**轴横铺——玩家面 +X → 门板沿 Z，沿 +X 穿行）。
+    static constexpr int FenceGateStateOpenFlag  = 0x1;
+    static constexpr int FenceGateStateFacingShift = 1;
+    static constexpr int FenceGateStateFacingMask  = 0x6;
+
+    // t1112 蛋糕 state 编码（咬口数是方块持久态——存档 round-trip 保真，SnowLayer/Cauldron 同门）：
+    //   bit[2:0] = 咬口数 0..5（1.0 口径六片：bites=5 再咬 → 方块消失；「7 片」是 1.8+/14w27a 改版，
+    //   3 位宽给到 7 仅为位面整齐，合法域 0..5 由 CakeBitesMax 收口）。CakeBitesMax = 5（可达上界）。
+    static constexpr int CakeStateBitesMask = 0x7;
+    static constexpr int CakeBitesMax       = 5;
 
     // t387 床方块段哨兵：id ∈ [FirstBed, LastBed] 为床色变体（既存 8 色）。t455 补齐 16 色：追加 8 色新变体段
     //   [FirstExtraBed, LastExtraBed]（white/light_blue/lime/pink/gray/light_gray/purple/brown）。isBed(id) 单一权威
@@ -1337,6 +1384,10 @@ public:
     static constexpr int FirstExtraBed = BedWhite;    // t455 新增 8 色床段下界
     static constexpr int LastExtraBed  = BedBrown;    // t455 新增 8 色床段上界
     static bool isBed(quint8 blockId);
+
+    // t1112 栅栏门统一谓词（单一权威，同 isDoor / isTrapdoor 单 id 模式）：placeBlock 右键开合分支 /
+    //   碰撞开合态判定（shapeBoxesInto 合=满 / 开=零）统一读本谓词，避免各处硬编码 id。
+    static bool isFenceGate(quint8 blockId);
 
     // t457 床低 3D 模型几何常量（cell-local [0,1]）—— PartialBlockGeometry 渲染 + shapeBoxes 碰撞共用同一组值，
     //   保证「碰撞盒顶 = 渲染床垫顶」（玩家立于床垫顶）。kBedMattressTop=床垫顶高（~0.31 = 5/16，低床，碰撞盒顶）；
@@ -1809,6 +1860,16 @@ public:
                             //   bit0 亮标（ BrewingStandStateLitFlag，scanBrewingStands 酿造进行中置位 → 渲染
                             //   切 lit 贴图，熔炉 frontTile 承载亮态同门）。渲染 = PartialBlockGeometry
                             //   BrewingStand case（底座 + 中柱 + 双臂横杆三盒，双臂纯视觉凸出不进碰撞）。
+        ShapeFenceGate = 14, // t1112 栅栏门：**开合态分面碰撞**（合=整格 footprint × 1.5 高挡通路——栅栏
+                            //   「不可跳越」语义同门；开=零碰撞可穿行，MC 口径开位无碰撞）。渲染 = 端柱双盒
+                            //   + 双横档沿运行轴（PartialBlockGeometry FenceGate case 据 state 开合旋转）。
+                            //   朝向 bit[2:1]（FenceGateStateFacingShift）解码运行轴 = 朝向轴垂直轴。
+        ShapeGlassPane = 15, // t1112 玻璃板：IronBars 同门几何家族——中心细柱 4/16 见方 × 满格高碰撞 +
+                            //   横板连接纯视觉（运行期邻居 R1 判定，ShapeIronBars 同模式）；选中 / 射线 =
+                            //   十字条带双盒（IronBars 同盒，邻接无关覆盖柱 + 全走向横板）。
+        ShapeCake = 16,      // t1112 蛋糕：分块食用矮盒（footprint 内缩 1px × 高 8/16；-X 侧随咬口数每咬
+                            //   收 2px——MC 咬口切片视觉口径）。碰撞 / 选中 / 射线同盒（ShapeRepeater
+                            //   「四消费者同源」先例）；state bit[2:0] = 咬口数（CakeStateBitesMask）。
     };
 
     // t505 积雪层（SnowLayer）层数上界（state 0..7 = 8 级高度）。机制等价 MC 1.0 snow layer 8 层
@@ -2129,7 +2190,8 @@ public:
     //   206=cauldron 炼药锅壁（暗铸铁 + 顶部沿口亮带 + 三足足影；Cauldron 全盒体 + 内水面 tile 复用
     //   静水 19，水面高由 PartialBlockGeometry Cauldron case 据 state 水位算）。tools/build_pumpkin_stem.py /
     //   build_jackolantern.py / build_cauldron.py 程序生成原创像素图 §9a）。**追加不插中间**（同上）。
-    static constexpr int AtlasTileCount = 207; // t1105 起 201→207（南瓜族 tile 201..205 + 炼药锅 206 尾部
+    static constexpr int AtlasTileCount = 209; // t1112 起 207→209（蛋糕族 tile 207..208 尾部追加；t1105 起
+                                               //   201→207（南瓜族 tile 201..205 + 炼药锅 206 尾部
                                                //   追加：南瓜茎 4 阶段/南瓜灯点亮刻脸/炼药锅壁，不插中间
                                                //   存档契约；t1103 曾 195→201——钉值随追加 lawful 前移）
 
