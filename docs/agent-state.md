@@ -14,16 +14,16 @@
 ```yaml
 project: QtMinecraft
 state: IN_PROGRESS
-current_task: **t1114 IN_PROGRESS（map 地图大件：物品面+探索填充面+显示面——名册大件批第二单；地图数据存储门实读定夺）**：串行 voxel-dev，filter 词 r2084。
+current_task: **审计 #24 IN_PROGRESS（治理 5/5 触发——独立只读审计 agent 在飞，窗口 t1110-t1114 五闭环；主控按报落档 docs/governance-audit-2026-09-29.md 后开 t1115）**：审计窗口 4e2b0db..<本 docs 提交>。
 current_task_status: IN_PROGRESS
-last_completed_task: t1113 sign 牌子（2026-09-29 闭环；矩阵 868→872——StandingSign=160/WallSign=161 kMc 63/68[4 向登记简化+无再编辑负面钉]+ShapeNone 零碰撞+signBoardBoxes 选中/射线单源+SignStore sign_texts 表存档门接入[首个方块附挂文本面]+放置时编辑一次 UI+失撑脱落三写入口收口；**一勘误**=合成面降级[6 板 2×3 与活板门行模式全等]；**一笔超派工面补正**=t1097 酿造内容从未落盘缺口随单修复；过程注三笔[initSchema 同位插入事故/raycastAABBs 吞 GlassPane case/119 图标误重生成全数还原]。详录 = dev-plan t1113 关单条目）
-last_completed_task_prev: t1112 名册中件量批（2026-09-29 闭环，矩阵 864→868；详录 = dev-plan t1112 关单条目）
-last_completed_task_commits: fix(t1113)（60f8ae9：双 id+SignStore 新文件+sign_texts 表+失撑钩子+存档链补正+编辑面板+sign 瓦/图标，25 文件）+ test(t1113)（b8b7325：section76_roster_sign_t1113.cpp 新段 r2083a-d + lawful 钉修订 16 文件）
-last_verified_commit: test(t1113)（矩阵 **872 PASS / 0 FAIL ×2**：matrix_t1113_{pos,final}.log；腿集合 md5[规范配方]四方恒等 53ce88f396862b0a3eb441da1d3d89b0[含双 restore]；NEG-1 恰红 {r2083c} / NEG-2 恰红 {r2083a}，四件规范终名 matrix_r2083_neg{1,2}_{red,restore}.log；主控独立脱离式复跑 872/0 同 md5 = 三方恒等 matrix_orch_t1113_verify.log）
+last_completed_task: t1114 map 地图（2026-09-29 闭环；矩阵 872→876——EmptyMapId=0x290/FilledMapId=0x291[8 纸环+三件勘误三面留痕：两形拆分登记简化/罗盘芯不取/maxStack 64 翻案]+每会话单份全幅数据集+周界盒扫+§9a 原创色板+overlay 显示面+零存档门如实登记；纯物品面零 lawful 钉修订。详录 = dev-plan t1114 关单条目）
+last_completed_task_prev: t1113 sign 牌子（2026-09-29 闭环，矩阵 868→872；详录 = dev-plan t1113 关单条目）
+last_completed_task_commits: fix(t1114)（c631a32：双 id+MapStore 新文件+8 纸环配方+激活/探索/调色板三面+provider+overlay，10 文件 +488）+ test(t1114)（1fa4e21：section77_roster_map_t1114.cpp 新段 r2084a-d + 套件/CMake 注册）
+last_verified_commit: test(t1114)（矩阵 **876 PASS / 0 FAIL ×2**：matrix_t1114_{pos,final}.log；腿集合 md5[规范配方]四方恒等 52b298e1fec8c072b0e95da41c9db5f7[含双 restore]；NEG-1 恰红 {r2084b} / NEG-2 恰红 {r2084a}，四件规范终名 matrix_r2084_neg{1,2}_{red,restore}.log；主控独立脱离式复跑 876/0 同 md5 = 三方恒等 matrix_orch_t1114_verify.log）
 last_governance_review: 2026-09-28（audit #23 GREEN——窗口 84bafc1..4e2b0db 14 提交/t1104-t1108 五闭环证据链全实核[五单 md5 三方恒等 005f5365/dd52e1a8/d8e9ca6f/54b5d3cb/b9ad4689 + NEG 十份恰红十份还原吻合 + 腿数链 832→852 无断]；提交纪律 14 笔署名零命中[检测器正反验证]+全窗纯 ASCII；tail20 来源头注 5/5 全应用=#22 F4 整改首窗落地；控制块第四窗连续守住[counter 1..5+HEAD 行同步]；「锚哈希 git 现抄」整改生效=本窗锚零记误；不变量五单 file:line 级实文亲读全过[含 t1108 三笔 bug 门实文]；**F1[LOW] 规程参照文件名陈旧**[governance-audit-2026-09-25-b.md 实为 #20 报告，应为 2026-09-27.md=#22——连续两窗同根因，清偿=本批更正+「规程参照文件名须 ls docs/ 现核」纪律扩充] + F2[INFO push 积压实数 156 笔[原记 100+]以实数汇报] + F3[INFO CJK 载体=矩阵段注释既有惯例免]；详见 governance-audit-2026-09-28.md）
-governance_review_due: false（审计 #23 GREEN 落档清零——待机期不累计）
-completed_tasks_since_governance_review: 4（t1110 + t1111 + t1112 + t1113 闭环；审计 #23 GREEN 于 2026-09-28——下一审计窗口 = 再 1 闭环 → 审计 #24）
-next_task: **t1114 map 地图大件（在飞）→ 之后 golden apple 完整链（苹果根缺口前置）+ 长线停放待用户：下界/蘑菇岛维度级/§30/§31/P5 实机清单/push 156+ 笔**
+governance_review_due: true（**治理 5/5 触发——审计 #24 在飞**；落档后清零+counter 归零）
+completed_tasks_since_governance_review: 5（t1110 + t1111 + t1112 + t1113 + t1114 五闭环——审计 #24 触发在飞）
+next_task: **审计 #24 在飞 → 之后 t1115 golden apple 完整链（苹果根缺口前置）+ 长线停放待用户：下界/蘑菇岛维度级/§30/§31/P5 实机清单/push 积压已由用户清偿至 t1109 后——当前 15 笔待推**
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -33,7 +33,7 @@ needs_human: false
 
 ## Workspace Guard
 
-- HEAD = t1113 sign 牌子代码终态（fix(t1113) 60f8ae9 + test(t1113) b8b7325 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 872 腿满绿（76 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（t1097-t1113 十七单全过）。**git 提交禁任何 AI 署名尾注**（审计 #21 F1 入档纪律——派工简报恒带此句）。**审计窗口锚哈希须 git 现抄 + 规程参照文件名须 ls docs/ 现核**（审计 #22 F1/#23 F1 两教训）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（横幅+root objects 实文+组合件带来源头注，主控核对）。**NEG 四件终名日志必须落盘**（t1099 件教训）。**NEG 变异选址 = 摘调用点非摘守卫体 + position() 是眼位[feet+1.62]**（t1051/t1112 两教训）。**initSchema 加表 = 纯追加禁同位替换**（t1113 首轮 57 红教训）。
+- HEAD = t1114 map 地图代码终态（fix(t1114) c631a32 + test(t1114) 1fa4e21 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 876 腿满绿（77 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（t1097-t1114 十八单全过）。**git 提交禁任何 AI 署名尾注**（审计 #21 F1 入档纪律——派工简报恒带此句）。**审计窗口锚哈希须 git 现抄 + 规程参照文件名须 ls docs/ 现核**（审计 #22 F1/#23 F1 两教训）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（横幅+root objects 实文+组合件带来源头注，主控核对）。**NEG 四件终名日志必须落盘**（t1099 件教训）。**NEG 变异选址 = 摘调用点非摘守卫体 + position() 是眼位[feet+1.62]**（t1051/t1112 两教训）。**initSchema 加表 = 纯追加禁同位替换**（t1113 首轮 57 红教训）。
 - 纪律①-⑨全在案；**大 TU 编译一律 -j 1**（09-13 蓝屏教训；分段后单段增量 -j 4 实测安全）。**矩阵测试为 tools/matrix/ 分层结构**：改探针只重编对应段 TU（秒级）+ `--filter <substring>` 只跑本任务腿；新腿落对应段文件，新段置尾 runAll 末执行、须 ≤500KB；section11 起「自建 fresh 小世界」先例（48×48×96 seed 82 + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)）。
 - **R20.06 起值类型纪律**：src/Core/ 新值类型一律 result.h QObjectFree 编译期钉 + 头内 static_assert；命令/事件队列满载拒绝与快照队列覆盖最老是两域容量策略分化，勿「统一」。
 - **R20.07 起编排壳纪律**：GameSession 只做编排（命令 → 整 tick 边界 → World::setBlock 权威），禁复制游戏逻辑；**QML 现行玩法路径零变化是 R20 主线不变量**（Main.qml 含 "GameSession" 即违零迁移阴性钉 r2007b）。
@@ -50,6 +50,7 @@ needs_human: false
 
 ## Recovery Point
 
+- 2026-09-29（五）：t1114 map 地图闭环（矩阵 872→876，md5 52b298e1 四方恒等；c631a32/1fa4e21；双 id 0x290/0x291+8 纸环+会话单份全幅数据集+overlay 显示面+零存档门如实登记；三件派工勘误三面留痕；纯物品面零 lawful 钉修订。**治理 5/5 → 审计 #24 在飞**。恢复点 = 本条；在飞 = 审计 #24（只读）。
 - 2026-09-29（四）：t1113 sign 牌子闭环（矩阵 868→872，md5 53ce88f3 四方恒等；60f8ae9/b8b7325；双 id+SignStore sign_texts 存档门接入[首个方块附挂文本面]+存档链补正[t1097 酿造从未落盘]；一勘误[合成面降级：6 板 2×3 与活板门行模式全等]；过程注三笔。恢复点 = 本条；在飞 = t1114 map 地图（r2084）。
 - 2026-09-29（三）：t1112 名册中件量批闭环（矩阵 864→868，md5 4bd9b20e 四方恒等；72b7ac7/e2e21ee；三新方块[栅栏门 state 敏感碰撞形/玻璃板 IronBars 同门/蛋糕六片]+牛奶桶 0x28F 全链+鞍猪骑乘；两处派工勘误[蛋糕六片勘误/鞍死不掉翻案]+两小裁定[挤奶无冷却/游荡骑乘]；NEG 规范终名直接落盘；首轮 6 FAIL 过程注。恢复点 = 本条；在飞 = t1113 sign 牌子（r2083）。
 - 2026-09-29（二）：t1111 名册低件量批闭环（矩阵 860→864，md5 d3ae5194 四方恒等；dbc8b82/aa5434c；三新方块+slime 出生修复+金苹果链断降级；两处派工勘误[阶梯形/纪元重定代]）。恢复点 = 本条；在飞 = t1112 名册中件量批（r2082）。
