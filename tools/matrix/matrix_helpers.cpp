@@ -214,6 +214,15 @@ void MatrixRun::runAll()
                               //   ——NEG-2 摘面行本腿持有]，r2088c 结构钉族[源钉族 + 零字体引擎/
                               //   零字体文件/零 MC 资产名三负面钉——NEG 双摘面豁免不钉]。纯像素/源钉
                               //   腿，rig 世界零接触，接 section80）
+    section82_sit_pose_t1119(); // t1119 骑猪第三人称坐姿探针段（置尾先例沿用：r2089a 坐姿柱
+                              //   [鞍→骑上→isRidingPig 权威答真 + 钉位脚底回归 + moveSpeed 压零
+                              //   + Shift 下猪复位 + 船/矿车 tryMount 既有坐姿触发面对照]，
+                              //   r2089b 接线柱[sitBlend 扩展谓词行 raw 钉——NEG-1 摘面行本腿持有
+                              //   + 三 sit 量消费面幸存 + 船/矿车既有触发行幸存 + 沿革锚]，
+                              //   r2089c 结构钉族[QML isRidingPig 桥行 raw 钉——NEG-2 摘面行本腿
+                              //   持有 + 触发权威源钉 + 机制面零触碰负面钉族（骑乘钉位行/推挤豁免
+                              //   行/下猪链两行/骑乘互斥守卫双行 r2082d 源钉幸存复核）+ CMake 段行]。
+                              //   行为腿真链 pc rig fresh 48×48×96 s82，rig 世界零接触，接 section81）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";

@@ -1205,6 +1205,14 @@ add_executable(redstone_matrix_test
     #   墨写点行（r2088a 行为红/他腿幸存）。随段直编 src/Game/signboardfont.h/.cpp（Game 层
     #   纯函数零 QObject；app 目标已列，此处补列测试 TU 链接），rig 世界零接触）。
     tools/matrix/section81_sign_text_t1118.cpp
+    # t1119 骑猪第三人称坐姿探针段（3 腿 r2089a-c，filter 词 r2089；坐姿柱[鞍→骑上→isRidingPig
+    #   权威答真 + 钉位脚底回归 + moveSpeed 压零 + Shift 下猪复位 + 船/矿车 tryMount 既有坐姿触发
+    #   面对照，真链 pc rig fresh 48×48×96 s82] + 接线柱[sitBlend 扩展谓词行 raw 钉——NEG-1 摘面行
+    #   本腿持有 + 三 sit 量消费面幸存 + 船/矿车既有触发行幸存] + 结构钉族[QML isRidingPig 桥行
+    #   raw 钉——NEG-2 摘面行本腿持有 + 触发权威源钉 + 机制面零触碰负面钉族（骑乘钉位行/推挤豁免
+    #   行/下猪链两行/骑乘互斥守卫双行 r2082d 源钉幸存复核）+ CMake 段行]。QML 面不进 C++ 构建
+    #   = NEG 双摘编译仍绿；playercontroller.cpp 零改动 = 纯呈现层。rig 世界零接触）。
+    tools/matrix/section82_sit_pose_t1119.cpp
     src/Game/signboardfont.cpp
     src/Game/signboardfont.h
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
