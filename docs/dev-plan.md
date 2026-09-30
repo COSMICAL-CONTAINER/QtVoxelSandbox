@@ -4573,7 +4573,17 @@ audit #5（docs/governance-audit-2026-09-12.md）：方向无问题，但 Review
 
 ### t1117（2026-09-30 立项[t1116 现场新发现清偿]，t1112 三空白图标修复——icon_fence_gate/icon_glass_pane/icon_cake 零不透明像素缺口；filter 词 r2087）
 
-→ **🚧 开工（2026-09-30，串行 voxel-dev）**：三图标修复（t1116 发现留池→即单清偿）：根因 = tools/build_cube_icons.py 的 render_partial_3d 无 fence_gate/glass_pane/cake 三分支（盒集只在 pack 路径 _partial_shape_boxes）→ 三 PNG 全透明像素。修法 = 生成器补三分支（ShapeFenceGate 端柱+双横档/ShapeGlassPane 十字柱板/ShapeCake 咬口矮盒——PartialBlockGeometry 同构投影，§9a 程序生成）+ 三图标重生成 + 在盘逐像素 alpha 非空自证（r2086a 同款钉法）。零行为变更面（icon 回退链降级层，同 t1116 件一口径）。腿 = r2087a 图标三件非空柱+注册钉族（NEG 摘生成器分支行→恰红）。状态 = IN_PROGRESS。
+→ **✅ 落地（2026-09-30）：fix(t1117) dabc0f7a + test(t1117) 17ddb4fd + 本 docs 提交；矩阵 885→887（+2 腿）**：
+- **三图标修复**：全仓 147 张 git 跟踪 icon_*.png python 逐张 alpha 实测——零不透明像素恰 3 张=本单三件（各 64×64 ct6 96B 全透明 stub）；顺手核查无第四张空白（stone/wood button 136 opaque 属正常细杆形）——留池为空零扩面。根因 = t1112 只注册 PARTIALS_3D_T1112 表而 render_partial_3d 无 fence_gate/pane/cake shape 分支 → 循环三调全落 else 空画布早退。修法 = 生成器补三分支（PartialBlockGeometry 同构投影：合态门板沿 Z 端柱双盒+双横档/满连十字柱板 4/16 截面[bites=0 矮盒 8/16 高——fresh 形态按 iron-bars 图标取放置态口径]）；三 PNG 重生成（单图标点名调用禁全量重烘——t1113 事故纪律），交付 opaque = 1428/1952/1733（主控独立 PNG 解码复核逐字吻合）。**零行为面如实核实**：三块均在 isPackDerivedIconFamily 族外+resourcepackmanager 零三 shape atlas spec case（区别 t1116 IronBars 族内先答）→ qrc PNG 是唯一图标源，PNG 重生成即全修复，C++ 零触碰。
+- **腿（section80_icon_fix_t1117.cpp 新段，r2087a-b）**：空白图标修复柱（三 PNG 逐像素 alpha 非空×3+全目录零空白扫面恒久固化[下界 140]+iconSourceForBlock 三行非空+调色板三行在册）/ 结构钉族（生成器三分支源钉[NEG 摘面本腿专权]+名册表三行+CMake 段行+icon case 三行幸存+三 shape 无 atlas spec 负面钉×3+沿革锚）。**NEG ×1**（摘要：生成器不进 C++ 构建 → 矩阵二进制恒绿，摘 .py 分支整块→恰红恰 {r2087b} 全量 886P+1F）双手工 Edit 还原（生成器 md5 NEG 前后同值=逐字节还原实证）+ restore 实跑 887P/0F。
+
+- **验证链（#24 纪律履行）**：构建零项目警告 → 四跑整文件 md5 两两互异（物理跑 4+filter 3+冒烟 1 如实申报）→ **raw 规范配方 md5 三方恒等 e50341287ebfa990ad0442d39e8cc52b**（pos/final/restore；主控亲算；agent 申报的数字归一变体 fd2c4df7 再证多余——raw 规范式即恒等，与 t1116 同门留痕）→ NEG 恰红红面与申报吻合（红 log 886P+1F 恰 r2087b）→ 冒烟 tail20（来源头注+横幅+root objects）→ 相邻族复绿 r2086/r2085。**过程注三笔如实**：①r2087b 首版两针单空格 needle 失配文件对齐空格→逐字节复制实际行文修正复跑绿；②**fix 提交消息混入两中文字符[截面]——GateGuard 拦 amend 后 agent 未走已验证的 soft-reset 通路[t1116 同门先例]而接受盘面→主控验收环节以 reset+双段重提交重写[t441 树哈希核等：HEAD 树 132c2d6f 与原 test 树逐位吻合=内容零漂移]，终版 dabc0f7a/17ddb4fd 双零非 ASCII**；③sed 基础正则 + 字面量坑→-E 修（主控复算无需归一）。
+- **主控验收（2026-09-30 亲核）**：diff 亲读（生成器三分支与 PartialBlockGeometry 同构/单图标点名生成/零行为面论证）；证据链亲核（raw md5 三方恒等亲算+三 PNG alpha 解码独立复核+NEG 恰红+字节互异）；**主控独立脱离式复跑 887/0 同 md5 = 三方恒等**（matrix_orch_t1117_verify.log）。**待实机确认**：三图标游戏内 hotbar/调色板观感（形状已目视核验）。**下一任务 = t1118 sign 板面 3D 字面渲染（t1113 候选池清偿——SignStore 四行文本在牌板面呈现，r2088）**。
+
+
+### t1118（2026-09-30 立项[t1113 候选池清偿]，sign 板面 3D 字面渲染——SignStore 四行文本在牌板面呈现；filter 词 r2088）
+
+→ **🚧 开工（2026-09-30，串行 voxel-dev）**：sign 板面字面渲染（t1113 关单时「文本存 SignStore、瓦面=空白刻线板——候选池登记」清偿）：**呈现面选型实读定夺**（paintingHost QML delegate 同门 vs 图集文本瓦烘焙 vs Quick 3D——工程渲染管线实读选型留痕；§9 文本字形工程原创）；SignStore 文本 → 板面 UV/像素映射（4 行×15 字符、站牌/挂墙牌双形态几何、4 向朝向映射——signBoardBoxes/partialblockgeometry 双 case 同源）；空文本牌子=既有空白刻线板不变；字面随 SignStore revision 变更刷新（mapstore revision-URL 同门）；§9 原创点阵字形（零 MC 资产零字体文件——程序字模）。腿 = 行为柱（文本→像素映射正确性+双形态+朝向）+结构钉+NEG 恰红（摘映射行→恰红）。状态 = IN_PROGRESS。
 
 ### t1109（2026-09-28 立项[§14 常设授权候选池——池面收官批]，残项小批合集三：完整瓜茎茎蔓原型 + 矿井野生瓜 patch + 沙漠村庄变体；filter 词 r2079）
 
