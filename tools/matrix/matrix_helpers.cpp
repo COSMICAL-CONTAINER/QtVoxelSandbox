@@ -207,6 +207,13 @@ void MatrixRun::runAll()
                               //   icon case 三行幸存 + 家族行 minCount=2 + 三 shape 无 atlas spec
                               //   负面钉 ×3(qrc 唯一图标源核实留痕) + 沿革锚]。纯资产/源钉腿，
                               //   rig 世界零接触，接 section79）
+    section81_sign_text_t1118(); // t1118 牌板面文字渲染探针段（置尾先例沿用：r2088a 字模/映射柱
+                              //   [85 字模全覆盖 + 缺字框形态钉 + 已知文本墨非空 + 行序墨行带互斥 +
+                              //   行内居中 + 空文本恒空白 + 行数互钉]，r2088b 接线柱[双形态几何读回 +
+                              //   revision 失效键 + provider 注册 + active 桥 + QML 接线 raw 钉族
+                              //   ——NEG-2 摘面行本腿持有]，r2088c 结构钉族[源钉族 + 零字体引擎/
+                              //   零字体文件/零 MC 资产名三负面钉——NEG 双摘面豁免不钉]。纯像素/源钉
+                              //   腿，rig 世界零接触，接 section80）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";

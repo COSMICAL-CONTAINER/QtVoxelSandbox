@@ -1195,6 +1195,18 @@ add_executable(redstone_matrix_test
     #   minCount=2 + 三 shape 无 atlas spec 负面钉 ×3(qrc 唯一图标源核实留痕) + 沿革锚]——零新
     #   include 面，hotbar/QImage 系均已列）。
     tools/matrix/section80_icon_fix_t1117.cpp
+    # t1118 牌板面文字渲染探针段（3 腿 r2088a-c，filter 词 r2088；字模/映射柱[程序字模存在面
+    #   85 在册全覆盖扫 + 覆盖面外缺字框反判/形态钉 + 已知文本墨非空双画布 + 行序正确墨行带
+    #   互斥 + 行内水平居中 + 空文本恒空白面 + kLineCount/kLinesPerSign 互钉] + 接线柱[双形态
+    #   几何读回 128×96/96×96 + revision 失效键 URL raw 钉 + provider 注册钉 + SignStore::active
+    #   桥行为面 + QML 接线 raw 钉族——NEG-2 摘面行[onSignChanged 对账行]本腿持有] + 结构钉族
+    #   [字模表头/映射常量/渲染签名/active 桥三行/CMake 双行源钉 + 零字体引擎/零字体文件/零
+    #   MC 资产名三负面钉——NEG 双摘面豁免不钉]——NEG-1 摘面 = signboardfont.cpp renderBoard
+    #   墨写点行（r2088a 行为红/他腿幸存）。随段直编 src/Game/signboardfont.h/.cpp（Game 层
+    #   纯函数零 QObject；app 目标已列，此处补列测试 TU 链接），rig 世界零接触）。
+    tools/matrix/section81_sign_text_t1118.cpp
+    src/Game/signboardfont.cpp
+    src/Game/signboardfont.h
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
     #   确定性等价承重墙[8 形态快照 worker ≡ 同步直调逐位恒等：顶点/索引/统计三面]/队列纪律
     #   [容量压小满载 kErrQueueFull 可见拒绝 + 拒绝项不入账 + 接受项恰一产出按 requestId 对账]/
