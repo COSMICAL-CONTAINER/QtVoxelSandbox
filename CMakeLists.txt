@@ -1182,6 +1182,13 @@ add_executable(redstone_matrix_test
     #   带 + 瓜种带回归] + 结构钉族[值面 + 源钉族 + 双负面钉——NEG 双摘面豁免不钉]——零新 include 面,
     #   loottable/hotbar/playercontroller 系均已列,QImage 面 Qt6::Gui 既有链接)。
     tools/matrix/section79_small_gaps_t1116.cpp
+    # t1117 t1112 三空白图标修复探针段（2 腿 r2087a-b，filter 词 r2087；空白图标修复柱[三 PNG
+    #   在盘非空逐像素 alpha 扫描 ×3 + 全目录零空白扫面(icon_*.png 全集无第四张零不透明) + 运行期
+    #   iconSourceForBlock 三行非空 + 调色板三行在册] + 结构钉族[生成器三分支源钉——fence_gate
+    #   分支行 = NEG-1 摘面本腿专权 + 名册表三行 + CMake 段行 + icon case 三行幸存 + 家族行
+    #   minCount=2 + 三 shape 无 atlas spec 负面钉 ×3(qrc 唯一图标源核实留痕) + 沿革锚]——零新
+    #   include 面，hotbar/QImage 系均已列）。
+    tools/matrix/section80_icon_fix_t1117.cpp
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
     #   确定性等价承重墙[8 形态快照 worker ≡ 同步直调逐位恒等：顶点/索引/统计三面]/队列纪律
     #   [容量压小满载 kErrQueueFull 可见拒绝 + 拒绝项不入账 + 接受项恰一产出按 requestId 对账]/

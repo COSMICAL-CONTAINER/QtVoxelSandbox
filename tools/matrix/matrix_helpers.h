@@ -725,4 +725,12 @@ private:
                               //   零行]，r2086d 结构钉族[值面 + 源钉族(decl/impl 头/静默挂点行/金苹果
                               //   行/沿革锚/CMake 段行) + 双负面钉——NEG 双摘面豁免不钉]。
                               //   fresh 48×48×96 s86，rig 世界零接触，接 section78）
+    void section80_icon_fix_t1117(); // t1117 t1112 三空白图标修复探针段（置尾先例沿用：r2087a
+                              //   空白图标修复柱[三 PNG 在盘非空逐像素 alpha 扫描 ×3 + 全目录
+                              //   零空白扫面(icon_*.png 全集无第四张零不透明) + 运行期 iconSourceForBlock
+                              //   三行非空 + 调色板三行在册]，r2087b 结构钉族[生成器三分支源钉
+                              //   (fence_gate 分支行 = NEG-1 摘面本腿专权) + 名册表三行 + CMake
+                              //   段行 + icon case 三行幸存 + 家族行 minCount=2 + 三 shape 无
+                              //   atlas spec 负面钉 ×3(qrc 唯一图标源核实留痕) + 沿革锚]。
+                              //   纯资产/源钉腿，rig 世界零接触，接 section79）
 };
