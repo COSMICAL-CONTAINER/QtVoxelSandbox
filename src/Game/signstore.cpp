@@ -5,9 +5,19 @@
 
 // 牌子文本存储实现（声明见 .h 注——首个方块附挂文本面；Game 层纯存储 + QML 面向面）。
 
+SignStore *SignStore::s_active = nullptr;
+
 SignStore::SignStore(QObject *parent)
     : QObject(parent)
 {
+    s_active = this; // 活跃实例注册（最后构造者生效；provider 拉取面，MapStore 同门）。
+}
+
+// 析构注销（QML 单实例长寿——注销防悬垂；多实例栈对象析构不误清后继活跃实例）。
+SignStore::~SignStore()
+{
+    if (s_active == this)
+        s_active = nullptr;
 }
 
 // 某牌子某行文本。line 越界 / 无此牌 → 空串（与 ChestStore::slotIdAt 越界返 0 同款兜底口径）。

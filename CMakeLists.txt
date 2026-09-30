@@ -317,6 +317,12 @@ qt_add_executable(voxelsandbox
     #   族（同族 per-block 方块附挂数据容器）。纯存储类（无光 / 无 World 依赖）。
     src/Game/signstore.cpp
     src/Game/signstore.h
+    # t1118 牌板面文字像素渲染（Game 层纯函数工具）：原创 9 行点阵字模（85 字模 = 大写 26 + 小写 26 +
+    #   数字 10 + 基础标点 22，§9 零字体文件零 MC 资产）+ SignStore 四行文本 → 板面像素 QImage
+    #   （站牌 96×96 / 挂墙牌 128×96，行带对齐 sign_board 瓦淡带）。零 QObject / 零 World / 零 QtQuick
+    #   ——main.cpp SignBoardAtlasProvider（image://signboard）胶水消费（MapAtlasProvider 同门）。
+    src/Game/signboardfont.cpp
+    src/Game/signboardfont.h
     # t1114 map 地图数据集（Game 层 ViewModel）：每会话单份全幅 1bpp 地图像素存储（激活建库 / 探索写列
     #   / renderImage 出图 / clearAll 跨世界收口）。机制面在 PlayerController（激活分支 + 探索 tick +
     #   mapColumnColor 色板——有 m_world 读栅格，本类零 World 依赖）；显示面经 main.cpp 胶水 provider

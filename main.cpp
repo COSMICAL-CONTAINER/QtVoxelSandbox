@@ -20,6 +20,10 @@
 #include "resourcepackmanager.h"
 // t1114 map 图像 provider 依赖（Game 层数据集；QtQuick 依赖留此 app 胶水层——MapStore 本体零 QtQuick）。
 #include "mapstore.h"
+// t1118 牌板面文字 provider 依赖（Game 层：SignStore 活跃实例拉取 + SignBoardFont 板面像素渲染；
+//   QtQuick 依赖留此 app 胶水层——两 Game 类本体零 QtQuick，MapStore 同门）。
+#include "signstore.h"
+#include "signboardfont.h"
 // t813 构建版本戳（Core 叶子）：启动日志自报家门 —— 每份 logs/voxelsandbox.log 首段即可
 //   核对「该日志由哪个构建产出」，与主菜单角落 / F3 显示同源（BuildInfo 单一权威出口）。
 #include "buildinfo.h"
@@ -57,6 +61,45 @@ public:
         Q_UNUSED(id);
         Q_UNUSED(requestedSize);
         const QImage img = MapStore::active() ? MapStore::active()->renderImage() : QImage();
+        if (size)
+            *size = img.size();
+        return img;
+    }
+};
+
+// t1118 牌板面文字图像 provider（image://signboard/<x>,<y>,<z>/<wall>/<revision>）：把 SignStore
+//   四行文本经 SignBoardFont 程序点阵字模渲染为板面像素画布，交给 Main.qml signDelegate 的板面
+//   Texture（MapAtlasProvider 同门胶水——QtQuick 依赖留 app 层，Game 两类零 QtQuick）。id 携
+//   SignStore::revision 失效键（mapstore revision-URL 同门思路）：任一牌子文本写入 → 全部牌面
+//   URL 换值 → QML 源缓存失效重取重渲；牌坐标选数据源、wall 位选画布形态（0=站牌 96×96 /
+//   1=挂墙牌 128×96）。无活跃 SignStore / id 形态不符 → 全空行 → 全透明画布兜底（§2-E 静默降级，
+//   板面瓦原样露出 = 空白刻线板）。
+class SignBoardAtlasProvider : public QQuickImageProvider
+{
+public:
+    SignBoardAtlasProvider() : QQuickImageProvider(QQuickImageProvider::Image) {}
+    QImage requestImage(const QString &id, QSize *size, const QSize &requestedSize) override
+    {
+        Q_UNUSED(requestedSize);
+        // id 形态 "x,y,z/<wall>/<rev>"（坐标可负；形态不符 → 0,0,0 全空兜底）。
+        QString lines[SignStore::kLinesPerSign];
+        int rx = 0, ry = 0, rz = 0;
+        bool wall = false;
+        const QStringList parts = id.split(QLatin1Char('/'));
+        if (parts.size() == 3) {
+            wall = parts.at(1) == QLatin1String("1");
+            const QStringList c = parts.at(0).split(QLatin1Char(','));
+            if (c.size() == 3) {
+                rx = c.at(0).toInt();
+                ry = c.at(1).toInt();
+                rz = c.at(2).toInt();
+            }
+        }
+        if (SignStore *st = SignStore::active()) {
+            for (int i = 0; i < SignStore::kLinesPerSign; ++i)
+                lines[i] = st->lineAt(rx, ry, rz, i);
+        }
+        const QImage img = SignBoardFont::renderBoard(lines, wall);
         if (size)
             *size = img.size();
         return img;
@@ -142,6 +185,10 @@ int main(int argc, char *argv[])
     // t1114 map 图像 provider（image://mapstore/<rev>）：手持地图 overlay 纹理源（必须在 loadFromModule
     //   之前注册；engine 接管 provider 生命周期）。id 携 revision 失效键（见 MapAtlasProvider 头注）。
     engine.addImageProvider(QStringLiteral("mapstore"), new MapAtlasProvider);
+    // t1118 牌板面文字图像 provider（image://signboard/…）：Main.qml signDelegate 板面 Texture 源
+    //   （必须在 loadFromModule 之前注册；engine 接管 provider 生命周期。id 携 revision 失效键，
+    //   见 SignBoardAtlasProvider 头注）。
+    engine.addImageProvider(QStringLiteral("signboard"), new SignBoardAtlasProvider);
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed,
                      &app, []() { qCritical("QML objectCreationFailed"); QCoreApplication::exit(-1); },
                      Qt::QueuedConnection);

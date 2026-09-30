@@ -39,6 +39,11 @@ class SignStore : public QObject
 
 public:
     explicit SignStore(QObject *parent = nullptr);
+    // 活跃实例桥接（t1118）：main.cpp 牌面图像 provider（image://signboard）建于 engine 装配期、
+    //   本类实例生于 QML 装配期（更晚）——两生命周期以静态指针衔接（MapStore::active 同门形态）。
+    //   多实例时最后构造者生效（Main.qml 单实例惯例）。析构注销（见下）。
+    static SignStore *active() { return s_active; }
+    ~SignStore() override;
 
     static constexpr int kLinesPerSign = 4;  // MC 1.0 牌子 4 行
     static constexpr int kCharsPerLine = 15; // MC 1.0 牌子每行 15 字符
@@ -72,6 +77,7 @@ signals:
     void signChanged();
 
 private:
+    static SignStore *s_active; // 活跃实例（active() 拉取面；构造注册 / 析构注销，MapStore 同门）
     // 单牌 4 行文本。全空 4 行 = 合法条目（放置未打字），仅 clearSign/clearAll/loadAll 清条目。
     using Sign = std::array<QString, kLinesPerSign>;
 
