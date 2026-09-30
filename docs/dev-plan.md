@@ -4583,7 +4583,19 @@ audit #5（docs/governance-audit-2026-09-12.md）：方向无问题，但 Review
 
 ### t1118（2026-09-30 立项[t1113 候选池清偿]，sign 板面 3D 字面渲染——SignStore 四行文本在牌板面呈现；filter 词 r2088）
 
-→ **🚧 开工（2026-09-30，串行 voxel-dev）**：sign 板面字面渲染（t1113 关单时「文本存 SignStore、瓦面=空白刻线板——候选池登记」清偿）：**呈现面选型实读定夺**（paintingHost QML delegate 同门 vs 图集文本瓦烘焙 vs Quick 3D——工程渲染管线实读选型留痕；§9 文本字形工程原创）；SignStore 文本 → 板面 UV/像素映射（4 行×15 字符、站牌/挂墙牌双形态几何、4 向朝向映射——signBoardBoxes/partialblockgeometry 双 case 同源）；空文本牌子=既有空白刻线板不变；字面随 SignStore revision 变更刷新（mapstore revision-URL 同门）；§9 原创点阵字形（零 MC 资产零字体文件——程序字模）。腿 = 行为柱（文本→像素映射正确性+双形态+朝向）+结构钉+NEG 恰红（摘映射行→恰红）。状态 = IN_PROGRESS。
+→ **✅ 落地（2026-09-30）：fix(t1118) 0911e3c5 + test(t1118) 373145c7 + 本 docs 提交；矩阵 887→890（+3 腿）**：
+- **呈现面选型（实读定夺三面留痕）**：paintingHost QML delegate 同门——①图集文本瓦烘焙不可行（per-sign 动态无界+terrain 图集静态共享+revision 须整网格重建）；②Quick 3D 字体路径违 §9 零字体纪律；③paintingHost 世界内异形呈现层既验证先例。**字模 = §9 原创点阵**（signboardfont.h/cpp 新文件——Game 层零 QObject/零 World/零 QtQuick；9 行点阵 5 列步进 6；85 字模=大写 26+小写 26+数字 10+标点 22+空格；覆盖面外→缺字框[空心框+内点行，行序与全表互异 hasGlyph 反判]；**零字体文件/零字体引擎负面钉三针**）。
+
+- **接线面**：SignStore::active() 静态桥三行（最后构造者生效+析构注销——MapStore 同门）；main.cpp SignBoardAtlasProvider（image://signboard/<x>,<y>,<z>/<wall>/<revision>——坐标选数据源/wall 位选画布形态[站牌 96×96/挂墙牌 128×96]/revision 失效键换 URL 重取零网格重建；id 形态不符→全空行透明画布兜底）；Main.qml signHost（reconcileVis 幂等对账=SignStore 条目 ∩ blockAt 仍是牌子；文本变更不重建 delegate——URL 携 revision 自失效；onWorldChanged 兜底清爆炸/静默改写孤儿）；**空文本牌子不挂 delegate**（既有空白刻线板原样）。行带对齐 sign_board 瓦四行淡文本带+行内居中；机制/存档面零触碰（r2083c 既有钉原样幸存）。
+
+- **腿（section81_sign_text_t1118.cpp 新段，r2088a-c）**：字模/映射柱（85 字模全覆盖扫+覆盖面外反判+缺字框逐行形态钉+已知文本双画布墨非空+行序正确+行内居中+空文本恒全透明——NEG-1 摘 renderBoard 墨写点行[预先守卫化保证摘后编译零警告]恰红归因本腿专权）/ 接线柱（双形态几何读回+revision 失效键 URL raw 钉+provider 注册钉+active 桥行为面+QML 接线 raw 钉族——NEG-2 摘 onSignChanged 对账行恰红归因本腿专权）/ 结构钉族（源钉+三负面钉[QFont/QRawFont/QFontDatabase 零命中/textures 全目录零 *font* 文件/ascii.png 零命中]）。
+- **验证链（#24 纪律履行）**：编译零警告 → 全矩阵物理脱离式 **6 跑全实跑**（pos 890/0 → NEG-1 red 889/1 恰 r2088a → restore 890/0 → NEG-2 red 889/1 恰 r2088b → restore 890/0 → final 890/0）；六跑整文件 md5 两两互异；NEG 复原字节核验（signboardfont.cpp/Main.qml 摘前=复后逐位同）；**raw 规范配方 md5 四方恒等 6e5728a348f547e0e52d173fe25d47d4**（主控亲算；agent 数字归一变体 8ed77d30 三连单再证多余留痕）→ 冒烟 tail20（来源头注 build 62e1ab40+横幅+root objects）→ 相邻族复绿 r2087/r2086。**过程注**：NEG-1 摘 C++ 行预先守卫化（continue 守卫+独立写点行——摘后编译仍绿，区别 t1117 摘 .py 不进构建）；CMakeLists 双 hunk 分属两提交（临时摘 test hunk 提交 fix→回填提 test——两提交各自可构建自洽）；agent 侧长写入乱码两笔自愈（signboardfont.cpp 小分块落地+python 逐项校验 85 标签零重复/括号平衡/memcpy 计数）。
+- **主控验收（2026-09-30 亲核）**：diff 亲读（选型论证三面/字模表+缺字框互异面/active 桥析构注销/signHost 对账幂等+revision 失效键+孤儿清扫）；证据链亲核（raw md5 四方恒等亲算+NEG 双恰红+字节互异+复原字节核验申报）；**主控独立脱离式复跑 890/0 同 md5 = 三方恒等**（matrix_orch_t1118_verify.log）。**待实机确认**：板面字样四向朝向观感（painting yaw 表防镜像代码面已钉，观感留实机）/挂墙牌满宽文字贴墙四向/存退重进字样保持/中文输入缺字框观感/空文本牌空白不变/TNT 静默改写无浮字残影/image://signboard 运行期重取节奏。**下一任务 = t1119 骑猪第三人称坐姿 sitBlend（t1112 候选池清偿——骑乘中玩家模型站姿改坐姿，r2089）**。
+
+
+### t1119（2026-09-30 立项[t1112 候选池清偿]，骑猪第三人称坐姿 sitBlend——骑乘中玩家模型站姿改坐姿；filter 词 r2089）
+
+→ **🚧 开工（2026-09-30，串行 voxel-dev）**：t1112 关单时「骑猪第三人称坐姿（未接 sitBlend，登记简化——骑乘中玩家模型仍站姿，候选池）」清偿：玩家模型坐姿呈现面（既有人物模型/动画管线实读选型——sneak/攻击/挥臂既有姿态混合先例同门；坐姿 = 腿部姿态混合 [blend 权重/过渡时长实读定夺]）；触发面 = ridingPigActive() 骑乘谓词（t1112 既有单一权威读口）；船/矿车骑乘坐姿既有面实读核实（若已有坐姿则同门扩展；若无则本单为首个坐姿混合面如实留痕）。纯呈现层零机制触碰（骑乘钉位/推挤豁免/下猪链零改动——r2082d 既有钉原样幸存）。腿 = 行为柱（坐姿混合权重断言+骑乘谓词触发+下猪复位）+结构钉+NEG 恰红（摘混合行→恰红）。状态 = IN_PROGRESS。
 
 ### t1109（2026-09-28 立项[§14 常设授权候选池——池面收官批]，残项小批合集三：完整瓜茎茎蔓原型 + 矿井野生瓜 patch + 沙漠村庄变体；filter 词 r2079）
 
