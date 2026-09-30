@@ -184,6 +184,9 @@ PARTIALS_3D_T1111 = [
 # t1112 名册中件量批半方块 3D dimetric 立体图标：fence_gate / pane / cake 三个新 shape + 各自材质 fill
 #   （机制等价石砖变体 PARTIALS_3D_STONE_BRICK 流程）：栅栏门（木板 fill）/ 玻璃板（玻璃 fill）/
 #   蛋糕（顶=霜面 / 侧=蛋糕侧带，与放置态 kDefs 面 topTile 207 / side 208 同源）。
+#   [t1117 沿革注] t1112 只登记了本表未落 render_partial_3d 的 fence_gate / pane / cake shape
+#   分支 → 循环三图标全落 else 空画布（零不透明像素空白 PNG 在盘，t1116 现场发现）。本批补齐
+#   三分支后本表才真正产出——表行与分支盒集同构（PartialBlockGeometry 同源），改编码两处同步。
 PARTIALS_3D_T1112 = [
     ("fence_gate", "fence_gate", "default_wood",      "default_wood"),
     ("glass_pane", "pane",       "default_glass",     "default_glass"),
@@ -612,6 +615,44 @@ def render_partial_3d(shape, fill_top="default_wood", fill_side="default_wood"):
             (7.0 / 16.0, 9.0 / 16.0, 7.0 / 16.0, 9.0 / 16.0, 0.0, 7.0 / 16.0),    # -Z 横板
         ]
         y_min, y_max = 0.0, 1.0
+    elif shape == "fence_gate":
+        # t1117 栅栏门（t1112 资产在盘但生成器缺分支 → PARTIALS_3D_T1112 循环落 else 空画布 =
+        #   icon_fence_gate.png 零不透明像素空白图，本批根因修复——三分支同门）：合态门板沿 Z
+        #   运行居中，与 PartialBlockGeometry FenceGate case 合态 runZ 分支同盒集（**编码镜像**，
+        #   改编码两处同步）：两端柱 4/16 见方满格高（柱心距端 2/16 → z[2/16,6/16] 与
+        #   z[10/16,14/16]）+ 双横档沿 Z 满贯（y 带同栅栏族下 6..9/16 上 12..15/16，厚向 X
+        #   4/16 居中 6..10/16 与柱同宽）。depth buffer 解端柱-横档相交遮挡。图标取合态观感
+        #   （开合态几何同构旋转，物品剪影同门——牌子/挂墙牌共用 icon_sign.png 族惯例）。
+        boxes = [
+            (6.0 / 16.0, 10.0 / 16.0, 0.0, 1.0, 2.0 / 16.0, 6.0 / 16.0),            # -Z 端柱
+            (6.0 / 16.0, 10.0 / 16.0, 0.0, 1.0, 10.0 / 16.0, 14.0 / 16.0),          # +Z 端柱
+            (6.0 / 16.0, 10.0 / 16.0, 6.0 / 16.0, 9.0 / 16.0, 0.0, 1.0),            # 下横档
+            (6.0 / 16.0, 10.0 / 16.0, 12.0 / 16.0, 15.0 / 16.0, 0.0, 1.0),          # 上横档
+        ]
+        y_min, y_max = 0.0, 1.0
+    elif shape == "pane":
+        # t1117 玻璃板（t1112 空白同门根因修复）：中心柱 4/16 见方满格高 + 四向满高横板（厚向
+        #   4/16 居中、从柱面伸到格边）——与 PartialBlockGeometry GlassPane case 连接满连几何同
+        #   盒集（iron_bars 同门「物品无邻居语境取满连」口径，十字轮廓最可辨；柱/板截面均
+        #   4/16，区别铁栏杆 2/16 细杆族）。depth buffer 解柱-板相交遮挡。
+        boxes = [
+            (6.0 / 16.0, 10.0 / 16.0, 0.0, 1.0, 6.0 / 16.0, 10.0 / 16.0),           # 中心柱（满格高）
+            (10.0 / 16.0, 1.0, 0.0, 1.0, 6.0 / 16.0, 10.0 / 16.0),                  # +X 横板
+            (0.0, 6.0 / 16.0, 0.0, 1.0, 6.0 / 16.0, 10.0 / 16.0),                   # -X 横板
+            (6.0 / 16.0, 10.0 / 16.0, 0.0, 1.0, 10.0 / 16.0, 1.0),                  # +Z 横板
+            (6.0 / 16.0, 10.0 / 16.0, 0.0, 1.0, 0.0, 6.0 / 16.0),                   # -Z 横板
+        ]
+        y_min, y_max = 0.0, 1.0
+    elif shape == "cake":
+        # t1117 蛋糕（t1112 空白同门根因修复）：footprint 内缩 1px（1..15/16）× 高 8/16 矮盒
+        #   ——与 PartialBlockGeometry Cake case 完整态（bites=0）同盒集（ShapeCake 碰撞盒镜像；
+        #   咬口收窄是手持态 state 维度，图标取完整态观感同 iron_bars 满连口径）。fill 顶=
+        #   default_cake_top 霜面 / 侧=default_cake_side 侧带（PARTIALS_3D_T1112 表双 fill 透传，
+        #   与放置态 kDefs 蛋糕面 topTile 207 / side 208 同源）。
+        boxes = [
+            (1.0 / 16.0, 15.0 / 16.0, 0.0, 0.5, 1.0 / 16.0, 15.0 / 16.0),           # 矮盒（8/16 高）
+        ]
+        y_min, y_max = 0.0, 0.5
     else:
         img = Image.fromarray(canvas.astype(np.uint8), "RGBA")
         return img.resize((OUT, OUT), Image.LANCZOS)
