@@ -81,6 +81,11 @@ const char *iconFileForBlock(quint8 id)
     case BlockRegistry::FenceGate:        return "icon_fence_gate.png";        // 栅栏门：3D 门板（木板纹端柱+双档）
     case BlockRegistry::GlassPane:        return "icon_glass_pane.png";        // 玻璃板：3D 十字柱板（玻璃纹）
     case BlockRegistry::Cake:             return "icon_cake.png";              // 蛋糕：3D 矮盒（霜面+侧纹）
+    // t1116 铁栏杆 qrc 图标补齐（t1112 登记先例存量缺口——铁栏杆自 t998 入册起无本 case 无 qrc 稿）：
+    //   正常路径走 isPackDerivedIconFamily 程序图集重渲（本块在族），本 case 是回退链 ①② 皆空的
+    //   降级兜底层（零行为变更面）。build_cube_icons.py PARTIALS_3D_T1116 程序生成——十字柱板形状
+    //   投影（中心细柱+四向横板满连盒集），铁灰调 §9a 原创。
+    case BlockRegistry::IronBars:         return "icon_iron_bars.png";         // 铁栏杆：3D 十字柱板（铁灰）
     // t1113 名册大件批首单图标（build_cube_icons.py PARTIALS_3D_T1113 程序生成；sign 形状投影 =
     //   立柱+板面 dimetric）：牌子 / 挂墙牌子双 id 共用一张 icon_sign.png（族惯例——两形态仅世界内
     //   几何摆位异，物品剪影同构；同门先例 MonsterEgg 复用 icon_stone_brick.png）。

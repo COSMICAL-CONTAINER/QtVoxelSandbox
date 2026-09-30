@@ -1226,6 +1226,16 @@ public:
     //   各一次，checkPaintingSupportOnEdit 同位同序。
     void checkSignSupportOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
 
+    // t1116 蛋糕失撑当场破块（写入钩子族，checkSignSupportOnEdit 同门模式）：本格 (x,y,z) 刚发生
+    //   编辑且新内容已非 solidSupportBlock 统一权威支撑 → 正上方蛋糕格（Cake 唯一附着位 = 下方格，
+    //   放置预检同门）当场破块（**零掉落**——1.0 蛋糕破坏零掉落口径同门：popSign 同款写入族 m_chunks
+    //   直写无重入 + note*Write 同族一致 + blockBroken，**不发 blockDroppedAsItem**）+ 批量 worldChanged
+    //   收口。与放置预检同谓词零漂移（蛋糕放置预检 = solidSupportBlock 门，t1112 先例——改谓词只改
+    //   一处、放置面与失撑面永不劈叉，t847 收口同门纪律）。置换为另一完整支撑（木板→石头）→ 蛋糕
+    //   保留；纯放置（Air 格写入）天然 no-op（蛋糕附着位恒非 Air）。挂 4/5 参数 setBlock /
+    //   setWaterSilent（焚毁 / 蒸发 / 流体静默写路径）末尾各一次，checkSignSupportOnEdit 同位同序。
+    void checkCakeSupportOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
+
     // ── t656/t657/t658 红石电力系统 v1（机制等价 MC 1.0 redstone 的纵切简化；World 层局部重算）──
     //
     // 模型（事件驱动局部重算，非全图扫描 —— lessons perf-fluid-scan 反模式教训）：
