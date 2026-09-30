@@ -199,6 +199,14 @@ void MatrixRun::runAll()
     section77_roster_map_t1114(); // t1114 名册大件批第二单探针段（置尾先例沿用：r2084a 激活链柱[8 纸环合成命中 + 熔炉/画作环孪生零污染 + 双 id 段位/名面/调色板/maxStack 64 + 空地图右键激活真链(槽内转换 + 建库 + 首绘中心区)]，r2084b 探索填充柱[MapStore 行为面 + 持图探索 tick 真链双 rig 盒扫 + 不持图不扫描负例 + 清库惰性重建(会话口径重探索面)]，r2084c 显示面柱[Main.qml overlay 接线 raw 钉 + main.cpp provider 钉 + 注入行钉]，r2084d 结构钉族[源钉族——NEG 双摘面豁免不钉 + 罗盘芯/缩放克隆/不可堆叠/存档表四负面钉]。fresh 48×48×96 s84，rig 世界零接触，接 section76）
     section78_golden_apple_t1115(); // t1115 golden apple 完整链探针段（置尾先例沿用：r2085a 苹果掉落柱[橡树叶 1/200 直调大样本 6000 采样带断言 + 树苗/木棒族面幸存 + 云杉零苹果门 600 采样 + 消亡路径零苹果负钉(world.cpp 零 AppleId)]，r2085b 苹果食物柱[食面单一权威 +4/+4/瓜片 +2 幸存 + 非可饮面 + 真链进食 rig 饥饿 +4/消耗 1 件/foodBurped 恰一次/potionDrunk 零 + 名面]，r2085c 金苹果食物柱[真链进食 Regen I 30s 效果快照(type/level/seconds 带) + healed 2.5s 首脉冲 + 创造门面挂零不消耗]，r2085d 合成柱[8 金锭环+苹果心命中 3×3 门 + 四环孪生零污染(熔炉/地图/画作/闪烁西瓜) + 心片权威负例(瓜片心/金粒心无行)]，r2085e 结构钉族[源钉族——NEG 双摘面豁免不钉 + 无 Absorption/无 kMc/无进食时长加成/战利品零生苹果负面钉（t1116 lawful 修订——金苹果行入池，缺席钉退役改钉交付面）]。fresh 48×48×96 s85，rig 世界零接触，接 section77）
     section79_small_gaps_t1116(); // t1116 名册后小缺口批探针段（置尾先例沿用：r2086a 铁栏杆图标柱[iconFileForBlock case 源钉 + CMake 资源行钉 + 图标文件在盘非空钉(QImage alpha 扫描) + iconSourceForBlock 运行期非空钉 + 调色板行在册]，r2086b 蛋糕失撑柱[三写入口收口行为柱(4/5 参 setBlock + setWaterSilent 破支撑 → 当场破块零掉落 + 完整立方置换幸存面) + 真链放置预检同谓词(半砖顶拒/石坪顶放)]，r2086c 地牢箱柱[金苹果行逐字段+尾位钉 + 既有 9 行逐条幸存 + 总权重 118 + 千 seed roll 带 + 瓜种带回归 + 生苹果零行]，r2086d 结构钉族[值面 + 源钉族(decl/impl 头/静默挂点行/金苹果行/沿革锚/CMake 段行) + 双负面钉——NEG 双摘面豁免不钉]。fresh 48×48×96 s86，rig 世界零接触，接 section78）
+    section80_icon_fix_t1117(); // t1117 t1112 三空白图标修复探针段（置尾先例沿用：r2087a 空白图标修复柱
+                              //   [三 PNG 在盘非空逐像素 alpha 扫描 ×3 + 全目录零空白扫面(icon_*.png
+                              //   全集无第四张零不透明，下界 140 张) + 运行期 iconSourceForBlock 三行
+                              //   non-empty + 调色板三行在册]，r2087b 结构钉族[生成器三分支源钉——
+                              //   fence_gate 分支行 = NEG-1 摘面本腿专权 + 名册表三行 + CMake 段行 +
+                              //   icon case 三行幸存 + 家族行 minCount=2 + 三 shape 无 atlas spec
+                              //   负面钉 ×3(qrc 唯一图标源核实留痕) + 沿革锚]。纯资产/源钉腿，
+                              //   rig 世界零接触，接 section79）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";
