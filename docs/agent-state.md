@@ -14,16 +14,16 @@
 ```yaml
 project: QtMinecraft
 state: IN_PROGRESS
-current_task: **审计 #25 IN_PROGRESS（治理 5/5 触发——独立只读审计 agent 在飞，窗口 t1115-t1119 五闭环；主控按报落档后自治循环如实待机）**：审计窗口 d470123..<本 docs 提交>。
-current_task_status: IN_PROGRESS
+current_task: **无（如实待机——候选池真底空：名册审计清偿批/大件批/golden apple 链/小缺口批/三空白图标/sign 板面字面/骑猪坐姿全部闭环，剩余全部为用户门控项[下界/蘑菇岛维度级/§30/§31 设计门控/P5 实机清单]或 P0 用户反馈插队位）**：唤醒条件 = 用户反馈 P0 插队/维度门控回答/新候选出现（cron 心跳④边界照旧：不绕设计门控/维度排除/零署名）。
+current_task_status: STANDBY
 last_completed_task: t1119 骑猪坐姿 sitBlend（2026-09-30 闭环；矩阵 890→893——Main.qml 单文件 +18/-1[sitBlend 同门扩展非新坐姿网格选型留痕+isRidingPig 桥 t498 依赖载体表达式形+0 帧瞬切沿先例+几何复用 sitThigh/sitKnee/sitDrop 脚落钉位脚底]；船/矿车已有坐姿面=第三骑乘种扩展如实留痕；纯呈现层 playercontroller 零字节 r2082d 钉幸存复核；raw md5 四方恒等 4c21d575[agent 归一变体四连单多余]；过程注=NEG-1 首摘事故 checkout 复归非还原通路如实留痕。详录 = dev-plan t1119 关单条目）
 last_completed_task_prev: t1118 sign 板面 3D 字面渲染（2026-09-30 闭环，矩阵 887→890；详录 = dev-plan t1118 关单条目）
 last_completed_task_commits: fix(t1119)（8ddeffc7：Main.qml sitBlend 扩展，1 文件 +18/-1）+ test(t1119)（f066bad4：section82_sit_pose_t1119.cpp 新段 r2089a-c+helpers/CMake 注册）
 last_verified_commit: test(t1119)（矩阵 **893 PASS / 0 FAIL ×2**：matrix_t1119_{pos,final}.log；**raw 规范配方 md5 四方恒等 4c21d57583404d1df5c89eb3301cd753**[pos/final/orch+双 restore]；六跑整文件 md5 两两互异[全物理实跑]；NEG-1 恰红 {r2089b} / NEG-2 恰红 {r2089c}，四件规范终名；主控独立脱离式复跑 893/0 同 md5 = 三方恒等 matrix_orch_t1119_verify.log）
-last_governance_review: 2026-09-30（audit #24 YELLOW——窗口 4e2b0db..fc90774 共 20 提交/t1109 尾三笔在窗+t1110-t1114 五闭环；**交付代码与测试实质面全绿无瑕**[15 件矩阵日志 0 FAIL/NEG 十红面恰红吻合/腿数链 856→876 无断/20 笔署名零命中+纯 ASCII/三单不变量 file:line 亲读全过/tail20 十八单连守]，但证据链账面三单失实：**F1[HIGH] t1111 规范 md5 幻影值**[账面 d3ae5194… 不可复现，在盘实值 b6ae823d68271b873643abca5815ddaa——主控验收漏洞同批记录：上单复跑实得 b6ae823d 未对表放行] + **F2[MEDIUM] t1111 NEG 申报「全量 863/1」实为 4 腿 filter 面** + **F3[MEDIUM] t1114 四方恒等实为 2 跑 2 副本**[restore 系 pos/final 字节级复制]；F4[LOW] 预写落档名日期猜错 + F5[INFO] 窗口构成口径差；清偿=台账勘正+纪律四句扩充，不涉代码回滚；详见 governance-audit-2026-09-30.md）
-governance_review_due: true（**治理 5/5 触发——审计 #25 在飞**；落档后清零+counter 归零）
-completed_tasks_since_governance_review: 5（t1115 + t1116 + t1117 + t1118 + t1119 五闭环——审计 #25 触发在飞）
-next_task: **审计 #25 在飞 → 落档后池面真底如实待机[候选=空；唤醒条件 = 用户反馈 P0 插队/下界·蘑菇岛·§30·§31 门控回答/新候选盘点] + 长线停放待用户：P5 实机清单/push 16+ 笔待推**
+last_governance_review: 2026-09-30（audit #25 GREEN——窗口 d470123..d30aa405 共 15 提交/t1115-t1119 五闭环；**#24 四项清偿全部核实履行**[raw 配方 md5 五单 23 件复算与权威值逐字命中=F1 幻影值零复发+主控亲算下发流程修补见效；33 件整文件 md5 零重值+cmp 四对+mtime 物理形态=F3 restore 禁复制履行；NEG 9/9 全量形态申报与盘面一致=F2 履行；落档名 -b 后缀=F4 履行]；t1117 提交重写四方对表全中[reflog 链/树哈希逐位等/链位连续/两窗同法核实 t1116]；r2089c 机制面零触碰实证+r2082d 钉族实文幸存；三发现 LOW/INFO：**F1[LOW] t1118/t1119 tail20 head 9 行窗被 worldgen 新增行挤出 root objects 实文行**[主控独立复核证实+清偿=采集纪律 head 9→14 入档+两关单注勘正] + F2/INFO 简报窗口构成误计第三窗[清偿=简报窗口构成一律 git log 现抄] + F3/INFO 字模计数散文漂移[勘正随下次触该文件]；详见 governance-audit-2026-09-30-b.md）
+governance_review_due: false（审计 #25 GREEN 落档清零——池面真底空，自治循环如实待机；下一审计触发 = 再积 5 闭环或 P0 插队后累积）
+completed_tasks_since_governance_review: 0（审计 #25 GREEN 于 2026-09-30 落档清零）
+next_task: **待机（候选=空）→ 唤醒后按 §14-④ 重新盘点或 P0 插队 + 长线停放待用户：下界/蘑菇岛维度级/§30/§31/P5 实机清单/push 32 笔待推（实数）**
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -33,7 +33,7 @@ needs_human: false
 
 ## Workspace Guard
 
-- HEAD = t1119 骑猪坐姿代码终态（fix(t1119) 8ddeffc7 + test(t1119) f066bad4 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 893 腿满绿（82 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（t1097-t1119 二十三单全过）。**git 提交禁任何 AI 署名尾注**（审计 #21 F1 入档纪律——派工简报恒带此句）。**审计窗口锚哈希须 git 现抄 + 规程参照文件名须 ls docs/ 现核**（审计 #22 F1/#23 F1 两教训）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（横幅+root objects 实文+组合件带来源头注，主控核对）。**NEG 四件终名日志必须落盘**（t1099 件教训；单/双 NEG 单位如实申报）。**NEG 变异选址 = 摘调用点非摘守卫体 + position() 是眼位[feet+1.62]**（t1051/t1112 两教训）。**initSchema 加表 = 纯追加禁同位替换**（t1113 首轮 57 红教训）。**md5/证据值必须由当轮在盘日志现算贴入，禁引 shell 历史与中间轮值**（审计 #24 F1 HIGH 教训——主控验收加「复算值 vs 账面值逐字对表」步）。**NEG/restore 日志对齐更名必须 mv 保留原字节、禁重跑覆盖；关单申报形态[全量/filter]须与盘面一致**（#24 F2）。**restore 日志必须实跑产出禁复制；主控验收加 cmp 字节互异抽核**（#24 F3）。**审计落档名以实际落档日为准，预写处随后勘正**（#24 F4）。**fix 提交消息中文词→Gate 拦 amend 后须走 soft-reset 双段重提交通路[t1116 先例]，禁接受盘面**（t1117 教训——主控已重写处置一次）。**NEG 摘面事故截断→git checkout 只可作事故复归，终还原仍须双手工 Edit 规范通路**（t1119 教训，本单已如实走通）。
+- HEAD = t1119 骑猪坐姿代码终态（fix(t1119) 8ddeffc7 + test(t1119) f066bad4 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 893 腿满绿（82 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（t1097-t1119 二十三单全过）。**git 提交禁任何 AI 署名尾注**（审计 #21 F1 入档纪律——派工简报恒带此句）。**审计窗口锚哈希须 git 现抄 + 规程参照文件名须 ls docs/ 现核**（审计 #22 F1/#23 F1 两教训）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（横幅+root objects 实文+组合件带来源头注，主控核对）。**NEG 四件终名日志必须落盘**（t1099 件教训；单/双 NEG 单位如实申报）。**NEG 变异选址 = 摘调用点非摘守卫体 + position() 是眼位[feet+1.62]**（t1051/t1112 两教训）。**initSchema 加表 = 纯追加禁同位替换**（t1113 首轮 57 红教训）。**md5/证据值必须由当轮在盘日志现算贴入，禁引 shell 历史与中间轮值**（审计 #24 F1 HIGH 教训——主控验收加「复算值 vs 账面值逐字对表」步）。**NEG/restore 日志对齐更名必须 mv 保留原字节、禁重跑覆盖；关单申报形态[全量/filter]须与盘面一致**（#24 F2）。**restore 日志必须实跑产出禁复制；主控验收加 cmp 字节互异抽核**（#24 F3）。**审计落档名以实际落档日为准，预写处随后勘正**（#24 F4）。**fix 提交消息中文词→Gate 拦 amend 后须走 soft-reset 双段重提交通路[t1116 先例]，禁接受盘面**（t1117 教训——主控已重写处置一次）。**NEG 摘面事故截断→git checkout 只可作事故复归，终还原仍须双手工 Edit 规范通路**（t1119 教训，本单已如实走通）。**tail20 采集 head 行数 9→14（或 head+grep root objects 兜底行双段式）**（审计 #25 F1——worldgen 行数漂移再挤出实文行）。
 - 纪律①-⑨全在案；**大 TU 编译一律 -j 1**（09-13 蓝屏教训；分段后单段增量 -j 4 实测安全）。**矩阵测试为 tools/matrix/ 分层结构**：改探针只重编对应段 TU（秒级）+ `--filter <substring>` 只跑本任务腿；新腿落对应段文件，新段置尾 runAll 末执行、须 ≤500KB；section11 起「自建 fresh 小世界」先例（48×48×96 seed 82 + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)）。
 - **R20.06 起值类型纪律**：src/Core/ 新值类型一律 result.h QObjectFree 编译期钉 + 头内 static_assert；命令/事件队列满载拒绝与快照队列覆盖最老是两域容量策略分化，勿「统一」。
 - **R20.07 起编排壳纪律**：GameSession 只做编排（命令 → 整 tick 边界 → World::setBlock 权威），禁复制游戏逻辑；**QML 现行玩法路径零变化是 R20 主线不变量**（Main.qml 含 "GameSession" 即违零迁移阴性钉 r2007b）。
