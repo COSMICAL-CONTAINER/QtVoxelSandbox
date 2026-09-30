@@ -22,6 +22,9 @@
 //     在册形态)。多重集 {GoldIngot:8, Apple:1} 全表唯一(熔炉 8 圆石缺心/地图 8 纸缺心/画作 8 棒+
 //     心毛/闪烁西瓜 8 金粒+心片——同形环行异料逐格 id 比对零冲突,**未撞行零降级**,t1113 sign
 //     降级先例不触发)。kMc 面不扩(mcMaterialId 越界 -1 → MaterialIcon 自绘回退)。
+//   t1116 沿革:金苹果行已入矿井箱池(loottable.cpp 段尾追加,权重 1 / 恒 1 件)——r2085e 原「战利品
+//     零苹果」缺席钉随交付退役改钉「零生苹果 + 金苹果行交付面」(缺席面随交付关闭,t1111 金苹果缺席
+//     钉 t1115 退役同门),行位沿革见 loottable.h t1116 注。
 //
 // ── NEG 面与豁免设计(恰红归因先于腿文;摘调用点非摘守卫体 t1051 教训应用)──
 //   NEG-1 = 摘 playercontroller.cpp dropLeafDrops 苹果块的 emit spawnItem(AppleId) 单语句行
@@ -410,7 +413,8 @@ void MatrixRun::section78_golden_apple_t1115()
         " hotbar and controller and icon and cmake rows are pinned on file with the two"
         " negative lesion faces exempt, no absorption symbol exists per the one point one"
         " plus read, no kmc mapping row exists for either id, no eat duration bonus symbol"
-        " exists, and the decay path and the loot table stay apple free)", [&]() {
+        " exists, and the decay path stays apple free while the loot table answers only"
+        " the golden apple row)", [&]() {
         bool ok = true;
         QString diag;
         // (E1) 值面:双 id 段位 / 原位邻族 / 图集零变更(物品零新瓦) / kMc -1 / maxStack 64 /
@@ -501,7 +505,11 @@ void MatrixRun::section78_golden_apple_t1115()
         }
         // (E3) 四负面钉(1.0 实读裁定锁面):无 Absorption(1.1+ 越纪元——枚举verbatim钉 + 双文件
         //      零符号)+ 无 kMc 行(值面 -1 已断,双 id 常量不入 itemFilenameMap 面)+ 无进食时长
-        //      加成符号(全食物统一 kEatDuration)+ 消亡路径与战利品表双零苹果。
+        //      加成符号(全食物统一 kEatDuration)+ 消亡路径零苹果 + 战利品表零**生**苹果。
+        //      t1116 lawful 修订(原「战利品零苹果」缺席钉随金苹果行入池退役——缺席面随交付关闭,
+        //      t1111 金苹果缺席钉退役同门):战利品表零生苹果(RawSearch 字面「RecipeRegistry::AppleId」
+        //      零命中——「RecipeRegistry::GoldenAppleId」不含该子串,金苹果行是唯一苹果面)+ 金苹果
+        //      行交付面(权重 1 / 恒 1 件)在册。
         {
             const QString srcDir = srcRootForRosterApplePins();
             const bool noAbsorption =
@@ -517,10 +525,17 @@ void MatrixRun::section78_golden_apple_t1115()
                                            QStringLiteral("GoldenAppleDuration"));
             ok = ok && noDuration;
             if (!noDuration) diag += QStringLiteral("[noDuration]");
-            const bool noLootApple = !rawContainsRosterApple(srcDir + QStringLiteral("/Game/loottable.cpp"),
-                                                             QStringLiteral("AppleId"));
+            const bool noPlainApple =
+                !rawContainsRosterApple(srcDir + QStringLiteral("/Game/loottable.cpp"),
+                                        QStringLiteral("RecipeRegistry::AppleId"));
+            bool goldenRow = false;
+            for (const auto &e : LootTable::mineshaftChestPool())
+                if (e.itemId == int(RecipeRegistry::GoldenAppleId))
+                    goldenRow = e.weight == 1 && e.minCount == 1 && e.maxCount == 1;
+            const bool noLootApple = noPlainApple && goldenRow;
             ok = ok && noLootApple;
-            if (!noLootApple) diag += QStringLiteral("[noLoot]");
+            if (!noLootApple) diag += QStringLiteral("[noLoot plain=%1 golden=%2]")
+                .arg(noPlainApple).arg(goldenRow);
         }
 
         if (!ok) ++totalFail;

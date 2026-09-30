@@ -2624,7 +2624,8 @@ void MatrixRun::section67_brewing()
         ok = ok && negs;
         if (!negs) diag += QStringLiteral("[negs]");
         // (5) 瓜种矿井池行逐字段（10 / 2..4）+ 千 seed 确定性扫描命中 + 复现 + 数量带 + 千 seed 宽频带
-        //     （权重 10/117 ≈ 8.55%/roll × 8000 roll ≈ 684 期望；带 [450,950] 防塌零 / 爆涨两向漂移，
+        //     （权重 10/118 ≈ 8.47%/roll × 8000 roll ≈ 678 期望[t1116 沿革注：金苹果行入池前分母
+        //     117 / 期望 684——带 [450,950] 两口径均容纳，断言零改]；带防塌零 / 爆涨两向漂移，
         //     r2062a 同门算式）+ 地牢池邻族零污染（行数 10 / 权重和 153 / 无瓜种行——r2062d 锚不动）。
         bool rowOk = false, seedHit = false, reproOk = true, rangeOk = true;
         int seedStacks = 0;
