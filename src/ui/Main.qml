@@ -11683,6 +11683,107 @@ Window {
             }
         }
 
+        // t1118 牌板面文字渲染 host（paintingHost 同门[世界内异形呈现层]——t1113 候选池清偿）：
+        //   SignStore 四行文本 → 程序点阵字模（Game 层 SignBoardFont）→ image://signboard 板面像素 →
+        //   贴板面 quad。呈现面选型实读留痕（派工三候选定夺）：图集文本瓦烘焙不可行（牌子文本 per-sign
+        //   动态无界，terrain 图集是共享静态资源无 per-sign 动态瓦区，且 revision 变更须整 chunk 网格
+        //   重建才可见）；Quick 3D 字体路径违 §9 零字体文件 + 原创点阵字模纪律；故走 paintingHost
+        //   delegate 同门（per-sign 独立视觉、随 revision 刷新不经网格重建）。**空文本牌子不挂
+        //   delegate**（SignStore 全空条目已不落库 → 无 delegate → 既有空白刻线板瓦原样不变）。维护
+        //   （paintingHost 三重同门收敛为单对账）：onSignChanged 对账（放置录入 setText / 破坏 clearSign
+        //   / 读档 loadAll 全走 signChanged——放置/读档的挂与破牌的摘各由同一对账面承载）+
+        //   onWorldChanged 兜底清孤儿（静默栅格改写：爆炸 / 系统替换把牌子格换成非牌子 → delegate 残浮，
+        //   由 blockAt 真值清扫）。分层（PLAN §2）：纯呈现层，只读 blockAt/stateAt + SignStore 拉取，
+        //   绝不反向写栅格。
+        Node {
+            id: signHost
+            property var signObjs: ({})
+            // 对账：delegate 全集 = SignStore 条目 ∩ 「该格 blockAt 仍是牌子方块」。幂等（重复调用零重建）；
+            //   文本内容变更不重建 delegate——Texture URL 携 signStore.revision 失效键自行重取（mapstore
+            //   revision-URL 同门，见 signDelegate source 绑定）。
+            function reconcileVis() {
+                const want = {}
+                const entries = signStore.allSigns()
+                for (let ei = 0; ei < entries.length; ++ei) {
+                    const e = entries[ei]
+                    const bid = theWorld.blockAt(e.x, e.y, e.z)
+                    if (bid !== 160 && bid !== 161) continue // id=160/161=StandingSign/WallSign（字面量+注释同 furnace=10 模式）
+                    const key = e.x + "," + e.y + "," + e.z
+                    want[key] = true
+                    if (!signObjs[key])
+                        signObjs[key] = signDelegate.createObject(signHost, {
+                            cellX: e.x, cellY: e.y, cellZ: e.z,
+                            wall: bid === 161 ? 1 : 0,
+                            facing: theWorld.stateAt(e.x, e.y, e.z) & 3 // SignStateFacingMask 低 2 位
+                        })
+                }
+                for (const key in signObjs) {
+                    if (!want[key]) { signObjs[key].destroy(); delete signObjs[key] }
+                }
+            }
+            // 兜底清孤儿（爆炸 / 系统改写栅格不经 clearSign 的路径收口；blockAt 真值单一权威，同 paintingHost）。
+            function cleanupVis() {
+                for (const key in signObjs) {
+                    const p = key.split(",")
+                    const x = parseInt(p[0]), y = parseInt(p[1]), z = parseInt(p[2])
+                    const bid = theWorld.blockAt(x, y, z)
+                    if (bid !== 160 && bid !== 161) { signObjs[key].destroy(); delete signObjs[key] }
+                }
+            }
+            // SignStore 任一变更（setText / clearSign / clearAll / loadAll）→ 对账。Connections 目标 =
+            //   同文件 id（signStore 单实例，3007 行装配）。
+            Connections {
+                target: signStore
+                function onSignChanged() { signHost.reconcileVis() }
+            }
+        }
+
+        // t1118 牌板面文字 delegate 模板（paintingDelegate 同门：createObject 实例化 / destroy 回收）。
+        //   板面几何 = partialblockgeometry.cpp StandingSign/WallSign case + blockregistry signBoardBoxes
+        //   同源编码镜像（改编码两处同步）：板面 y[4/16,1]（高 12/16）；站牌板厚向朝向轴居中（宽向
+        //   12/16）、挂墙牌板贴朝向反向侧格边（宽向满格 1.0）。文字 quad = 板面外法线侧 1/64 悬浮
+        //   （painting 离墙 1/16 防 z-fight 同门——这里贴的是同格板面，间隙取更小防视觉脱开）。
+        Component {
+            id: signDelegate
+            Node {
+                id: signRoot
+                property int cellX: 0
+                property int cellY: 0
+                property int cellZ: 0
+                property int wall: 0   // 0=站牌（板面宽 12/16）/ 1=挂墙牌（板面满格宽）
+                property int facing: 0 // 0=+X 1=-X 2=+Z 3=-Z（板面外法线；SignStateFacingMask）
+                readonly property real boardW: wall === 1 ? 1.0 : 12.0 / 16.0
+                readonly property real boardH: 12.0 / 16.0
+                // 朝向单位向量（0=+X 1=-X 2=+Z 3=-Z）+ 板面外法线侧悬浮偏移：站牌板厚居中 → 面 = 格心 +
+                //   半厚 1/16；挂墙牌板贴墙 → 面 = 格心 − 1/2 + 板厚 2/16。各 +1/64 悬浮。
+                readonly property real dirX: facing === 0 ? 1 : facing === 1 ? -1 : 0
+                readonly property real dirZ: facing === 2 ? 1 : facing === 3 ? -1 : 0
+                readonly property real faceOff: (wall === 1 ? (-0.5 + 2.0 / 16.0) : (1.0 / 16.0)) + 1.0 / 64.0
+                position: Qt.vector3d(cellX + 0.5 + dirX * faceOff,
+                                      cellY + 0.25 + boardH / 2.0,
+                                      cellZ + 0.5 + dirZ * faceOff)
+                // 朝向 → yaw（paintingDelegate 同表：把局部 +Z 转到板面外法线，+X 对观察者右向不镜像）。
+                eulerRotation: Qt.vector3d(0, facing === 0 ? 90 : facing === 1 ? 270 : facing === 2 ? 0 : 180, 0)
+                Model {
+                    geometry: BillboardQuad {}
+                    scale: Qt.vector3d(signRoot.boardW, signRoot.boardH, 1.0)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        // 透明底 + 墨字 → Mask 硬边（t169/t757 alpha 契约：透明素丢弃防黑底）。
+                        alphaMode: PrincipledMaterial.Mask
+                        alphaCutoff: 0.5
+                        baseColorMap: Texture {
+                            // revision 入 URL 参与返回值构造（t177 AOT 裸触碰教训）——任一牌子文本写入
+                            //   → URL 换值 → 重取重渲；坐标 + wall 选画布形态（provider 侧解码）。
+                            source: "image://signboard/" + signRoot.cellX + "," + signRoot.cellY + ","
+                                    + signRoot.cellZ + "/" + signRoot.wall + "/" + signStore.revision
+                            generateMipmaps: false
+                        }
+                    }
+                }
+            }
+        }
+
         // t724 火焰渲染 host（同 paintingHost / torchHost 的 createObject delegate 模式）：Fire 方块（137）
         //   的贴图是 32 帧条带 flipbook + 透明底 cutout（非图集瓦片）→ 渲染不走 chunk mesh（chunkgeometry 三
         //   处 PASS 已 skip），每格火一个 delegate = 两片对角交叉双面 quad（BillboardQuad XY ±0.5，绕 Y 各转
@@ -12949,6 +13050,9 @@ Window {
             bookHost.cleanupVis()
             // t720：同步清画作视觉 delegate 孤儿（爆炸 / 系统改写 / 非锚格破坏路径收口；同 torchHost 模式）。
             paintingHost.cleanupVis()
+            // t1118：同步清牌面文字 delegate 孤儿（爆炸 / 系统替换把牌子格换成非牌子的静默路径收口；
+            //   blockAt 真值清扫，同 paintingHost 模式）。
+            signHost.cleanupVis()
             // t724：同步清火焰视觉 delegate 孤儿（爆炸 / 系统改写栅格不经 blockBroken 的路径收口；同 paintingHost）。
             fireHost.cleanupVis()
             // t843：同步清燃烧方块面火 overlay 孤儿（爆炸改写 / 静默直写替换块的 ≤1 窗自愈期兜底；
