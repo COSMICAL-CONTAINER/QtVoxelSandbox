@@ -4560,7 +4560,20 @@ audit #5（docs/governance-audit-2026-09-12.md）：方向无问题，但 Review
 
 ### t1116（2026-09-30 立项[池面真底后 §14-④ 重新盘点产出——名册后小缺口批]，IronBars 图标补齐 + 蛋糕失撑自动破坏 + 地牢箱金苹果行；filter 词 r2086）
 
-→ **🚧 开工（2026-09-30，串行 voxel-dev）**：三件小缺口（皆既有登记候选，盘点产出）：**件一 IronBars 缺图标补齐**（icon_iron_bars.png 缺失 = t1112 登记先例存量——调色板空图标观感缺口；build_cube_icons.py 族程序生成补齐）；**件二 蛋糕失撑自动破坏**（t1112 登记候选——失撑掉落钩子家族同门接线：checkSignSupportOnEdit/checkPaintingSupportOnEdit 同位挂 setBlock/setWaterSilent 写入口；蛋糕失撑 → 当场破块 + 零掉落[1.0 蛋糕破坏零掉落口径同门]）；**件三 地牢箱金苹果行**（t1115 登记候选——t484 矿物族替代面解除：mineshaftChestPool 增金苹果条目[1.0 地牢箱金苹果原值口径 web 实读定夺]；loottable.h 沿革注更新；loot 权重面 r2038 家族腿回归）。NEG 双摘面（摘图标注册行→恰红调色板钉腿；摘蛋糕失撑钩子挂点行→恰红失撑腿）。腿 = 行为柱+结构钉，NEG 恰红。状态 = IN_PROGRESS。
+→ **✅ 落地（2026-09-30）：fix(t1116) 716ce1c7 + test(t1116) eff38764 + 本 docs 提交；矩阵 881→885。三件全交付+一现场新发现留池**：
+- **件一 IronBars 图标补齐**（t998 起先例存量缺口）：icon_iron_bars.png 844 不透明像素真图（build_cube_icons.py iron_bars 分支：中心细柱 2/16+四向横板——与 PartialBlockGeometry/atlasIconSpecForBlock 满连盒集同构；单图标点名生成未重烘无关 icon——t1113 事故纪律履行）；hotbar.cpp iconFileForBlock case+沿革注+CMake 资源行。零行为变更（IronBars 在 isPackDerivedIconFamily 族——正常路径程序图集重渲先答，新 case 仅回退链降级兜底层）。
+
+- **件二 蛋糕失撑自动破坏**：World::checkCakeSupportOnEdit 三写入口同位同序收口（setBlock 4 参/5 参+setWaterSilent——checkSignSupportOnEdit 同门；popSign 同款写入族：m_chunks 直写无重入+note*Write 同族+blockBroken+批量 worldChanged；**零掉落**不发 blockDroppedAsItem——1.0 蛋糕破坏零掉落口径）；与放置预检同谓词 solidSupportBlock 零漂移（t1112 先例同源）；放置预检行注候选池→接线沿革勘正。
+- **件三 地牢箱金苹果行**：mineshaftChestPool 段尾追加 {GoldenAppleId,1,1,1}（1.0.0 地牢箱 11 条目之 1 行/权重 1/恒 1 件——**申报口径如实**：本环境无 web 工具，按 1.0.0 在册值核对落表非实时实读，留痕）；**派工勘误**：池实为 9 条/权重和 117 非申报「8 条」（t1103 瓜种行已前置，loottable.h「8 条」注同期陈旧一并勘正）——池头注重算 10 条/118+分布百分率更新；既有 9 行逐字幸存（瓜种行字节不动）；t484「矿物族替代」面解除沿革注+生苹果零行负面面锁死。
+
+- **腿（section79_small_gaps_t1116.cpp 新段，r2086a-d）**：铁栏杆图标柱（case 源钉+CMake 资源行钉+图标在盘逐像素 alpha 非空钉+运行期非空钉+调色板行在册钉）/ 蛋糕失撑柱（三写入口行为柱[4 参半砖置换→当场破块零掉落+blockBroken 带 Cake id+state 清零；完整立方置换幸存面]+真链放置预检同谓词）/ 地牢箱柱（金苹果行逐字段+既有 9 行逐条+总权重 118+千 seed roll 带 [20,120]+恒 1 件+瓜种回归+生苹果零行+kMineshaftRolls==6）/ 结构钉族（值面+源钉+负面钉[world.cpp 零 AppleId=消亡掉落仍零]）。lawful 钉修订四处携沿革注（r2085e 战利品零苹果钉退役→零生苹果+金苹果行交付面；helpers 注同步；r2073a 注分母 117→118 断言零改；蛋糕预检行注）。
+- **验证链（#24 纪律履行）**：零警告 → NEG-1 摘 icon case 行→恰红恰 {r2086a}（884/1）+ NEG-2 摘 4 参挂点行→恰红恰 {r2086b}（884/1）双手工 Edit 还原、四件终名规范名直落 → 全矩阵 pos/final 881→**885/0 ×2** + 双 restore 实跑（**六日志字节互异 cmp 抽核 + 规范配方 md5 四方恒等 784831615882eff17ff409dedf25407d**[raw 规范式即恒等——agent 申报的墙钟归一变体 a5ad8409 系多余动作，关单按规范 raw 值记]；物理跑数如实：全量 6+filter 3+相邻 7+冒烟 1）→ 冒烟 tail20（来源头注 build 716ce1c7+横幅+root objects）→ 相邻族复绿 r2085/r2084/r2083/r2082 + **r2073/r2054 loot 权重真族**（派工点名的 r2038 实为存档退避族——勘误留痕）。**过程注**：NEG-2 结构钉豁免设计（4/5 参挂点行剥注后同文→d 腿只钉 lightOldId 行防恰红归因污染）；腿算术红[9 行和 117≠118]修于终版证据跑前；fix 提交一词中文 Gate 拦截 soft-reset 重提交[t1070 先例]。
+- **主控验收（2026-09-30 亲核）**：diff 亲读（三写入口收口+同谓词+零掉落口径/loot 行原值+池头注重算/图标零行为面）；证据链亲核（raw 配方 md5 四方恒等亲算+字节互异抽核+NEG 规范终名）；**主控独立脱离式复跑 885/0 同 md5 = 三方恒等**（matrix_orch_t1116_verify.log）。**待实机确认**：铁栏杆图标（正常态程序图集重渲不变/降级态显新 qrc 稿）/蛋糕支撑被破当场消失零掉落观感/矿井箱金苹果体感（~0.85%/roll）。**现场新发现留池**：t1112 三图标 icon_fence_gate/icon_glass_pane/icon_cake 在盘 PNG 全零不透明像素空白图（生成器 render_partial_3d 无三分支；icon_sign 938px/新 iron_bars 844px 对照）——**t1117 立项清偿**。**下一任务 = t1117 t1112 三空白图标修复（r2087）**。
+
+
+### t1117（2026-09-30 立项[t1116 现场新发现清偿]，t1112 三空白图标修复——icon_fence_gate/icon_glass_pane/icon_cake 零不透明像素缺口；filter 词 r2087）
+
+→ **🚧 开工（2026-09-30，串行 voxel-dev）**：三图标修复（t1116 发现留池→即单清偿）：根因 = tools/build_cube_icons.py 的 render_partial_3d 无 fence_gate/glass_pane/cake 三分支（盒集只在 pack 路径 _partial_shape_boxes）→ 三 PNG 全透明像素。修法 = 生成器补三分支（ShapeFenceGate 端柱+双横档/ShapeGlassPane 十字柱板/ShapeCake 咬口矮盒——PartialBlockGeometry 同构投影，§9a 程序生成）+ 三图标重生成 + 在盘逐像素 alpha 非空自证（r2086a 同款钉法）。零行为变更面（icon 回退链降级层，同 t1116 件一口径）。腿 = r2087a 图标三件非空柱+注册钉族（NEG 摘生成器分支行→恰红）。状态 = IN_PROGRESS。
 
 ### t1109（2026-09-28 立项[§14 常设授权候选池——池面收官批]，残项小批合集三：完整瓜茎茎蔓原型 + 矿井野生瓜 patch + 沙漠村庄变体；filter 词 r2079）
 
