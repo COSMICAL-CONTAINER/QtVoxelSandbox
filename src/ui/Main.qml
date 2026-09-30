@@ -5790,7 +5790,24 @@ Window {
             readonly property bool isRidingCart: carts.revision >= 0
                                                  ? (player.minecartManager ? player.minecartManager.ridingIndex() >= 0 : false)
                                                  : false
-            readonly property real sitBlend: (playerModel.isRidingBoat || playerModel.isRidingCart) ? 1.0 : 0.0
+            // t1119 骑猪同坐姿（机制等价 MC 1.0 saddled pig 骑乘坐姿；t1112 关单登记的候选池清偿）：
+            //   骑乘中玩家脚底已被钉在猪背 +0.25（kPigSeatLift 骑乘钉位既有面），但模型腿姿仍走站立
+            //   → 肉眼读作「站在猪背上」。触发面 = PlayerController::ridingPigActive() 单一权威
+            //   （isRidingPig() Q_INVOKABLE 直读，同骑乘互斥守卫读口），与船 / 矿车同「坐进背」几何
+            //   → 复用同一 sitBlend / sitThigh / sitKnee / sitDrop（大腿水平 90° + 小腿竖直 −90° +
+            //   髋下沉 0.3 → 脚恰落钉位脚底 = 跨骑猪背；猪背顶 ≈ 猪中心 + 0.45，髋落中心 + 0.55 =
+            //   背上少许悬坐，与船「坐进斗」同判据）。纯呈现层（PLAN §2）：只读骑乘权威真值，绝不
+            //   反向写；骑乘钉位 / 推挤豁免 / 下猪链零触碰（r2082d 源钉原样幸存）。
+            //   ⚠ 绑定依赖：isRidingPig() 是 Q_INVOKABLE 无 NOTIFY（同 ridingIndex() 口径）→ 直接调
+            //   不随骑乘切重算。feetPosition 作依赖载体（NOTIFY=positionChanged）：条件位参与值计算
+            //   → 依赖可靠注册（t498 铁律：表达式形式；语句块形式在静态节点有漏注册风险）；骑乘分支
+            //   每 tick 无条件 emit positionChanged → 绑定每 tick 重算读 ridingPigActive() 新真值，
+            //   上猪（脚底抬上猪背）/ Shift 下猪（dismount 摆侧位）/ 猪死对账脱骑（下 tick 重力接管
+            //   位移）三转变都经该 NOTIFY 触达。过渡时长实读裁定：0 帧瞬切——船 / 矿车既有 sitBlend
+            //   即 0/1 瞬切（管线无姿态过渡动画先例），同门扩展不引入新时长面；骑乘期 moveSpeed 强制
+            //   0（walkBlend=0）→ 腿摆归中性，sit 量独占（与 crouch 同互斥口径）。
+            readonly property bool isRidingPig: player.feetPosition.y > -1000.0 ? player.isRidingPig() : false
+            readonly property real sitBlend: (playerModel.isRidingBoat || playerModel.isRidingCart || playerModel.isRidingPig) ? 1.0 : 0.0
             // t532「坐姿 = 腿与身 90°，非卡地底」复盘：旧 sitThigh/sitKnee=±85°（钝角非直角）+ sitDrop=0.42
             //   → 髋枢降到 feet+0.18，大腿水平时小腿竖直下垂 0.3 → 脚落 feet−0.12（穿船底 / 穿地 =「人卡地底」用户报）。
             //   几何推导：大腿绕髋 +θ 转，膝（本地 (0,−0.3,0)）→ 世界 (0,−0.3·cosθ, −0.3·sinθ)；θ=90° → 膝同髋高、前伸 0.3。
