@@ -6087,8 +6087,9 @@ void PlayerController::placeBlock()
         if (!belowSupport) return; // 下方非完整立方 / 非满层雪 → 悬空 / 侧放 → 拒（不挥）
     }
     // t1112 蛋糕放置需实体支撑（机制等价 MC 1.0 cake 需下方实体方块——candy 块族支撑语义同门）。
-    //   读 solidSupportBlock 统一权威（雪层同门：排除仙人掌缩体面）。失撑自动破坏面未接线（MC 破
-    //   支撑蛋糕即掉）→ 候选池登记（同门压力板失撑钩子 checkPressurePlateOnEdit 家族可后接）。
+    //   读 solidSupportBlock 统一权威（雪层同门：排除仙人掌缩体面）。失撑自动破坏面 = World::
+    //   checkCakeSupportOnEdit 钩子族（t1116 接线，登记候选闭环——同谓词零漂移：破支撑蛋糕当场
+    //   破块零掉落，checkSignSupportOnEdit 家族同门三写入口收口）。
     if (m_selectedBlock == BlockRegistry::Cake) {
         if (!BlockRegistry::solidSupportBlock(m_world->blockAt(tx, ty - 1, tz))) return; // 悬空 / 侧放 → 拒（不挥）
     }

@@ -1813,6 +1813,7 @@ bool World::setBlock(int x, int y, int z, quint8 id)
         breakEmberGatesAround(x, y, z);
     checkPaintingSupportOnEdit(x, y, z, oldId, id); // t837①：画作支撑墙失撑 → 整画掉落（钩子族同口径）
     checkSignSupportOnEdit(x, y, z, oldId, id); // t1113：牌子失撑脱落（下方站牌 / 贴墙挂墙牌，钩子族同口径）
+    checkCakeSupportOnEdit(x, y, z, oldId, id); // t1116：蛋糕失撑当场破块（4 参放置/挖掘主入口同位同序）
     notePowerWrite(x, y, z, oldId, id);       // t656：红石电力脏标记（红石族编辑 / 邻粉 → 局部重算入队）
     return true;
 }
@@ -1968,6 +1969,7 @@ bool World::setBlock(int x, int y, int z, quint8 id, quint8 state)
     checkPaintingSupportOnEdit(x, y, z, oldId, id); // t837①：画作支撑墙失撑 → 整画掉落（钩子族同口径；
     //   画格自清重入由 m_inRemovePainting 守卫，放置入 Air 格的画锚写直写无重入——墙格恒非 Air）
     checkSignSupportOnEdit(x, y, z, oldId, id); // t1113：牌子失撑脱落（5 参数版同 4 参数版钩子族收口）
+    checkCakeSupportOnEdit(x, y, z, oldId, id); // t1116：蛋糕失撑当场破块（5 参放置/开合主入口同位同序）
     notePowerWrite(x, y, z, oldId, id);       // t656：红石电力脏标记（红石族编辑 / 邻粉 → 局部重算入队；state-only 写亦触发——拉杆 / 按钮翻位即此路径）
     return true;
 }
@@ -2269,6 +2271,7 @@ bool World::setWaterSilent(int x, int y, int z, quint8 id, quint8 state)
         breakEmberGatesAround(x, y, z);
         checkPaintingSupportOnEdit(x, y, z, lightOldId, id);
         checkSignSupportOnEdit(x, y, z, lightOldId, id); // t1113：牌子失撑脱落（焚毁/蒸发静默写路径同收口）
+        checkCakeSupportOnEdit(x, y, z, lightOldId, id); // t1116：蛋糕失撑当场破块（流体静默写路径同收口）
     }
     if (m_batchFluid) return true; // t350 流体 tick 批量写：累积栅格写 + 重光照，末尾由 caller 统一 emit + clearDirty
     emit worldChanged(); // 驱动 mesh 重建（水流是系统模拟，非玩家破/放 → 不发 broken/placed）
@@ -5525,6 +5528,37 @@ void World::checkSignSupportOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
     }
     if (!any) return;
     emit worldChanged();      // 驱动 mesh 重建（N 写 1 emit 批量收口，同 dropUnsupportedDoorsAbove）
+    m_chunks.clearAllDirty(); // 两段重建完统一清脏（同 setBlock 末尾）
+}
+
+// t1116 蛋糕失撑当场破块复检（声明见 .h 注——checkSignSupportOnEdit 同门模式；本格编辑后新内容非
+//   solidSupportBlock 支撑 → 正上方蛋糕格零掉落清除）。
+void World::checkCakeSupportOnEdit(int x, int y, int z, quint8 oldId, quint8 id)
+{
+    Q_UNUSED(oldId); // 守卫按「编辑后本格是否仍有效支撑」（id 谓词）判——oldId 保留供钩子族签名一致
+    // 域门（checkSignSupportOnEdit 同款两模式分流）：sparse x/z 无界（y 域两模式同构）。
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        if (x < 0 || z < 0 || x >= m_width || z >= m_depth || y < 0 || y >= m_height) return;
+    } else {
+        if (y < 0 || y >= m_height) return; // y 域两模式同构（有限高）；x/z 无界
+    }
+    // 本格新内容仍是完整支撑 → 上方蛋糕附着有效（置换为另一实心块 / state-only 写不动支撑）→ 蛋糕保留。
+    //   与放置预检同一谓词（solidSupportBlock 单一权威——蛋糕放置门 t1112 先例同源，改谓词只改一处）。
+    if (BlockRegistry::solidSupportBlock(id)) return;
+    // 正上方蛋糕失撑 → 当场破块（popSign 同款写入族：m_chunks 直写无重入 + note*Write 同族一致 +
+    //   blockBroken；**零掉落**——不发 blockDroppedAsItem，1.0 蛋糕破坏零掉落口径同门；本函数末尾
+    //   统一 1 次 worldChanged 收口）。
+    const int cy = y + 1;
+    const quint8 cakeId = m_chunks.blockAt(x, cy, z);
+    if (cakeId != BlockRegistry::Cake) return; // 附着位恒非 Air（纯放置天然 no-op；同门早退口径）
+    m_chunks.setBlock(x, cy, z, BlockRegistry::Air); // 静默直写 + 标脏（不经 World::setBlock 无重入）
+    noteGrowthWrite(x, cy, z, cakeId, BlockRegistry::Air); // 非生长方块 → no-op，同族写入一致
+    noteFluidWrite(x, cy, z, cakeId, BlockRegistry::Air);
+    noteIceWrite(x, cy, z, cakeId, BlockRegistry::Air);
+    noteFireWrite(x, cy, z, cakeId, BlockRegistry::Air);
+    emit blockBroken(x, cy, z, int(cakeId));               // 破块粒子 / 音（零掉落 → 无 blockDroppedAsItem）
+    recomputeLightAround(x, cy, z, cakeId, BlockRegistry::Air);
+    emit worldChanged();      // 驱动 mesh 重建（N 写 1 emit 批量收口，同 popSign 尾收口）
     m_chunks.clearAllDirty(); // 两段重建完统一清脏（同 setBlock 末尾）
 }
 

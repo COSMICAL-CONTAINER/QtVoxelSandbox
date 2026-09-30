@@ -196,6 +196,14 @@ PARTIALS_3D_T1113 = [
     ("sign", "sign", "default_sign_board", "default_sign_board"),
 ]
 
+# t1116 铁栏杆 qrc 图标补齐（t1112 登记先例存量缺口——铁栏杆自 t998 入册起 iconFileForBlock 无 case
+#   且无 qrc 稿）：iron_bars 形状（中心细柱 2/16 见方满格高 + 四向横板 y[7/16,9/16] 截面 2/16 柱面..
+#   格边——与 PartialBlockGeometry IronBars case / atlasIconSpecForBlock IronBars 满连盒集同构，十字
+#   轮廓最可辨）。fill = default_iron_bars 瓦（与放置态 kDefs 铁栏杆 tile 183 同源，铁灰调 §9a 原创）。
+PARTIALS_3D_T1116 = [
+    ("iron_bars", "iron_bars", "default_iron_bars", "default_iron_bars"),
+]
+
 # t492 「正面有辨识特征」的方块（正面贴图, 顶面贴图, 侧面贴图）—— 走 render_front（正面为主的 dimetric 投影）。
 #   t676 工作台 / 熔炉 / 发射器 / 投掷器**全部移出**（用户点名「front 方案太扁平」→ 升 cube per-face 满立方
 #   dimetric：顶 + 右侧 + 前面三面独立贴图，见 FROM_PACK cube_front 段）。本表现空 —— 保留表结构 /
@@ -590,6 +598,18 @@ def render_partial_3d(shape, fill_top="default_wood", fill_side="default_wood"):
         boxes = [
             (7.0 / 16.0, 9.0 / 16.0, 0.0, 0.375, 7.0 / 16.0, 9.0 / 16.0),  # 立柱（2/16 见方 × 6/16 高）
             (2.0 / 16.0, 14.0 / 16.0, 0.25, 1.0, 7.0 / 16.0, 9.0 / 16.0),  # 板面（12/16 宽 × y[4/16,1] × 2/16 厚）
+        ]
+        y_min, y_max = 0.0, 1.0
+    elif shape == "iron_bars":
+        # t1116 铁栏杆：中心细柱 2/16 见方满格高 + 四向横板（y[7/16,9/16]、截面 2/16，柱面..格边）
+        #   ——与 PartialBlockGeometry IronBars case / atlasIconSpecForBlock IronBars 满连盒集同构
+        #   （十字轮廓最可辨，图标贴放置观感）。depth buffer 解柱-板相交遮挡。
+        boxes = [
+            (7.0 / 16.0, 9.0 / 16.0, 0.0, 1.0, 7.0 / 16.0, 9.0 / 16.0),           # 中心细柱（满格高）
+            (9.0 / 16.0, 1.0, 7.0 / 16.0, 9.0 / 16.0, 7.0 / 16.0, 9.0 / 16.0),    # +X 横板
+            (0.0, 7.0 / 16.0, 7.0 / 16.0, 9.0 / 16.0, 7.0 / 16.0, 9.0 / 16.0),    # -X 横板
+            (7.0 / 16.0, 9.0 / 16.0, 7.0 / 16.0, 9.0 / 16.0, 9.0 / 16.0, 1.0),    # +Z 横板
+            (7.0 / 16.0, 9.0 / 16.0, 7.0 / 16.0, 9.0 / 16.0, 0.0, 7.0 / 16.0),    # -Z 横板
         ]
         y_min, y_max = 0.0, 1.0
     else:
@@ -1291,6 +1311,14 @@ def main():
     # t1113 名册大件批首单 3D dimetric 立体图标（机制等价 t1112 流程；sign 形状 = 立柱+板面，fill
     #   = sign_board 瓦——与放置态 kDefs 牌板 tile 209 同源；牌子/挂墙牌双 id 共用 icon_sign.png）。
     for out_name, shape, fill_top, fill_side in PARTIALS_3D_T1113:
+        img = render_partial_3d(shape, fill_top, fill_side)
+        out_path = os.path.join(SRC, "icon_{}.png".format(out_name))
+        img.save(out_path)
+        print("wrote", os.path.relpath(out_path, HERE), img.size)
+    # t1116 铁栏杆 qrc 图标（t1112 登记先例存量缺口补齐）：iron_bars 形状 + default_iron_bars fill
+    #   （机制等价 t1112/t1113 流程——满连十字盒集与放置态 PartialBlockGeometry 同源，铁灰调 §9a 原创；
+    #   单任务点名重生成走模块级直调，全量 main() 不重烘无关 icon）。
+    for out_name, shape, fill_top, fill_side in PARTIALS_3D_T1116:
         img = render_partial_3d(shape, fill_top, fill_side)
         out_path = os.path.join(SRC, "icon_{}.png".format(out_name))
         img.save(out_path)
