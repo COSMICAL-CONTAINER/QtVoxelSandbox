@@ -731,6 +731,7 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_glass_pane.png             # t1112 玻璃板立方体图标（build_cube_icons.py PARTIALS_3D_T1112；3D 十字柱板，玻璃纹）
         textures/icon_cake.png                   # t1112 蛋糕立方体图标（build_cube_icons.py PARTIALS_3D_T1112；3D 矮盒，霜面+侧带）
         textures/icon_sign.png                   # t1113 牌子立方体图标（build_cube_icons.py PARTIALS_3D_T1113；3D 立牌，立柱+板面——牌子/挂墙牌双 id 共用）
+        textures/icon_iron_bars.png              # t1116 铁栏杆立方体图标（build_cube_icons.py PARTIALS_3D_T1116；3D 十字柱板，铁灰调 §9a 原创）
         textures/icon_lever.png                  # t490 杠杆立方体图标（build_cube_icons.py；pressure_plate shape+lever 贴图；手动点火机关）
         textures/icon_wood_button.png            # t490 木按钮立方体图标（build_cube_icons.py；pressure_plate shape+wood_button 贴图）
         textures/icon_stone_button.png           # t490 石按钮立方体图标（build_cube_icons.py；pressure_plate shape+stone_button 贴图）
@@ -1175,6 +1176,12 @@ add_executable(redstone_matrix_test
     #   无 kMc/无时长加成/战利品零苹果负面钉]——零新 include 面,recipe/hotbar/playercontroller/
     #   playerstate 系均已列)。
     tools/matrix/section78_golden_apple_t1115.cpp
+    # t1116 名册后小缺口批探针段(4 腿 r2086a-d,filter 词 r2086;铁栏杆图标柱[case 源钉 + CMake 资源
+    #   行钉 + 图标在盘非空钉 + iconSourceForBlock 非空钉 + 调色板行] + 蛋糕失撑柱[三写入口收口行为柱
+    #   + 放置预检同谓词真链] + 地牢箱柱[金苹果行逐字段 + 既有 9 行幸存 + 总权重 118 + 千 seed roll
+    #   带 + 瓜种带回归] + 结构钉族[值面 + 源钉族 + 双负面钉——NEG 双摘面豁免不钉]——零新 include 面,
+    #   loottable/hotbar/playercontroller 系均已列,QImage 面 Qt6::Gui 既有链接)。
+    tools/matrix/section79_small_gaps_t1116.cpp
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
     #   确定性等价承重墙[8 形态快照 worker ≡ 同步直调逐位恒等：顶点/索引/统计三面]/队列纪律
     #   [容量压小满载 kErrQueueFull 可见拒绝 + 拒绝项不入账 + 接受项恰一产出按 requestId 对账]/
