@@ -757,7 +757,19 @@ private:
                               //   满档 healed 4 + 直调缩放档 2/1/0 + 创造门 + 零效果快照 + NEG-2
                               //   摘面行本腿钉]，r2090c 炼药锅裁定锚柱[空桶右键满锅无效应 + 雨态
                               //   tick 双态水位恒定 + 瓶取/桶灌复绿 + 裁定注锚 + 降水权威三行源钉]，
-                              //   r2090d 结构钉族[段位/枚举尾/映射行/呈现三面/CMake/负面禁出钉——
+                              //   r2090d 结构钉族[段位/枚举尾/映射行/呈现三面/CMake/负面钉——
                               //   NEG 双摘面豁免不钉]。行为腿真链 pc rig fresh 48×48×96 s82，
                               //   rig 世界零接触，接 section82）
+    void section84_pumpkin_helmet_t1121(); // t1121 南瓜戴盔·夜行者凝视面探针段（置尾先例沿用：
+                              //   r2091a 装备柱[armorSlotAccepts 谓词真链：南瓜入头盔位整栈保真 +
+                              //   玻璃/错部位对照拒 + 卸下还原 count 随槽 + 0 护甲值面 + damageArmor
+                              //   不损耗 + 右键 equipSelectedArmor 不接南瓜 + 存档门同谓词复绿 +
+                              //   NEG-2 摘面行本腿钉]，r2091b 压制柱[确定性瞪视 rig：未戴对照恰激怒 +
+                              //   佩戴长窗恒不激怒 + 窗中卸下转激怒三态 + 钻石头盔对照仅南瓜压制 +
+                              //   未注入 rig 惰性面 + NEG-1 摘面行本腿钉]，r2091c 不相干面柱[蹒跚者
+                              //   照常追击佩戴者 + playerTargetable 观察者门幸存 + 佩戴者死亡掉落链
+                              //   覆盖面]，r2091d 结构钉族[注入 setter/成员/PlayerController 注入行/
+                              //   QML 谓词行/overlay/三呈现面/CMake/双负面钉——NEG 双摘面豁免不钉]。
+                              //   行为腿 fresh 48×48×96 s82 + 真链 EntityManager rig（t829 同门）+
+                              //   setWanderFrozen 确定性缝（t1029 同门），rig 世界零接触，接 section83）
 };

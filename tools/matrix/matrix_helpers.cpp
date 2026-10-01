@@ -233,6 +233,11 @@ void MatrixRun::runAll()
                               //   r2090d 结构钉族[段位/枚举尾/映射行/呈现三面/CMake/负面禁出钉——
                               //   NEG 双摘面豁免不钉]。行为腿真链 pc rig fresh 48×48×96 s82，
                               //   rig 世界零接触，接 section82）
+    section84_pumpkin_helmet_t1121(); // t1121 南瓜戴盔·夜行者凝视面探针段（置尾先例沿用：r2091a
+                              //   装备柱 + r2091b 压制柱[确定性瞪视 rig：t829 同门 + setWanderFrozen
+                              //   t1029 确定性缝] + r2091c 不相干面柱 + r2091d 结构钉族——NEG 双摘
+                              //   面豁免不钉。fresh 48×48×96 s82 小世界族，rig 世界零接触，接
+                              //   section83）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";
