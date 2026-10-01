@@ -2233,6 +2233,17 @@ void EntityManager::setPlayerSight(const QVector3D &eyePos, const QVector3D &loo
         m_playerLook = QVector3D(0, 0, -1); // 退化零向量 → 默认 -Z 并标无效（不误判瞪视）
         m_playerSightValid = false;
     }
+    // t1121 头盔位方块随行注入点说明：头盔 id 由 PlayerController 走 setPlayerHeadBlock 独立注入
+    //   （同门每 tick 幂等写；setPlayerSight 本体不接它——两语义两入口，各矩阵腿可独立驱动）。
+}
+
+// t1121 玩家头盔位方块注入（Game 层每 tick 调，同 setPlayerSight 门；见头文件注释）。幂等值写。
+//   Entities 层只收值不反查（护甲槽读取权威在 Game 层，由 PlayerController 读妥后注入值——PLAN §2
+//   向下依赖；本层零装备槽直读，负面钉 r2091d 在案）。
+void EntityManager::setPlayerHeadBlock(int itemId)
+{
+    m_playerHeadBlock = itemId;
+    m_playerHeadBlockValid = true;
 }
 
 // t635 铁傀儡反击锁定（PlayerController::attackMob 目标是铁傀儡时调；见头文件注释）。
@@ -5437,7 +5448,15 @@ bool EntityManager::aiNightwalker(int idx, Entity &e, float dt, World *world, co
             float mobDot = 0.0f;
             const float toP = hl > 1e-4f ? hl : 1.0f;
             mobDot = (fwdX * (e.pos.x() - m_playerEye.x()) + fwdZ * (e.pos.z() - m_playerEye.z())) / toP;
-            if (dot > 0.99f && hDist < kNightwalkerStareRange && mobDot > 0.3f) {
+            // t1121 南瓜戴盔压制（单一权威守卫，禁散布第二份判定）：玩家头盔位 = 南瓜方块 → 视同不在
+            //   瞪视（不累积，走下方 else 归零分支 → enrageTimer 恒 0，卸下后从头累积；机制等价 MC 1.0
+            //   「戴南瓜望向末影人不被激怒」，Beta 1.8 pre1 入版 = 1.0 基准内）。读取面 = Game 层
+            //   setPlayerHeadBlock 每 tick 注入（setPlayerSight 同门），本处只读注入值；创造门 / 其他
+            //   mob 不受影响（守卫仅在本判定内，非夜行者 / 未瞪视路径不经过）。未注入（rig）→ invalid
+            //   → 守卫恒 false = 既有行为零变化。
+            const bool stareSuppressed = m_playerHeadBlockValid
+                                         && m_playerHeadBlock == int(BlockRegistry::Pumpkin);
+            if (!stareSuppressed && dot > 0.99f && hDist < kNightwalkerStareRange && mobDot > 0.3f) {
                 e.enrageTimer += dt; // 持续瞪视累积
             } else {
                 e.enrageTimer = 0.0f; // 视线移开 / 转脸 → 归零

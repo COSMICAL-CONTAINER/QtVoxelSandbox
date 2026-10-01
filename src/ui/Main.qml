@@ -5903,7 +5903,7 @@ Window {
                     Model {
                         id: playerArmorHead
                         property int armId: hotbarVM.armorRevision >= 0 ? hotbarVM.armorBlockIdAt(0) : 0
-                        visible: armId !== 0
+                        visible: armId !== 0 && armId !== 100   // t1121 南瓜不入壳层（下方南瓜头 Model 接管）
                         geometry: ArmorLayerBox { piece: 0 }
                         position: Qt.vector3d(0, 0.30, 0.06)
                         scale: Qt.vector3d(0.60, 0.58, 0.56)
@@ -5915,6 +5915,24 @@ Window {
                             // 不透明模式 0.99（<1 强制走 alpha 通道 → 贴图透明底被丢弃）；观察者半透（本就 <1，
                             //   既保 ghost 半透又自然尊重贴图 alpha）。
                             opacity: playerModel.bodyOpacity >= 1.0 ? 0.99 : playerModel.bodyOpacity
+                        }
+                    }
+                    // t1121 南瓜头（装备槽 0 = 南瓜方块时接管头位呈现；机制等价 MC 1.0 头戴南瓜 = 头顶整块
+                    //   南瓜方块，第三人称 / F5 可见。BlockCube 共享图集同 golem 头先例；字面量 100 =
+                    //   BlockRegistry::Pumpkin（QML 不 import C++ 静态类约定）。visible 与上方盔甲壳互斥
+                    //   （南瓜不进壳层——ArmorLayerBox 铁灰壳对南瓜是错误呈现）。位姿 / 尺度沿用盔甲壳行
+                    //   （头位锚点不变）；tint 走玩家自身 hurtTint（同头部皮肤行，受击红闪一致性）。
+                    Model {
+                        id: playerArmorPumpkinHead
+                        property int headId: hotbarVM.armorRevision >= 0 ? hotbarVM.armorBlockIdAt(0) : 0
+                        visible: headId === 100
+                        geometry: BlockCube { blockId: 100 }
+                        position: Qt.vector3d(0, 0.30, 0.06)
+                        scale: Qt.vector3d(0.60, 0.58, 0.56)
+                        materials: PrincipledMaterial {
+                            lighting: PrincipledMaterial.NoLighting
+                            baseColor: playerModel.hurtTint(playerModel.hurt, 1.0, 1.0, 1.0)
+                            baseColorMap: voxelAtlas
                         }
                     }
                     // t731 眼子 Model 移除（t39/t52/t66 四件：白眼底×2 + 瞳×2）：头换 PlayerSkinBox 皮肤脸区
@@ -12542,6 +12560,80 @@ Window {
         anchors.fill: parent
         visible: window.appState === "playing" && player.eyeInLava
         color: Qt.rgba(0.85, 0.30, 0.05, 0.55)
+    }
+
+    // t1121 南瓜戴盔视野叠层：头盔位 = 南瓜方块（100 = BlockRegistry::Pumpkin；QML 不 import C++ 静态类
+    //   故字面量 + 注释互指，同 golem 头约定）→ 全屏「瓜内视野」遮挡（机制等价 MC 1.0 南瓜头盔第一人称
+    //   视野遮挡面；era 实证 2026-10-01 = 1.0.0 client jar（官方 Mojang manifest sha 锚 b679fea2）内
+    //   misc/pumpkinblur.png 在场）。原创自绘 §9a（Canvas 一次性绘制：暗橙黑纱 + 瓜棱竖带 + 边缘暗晕 +
+    //   双眼缝 / 锯齿嘴缝半透光——非 MC 资产），只在窗口尺寸变时重绘（同 t465 vignette 模式，不每帧重绘）。
+    //   状态驱动 = hotbarVM 装备槽 0（表达式形式触碰 armorRevision 建 NOTIFY 依赖——t498 教训同门：语句块
+    //   形式在静态构建下不注册 NOTIFY → 装卸南瓜视野不刷新）。纯 Canvas 无 MouseArea → 不拦截鼠标（同
+    //   蓝雾经验）。仅 playing 态显；放 View3D 之后、HUD/背包/暂停叠层之前（同组惯例：只染 3D 场景区）。
+    Item {
+        id: pumpkinVision
+        anchors.fill: parent
+        // 头盔位 id（0 = 空 / 非方块；100 = 南瓜）。表达式形式（同 playerArmorHead.armId t498 修法）。
+        property int headBlockId: hotbarVM.armorRevision >= 0 ? hotbarVM.armorBlockIdAt(0) : 0
+        visible: window.appState === "playing" && headBlockId === 100
+        Canvas {
+            anchors.fill: parent
+            onPaint: {
+                const ctx = getContext('2d')
+                ctx.reset()
+                const w = width, h = height
+                // 基底：暗橙黑纱（瓜内壁暗光，全屏重挡视野——MC 南瓜视野遮挡主面）。
+                ctx.fillStyle = "rgba(26, 14, 6, 0.82)"
+                ctx.fillRect(0, 0, w, h)
+                // 瓜棱竖带（六条更暗竖带，天然南瓜瓣棱节奏；宽度等分确定性布点）。
+                ctx.fillStyle = "rgba(12, 7, 3, 0.45)"
+                const ribs = 6
+                for (let i = 0; i < ribs; ++i) {
+                    const x = w * (i + 0.5) / ribs
+                    ctx.fillRect(x - w * 0.012, 0, w * 0.024, h)
+                }
+                // 边缘暗晕（瓜腔内壁贴脸，边角最暗；径向渐变一次性绘制）。
+                const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.28, w / 2, h / 2, Math.max(w, h) * 0.72)
+                g.addColorStop(0.0, "rgba(0,0,0,0)")
+                g.addColorStop(1.0, "rgba(8, 4, 2, 0.55)")
+                ctx.fillStyle = g
+                ctx.fillRect(0, 0, w, h)
+                // 刻面透光缝（destination-out 半抠：内侧刻面孔位透出外景——双眼缝倒三角 + 五段锯齿嘴缝；
+                //   半透 0.55 = 缝内仍留暗纱，机制等价 MC 南瓜视野「孔内略清、整体昏暗」）。
+                ctx.globalCompositeOperation = "destination-out"
+                ctx.fillStyle = "rgba(0, 0, 0, 0.55)"
+                const ey = h * 0.40, eh = h * 0.075
+                ctx.beginPath()                      // 左眼缝（原创倒三角几何）
+                ctx.moveTo(w * 0.22, ey + eh)
+                ctx.lineTo(w * 0.30, ey)
+                ctx.lineTo(w * 0.38, ey + eh)
+                ctx.closePath()
+                ctx.fill()
+                ctx.beginPath()                      // 右眼缝（镜像）
+                ctx.moveTo(w * 0.62, ey + eh)
+                ctx.lineTo(w * 0.70, ey)
+                ctx.lineTo(w * 0.78, ey + eh)
+                ctx.closePath()
+                ctx.fill()
+                ctx.beginPath()                      // 锯齿嘴缝（五段折线带，上下缘同相锯齿）
+                const my = h * 0.62, mw = w * 0.44, mh = h * 0.05
+                for (let k = 0; k <= 6; ++k) {
+                    const tx = w * 0.28 + mw * k / 6
+                    const ty = my + (k % 2 === 0 ? mh : mh * 0.45)
+                    if (k === 0) ctx.moveTo(tx, ty); else ctx.lineTo(tx, ty)
+                }
+                for (let k = 6; k >= 0; --k) {
+                    const tx = w * 0.28 + mw * k / 6
+                    ctx.lineTo(tx, my + (k % 2 === 0 ? mh : mh * 0.45) + mh * 0.9)
+                }
+                ctx.closePath()
+                ctx.fill()
+                ctx.globalCompositeOperation = "source-over"
+            }
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            Component.onCompleted: requestPaint()
+        }
     }
 
     // t344 着火火焰叠层：玩家燃烧（player.burning，岩浆 / 火点燃）→ 屏幕底部 ~35% 火焰半透叠层（机制等价

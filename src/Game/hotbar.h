@@ -212,6 +212,13 @@ public:
     // t345 护甲段判定（id 在护甲段 [ArmorIdBase, ArmorIdEnd) 内）。与 isTool / isMaterial 互斥（护甲段在
     //   材料段之上 0x300）。供 QML delegate 据 isArmor 切到护甲自绘图标 + 装备槽校验「部位匹配」。
     Q_INVOKABLE bool isArmor(int itemId) const;
+    // t1121 装备槽接受谓词（单一权威）：itemId 能否置入装备槽 slot。护甲件 → 部位匹配该槽；**南瓜方块
+    //   （BlockRegistry::Pumpkin=100，方块物品牌非护甲段）→ 仅头盔位 slot 0**（机制等价 MC 1.0 南瓜可戴
+    //   头上——Alpha v1.2.0 入版「南瓜可以被玩家戴在头上」，0 护甲值纯功能位；t1110 裁定无雕刻品种，戴
+    //   的就是南瓜本牌）。0（清空）恒真；其余 id → false。armorSetStack（写守卫）与 QML 装备路径
+    //   （SurvivalInventory / Inventory 点击 + InventoryOps swapHoveredWithHotbar）共用本谓词，禁第二份
+    //   判定散布。
+    Q_INVOKABLE bool armorSlotAccepts(int slot, int itemId) const;
     // t345 护甲部位 / 材质档 / 单件护甲值 / 最大耐久（透传 ArmorRegistry；非护甲 → 0/-1）。QML 装备槽点击
     //   校验「持物部位 == 槽位部位」+ tooltip 显护甲值 + 创造取件初始化耐久用。
     Q_INVOKABLE int armorPiece(int itemId) const;     // ArmorRegistry::ArmorPiece（0 头盔..3 靴子）；非护甲 -1

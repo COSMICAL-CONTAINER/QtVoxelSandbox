@@ -1770,9 +1770,21 @@ int Hotbar::armorDurabilityAt(int slot) const
     return m_armorSlots[size_t(slot)].durability;
 }
 
-// 直接写入装备槽。slot 范围守；id 须为护甲段（或 0=清空）+ 部位须匹配该槽（头盔槽只接头盔，MC 行为）；
-//   count 钳 1（护甲不可堆叠）；durability 经 normalizeDurability 归一。非护甲 / 部位不符 → no-op。
-//   id==0 或 count<=0 → 清空该槽（脱下）。部位匹配：slot 索引 == ArmorRegistry::piece(id)。
+// t1121 装备槽接受谓词（单一权威；见头文件注释）。armorSetStack 写守卫 + QML 装备路径共用。
+//   护甲件 → 部位匹配；南瓜方块 → 仅头盔位；0（清空）恒可；其余（工具 / 材料 / 其他方块）→ false。
+bool Hotbar::armorSlotAccepts(int slot, int itemId) const
+{
+    if (slot < 0 || slot >= int(m_armorSlots.size())) return false;
+    if (itemId == 0) return true;                       // 清空（脱下）恒可
+    if (ArmorRegistry::isArmor(itemId)) return ArmorRegistry::piece(itemId) == slot;
+    // t1121 南瓜本牌（方块段 100）→ 头盔位（Alpha v1.2.0 起可戴；0 护甲值）。其余 id 恒拒。
+    return slot == 0 && itemId == int(BlockRegistry::Pumpkin);
+}
+
+// 直接写入装备槽。slot 范围守；id 经 armorSlotAccepts 谓词守（t1121 起护甲件按部位 + 南瓜仅头盔位；
+//   其余拒）。count：护甲不可堆叠钳 1；南瓜方块随传入 count 钳 [1,64]（MC 头盔位可持整栈方块）。
+//   durability 经 normalizeDurability 归一（南瓜非工具 / 护甲 → 0 inert，不受 damageArmor 损耗）。
+//   不接受 / 部位不符 → no-op。id==0 或 count<=0 → 清空该槽（脱下）。
 //   enchants（t475）：护甲可附魔（保护族 / 耐久 / 水上亲和）；装备 / 脱下搬运时透传实例附魔保真。
 //   name（t622）：同 setStack（护甲整件装备 / 脱下透传实例名保真）。
 void Hotbar::armorSetStack(int slot, int id, int count, int durability, const QVariantList &enchants, const QString &name)
@@ -1785,10 +1797,11 @@ void Hotbar::armorSetStack(int slot, int id, int count, int durability, const QV
         bumpArmorRevision();
         return;
     }
-    if (!ArmorRegistry::isArmor(id)) return;            // 非护甲 → 拒（装备槽只接护甲）
-    if (ArmorRegistry::piece(id) != slot) return;       // 部位不符 → 拒（头盔不进胸甲槽）
+    if (!armorSlotAccepts(slot, id)) return;            // 谓词外 → 拒（t1121 单一权威，含南瓜头盔位特收）
+    const bool isArmorItem = ArmorRegistry::isArmor(id);
     const int dur = normalizeDurability(id, durability);
-    ItemStack ns{id, 1, dur};                           // 护甲不可堆叠 → count 恒 1
+    // 护甲不可堆叠 → count 恒 1；南瓜（t1121）随传入 count（钳 64，同方块栈上限；存档 / UI 整栈搬运保真）。
+    ItemStack ns{id, isArmorItem ? 1 : std::min(std::max(count, 1), 64), dur};
     applyEnchants(ns, enchants);                        // t475 写附魔元数据
     ns.customName = name.trimmed();                     // t622 写实例名
     m_armorSlots[size_t(slot)] = ns;

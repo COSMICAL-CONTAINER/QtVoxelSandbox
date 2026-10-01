@@ -1083,12 +1083,30 @@ Item {
                                             }
                                         }
                                     }
-                                    // 已装备护甲图标（MaterialIcon 护甲段分支；armId!==0 时显）。
+                                    // 已装备护甲图标（MaterialIcon 护甲段分支；护甲 id 时显）。
+                                    //   t1121 方块型装备（南瓜头盔）分流：方块段 id 走 iconSourceForBlock 图像
+                                    //   （MaterialIcon 方块 id 落 default 兜底木棒，先按段分流，同主栏槽三分支）。
+                                    Image {
+                                        anchors.centerIn: parent
+                                        width: 30; height: 30
+                                        visible: armId !== 0 && !root.hotbar.isArmor(armId) && !root.hotbar.isTool(armId) && !root.hotbar.isMaterial(armId)
+                                        source: { const _r = root.hotbar.armorRevision; const _p = iconPackRefresh.active; return _r >= 0 && _p >= 0 ? root.hotbar.iconSourceForBlock(armId) : "" }
+                                        fillMode: Image.PreserveAspectFit; smooth: true
+                                    }
                                     MaterialIcon {
                                         anchors.centerIn: parent
                                         width: 30; height: 30
-                                        visible: armId !== 0
+                                        visible: armId !== 0 && root.hotbar.isArmor(armId)
                                         materialId: armId
+                                    }
+                                    // t1121 装备槽数量（南瓜整栈入头盔位 → count>1 显数字；护甲恒 1 不显）。
+                                    Text {
+                                        anchors.right: parent.right; anchors.bottom: parent.bottom
+                                        anchors.rightMargin: 3; anchors.bottomMargin: 1
+                                        visible: root.hotbar.armorRevision >= 0 && root.hotbar.armorCountAt(index) > 1
+                                        text: root.hotbar.armorRevision >= 0 ? root.hotbar.armorCountAt(index) : ""
+                                        color: "#ffffff"; style: Text.Outline; styleColor: "#000000"
+                                        font.pixelSize: 13; font.bold: true
                                     }
                                     // t640② 装备槽护甲耐久条（DurabilityBar；满耐久不显——t931 对齐 hotbar 口径，
                                     //   组件内统一判）。触碰 armorRevision → 受击损耗 / 换装后重算。
@@ -1127,23 +1145,27 @@ Item {
                                         acceptedButtons: Qt.LeftButton
                                         onTapped: {
                                             const heldId = root.hotbar.heldBlock
+                                            const heldCnt = root.hotbar.heldCount            // t1121 方块型装备整栈随光标
                                             const heldDur = root.hotbar.heldDurability
                                             const heldEnch = root.hotbar.heldEnchants()
                                             const heldName = root.hotbar.heldCustomName       // t622 实例名随实例走
                                             const slotId = root.hotbar.armorBlockIdAt(index)
+                                            const slotCnt = root.hotbar.armorCountAt(index)   // t1121 南瓜整栈互换保真
                                             const slotDur = root.hotbar.armorDurabilityAt(index)
                                             const slotEnch = root.hotbar.armorEnchantsAt(index)
                                             const slotName = root.hotbar.armorCustomNameAt(index) // t622 装备槽实例名
                                             if (heldId !== 0) {
-                                                if (!root.hotbar.isArmor(heldId)) return
-                                                if (root.hotbar.armorPiece(heldId) !== index) return
-                                                // 互换：先清槽（脱下旧物），再装备手持护甲（armorSetStack 守部位）。
+                                                // t1121 装备槽接受谓词（单一权威：护甲部位匹配 + 南瓜仅头盔位）。
+                                                if (!root.hotbar.armorSlotAccepts(index, heldId)) return
+                                                // 互换：先清槽（脱下旧物），再装备手持护甲（armorSetStack 守谓词）。
                                                 //   附魔 / t622 名随实例互换（旧物附魔 / 名 → 光标；手持 → 装备槽）。
+                                                //   count：护甲恒 1（不可堆叠）；南瓜等方块型随光标整栈（钳 [1,64]）。
+                                                const equipCnt = root.hotbar.isArmor(heldId) ? 1 : heldCnt
                                                 root.hotbar.armorSetStack(index, 0, 0)
-                                                root.hotbar.armorSetStack(index, heldId, 1, heldDur, heldEnch, heldName)
+                                                root.hotbar.armorSetStack(index, heldId, equipCnt, heldDur, heldEnch, heldName)
                                                 if (slotId !== 0) {
                                                     root.hotbar.heldBlock = slotId
-                                                    root.hotbar.heldCount = 1
+                                                    root.hotbar.heldCount = slotCnt          // t1121 count 随槽
                                                     root.hotbar.heldDurability = slotDur
                                                     root.hotbar.setHeldEnchants(slotEnch)
                                                     root.hotbar.heldCustomName = slotName   // t622 旧件名随实例回光标
@@ -1153,10 +1175,10 @@ Item {
                                                 }
                                                 return
                                             }
-                                            // 空手：槽有护甲 → 脱下到光标。
+                                            // 空手：槽有物 → 脱下到光标（t1121 count 随槽：南瓜整栈回光标）。
                                             if (slotId !== 0) {
                                                 root.hotbar.heldBlock = slotId
-                                                root.hotbar.heldCount = 1
+                                                root.hotbar.heldCount = slotCnt
                                                 root.hotbar.heldDurability = slotDur
                                                 root.hotbar.setHeldEnchants(slotEnch)
                                                 root.hotbar.heldCustomName = slotName       // t622 脱下带名保真

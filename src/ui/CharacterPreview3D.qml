@@ -233,8 +233,11 @@ Item {
                     }
                     // t731 眼子 Model 移除（t52 四件白底/瞳）：皮肤脸区纹素自带五官，独立眼盒会叠画成双层眼。
                     // 头盔（装备槽 0 有护甲时叠头；z 探出 +0.06，脸仍露，同 Main.qml playerArmorHead）。
+                    //   t1121 南瓜（方块段 100）不入壳层：壳层是 tier 配色盔甲盒，南瓜会错呈铁灰壳——
+                    //   预览面板无方块图集管线，头部保持裸露（装备格图标承载南瓜呈现；同 Main.qml
+                    //   playerArmorHead 的南瓜分支口径——壳层与南瓜互斥）。
                     Model {
-                        visible: root.headArmor !== 0
+                        visible: root.headArmor !== 0 && root.headArmor !== 100
                         geometry: UnitCube {}
                         position: Qt.vector3d(0, 0.30, 0.06)
                         scale: Qt.vector3d(0.60, 0.58, 0.56)
