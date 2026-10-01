@@ -190,6 +190,7 @@
                         //   ——worldstore 零改动纯消费；Game→World 向下依赖，PLAN §2 同门）
 
 #include <QDebug>  // qWarning（超界 dt 丢弃——背压可见，t1050）
+#include <QElapsedTimer> // t1124：流式收割拍数据面单拍预算墙钟（STEADY 同门——不新造第二时钟）
 #include <QObject>
 #include <QSet>    // 读档仲裁胜者集（ChunkKey::packed 键）
 #include <QVector> // 未到期命令暂存（drain-then-replay；容量受 CommandQueue::kCapacity 上界）
@@ -283,6 +284,21 @@ public:
     int streamingOutcomeCount() const { return m_streamOutcomeCount; }
     int streamingAdoptedCount() const { return m_streamAdoptedCount; }
     const ChunkStreamDriver *streamDriver() const { return m_streamDriver.get(); }
+    // ── t1124 流式收割拍数据面单拍预算（pumpStreamingTick ④ 排干循环的节流闸门）──────────
+    // t1123 件① 调研数据支撑（offscreen rig 实测）：单 adopt 主线程成本 ≈ 40-90ms（bulk
+    //   memcpy + 整 chunk heightmap 重算 + population 窗重放 + 天光 refloodBox）；入场 tick
+    //   单拍 adopt 61 = 4147.93ms、跨界 tick744 单拍 adopt 27 = 2322.67ms（本单 bench rig
+    //   同径复现：入场 56 adopt = 4319ms）——worker 突发经数据面无界排干整批落一帧 = 用户
+    //   走路卡顿 P0 主因。预算推导：任务建议带 2-4ms 取中值 3ms——深队列时单 adopt(≥40ms)
+    //   ≫ 预算 → 每拍恰排 1 条（单拍尖刺 2323ms/4148ms → ≤ 1×adopt + 预算 ≈ 一帧内可见
+    //   卡顿级，1 秒级冻结消失）；廉价落位（blob restore / 小 chunk）一拍可在预算内排多条
+    //   → 稳态吞吐不塌。收敛不变量（t1061 livelock 史硬门）保全推导见 pumpStreamingTick ④
+    //   注。测试缝注入 0ms → 闸门恒真 = 每拍恰 1 adopt 的确定性计数上界形态（矩阵行为面靠
+    //   语料内嵌复现体——绝对时间断言禁入腿，机器相关脆弱）。
+    static constexpr int kStreamingPumpBudgetMs = 3;
+    // 预算注入缝（矩阵确定性验证专用；生产零调用——预算恒上值默认）。
+    void setStreamingPumpBudgetMsForTest(int budgetMs) { m_streamPumpBudgetMs = budgetMs; }
+    int streamingPumpBudgetMs() const { return m_streamPumpBudgetMs; }
     // worker 诊断读面（线程身份对账 / 已执行计数——r2012a 先例；fixed 恒 null）。
     const BackgroundGenerationWorker *streamWorker() const { return m_streamWorker.get(); }
     // P5 调参入口（W2 生产 = P1 默认半径不传即用；矩阵腿内压小半径控时长）。
@@ -478,6 +494,9 @@ private:
     int m_playerChunkCz = 0;
     int m_streamOutcomeCount = 0; // 收割拍结果面累计（每活别名一条——#7 同拍消费账面）
     int m_streamAdoptedCount = 0; // 收割拍数据面累计（每完成 job 恰一条——#7 同拍消费账面）
+    // t1124：数据面单拍时间预算（毫秒）——闸门值（推导与调研数据支撑见 kStreamingPumpBudgetMs
+    //   注）。非 const = 测试缝可注入（生产路径零写点，恒默认值）。
+    int m_streamPumpBudgetMs = kStreamingPumpBudgetMs;
     // t1059：F3 stream 行 sub/can/rej 域的推送差分基线（上一推送时点的驱动器 stats 快照——
     // 窗口增量 = 现值 − 基线，推送后更新。聚合权威仍在驱动器 stats()，本基线只是 F3 差分
     // 底账非第二份账本；平凡可拷贝小聚合，无析构序约束）。
@@ -889,6 +908,16 @@ inline bool GameSession::loadStreamingWorld(WorldStore &store)
 // 循环的**同拍并列**——两面各自独立 pop（takeCompletedAsync 已在 pump 内被 scheduler 消费、
 // 转译为每活别名一条 outcome；takeResultData 与其同源同序、每完成 job 恰一条自持缓冲），
 // 只收一面 = 另一面无界积压（#7 原文）——故两面必须在同一收割拍内全部排干。
+//
+// ── review0916 #7 契约修订（t1124，t1123 件① 走路卡顿调研裁定交付）────────────────────────
+//   原「结果面 + 数据面同拍全排干」修订为「结果面维持同拍全排干（记账廉价，无积压面）+
+//   数据面预算内排干 + 跨拍续排」（单 adopt 主线程 40-90ms，无界排干让 worker 突发整批落
+//   一帧 = 2323ms/4148ms 级尖刺）。修订后数据面的队列有界性不再依赖「同拍全排干」，改由
+//   「worker 结果缓冲容量有限（每完成 job 恰一条，完成量 ≤ submit 背压 kMaxQueuedTasks=64
+//   + scheduler 在途上界）+ 预算持续排空（首条 take 前预算必未耗尽 → 深队列每拍至少排
+//   1 条 → 排空速率 ≥ 1 adopt/tick ≈ 10 chunk/s（10Hz tick 基准）≥ 稳态 worker 产出速率
+//   → 队列必归零收敛，
+//   t1061 收敛不变量逐位保留）」共同保证。
 inline void GameSession::pumpStreamingTick()
 {
     if (!m_streamDriver)
@@ -926,7 +955,8 @@ inline void GameSession::pumpStreamingTick()
         ++outcomesDrained;
     }
     FrameProfiler::instance()->addCount("streamOut", outcomesDrained);
-    // ④ #7 同拍双面·数据面（漏取 = m_data 无界积压——#7 原文）：主线程落位唯一通路。
+    // ④ #7 同拍双面·数据面（漏取 = m_data 积压——#7 原文；t1124 起本面受单拍预算节流 +
+    //    跨拍续排管辖，队列有界性与收敛不变量推导见函数头注修订段）：主线程落位唯一通路。
     //    §29.5-W3 路由（t1070 件一/件二修订后）：附加表命中（= 该 chunk 曾驱逐落盘，行只增
     //    不删故命中稳定）→ World::restoreChunkFromBlob 直接物化（跳过 population——存档内容
     //    已是终态，头注立证）；未命中 → 按完成 job 的种别收尾：Load 键载体信封（t1070 件一
@@ -939,6 +969,15 @@ inline void GameSession::pumpStreamingTick()
     //    hasChunk 注。
     std::unique_ptr<GeneratedChunkData> data;
     qint64 adoptedDrained = 0; // t1059 F3 stream 行 adopt 域的本拍增量
+    // t1124 数据面单拍时间预算（#7 契约修订兑现点——修订语义全文见函数头注）：预算计时
+    //   原点 = 数据面入口；每**完整落位**恰 1 条后查预算（adopt 原子不可拆——半条不停，单拍
+    //   上界 = 预算 + 1×adopt 成本）。耗尽即 break 早退，余量留 m_data 下拍续排（自持缓冲
+    //   持有，零丢失）。收敛保命门：首条 take 前计时器刚清零（elapsed ≈ 0 < 预算）→ 预算
+    //   永不拦截首条 → 深队列每拍至少排 1 条（进度保证）。沿革锚：本闸门即
+    //   r2093c 调研站点 → t1124 改造落点（t1123 件① 定界的 pumpStreamingTick ④ 数据面
+    //   排干行——while 行逐字幸存，预算查检落循环体内每完整落位之后）。
+    QElapsedTimer adoptBudgetClock;
+    adoptBudgetClock.start();
     while (m_streamWorker->takeResultData(data)) {
         if (data) {
             ChunkStoreBlob blob;
@@ -961,6 +1000,7 @@ inline void GameSession::pumpStreamingTick()
         }
         ++m_streamAdoptedCount;
         ++adoptedDrained;
+        if (adoptBudgetClock.elapsed() >= m_streamPumpBudgetMs) break; // t1124：预算耗尽早退——余量下拍续排
     }
     FrameProfiler::instance()->addCount("streamAdopt", adoptedDrained);
     // ⑤ W4 网格收割拍（tick 尾单点收口——「收割拍单点收口」r2026d 钉面；与 ④ 数据面同拍
