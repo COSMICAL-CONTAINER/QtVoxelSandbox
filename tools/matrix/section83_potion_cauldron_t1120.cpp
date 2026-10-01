@@ -559,9 +559,11 @@ void MatrixRun::section83_potion_cauldron_t1120()
                             .arg(missRc.join(QLatin1Char(',')));
         }
         // (2) 枚举尾追加(playerstate.h StatusEffect 尾——纯映射位非时序效果)。
+        //     [lawful 修订 t1122] 枚举尾再追加 EffectInstantDamage(喷溅瞬间伤害纯映射位，同门纪律)——
+        //     本钉随尾段位沿革改针(r2085e enum-tail-pin-rides 先例同门)，语义「即时治疗在位」不变。
         {
             const QStringList missPs = pinSet(srcDir + QStringLiteral("/Game/playerstate.h"), {
-                SrcPin("enum tail", "EffectWeakness, EffectInstantHeal };", 1)});
+                SrcPin("enum tail", "EffectWeakness, EffectInstantHeal, EffectInstantDamage };", 1)});
             ok = ok && missPs.isEmpty();
             if (!missPs.isEmpty())
                 diag += QStringLiteral("[enum %1]").arg(missPs.join(QLatin1Char(',')));

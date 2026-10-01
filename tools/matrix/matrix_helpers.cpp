@@ -238,6 +238,10 @@ void MatrixRun::runAll()
                               //   t1029 确定性缝] + r2091c 不相干面柱 + r2091d 结构钉族——NEG 双摘
                               //   面豁免不钉。fresh 48×48×96 s82 小世界族，rig 世界零接触，接
                               //   section83）
+    section85_instant_damage_t1122(); // t1122 瞬间伤害族探针段（置尾先例沿用：r2092a 酿造转换柱 +
+                              //   r2092b 饮用自伤柱 + r2092c 喷溅柱 + r2092d 结构钉族——NEG 双摘
+                              //   面豁免不钉。fresh 48×48×96 s82 小世界族 + drop rig（r2090b 同门），
+                              //   rig 世界零接触，接 section84）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";
