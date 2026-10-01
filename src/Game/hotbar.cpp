@@ -91,6 +91,18 @@ const char *iconFileForBlock(quint8 id)
     //   几何摆位异，物品剪影同构；同门先例 MonsterEgg 复用 icon_stone_brick.png）。
     case BlockRegistry::StandingSign:     return "icon_sign.png";              // 牌子：3D 立牌（立柱+板面，木牌纹）
     case BlockRegistry::WallSign:         return "icon_sign.png";              // 挂墙牌子：复用牌子剪影（两形态物品剪影同构）
+    // t1123 创造背包图标缺席系统扫清偿（用户实测「漏斗 / 酿造台等创造背包看不到」——五件自入册起
+    //   iconFileForBlock 无 case 且不在 isPackDerivedIconFamily → iconSourceForBlock 回退链四层全空 =
+    //   调色板条目透明。全量差集扫描 147 调色板条目 × 图标路由恰此五件缺席，全量清偿）。
+    //   生成器 build_cube_icons.py 新 shape 三分支（hopper / brewing_stand / cauldron 与世界内
+    //   hopperShapeBoxes / brewingStandShapeBoxes / PartialBlockGeometry Cauldron 盒集同构——编码镜像
+    //   改编码两处同步）+ BLOCKS 表 melon 行 + BLOCKS_FRONT 表 jack_o_lantern 行（t1117 三分支先例
+    //   同门：shape 分支缺失 → 空画布空白件，本批生成器与 case 同批落）。
+    case BlockRegistry::Hopper:           return "icon_hopper.png";            // 漏斗：3D 顶箅+颈+底嘴（朝下态剪影，暗铁）
+    case BlockRegistry::BrewingStand:     return "icon_brewing_stand.png";     // 酿造台：3D 底座+中柱（石灰底座暗柱）
+    case BlockRegistry::Melon:            return "icon_melon.png";             // 西瓜：3D 立方体（顶=网纹 / 侧=波浪棱带）
+    case BlockRegistry::JackOLantern:     return "icon_jack_o_lantern.png";    // 南瓜灯：正面为主投影（点亮刻脸主面+顶侧瓜纹带）
+    case BlockRegistry::Cauldron:         return "icon_cauldron.png";          // 炼药锅：3D 外壁环+底板（空锅态剪影，铸铁）
     case BlockRegistry::Cactus:        return "icon_cactus.png";         // t394 仙人掌立方体图标（顶=绿截面环纹 / 侧=棱脊+刺点）
     case BlockRegistry::SnowLayer:    return "icon_snow_layer.png";    // t395 积雪层立方体图标（各面=冷白冰晶噪点）
     case BlockRegistry::SpruceLog:    return "icon_spruce_log.png";    // t395 云杉原木立方体图标（顶=年轮截面 / 侧=深棕树皮）

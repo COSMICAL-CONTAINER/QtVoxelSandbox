@@ -162,6 +162,10 @@ BLOCKS = [
     ("spawner",         "default_spawner", "default_spawner"),  # t760 刷怪笼（各面同贴图=铁灰栅栏笼格；地牢/要塞结构方块）
     # t600 石砖台阶/楼梯不再走 BLOCKS（满立方体投影）：三个图标渲染成同一张整砖立方 → 背包里与石砖满格无法区分
     #   （用户「三个都是石砖满一格子的样子」）。改走下方 PARTIALS_3D_STONE_BRICK（slab/stairs 形状投影，砖纹 fill）。
+    # t1123 西瓜立方体图标（t1123 创造背包图标缺席系统扫清偿五件之一——Melon 自 t1103 入册起无本行
+    #   无 iconFileForBlock case → 调色板条目透明）：各面=瓜纹（顶=default_melon_top 网纹 /
+    #   侧=default_melon_side 波浪棱带，与放置态 kDefs 瓜块 tile 195/196 同源）。
+    ("melon",           "default_melon_top", "default_melon_side"),
 ]
 
 # t600 石砖半方块 3D dimetric 立体图标：slab 半高盒 / stairs L 阶（背墙 + 整步），fill 换 default_stone_brick
@@ -207,11 +211,27 @@ PARTIALS_3D_T1116 = [
     ("iron_bars", "iron_bars", "default_iron_bars", "default_iron_bars"),
 ]
 
+# t1123 创造背包图标缺席系统扫清偿三件异形（机制等价 t1116 流程——新 shape 分支 + 各自材质 fill，
+#   盒集与世界内权威同构编码镜像，见 render_partial_3d 各分支注）：hopper（顶箅 hopper_top /
+#   锅体 hopper_side 双 fill，朝下态）/ brewing_stand（静置瓦）/ cauldron（铸铁壁瓦，空锅态）。
+#   表行与分支盒集同构（t1117 沿革注同门：表行与分支改编码两处同步）。
+PARTIALS_3D_T1123 = [
+    ("hopper",         "hopper",         "default_hopper_top",    "default_hopper_side"),
+    ("brewing_stand",  "brewing_stand",  "default_brewing_stand", "default_brewing_stand"),
+    ("cauldron",       "cauldron",       "default_cauldron",      "default_cauldron"),
+]
+
 # t492 「正面有辨识特征」的方块（正面贴图, 顶面贴图, 侧面贴图）—— 走 render_front（正面为主的 dimetric 投影）。
 #   t676 工作台 / 熔炉 / 发射器 / 投掷器**全部移出**（用户点名「front 方案太扁平」→ 升 cube per-face 满立方
 #   dimetric：顶 + 右侧 + 前面三面独立贴图，见 FROM_PACK cube_front 段）。本表现空 —— 保留表结构 /
 #   render_front（t644 render_pack_front 同族）供后续「正面为主」需求复用。
-BLOCKS_FRONT = []
+# t1123 南瓜灯入列（图标缺席系统扫清偿五件之一）：正面（+Z 主面）= default_jackolantern_face 点亮刻脸
+#   （放置态 frontTile 205 同源——点亮刻脸是本块唯一辨识特征，render() 顶/侧视角下完全不可见 → 走
+#   render_front 正面为主投影），顶细带 / 右细带 = 瓜纹（default_pumpkin_top 119 / default_pumpkin_side
+#   117——与放置态 kDefs 顶/侧同源）。
+BLOCKS_FRONT = [
+    ("jack_o_lantern", "default_jackolantern_face", "default_pumpkin_top", "default_pumpkin_side"),
+]
 
 # ---- dimetric 几何（工作画布坐标，y 向下）----
 hw = 0.46 * W   # 顶菱形水平半对角线（= 立方体水平半宽）
@@ -653,6 +673,43 @@ def render_partial_3d(shape, fill_top="default_wood", fill_side="default_wood"):
             (1.0 / 16.0, 15.0 / 16.0, 0.0, 0.5, 1.0 / 16.0, 15.0 / 16.0),           # 矮盒（8/16 高）
         ]
         y_min, y_max = 0.0, 0.5
+    elif shape == "hopper":
+        # t1123 漏斗（图标缺席系统扫清偿五件之一）：三盒与世界内 hopperShapeBoxes（blockregistry.cpp
+        #   单一权威）**朝下态**（state=HopperFacingDownFlag 排料口贴底心的 canonical 放置读感）编码
+        #   镜像（改编码两处同步）：① 顶箅板满格 footprint y[8,10]/16；② 漏斗颈 4..12/16 见方
+        #   y[4,8]/16；③ 排料嘴 5..11/16 见方 y[0,4]/16 贴底心（水平态嘴贴朝向侧边——物品无朝向语境
+        #   取朝下态，同 iron_bars「物品取满连」口径）。depth buffer 解三盒叠级遮挡。
+        #   fill 顶=default_hopper_top 箅板 / 侧=default_hopper_side 锅体（与放置态 kDefs 186/187 同源；
+        #   渲染循环特判盒 0 贴 top、盒 1.. 贴 side——lever 同款双 fill 分工）。
+        boxes = [
+            (0.0, 1.0, 8.0 / 16.0, 10.0 / 16.0, 0.0, 1.0),              # 顶箅板（可站顶面 10/16）
+            (4.0 / 16.0, 12.0 / 16.0, 4.0 / 16.0, 8.0 / 16.0, 4.0 / 16.0, 12.0 / 16.0),  # 漏斗颈
+            (5.0 / 16.0, 11.0 / 16.0, 0.0, 4.0 / 16.0, 5.0 / 16.0, 11.0 / 16.0),         # 排料嘴（贴底心）
+        ]
+        y_min, y_max = 0.0, 10.0 / 16.0
+    elif shape == "brewing_stand":
+        # t1123 酿造台（清偿五件之一）：两盒与世界内 brewingStandShapeBoxes 单一权威编码镜像（改编码
+        #   两处同步）：① 底座板 1..15/16 见方 y[0,2]/16；② 中柱 6..10/16 见方 y[2,10]/16。
+        #   fill 双向 = default_brewing_stand 静置瓦（与放置态 tile 193 同源；亮态 194 是运行态，物品
+        #   图标取静置态同红石灯 off 口径）。
+        boxes = [
+            (1.0 / 16.0, 15.0 / 16.0, 0.0, 2.0 / 16.0, 1.0 / 16.0, 15.0 / 16.0),  # 底座板
+            (6.0 / 16.0, 10.0 / 16.0, 2.0 / 16.0, 10.0 / 16.0, 6.0 / 16.0, 10.0 / 16.0),  # 中柱
+        ]
+        y_min, y_max = 0.0, 10.0 / 16.0
+    elif shape == "cauldron":
+        # t1123 炼药锅（清偿五件之一）：五盒与 PartialBlockGeometry Cauldron case **空锅态**（level=0
+        #   无内水面）编码镜像（改编码两处同步）：四面外壁 2/16 厚满高 + 底板 y[0,1/16]（内腔封底；
+        #   内水面是水位 state 维度，物品无水位语境取空锅态）。fill 全=default_cauldron 铸铁壁瓦
+        #   （与放置态 tile 206 同源）。depth buffer 解外壁环相交遮挡。
+        boxes = [
+            (0.0, 1.0, 0.0, 1.0, 0.0, 2.0 / 16.0),                      # -Z 外壁
+            (0.0, 1.0, 0.0, 1.0, 14.0 / 16.0, 1.0),                     # +Z 外壁
+            (0.0, 2.0 / 16.0, 0.0, 1.0, 2.0 / 16.0, 14.0 / 16.0),       # -X 外壁
+            (14.0 / 16.0, 1.0, 0.0, 1.0, 2.0 / 16.0, 14.0 / 16.0),      # +X 外壁
+            (2.0 / 16.0, 14.0 / 16.0, 0.0, 1.0 / 16.0, 2.0 / 16.0, 14.0 / 16.0),  # 底板
+        ]
+        y_min, y_max = 0.0, 1.0
     else:
         img = Image.fromarray(canvas.astype(np.uint8), "RGBA")
         return img.resize((OUT, OUT), Image.LANCZOS)
@@ -678,8 +735,12 @@ def render_partial_3d(shape, fill_top="default_wood", fill_side="default_wood"):
     for bi, (x0, x1, y0, y1, z0, z1) in enumerate(boxes):
         # t662 lever shape：盒 0（底座）贴 fill_top（圆石）、盒 1..（摆棍）贴 fill_side（木板棍）——
         #   两个 fill 各司其职；其余 shape 恒 top/side 同传（既有图标零回归）。
+        #   t1123 hopper 同门第二实例：盒 0（顶箅板）贴 fill_top（hopper_top 箅瓦）、盒 1..（颈/嘴）
+        #   贴 fill_side（hopper_side 锅体瓦）。
         box_top, box_side = top, side
         if shape == "lever" and bi > 0:
+            box_top, box_side = side, side
+        if shape == "hopper" and bi > 0:
             box_top, box_side = side, side
         _render_box_d(canvas, depth_buf, x0, x1, y0, y1, z0, z1, box_top, box_side, cy_local, scale)
 
@@ -1360,6 +1421,14 @@ def main():
     #   （机制等价 t1112/t1113 流程——满连十字盒集与放置态 PartialBlockGeometry 同源，铁灰调 §9a 原创；
     #   单任务点名重生成走模块级直调，全量 main() 不重烘无关 icon）。
     for out_name, shape, fill_top, fill_side in PARTIALS_3D_T1116:
+        img = render_partial_3d(shape, fill_top, fill_side)
+        out_path = os.path.join(SRC, "icon_{}.png".format(out_name))
+        img.save(out_path)
+        print("wrote", os.path.relpath(out_path, HERE), img.size)
+    # t1123 图标缺席清偿三件异形（漏斗 / 酿造台 / 炼药锅——机制等价 t1116 流程；新 shape 分支 +
+    #   各自 fill，盒集与世界内权威同构编码镜像，见 PARTIALS_3D_T1123 表注；melon 走上方 BLOCKS 行、
+    #   jack_o_lantern 走上方 BLOCKS_FRONT 行，五件同批落）。
+    for out_name, shape, fill_top, fill_side in PARTIALS_3D_T1123:
         img = render_partial_3d(shape, fill_top, fill_side)
         out_path = os.path.join(SRC, "icon_{}.png".format(out_name))
         img.save(out_path)
