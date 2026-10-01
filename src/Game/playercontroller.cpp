@@ -144,6 +144,9 @@ bool PlayerController::isDrinkableItem(int itemId)
 {
     // t1100 延长药水族六件：二级酿造产物 = 成品药水，饮用面与基础版同门（时长走延长常量，见
     //   finishEating 分流；NEG 面登记：finishEating 延长分流链 = NEG-2 触达面，本面不触达）。
+    // t1122 瞬间伤害药水并入本早退 switch（t1100 同门——基础链 return 原句逐字不动，drinkable
+    //   tail 源钉零修订纪律）：可饮有即时效果（饮毕 magicDamageTaken，见 finishEating 分流）；
+    //   喷溅版**不含**（isSplashPotionItem 恒互斥——饮面回归负例族同门）。
     switch (itemId) {
     case RecipeRegistry::ExtendedSpeedPotionId:
     case RecipeRegistry::ExtendedStrengthPotionId:
@@ -151,6 +154,7 @@ bool PlayerController::isDrinkableItem(int itemId)
     case RecipeRegistry::ExtendedRegenerationPotionId:
     case RecipeRegistry::ExtendedPoisonPotionId:
     case RecipeRegistry::ExtendedWeaknessPotionId:
+    case RecipeRegistry::InstantDamagePotionId:
         return true;
     default:
         break;
@@ -3077,6 +3081,11 @@ void PlayerController::finishEating()
             applyStatusEffect(PlayerState::EffectWeakness, kWeaknessDurationSec, 1);
         else if (eatenId == RecipeRegistry::InstantHealthPotionId && m_mode == Survival)
             emit healed(kInstantHealthHealHp);
+        // t1122 瞬间伤害药水饮毕分流（对偶面：瞬间治疗 :3078 同门镜像——即时效果无 timer 不挂快照，
+        //   Survival 门内联创造无敌不扣）。自伤走 magicDamageTaken 独立链（t690 毒链魔法系同门：绕甲
+        //   不磨甲 + 可致死 + 死因透传 Magic——1.0 death.magic jar 实证留痕见 recipe.h 0x296 注）。
+        else if (eatenId == RecipeRegistry::InstantDamagePotionId && m_mode == Survival)
+            emit magicDamageTaken(kInstantDamageHurtHp, PlayerState::Magic);
         // t1100 延长药水分流（同门追加；时长 = MC 1.0 extended 原值，常量族见 .h 逐链核实留痕）：
         //   效果 / 等级 / 门控与基础版完全同门，仅时长换延长值。NEG-2 触达面 = 本分流块（摘除后
         //   编译仍绿——isDrinkableItem 已含延长 id，饮用仍消耗/返瓶/发 potionDrunk，唯效果与
@@ -3868,8 +3877,11 @@ bool PlayerController::isSplashPotionItem(int itemId)
     case RecipeRegistry::SplashExtendedWeaknessPotionId:
     // t1120 转正两件（Beta 1.9 pre4 喷溅族首两件，era 核实留痕 recipe.h 0x294 注）：喷溅水瓶（零
     //   状态效果，破裂面全走既有链）+ 喷溅瞬间治疗（即时效果，结算面见 applySplashPotion 即时分支）。
+    //   t1122 并入喷溅瞬间伤害（t1120 同门段尾追加——即时效果，结算面见 applySplashPotion 即时伤害
+    //   分支；era 核实留痕 recipe.h 0x296 注）。
     case RecipeRegistry::SplashWaterBottleId:
     case RecipeRegistry::SplashInstantHealthPotionId:
+    case RecipeRegistry::SplashInstantDamagePotionId:
         return true;
     default:
         return false;
@@ -3898,7 +3910,9 @@ int PlayerController::splashEffectType(int itemId)
     case RecipeRegistry::SplashExtendedPoisonPotionId:       return PlayerState::EffectPoison;
     case RecipeRegistry::SplashExtendedWeaknessPotionId:     return PlayerState::EffectWeakness;
     // t1120 即时效果映射位（EffectInstantHeal = playerstate.h 枚举尾追加；枚举位即呈现层粒子取色键）。
+    //   t1122 同门追加即时伤害映射位（EffectInstantDamage 枚举尾追加同纪律）。
     case RecipeRegistry::SplashInstantHealthPotionId:        return PlayerState::EffectInstantHeal;
+    case RecipeRegistry::SplashInstantDamagePotionId:        return PlayerState::EffectInstantDamage;
     default: return 0; // EffectNone（非喷溅 id + 喷溅水瓶——零状态效果破裂）
     }
 }
@@ -3922,6 +3936,7 @@ float PlayerController::splashBaseSeconds(int itemId)
     case RecipeRegistry::SplashExtendedPoisonPotionId:       return kPoisonExtPotionDurationSec;   // 90s
     case RecipeRegistry::SplashExtendedWeaknessPotionId:     return kWeaknessExtDurationSec;       // 240s
     case RecipeRegistry::SplashInstantHealthPotionId:        return 0.0f;                          // t1120 即时效果无时长
+    case RecipeRegistry::SplashInstantDamagePotionId:        return 0.0f;                          // t1122 即时效果无时长（同门防御面）
     default: return 0.0f; // 非喷溅 id + 喷溅水瓶（EffectNone 载体零时长）
     }
 }
@@ -3939,9 +3954,18 @@ float PlayerController::splashBaseSeconds(int itemId)
 //   MC 1.0 instant potion 走 affectEntity 直结）——治疗基值 kInstantHealthHealHp=4（I 级 2 心，同饮用
 //   面常量），疗效按邻近系数缩放：healHp = int(d1 × 4 + 0.5)（**取整口径核实留痕**：MC 1.0 Potion::
 //   affectEntity 的 (int)(potency × (4 << level) + 0.5) 截断式 = 四舍五入半进位，中心 d1=1 → 4 /
-//   d1=0.5 → 2 / d1≈0.375 → 2 / d1≈0.125 → 0）；Survival 门内联（饮用面 :3074 同门——创造无敌不注入）；
+//   d1=0.5 → 2 / d1≈0.375 → 2 / d1≈0.125 → 1〔t1122 触面修正：原注「→ 0」算术滑记，按 audit 25
+//   F3 next-touch 先例修正〕；**t1122 jar 旁证注**：官方 1.0.0 client jar 字节码实证即时两族同式
+//   6<<level（abg 类 a(nq,nq,int,double) 路径）——治疗面交付值 4 = 现代 wiki I 级口径如实并档不翻案，
+//   伤害面 jar 与 wiki 同值 6 见下）；Survival 门内联（饮用面 :3074 同门——创造无敌不注入）；
 //   healed 信号链与饮用面同沿（PlayerState::heal 的 amount≤0 早退 = 零疗效 no-op 天然安全）。出圈静默 /
 //   无世界静默全同既有口径。
+//   [t1122 扩即时伤害分支]：EffectInstantDamage（喷溅瞬间伤害）→ **即时效果分支镜像**（治疗分支旁
+//   同门）——伤害基值 kInstantDamageHurtHp=6（I 级 3 心；官方 1.0.0 jar 字节码实证 6<<level，现代
+//   wiki 同值——伤害面 era 无歧义），dmgHp = int(d1 × 6 + 0.5) 半进位同式（中心 d1=1 → 6 /
+//   d1=0.875 → 5 / d1≈0.25 → 2 / d1 < 1/12 → 0）；magicDamageTaken 独立链发行（绕甲不磨甲 + 可致死
+//   + 死因透传 Magic——1.0 death.magic jar 实证留痕见 recipe.h 0x296 注）与饮用面同沿；Survival 门
+//   内联同门；出圈 / 无世界静默同口径。
 void PlayerController::applySplashPotion(int cx, int cy, int cz, int itemId)
 {
     if (!m_world) return;
@@ -3957,10 +3981,16 @@ void PlayerController::applySplashPotion(int cx, int cy, int cz, int itemId)
     const float d1 = 1.0f - dist / kSplashRadiusBlocks; // 邻近线性衰减（中心 1.0 → 边缘 0）
     if (eff == 0)
         return; // 喷溅水瓶（EffectNone）：零状态效果注入——破裂面由呈现层粒子 / 音路由，机制面无操作
-    if (eff == PlayerState::EffectInstantHeal) { // t1120 即时效果分支（NEG-2 摘面行本腿持有）
+    if (eff == PlayerState::EffectInstantHeal) { // t1120 即时效果分支（t1120 NEG-2 摘面行本腿持有）
         const int healHp = int(d1 * float(kInstantHealthHealHp) + 0.5f); // MC 1.0 (int)(potency×4+0.5) 半进位
         if (m_mode == Survival)
             emit healed(healHp); // 饮用面 :3074 同沿（PlayerState::heal 零值早退安全）
+        return; // 即时效果不落 applyStatusEffect 时长链（无 timer 不入快照——MC 口径）
+    }
+    if (eff == PlayerState::EffectInstantDamage) { // t1122 即时伤害分支镜像（本单 NEG-2 摘面行本腿持有）
+        const int dmgHp = int(d1 * float(kInstantDamageHurtHp) + 0.5f); // MC 1.0 (int)(potency×6+0.5) 半进位同式
+        if (m_mode == Survival)
+            emit magicDamageTaken(dmgHp, PlayerState::Magic); // 绕甲不磨甲 + 可致死 + 死因透传（饮用面同沿）
         return; // 即时效果不落 applyStatusEffect 时长链（无 timer 不入快照——MC 口径）
     }
     applyStatusEffect(eff, d1 * splashBaseSeconds(itemId) + kSplashTickFloorSec, 1);

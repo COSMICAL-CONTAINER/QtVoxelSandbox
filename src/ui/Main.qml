@@ -3622,6 +3622,15 @@ Window {
                 playerState.takeDamage(hp, PlayerState.Generic)
             player.wakeUp()
         }
+        // t1122 魔法伤路由（伤害药水饮毕 / 喷溅自伤）：绕护甲不磨甲（t690 毒链魔法系同门——不走
+        //   onFallDamageTaken 的 armor 减伤 / damageArmor 磨损链），**可致死**（无毒链「剩 1 血不致死」
+        //   下限——1.0 口径魔法伤致死），死因透传（致死 deathCause = Magic → deathCauseText「被魔法
+        //   夺去生命」；1.0 death.magic jar 实证留痕见 recipe.h 0x296 注）。同 fallDamageTaken 模式：
+        //   Game 层发语义事件，呈现层只消费（Survival 门在 Game 层发行处内联，创造无敌不发行）。
+        function onMagicDamageTaken(hp, cause) {
+            playerState.takeDamage(hp, cause)
+            player.wakeUp()
+        }
         // t238 饥饿回血 → PlayerState.heal（饱腹态每 4s 回 1HP；同 fallDamageTaken→takeDamage 反向配对）。
         function onHealed(hp) { playerState.heal(hp) }
         // t202 气泡值更新 → PlayerState.air（Physics 层算时序、Game 层持显值、呈现层路由；同 fallDamageTaken→

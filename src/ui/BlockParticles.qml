@@ -83,6 +83,7 @@ Node {
         case 7: return "#f080a8" // Regeneration 粉
         case 8: return "#9a9aae" // Weakness 灰
         case 9: return "#e8505a" // t1120 InstantHeal 疗红（喷溅瞬间治疗碎裂取色；纯映射枚举位）
+        case 10: return "#c04838" // t1122 InstantDamage 伤红（喷溅瞬间伤害碎裂取色；纯映射枚举位同门）
         default: return "#ffffff"
         }
     }
