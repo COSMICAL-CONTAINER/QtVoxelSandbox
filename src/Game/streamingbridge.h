@@ -86,6 +86,17 @@ public:
     // ── C++ 面（零 QML 暴露；矩阵腿 / 诊断消费）────────────────────────────────────────
     // 会话存活读面（fixed/未进入恒 false = D2 零活动墙的桥侧投影）。
     bool sessionActive() const { return m_session != nullptr; }
+    // t1124 诊断读面（GameSession 观测面同门转发；矩阵稳态窗口前置收敛用——生产零调用）：
+    //   流式管线全局静止 = 三队列全空（数据面自持缓冲 / 驱动器 pending / 驱动器 outcome）。
+    //   t1124 预算节流后「子窗收敛」不再蕴含「受理 job 全落位」（外环 adopt 滞后收敛锚数拍
+    //   ——见 section36 r2035c lawful 修订注），稳态断言窗前置本判据。非 Q_INVOKABLE = 零
+    //   QML 暴露（r2028c 暴露清单零触碰）；无会话恒 true（fixed 零活动墙投影）。
+    bool streamingQueuesSettled() const
+    {
+        return !m_session || (m_session->streamWorker()->resultDataCount() == 0
+                                 && m_session->streamDriver()->pendingJobCount() == 0
+                                 && m_session->streamDriver()->outcomeCount() == 0);
+    }
     // 泵拍执行体（生产 = WorldClock::ticked 槽体；矩阵腿直调同体——与生产拍同一函数，无第二份）。
     void pumpTick();
     // 拆会话（进入链换世界 / fixed 清退路径内部使用；矩阵腿间复位缝）。线程件 join 有界（会话
