@@ -606,7 +606,12 @@ void MatrixRun::section76_roster_sign_t1113()
                 diag += QStringLiteral("[pcH %1]").arg(missPcH.join(QLatin1Char(',')));
             const QStringList missPc = pinSet(srcDir + QStringLiteral("/Game/playercontroller.cpp"), {
                 SrcPin("place state branch head", "    } else if (BlockRegistry::isSign(quint8(m_selectedBlock))) {", 1),
-                SrcPin("wall facing row", "placeState = quint8(m_hitNx > 0 ? 0 : m_hitNx < 0 ? 1 : m_hitNz > 0 ? 2 : 3);", 2), // 漏斗 + 牌子双分支同句式
+                // [t1123 lawful 修订] 计数 2→1（沿革：原句式为牌子 + 漏斗双分支同句）。用户实测翻案
+                //   「漏斗贴方块左右放置排料口方向反」——MC 真值排料口指向被点方块（t1080 原裁定
+                //   沿命中面外法线为外向误读），playercontroller.cpp 漏斗分支写入行改取反法线映射
+                //   （本行不再匹配该句式，归 t1123/r2093a 专权钉）；牌子挂墙朝向行原样幸存 → 本钉
+                //   仅剩牌子分支一处。
+                SrcPin("wall facing row", "placeState = quint8(m_hitNx > 0 ? 0 : m_hitNx < 0 ? 1 : m_hitNz > 0 ? 2 : 3);", 1),
                 SrcPin("pre check head", "if (BlockRegistry::isSign(quint8(m_selectedBlock))) {", 1),
                 SrcPin("write branch head", "} else if (BlockRegistry::isSign(idByte)) {", 1),
                 SrcPin("wall form pick row", "quint8(BlockRegistry::WallSign)", 1),
