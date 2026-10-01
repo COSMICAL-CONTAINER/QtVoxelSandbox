@@ -242,6 +242,16 @@ void MatrixRun::runAll()
                               //   r2092b 饮用自伤柱 + r2092c 喷溅柱 + r2092d 结构钉族——NEG 双摘
                               //   面豁免不钉。fresh 48×48×96 s82 小世界族 + drop rig（r2090b 同门），
                               //   rig 世界零接触，接 section84）
+    section86_p0_batch_t1123(); // t1123 用户实测 P0 三件批探针段（置尾先例沿用：r2093a 漏斗贴面放置
+                              //   朝向柱[真链 pc rig 六放置四水平+顶/底面点 → id/state/hopperOutDelta
+                              //   指向三断言——嘴指向被点方块 = t1080 外向裁定用户实测翻案面 + NEG-1
+                              //   摘两写行本腿钉]，r2093b 创造背包图标差集清偿柱[五 PNG 在盘非空白 +
+                              //   目录扫面下界抬升 + 运行期全调色板 147/147 非空扫面 + 五 case 行/CMake
+                              //   资源行钉 + NEG-2 摘漏斗 case 行本腿钉]，r2093c 结构钉族 + 裁定锚柱
+                              //   [生成器三分支/表/循环/melon 行/jack 行/fill 特判 + 解码权威幸存 +
+                              //   翻案与 lawful 修订锚注 + CMake 段行 + 件一调研三站点锚柱 + spec/QML
+                              //   双负面门——NEG 双摘面豁免不钉]。行为腿真链 pc rig fresh 48×48×96
+                              //   s82，rig 世界零接触，接 section85）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";
