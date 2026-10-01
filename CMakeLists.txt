@@ -1213,6 +1213,14 @@ add_executable(redstone_matrix_test
     #   行/下猪链两行/骑乘互斥守卫双行 r2082d 源钉幸存复核）+ CMake 段行]。QML 面不进 C++ 构建
     #   = NEG 双摘编译仍绿；playercontroller.cpp 零改动 = 纯呈现层。rig 世界零接触）。
     tools/matrix/section82_sit_pose_t1119.cpp
+    # t1120 酿造/炼药锅残面批探针段（4 腿 r2090a-d，filter 词 r2090；矩阵 893→897。酿造转换柱
+    #   [转正两对经 brewResult + 门行序 + 真驱 + 饮面回归 + 物品三面 + NEG-1 摘面行本腿钉] + 投掷
+    #   + 即时疗效柱[真 rig 创造掷喷溅水瓶恰一次碎裂零效果 + 生存耗 1 + 直落瞬间治疗满档 healed 4
+    #   + 直调缩放档 2/1/0 + 创造门 + 零效果快照 + NEG-2 摘面行本腿钉] + 炼药锅裁定锚柱[空桶右键
+    #   满锅无效应 + 雨态 tick 双态水位恒定 + 瓶取/桶灌复绿 + 裁定注锚 + 降水权威三行源钉——件三/
+    #   件四零代码收口] + 结构钉族[段位/枚举尾/映射行/呈现三面/CMake/负面禁出钉——NEG 双摘面豁免
+    #   不钉]。行为腿真链 pc rig fresh 48×48×96 s82，rig 世界零接触）。
+    tools/matrix/section83_potion_cauldron_t1120.cpp
     src/Game/signboardfont.cpp
     src/Game/signboardfont.h
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
