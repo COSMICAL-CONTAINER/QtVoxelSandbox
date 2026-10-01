@@ -14,16 +14,16 @@
 ```yaml
 project: QtMinecraft
 state: IN_PROGRESS
-current_task: **t1123 = P0 用户实测反馈三件批（2026-10-01 立项开工——用户全权授权后自安排；①走路卡顿调研复现定界先行[t1007 式 rig：跨块行走+帧时间曲线+streams/mesh 计数采样→定位主线程阻塞源，机械性修复即修、架构性则数据报告+候选登记]/②创造背包图标缺席系统扫[创造清单全条目×图标在盘差集+生成器/qrc 缺口全量清偿]/③漏斗放置朝向反修复[侧面命中→低 2 位编码核实 MC 真值后修+四向+朝下腿钉]；filter 词 r2093/新段 section86 置尾）**：串行 voxel-dev 在飞，主控待验收。**用户 2026-10-01 全权授权升级：进度管理/任务安排/bug 插队全权主控裁量，无指令时自主沿 MC 对标路线开发**。
+current_task: **t1124 = 流式 adopt 节流（2026-10-02 立项开工——t1123 件①调研产物修复单，用户卡顿 P0 正主；裁定面=review0916 #7「两面同拍全排干」契约修订为主控全权裁量项+t1061 livelock 收敛不变量为硬门[任何 pacing 不得引入新的不收敛]；交付面=pumpStreamingTick 数据面 while(takeResultData) 无界排干改时间预算/批上限节流+三调研站点锚钉[r2093c]为改造锚+帧曲线前后对照数据入报告；**禁绝对时间钉腿**[机器相关]，腿钉结构面/计数面；filter 词 r2094/新段 section87 置尾；本单闭环=治理 5/5→审计 #26 触发）**：串行 voxel-dev 在飞，主控待验收。**用户 2026-10-01 全权授权升级：进度管理/任务安排/bug 插队全权主控裁量，无指令时自主沿 MC 对标路线开发**。
 current_task_status: IN_PROGRESS
-last_completed_task: t1122 瞬间伤害族（2026-10-01 闭环；矩阵 901→905——era=官方 1.0.0 client jar+javap 取证[wiki 双端不可达通路变如实留痕]；0x296/0x297 段尾追加+DeathCause Magic 尾追加+腐化行门序不扰动+applySplashPotion 即时伤害分支 6 值半进位；**jar 旁证发现=1.0 治疗面亦 6<<level**[t1120 已闭面不翻案如实并档，勘正候选入池]；t1120 注释滑记触面修正履行；报告「三同一」少报如实入档[实四方恒等]；详录 = dev-plan t1122 关单条目）
-last_completed_task_prev: t1121 南瓜戴盔·夜行者凝视面（2026-10-01 闭环，矩阵 897→901；详录 = dev-plan t1121 关单条目）
-last_completed_task_commits: fix(t1122)（d2c8fbd0：recipe/playerstate.{h,cpp}/playercontroller/brewingstore/hotbar + Main.qml/MaterialIcon/BlockParticles 十一文件 +121/-6）+ test(t1122)（d24a13e8：section85 新段 r2092a-d + section78/83 枚举钉 lawful 沿革 + helpers/CMake 注册）
-last_verified_commit: test(t1122)（矩阵 **905 PASS / 0 FAIL ×2**：matrix_t1122_{pos,final}.log；**raw 规范配方 md5 四方恒等 6378827ee01c7b9fa785952160eee14e**[pos/final/orch+双 restore，neg2restore 亦恒等=报告少报勘正]；NEG-1 恰红 {r2092a} / NEG-2 恰红 {r2092c}；主控独立脱离式复跑 905/0 同 md5 = 三方恒等 matrix_orch_t1122_verify.log）
+last_completed_task: t1123 P0 用户实测三件批（2026-10-02 闭环；矩阵 905→908——件③漏斗朝向 t1080 四向同错翻案修复[MC 真值=排料口指向被点方块，写入向单点取反解码零动]/件②图标缺席系统扫五件全清[Hopper/BrewingStand/Melon/JackOLantern/Cauldron，图标文件整缺形态]/件①卡顿调研裁定架构性不硬修[阻塞源=pumpStreamingTick 无界排干，入场 61-adopt 4147ms/跨界 27-adopt 2323ms 实测数据，修复单 t1124 立项]；NEG-2 红 r2080b flake 协议复跑绿如实入档；红轮 raw md5 账实不符勘正[账面取自重跑前轮次，关单以当盘实算为准]；详录 = dev-plan t1123 关单条目）
+last_completed_task_prev: t1122 瞬间伤害族（2026-10-01 闭环，矩阵 901→905；详录 = dev-plan t1122 关单条目）
+last_completed_task_commits: fix(t1123)（e6e7114b：playercontroller 漏斗写入行/hotbar 五 case/build_cube_icons.py 三分支/五 PNG/CMake 五资源行）+ test(t1123)（ded5a9ac：section86 新段 r2093a-c+section76 lawful 钉 2→1+helpers/CMake 注册+件①数据报告）
+last_verified_commit: test(t1123)（矩阵 **908 PASS / 0 FAIL ×2**：matrix_t1123_{pos,final}.log；**raw 规范配方 md5 四方恒等 9a012b595b469fde8bbc3748d5aad3ea**[pos/final/orch+双 restore]；NEG-1 恰红 {r2093a} / NEG-2 归因 {r2093b}[r2080b flake 协议处置]；主控独立脱离式复跑 908/0 同 md5 = 三方恒等 matrix_orch_t1123_verify.log）
 last_governance_review: 2026-09-30（audit #25 GREEN——窗口 d470123..d30aa405 共 15 提交/t1115-t1119 五闭环；**#24 四项清偿全部核实履行**[raw 配方 md5 五单 23 件复算与权威值逐字命中=F1 幻影值零复发+主控亲算下发流程修补见效；33 件整文件 md5 零重值+cmp 四对+mtime 物理形态=F3 restore 禁复制履行；NEG 9/9 全量形态申报与盘面一致=F2 履行；落档名 -b 后缀=F4 履行]；t1117 提交重写四方对表全中[reflog 链/树哈希逐位等/链位连续/两窗同法核实 t1116]；r2089c 机制面零触碰实证+r2082d 钉族实文幸存；三发现 LOW/INFO：**F1[LOW] t1118/t1119 tail20 head 9 行窗被 worldgen 新增行挤出 root objects 实文行**[主控独立复核证实+清偿=采集纪律 head 9→14 入档+两关单注勘正] + F2/INFO 简报窗口构成误计第三窗[清偿=简报窗口构成一律 git log 现抄] + F3/INFO 字模计数散文漂移[勘正随下次触该文件]；详见 governance-audit-2026-09-30-b.md）
-governance_review_due: false（审计 #25 GREEN 落档清零；新窗计数 t1122=3/5；下一审计触发 = 再积 5 闭环或 P0 插队后累积）
-completed_tasks_since_governance_review: 3（t1120/t1121/t1122，2026-10-01）
-next_task: t1123 P0 三件批在飞（验收后关单）→ 后续自主队列（用户全权授权）= 瞬间治疗 1.0 原值勘正 6[小件]/南瓜灯佩戴面[era 未核]/亡灵反转面+瞬间伤害 II 级[同域候选]/§14-④ 再盘点；长线停放待用户：下界/蘑菇岛维度级/§30/§31/P5 实机清单/push 积压以 git rev-list 现核为准不预写追赶
+governance_review_due: false（审计 #25 GREEN 落档清零；新窗计数 t1123=4/5；**t1124 闭环即 5/5→审计 #26 触发**）
+completed_tasks_since_governance_review: 4（t1120/t1121/t1122/t1123，2026-10-01/02）
+next_task: t1124 流式 adopt 节流在飞（验收后关单→审计 #26）→ 后续自主队列（用户全权授权）= 瞬间治疗 1.0 原值勘正 6[小件]/南瓜灯佩戴面[era 未核]/亡灵反转+II 级管线[酿造域]/单 adopt 成本削减[调研候选]/§14-④ 再盘点；长线停放待用户：下界/蘑菇岛维度级/§30/§31/P5 实机清单/push 积压以 git rev-list 现核为准不预写追赶
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
@@ -33,7 +33,7 @@ needs_human: false
 
 ## Workspace Guard
 
-- HEAD = t1122 瞬间伤害族代码终态（fix(t1122) d2c8fbd0 + test(t1122) d24a13e8 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 905 腿满绿（85 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（t1097-t1122 二十六单全过）。**git 提交禁任何 AI 署名尾注**（审计 #21 F1 入档纪律——派工简报恒带此句）。**审计窗口锚哈希须 git 现抄 + 规程参照文件名须 ls docs/ 现核**（审计 #22 F1/#23 F1 两教训）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（横幅+root objects 实文+组合件带来源头注，主控核对）。**NEG 四件终名日志必须落盘**（t1099 件教训；单/双 NEG 单位如实申报）。**NEG 变异选址 = 摘调用点非摘守卫体 + position() 是眼位[feet+1.62]**（t1051/t1112 两教训）。**initSchema 加表 = 纯追加禁同位替换**（t1113 首轮 57 红教训）。**md5/证据值必须由当轮在盘日志现算贴入，禁引 shell 历史与中间轮值**（审计 #24 F1 HIGH 教训——主控验收加「复算值 vs 账面值逐字对表」步）。**NEG/restore 日志对齐更名必须 mv 保留原字节、禁重跑覆盖；关单申报形态[全量/filter]须与盘面一致**（#24 F2）。**restore 日志必须实跑产出禁复制；主控验收加 cmp 字节互异抽核**（#24 F3）。**审计落档名以实际落档日为准，预写处随后勘正**（#24 F4）。**fix 提交消息中文词→Gate 拦 amend 后须走 soft-reset 双段重提交通路[t1116 先例]，禁接受盘面**（t1117 教训——主控已重写处置一次）。**NEG 摘面事故截断→git checkout 只可作事故复归，终还原仍须双手工 Edit 规范通路**（t1119 教训，本单已如实走通）。**tail20 采集 head 行数 9→14（或 head+grep root objects 兜底行双段式）**（审计 #25 F1——worldgen 行数漂移再挤出实文行）。
+- HEAD = t1123 P0 三件批代码终态（fix(t1123) e6e7114b + test(t1123) ded5a9ac 已提交，本 docs 提交收口），工作区干净；`.codex/` 豁免不删不提交。矩阵 908 腿满绿（86 段 TU；观察名单仅余 t897——r2040c 已由 t1082 事件驱动加固转绿）。**每闭环控制块全字段更新**（t1097-t1123 二十七单全过）。**git 提交禁任何 AI 署名尾注**（审计 #21 F1 入档纪律——派工简报恒带此句）。**审计窗口锚哈希须 git 现抄 + 规程参照文件名须 ls docs/ 现核**（审计 #22 F1/#23 F1 两教训）。**禁并发构建/并发跑矩阵**（t813 教训；验证轮必须独占）。**矩阵/检查一律绝对路径**（t1075/t1081 两教训）。**冒烟证据每闭环回填 tail20**（横幅+root objects 实文+组合件带来源头注，主控核对）。**NEG 四件终名日志必须落盘**（t1099 件教训；单/双 NEG 单位如实申报）。**NEG 变异选址 = 摘调用点非摘守卫体 + position() 是眼位[feet+1.62]**（t1051/t1112 两教训）。**initSchema 加表 = 纯追加禁同位替换**（t1113 首轮 57 红教训）。**md5/证据值必须由当轮在盘日志现算贴入，禁引 shell 历史与中间轮值**（审计 #24 F1 HIGH 教训——主控验收加「复算值 vs 账面值逐字对表」步）。**NEG/restore 日志对齐更名必须 mv 保留原字节、禁重跑覆盖；关单申报形态[全量/filter]须与盘面一致**（#24 F2）。**restore 日志必须实跑产出禁复制；主控验收加 cmp 字节互异抽核**（#24 F3）。**审计落档名以实际落档日为准，预写处随后勘正**（#24 F4）。**fix 提交消息中文词→Gate 拦 amend 后须走 soft-reset 双段重提交通路[t1116 先例]，禁接受盘面**（t1117 教训——主控已重写处置一次）。**NEG 摘面事故截断→git checkout 只可作事故复归，终还原仍须双手工 Edit 规范通路**（t1119 教训，本单已如实走通）。**tail20 采集 head 行数 9→14（或 head+grep root objects 兜底行双段式）**（审计 #25 F1——worldgen 行数漂移再挤出实文行）。
 - 纪律①-⑨全在案；**大 TU 编译一律 -j 1**（09-13 蓝屏教训；分段后单段增量 -j 4 实测安全）。**矩阵测试为 tools/matrix/ 分层结构**：改探针只重编对应段 TU（秒级）+ `--filter <substring>` 只跑本任务腿；新腿落对应段文件，新段置尾 runAll 末执行、须 ≤500KB；section11 起「自建 fresh 小世界」先例（48×48×96 seed 82 + 天气双钉 setWeatherState(0)+setWeatherRemainingSec(3600)）。
 - **R20.06 起值类型纪律**：src/Core/ 新值类型一律 result.h QObjectFree 编译期钉 + 头内 static_assert；命令/事件队列满载拒绝与快照队列覆盖最老是两域容量策略分化，勿「统一」。
 - **R20.07 起编排壳纪律**：GameSession 只做编排（命令 → 整 tick 边界 → World::setBlock 权威），禁复制游戏逻辑；**QML 现行玩法路径零变化是 R20 主线不变量**（Main.qml 含 "GameSession" 即违零迁移阴性钉 r2007b）。
@@ -50,6 +50,7 @@ needs_human: false
 
 ## Recovery Point
 
+- 2026-10-02（一）：t1123 P0 三件批闭环（矩阵 905→908，raw md5 9a012b59 四方恒等+主控复跑三方恒等；e6e7114b/ded5a9ac；漏斗朝向 t1080 翻案+图标五件全清+卡顿调研架构性裁定[数据入档，修复单 t1124 在飞]；红轮 md5 账实勘正如实入账+r2080b flake 协议处置。恢复点 = 本条；在飞 = t1124 流式 adopt 节流（r2094）[其闭环=治理 5/5→审计 #26]。
 - 2026-10-01（三）：t1122 瞬间伤害族闭环（矩阵 901→905，raw md5 6378827e 四方恒等+主控复跑三方恒等；d2c8fbd0/d24a13e8；era=1.0.0 jar+javap 取证[wiki 不可达通路变留痕]；jar 旁证治疗 6<<level 如实并档→勘正候选入池。恢复点 = 本条；在飞 = t1123 P0 三件批（r2093）[用户全权授权升级同日留痕]。
 - 2026-10-01（二）：t1121 南瓜戴盔·夜行者凝视面闭环（矩阵 897→901，raw md5 48d27642 四方恒等+主控复跑三方恒等；caad396d/97511744；四门 era 全确证交付[含 1.0.0 client jar 物理实证 pumpkinblur]；armorSlotAccepts 单一权威+瞪视内联守卫+§9a 瓜内视野叠层；lawful 修订零。恢复点 = 本条；在飞 = t1122 瞬间伤害族（r2092）。
 - 2026-10-01（一）：t1120 酿造/炼药锅残面批闭环（矩阵 893→897，raw md5 19036698 四方恒等+主控复跑三方恒等；7d8b463b/2a9d8910[消息杂质句重写后树哈希 0c8aebd3 核等]；件一喷溅水瓶/件二喷溅瞬间治疗 era 确证交付+件三空桶舀锅/件四雨天集水零代码裁定单收口[t1105 再验证成立+era 精度补齐]；head14 新纪律首单履行；过程注三笔如实[含主控重写处置]。恢复点 = 本条；在飞 = t1121 南瓜戴盔·夜行者凝视面（r2091）。
