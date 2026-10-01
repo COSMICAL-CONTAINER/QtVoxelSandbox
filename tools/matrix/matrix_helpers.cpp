@@ -252,6 +252,13 @@ void MatrixRun::runAll()
                               //   翻案与 lawful 修订锚注 + CMake 段行 + 件一调研三站点锚柱 + spec/QML
                               //   双负面门——NEG 双摘面豁免不钉]。行为腿真链 pc rig fresh 48×48×96
                               //   s82，rig 世界零接触，接 section85）
+    section87_stream_pacing_t1124(); // t1124 流式 adopt 节流探针段（置尾先例沿用：r2094a 节流
+                              //   机制柱[测试缝注入预算 0 → 单拍恰 1 adopt 确定性计数上界 + 余量
+                              //   下拍续排 + 队列归零收敛面 + NEG-1 摘面行本腿钉]，r2094b 稳态吞吐
+                              //   收敛柱[生产默认预算三站走查 + 相对恒等锚 + NEG-2 摘预算计时器启
+                              //   动行本腿钉]，r2094c 结构钉族 + r2094d 幸存复核/沿革锚柱——NEG 双
+                              //   摘面豁免不钉。自建 fresh sparse 小世界族 + 真线程 worker，rig
+                              //   世界零接触，接 section86）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";

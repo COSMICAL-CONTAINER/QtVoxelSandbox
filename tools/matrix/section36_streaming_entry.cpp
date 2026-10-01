@@ -29,6 +29,10 @@
 //   「fixed 世界零变化墙」→ r2035a（真链 fixed 存档进入分流恒 false + 会话零构造 + 驻留沿
 //     零发射 + 会话通电门/泵零动作墙/进入 fixed 分流三结构钉——修复不得改 fixed 世界任何
 //     行为的承重面）；
+//   [t1124 lawful 修订] r2035c 稳态窗前置全局静止收敛（assertion 本体零改动）：预算节流后
+//     「子窗收敛」不再蕴含「受理 job 全落位」（外环 adopt 滞后收敛锚数拍——数据面跨拍续排
+//     语义，r2094 机制柱承载），稳态观察窗前改泵到 streamingQueuesSettled()（t1124 桥侧
+//     诊断读面）判全静止；fixed/未进入恒 true（零活动墙投影，r2035a 零误伤）。
 //   「入口收敛承重墙」→ r2035b（真 QQmlEngine × 真桥 × 真 PlayerController 位置沿：真链进入
 //     生产尺寸核心域（160×160）+ 静止玩家 → ①**物化突发批口**：enterWorld 全程驻留沿恰
 //     1 条（突发收敛到稳态观察点）；②**沿时刻观测合流**：每条沿时刻采样的驻留集相对上一
@@ -638,6 +642,20 @@ Item {
                         .arg(heightOk);
 
         // 收敛后驻留集稳：再泵 5 拍 → 驻留数恒定（错位场景不振荡的稳态面）。
+        //   [t1124 lawful 修订] 前置全局静止收敛窗：同拍全排干时代「子窗（r3）收敛」蕴含
+        //   「受理 job 全落位」（数据面同拍完成即收编，零滞后）；t1124 预算节流后外环 chunk
+        //   的 adopt 滞后收敛锚数拍（r2094 机制柱承载的跨拍续排语义）——稳定断言的前施工
+        //   改为「先泵到流式管线全局静止（三队列空，streamingQueuesSettled 读面），再取稳态
+        //   观察窗」。断言本体零改动（驻留数恒定仍精确断言）；deadline 有界防挂死。
+        bool settled = bridge.streamingQueuesSettled();
+        for (int i = 0; i < 1500 && !settled; ++i) {
+            bridge.pumpTick();
+            QThread::msleep(2);
+            settled = bridge.streamingQueuesSettled();
+        }
+        ok = ok && settled;
+        if (!settled)
+            diag += QStringLiteral("[settle timeout] ");
         const int stableBefore = w.residentChunkCount();
         for (int i = 0; i < 5; ++i) {
             bridge.pumpTick();

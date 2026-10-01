@@ -1263,6 +1263,15 @@ add_executable(redstone_matrix_test
     #   计时断言禁绝对时间钉故腿零计时面）+ spec/QML 双负面门——NEG 双摘面豁免不钉]。行为腿真链 pc
     #   rig fresh 48×48×96 s82，rig 世界零接触）。
     tools/matrix/section86_p0_batch_t1123.cpp
+    # t1124 流式 adopt 节流探针段（置尾先例沿用：runAll 末执行，filter 词 r2094；4 腿 r2094a-d =
+    #   节流机制柱[测试缝注入预算 0 → 单拍恰 1 adopt 确定性计数上界 + 余量下拍续排 + 队列归零
+    #   收敛面 + 结果面同拍全排干修订契约面 + NEG-1 摘面行本腿钉] / 稳态吞吐收敛柱[生产默认
+    #   预算三站走查：队列归零 + 提交-adopt 相对恒等锚 + NEG-2 摘预算计时器启动行本腿钉] /
+    #   结构钉族[预算常量/成员/缝/计时器声明/数据面 while 幸存/契约修订注锚/QML+桥双负面门
+    #   ——NEG 双摘面豁免不钉] / r2093c 幸存复核 + 沿革锚柱[四调研站点逐字幸存 + 改造落点沿革
+    #   注 + 相邻族结构钉复钉]。行为腿自建 fresh sparse 小世界族 + 真线程 worker，rig 世界零
+    #   接触）。
+    tools/matrix/section87_stream_pacing_t1124.cpp
     src/Game/signboardfont.cpp
     src/Game/signboardfont.h
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
