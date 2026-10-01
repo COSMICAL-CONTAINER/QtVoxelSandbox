@@ -23,7 +23,7 @@ last_verified_commit: test(t1120)（矩阵 **897 PASS / 0 FAIL ×2**：matrix_t1
 last_governance_review: 2026-09-30（audit #25 GREEN——窗口 d470123..d30aa405 共 15 提交/t1115-t1119 五闭环；**#24 四项清偿全部核实履行**[raw 配方 md5 五单 23 件复算与权威值逐字命中=F1 幻影值零复发+主控亲算下发流程修补见效；33 件整文件 md5 零重值+cmp 四对+mtime 物理形态=F3 restore 禁复制履行；NEG 9/9 全量形态申报与盘面一致=F2 履行；落档名 -b 后缀=F4 履行]；t1117 提交重写四方对表全中[reflog 链/树哈希逐位等/链位连续/两窗同法核实 t1116]；r2089c 机制面零触碰实证+r2082d 钉族实文幸存；三发现 LOW/INFO：**F1[LOW] t1118/t1119 tail20 head 9 行窗被 worldgen 新增行挤出 root objects 实文行**[主控独立复核证实+清偿=采集纪律 head 9→14 入档+两关单注勘正] + F2/INFO 简报窗口构成误计第三窗[清偿=简报窗口构成一律 git log 现抄] + F3/INFO 字模计数散文漂移[勘正随下次触该文件]；详见 governance-audit-2026-09-30-b.md）
 governance_review_due: false（审计 #25 GREEN 落档清零；新窗计数 t1120=1/5；下一审计触发 = 再积 5 闭环或 P0 插队后累积）
 completed_tasks_since_governance_review: 1（t1120，2026-10-01）
-next_task: t1121 南瓜戴盔在飞（验收后关单）→ 后续候选 = 瞬间伤害族（饮用+喷溅对偶，工程缺席 t1120 申报）/喷溅水瓶灭火子面（era 不确证留痕）；长线停放待用户：下界/蘑菇岛维度级/§30/§31/P5 实机清单/push 积压 35 笔待推（32+本日 t1120 两笔+本 docs 提交）
+next_task: t1121 南瓜戴盔在飞（验收后关单）→ 后续候选 = 瞬间伤害族（饮用+喷溅对偶，工程缺席 t1120 申报）/喷溅水瓶灭火子面（era 不确证留痕）；长线停放待用户：下界/蘑菇岛维度级/§30/§31/P5 实机清单/push 积压 36 笔待推（git rev-list 现核实数 2026-10-01；35 预写差 1 勘正注见 dev-plan t1120 条目尾）
 next_task_source: R21.1 P0 批次（用户真机首测五条反馈，docs/auto-backlog.md P0 队列）
 active_write_lease: main_orchestrator_serial_queue
 single_writer_policy: one project, one workspace, one writing agent, one serial task
