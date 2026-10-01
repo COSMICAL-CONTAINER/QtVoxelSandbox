@@ -5993,13 +5993,19 @@ void PlayerController::placeBlock()
         //   scanDispenserTraps 触发时据 state 解出弹出口外向（同发射器 t608 方向语义，单一方向源）。
         placeState = quint8((horizontalFacing() & 3) ^ 1);
     } else if (m_selectedBlock == BlockRegistry::Hopper) {
-        // t1080 漏斗排料口朝向：机制等价 MC「漏斗排料口指向所贴面外向」——点顶 / 底面放置 → 排料口朝下
-        //   （bit2 HopperFacingDownFlag，低 2 位 inert）；点侧面放置 → 排料口沿命中面外法线（低 2 位 =
-        //   chestFrontFace 同源编码，由命中法线分量直译）。点底面（天花板下放置）MC 也朝下 → 同 bit2。
+        // t1080 漏斗排料口朝向：点顶 / 底面放置 → 排料口朝下（bit2 HopperFacingDownFlag，低 2 位
+        //   inert）；点侧面放置 → 排料口指向**被点方块**（低 2 位 = chestFrontFace 同源编码，由命中
+        //   法线分量**取反**直译）。
+        //   [t1123 用户实测翻案] t1080 原裁定「排料口沿命中面外法线（指向所贴面外向）」与 MC 真值相反
+        //   ——MC 漏斗贴面放置的输出嘴指向**被贴的方块**（正是「对着箱子 / 熔炉侧壁放漏斗即接入该容器」
+        //   的经典用法；wiki Hopper/Placement：output faces the block it was placed against；嘴恒不朝上，
+        //   点底面（天花板下放置）MC 也朝下 → 同 bit2）。用户实测「漏斗贴方块左右放置排料口方向反」
+        //   即此四向同错（外向 ↔ 内向整体取反），本单四向一并翻案；解码端 hopperOutDelta / mesher 嘴
+        //   盒 / 探针三方同源零改动（只翻写入向，消费面语义不变）。
         //   输出目标 / mesher 前贴图 / 探针三方同源 BlockRegistry::hopperOutDelta 解码（单一权威）。
         if (m_hitNy == 0) {
-            // 侧面：法线指向 ±X/±Z → 低 2 位编码（0=+X 1=-X 2=+Z 3=-Z）。
-            placeState = quint8(m_hitNx > 0 ? 0 : m_hitNx < 0 ? 1 : m_hitNz > 0 ? 2 : 3);
+            // 侧面：取反法线分量（指向被点方块）→ 低 2 位编码（0=+X 1=-X 2=+Z 3=-Z）。
+            placeState = quint8(m_hitNx > 0 ? 1 : m_hitNx < 0 ? 0 : m_hitNz > 0 ? 3 : 2);
         } else {
             placeState = BlockRegistry::HopperFacingDownFlag; // 顶 / 底面 → 排料口朝下
         }

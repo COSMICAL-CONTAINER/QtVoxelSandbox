@@ -738,6 +738,11 @@ qt_add_resources(voxelsandbox "voxel_textures"
         textures/icon_cake.png                   # t1112 蛋糕立方体图标（build_cube_icons.py PARTIALS_3D_T1112；3D 矮盒，霜面+侧带）
         textures/icon_sign.png                   # t1113 牌子立方体图标（build_cube_icons.py PARTIALS_3D_T1113；3D 立牌，立柱+板面——牌子/挂墙牌双 id 共用）
         textures/icon_iron_bars.png              # t1116 铁栏杆立方体图标（build_cube_icons.py PARTIALS_3D_T1116；3D 十字柱板，铁灰调 §9a 原创）
+        textures/icon_hopper.png                 # t1123 漏斗立方体图标（build_cube_icons.py PARTIALS_3D_T1123；3D 顶箅+颈+底嘴朝下态，hopperShapeBoxes 镜像）
+        textures/icon_brewing_stand.png          # t1123 酿造台立方体图标（build_cube_icons.py PARTIALS_3D_T1123；3D 底座+中柱，brewingStandShapeBoxes 镜像）
+        textures/icon_melon.png                  # t1123 西瓜立方体图标（build_cube_icons.py BLOCKS 行；顶=网纹 / 侧=波浪棱带）
+        textures/icon_jack_o_lantern.png         # t1123 南瓜灯立方体图标（build_cube_icons.py BLOCKS_FRONT 行；正面为主点亮刻脸投影）
+        textures/icon_cauldron.png               # t1123 炼药锅立方体图标（build_cube_icons.py PARTIALS_3D_T1123；3D 外壁环+底板空锅态，PartialBlockGeometry 镜像）
         textures/icon_lever.png                  # t490 杠杆立方体图标（build_cube_icons.py；pressure_plate shape+lever 贴图；手动点火机关）
         textures/icon_wood_button.png            # t490 木按钮立方体图标（build_cube_icons.py；pressure_plate shape+wood_button 贴图）
         textures/icon_stone_button.png           # t490 石按钮立方体图标（build_cube_icons.py；pressure_plate shape+stone_button 贴图）
