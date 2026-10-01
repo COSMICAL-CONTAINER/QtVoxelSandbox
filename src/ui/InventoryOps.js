@@ -795,11 +795,12 @@ function swapHoveredWithHotbar(root, hotbarIdx) {
     // review rv2-A4：护甲组守卫（armor hover 自 c63f46e/t590 写 hoveredKey → 本函数可达装备槽）。双向盲写对
     //   护甲是「销毁 + 复制」：writeSlot("armor") 经 armorSetStack 对非护甲 / 部位不符静默 no-op（VM 守，见
     //   hotbar.cpp armorSetStack），第二写 writeSlot("hotbar") 却照常覆盖 → 手持的 hotbar 物品被装备槽护甲
-    //   顶掉（销毁）+ 护甲复制一份进 hotbar。守卫（同 armorSetStack 部位匹配规则：slot 索引 == piece(id)）：
-    //   来件（hotbar 槽非空时）须为护甲且部位 == 本装备槽下标 → 放行（空槽装备 / 同部位互换，两写都过 VM）；
-    //   其余组合（异物 / 异部位）→ no-op。hotbar↔hotbar 及其它组行为不变。
+    //   顶掉（销毁）+ 护甲复制一份进 hotbar。守卫（t1121 起走装备槽接受谓词单一权威 armorSlotAccepts——
+    //   护甲部位匹配 + 南瓜仅头盔位，同 armorSetStack 写守卫一式）：来件（hotbar 槽非空时）须过谓词 →
+    //   放行（空槽装备 / 同部位互换 / 南瓜入头盔位，两写都过 VM）；其余组合（异物 / 异部位）→ no-op。
+    //   hotbar↔hotbar 及其它组行为不变。
     if (group === "armor" && dst.id !== 0
-        && (!root.hotbar.isArmor(dst.id) || root.hotbar.armorPiece(dst.id) !== srcIdx)) return
+        && !root.hotbar.armorSlotAccepts(srcIdx, dst.id)) return
     // t263 双方耐久随各自实例交换（数字键搬运工具保真）。t475 附魔同理随实例交换。t622 名同理。
     //   t648 门禁：双向各问面板（任一拒 → 整个 no-op，两侧槽都不动 —— 门禁只在写入前判定，写后拒绝
     //   会留下半交换态：一侧已写、另一侧被 no-op = 物品复制 / 丢失）。

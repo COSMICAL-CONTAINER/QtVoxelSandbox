@@ -1304,6 +1304,10 @@ void PlayerController::tickImpl()
         // 逐帧喂目光（常开：菜单/暂停时玩家仍“在”场景，夜行者瞪视计时不受捕获态门控 —— 眼位/目光
         //   position()/lookDirection() 只读世界定位，无写副作用，常开安全，同 playerPos 下发 tick 语义）。
         m_entityManager->setPlayerSight(position(), lookDirection());
+        // t1121 南瓜戴盔压制注入：头盔位方块 id 每 tick 随行下发（同 setPlayerSight 门；Game→Entities
+        //   向下依赖——Entities 层不反查 Hotbar）。读取面走既有装备槽读权威 armorBlockIdAt(0)（头盔位，
+        //   头/胸/腿/脚序首槽），零第二份护甲读取；空槽 / 非方块 → 0（夜行者压制守卫天然不触发）。
+        m_entityManager->setPlayerHeadBlock(m_hotbar ? m_hotbar->armorBlockIdAt(0) : 0);
         // t811 载具管理器注入（mob 自动乘坐矿车/船）：tickVehicleRiding 登乘/钉位/对账读它（Game→Entities
         //   向下，同 setPlayerSight 先例；幂等指针写）。无载具场景传 null 同样安全（tickVehicleRiding 早退）。
         m_entityManager->setVehicleManagers(m_minecartManager, m_boatManager);

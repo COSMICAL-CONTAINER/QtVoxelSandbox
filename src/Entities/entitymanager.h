@@ -1177,6 +1177,15 @@ public:
     QVector3D m_playerLook = QVector3D(0, 0, -1); // 默认 -Z（无输入时防零向量点积）
     bool m_playerSightValid = false;
 
+    // t1121 玩家头盔位方块注入（Game 层 PlayerController 每 tick 调，同 setPlayerSight 注入门；0 = 空头位）。
+    //   仅夜行者瞪视激怒压制判定读它（aiNightwalker 内单一权威守卫——南瓜头盔免瞪视激怒，机制等价 MC
+    //   Beta 1.8 pre1 入版史实，1.0 基准内）；其余 mob / AI 分支一律不读。未注入（矩阵 rig / 既有路径）
+    //   → m_playerHeadBlockValid=false → 压制守卫天然不触发（既有行为零变化）。Entities 层不反查
+    //   Hotbar（PLAN §2 分层：护甲槽读取权威在 Game 层，向下注入值，禁本层直读装备槽）。
+    void setPlayerHeadBlock(int itemId);
+    int m_playerHeadBlock = 0;        // 头盔位方块 id（0 = 空 / 非方块；100 = 南瓜）
+    bool m_playerHeadBlockValid = false; // 是否已注入（false = 从未注入 → 压制守卫不触发）
+
     // ── t811 生物自动乘坐矿车/船（mob ride vehicles）──
     // 载具管理器注入（Game/Physics 层 PlayerController 每 tick 调；Game→Entities 向下依赖，同 setPlayerSight
     //   先例）。EntityManager 据它读矿车 / 船的座位与位置（登乘扫描 + 骑乘钉位 + 双向对账）；载具管理器
@@ -1782,6 +1791,9 @@ private:
         //   （QML 据 enragedAt 播「张嘴 + 上下颤抖」动画）；满 → 瞬移到玩家背后（teleportBehindPlayer）+ 进入
         //   蓄力段 windupTimer 累加；满 kNightwalkerWindup ~0.5s → 近战重拳 attack（mobAttackedPlayer 大伤害）。
         //   teleportCooldown 通用瞬移冷却（怕水 / 弹射物 / 近战命中的 dodge 共用，防瞬移 spam）。
+        //   t1121 瞪视压制守卫（aiNightwalker 瞪视判定内单一权威）：玩家头盔位 = 南瓜（setPlayerHeadBlock
+        //   注入）→ 视同不在瞪视（enrageTimer 恒 0 不累积，卸下后从头累积）；其余激怒门（非最近 / 已激怒 /
+        //   越界 / 视线无效）全数原样幸存。
         bool  enraged = false;        // 是否已激怒（瞪视触发；QML 据 enragedAt 播激怒动画）
         float enrageTimer = 0.0f;     // 持续瞪视累积（秒；达 kNightwalkerStareTime 激怒）
         float rageTimer = 0.0f;       // 激怒后经过时间（秒；驱动瞬移+蓄力时序）
