@@ -673,6 +673,19 @@ public:
     //      材料段物品同门；kMc 表不扩——mcMaterialId 越界恒 -1）。
     static constexpr int AppleId       = 0x292; // 苹果：橡树叶 1/200 掉落；可食 +4 饥饿；金苹果合成心（t1115）
     static constexpr int GoldenAppleId = 0x293; // 金苹果：8 金锭环+苹果心合成；可食 +4 饥饿 + 再生 I 30s（t1115）
+    // t1120 喷溅水瓶 + 喷溅瞬间治疗药水（材料段 0x294/0x295，金苹果 0x293 之上**段尾追加**不插中间 =
+    //   存档安全铁律）。机制等价 MC 1.0 喷溅药水首两件补全——**era 核实留痕（wiki 2026 实读）**：喷溅
+    //   药水族 Beta 1.9 Prerelease 4 入版（1.0.0 开发期 = 1.0 基准内），首批即含喷溅水瓶与喷溅瞬间
+    //   治疗（splash water bottle / splash potion of healing 同批 10 面），t1101 负例口径本单**转正**
+    //   （水瓶 + 火药 / 瞬间治疗 + 火药两既录负例对撤销，行位沿革注见 brewingstore.cpp splashPotion
+    //   Result 头注）。命名 = 「喷溅」+ 基础名（通用描述词，§9 合法，t1101 十二件同门）；无 pack 映射
+    //   （越表界 → -1 → 资源包回退自绘，同药水族）；可堆叠 64（材料段默认零特判）。
+    //   **不交付子面裁定（核实留痕，不确证禁硬造）**：喷溅水瓶对火焰 / 作物的灭火浇水面纪元存疑——
+    //   1.0 实读口径为 Jeb 2011-10 评注「splash water bottles 应伤 endermen / blazes，但编码成本不值」
+    //   → 首批喷溅水瓶**零效果破裂**（无状态效果注入），灭火 / 浇水证据不确证 → 本单不交付该子面，
+    //   候选池登记（喷溅水瓶灭火 / 浇水 sub-face 留档）。
+    static constexpr int SplashWaterBottleId       = 0x294; // 喷溅水瓶：水瓶 + 火药酿成；掷出破裂零状态效果（可掷不可饮）
+    static constexpr int SplashInstantHealthPotionId = 0x295; // 喷溅瞬间治疗药水：瞬间治疗 + 火药；掷出范围即时回血（邻近缩放）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

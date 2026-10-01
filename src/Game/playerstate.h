@@ -93,7 +93,10 @@ public:
     //   EffectRegeneration 再生（药水饮用，每 2.5s 回 1HP；时序源 m_regenPotionTimer）/
     //   EffectWeakness 虚弱（药水饮用，近战 -4/级；时序源 m_weakTimer）。**追加在末尾**（快照序 = 枚举序，
     //   追加不破坏既有消费者；瞬间治疗无 timer 不入枚举不入快照——MC 口径即时效果）。
-    enum StatusEffect { EffectNone = 0, EffectPoison, EffectSlowness, EffectFire, EffectSpeed, EffectStrength, EffectFireResistance, EffectRegeneration, EffectWeakness };
+    //   t1120 追加：EffectInstantHeal 即时治疗——**纯映射枚举位，非时序效果**（无 timer 不入快照，与
+    //   瞬间治疗饮用面口径一致）：仅供喷溅面 splashEffectType 映射（喷溅瞬间治疗药水 → 本位 → 结算面
+    //   走 healed 信号即时分支 + 呈现层碎裂粒子取色路由键）。**追加在末尾**（同门纪律）。
+    enum StatusEffect { EffectNone = 0, EffectPoison, EffectSlowness, EffectFire, EffectSpeed, EffectStrength, EffectFireResistance, EffectRegeneration, EffectWeakness, EffectInstantHeal };
     Q_ENUM(StatusEffect)
     // t311 死亡原因枚举（机制等价 MC 1.0 各来源死因，§9 改名为通用词）。Q_ENUM 暴露给 QML：
     //   PlayerState.Fall 等（同 EntityManager.MobPig 模式）。避免命名 None（Linux CI 下 X11 头 None 宏冲突）。

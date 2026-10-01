@@ -2474,6 +2474,10 @@ Item {
             //   双自绘（同形苹果基座异色——红果食物 / 金壳食物，读作「掉落食物 + 金合成食物」）。
             case 0x292: drawRedApple(); break    // 苹果：橡树叶 1/200 掉落；可食 +4；金苹果合成心
             case 0x293: drawGoldenApple(); break // 金苹果：8 金锭环+苹果心合成；可食 +4 + 再生 I 30s
+            // t1120 喷溅水瓶 + 喷溅瞬间治疗（0x294/0x295，段尾追加）：drawPotion 同构异色（喷溅版 =
+            //   基础版色系提亮一档，t1101 十二件同门——水瓶蓝系 / 瞬间治疗粉系提亮）。
+            case 0x294: drawPotion("#5aa0e0", "#8ec6f4", "#d0ecff"); break // 喷溅水瓶：水瓶 + 火药；掷出破裂零效果
+            case 0x295: drawPotion("#f0b4c8", "#f8d4e0", "#fff0f4"); break // 喷溅瞬间治疗药水：瞬间治疗 + 火药；范围即时回血
             // t788 染料 16 色（0x24B..0x25A，白→黑羊毛色序；三色参数取 build_wool.py 同源色板）
             case 0x24B: drawDye("#f0f0ee", "#f9f9f8", "#959594"); break // 白色染料（白花破坏掉落；染白羊毛/白床）
             case 0x24C: drawDye("#de781e", "#ee9f69", "#8a4a13"); break // 橙色染料

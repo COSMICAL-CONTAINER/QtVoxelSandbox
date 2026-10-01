@@ -1492,6 +1492,10 @@ static_assert(RecipeRegistry::FilledMapId == 0x291, "FilledMapId 须为材料段
 // t1115 苹果/金苹果段位契约（MaterialIcon case 0x292/0x293 同字面量互钉；段尾追加序 = 0x291 填充地图之上）。
 static_assert(RecipeRegistry::AppleId       == 0x292, "AppleId 须为材料段 0x292（MaterialIcon case 0x292 同字面量互钉）");
 static_assert(RecipeRegistry::GoldenAppleId == 0x293, "GoldenAppleId 须为材料段 0x293（MaterialIcon case 0x293 同字面量互钉）");
+// t1120 喷溅水瓶/喷溅瞬间治疗段位钉（工程惯例）：0x294/0x295 = 金苹果 0x293 之上**段尾连续追加**（不插
+//   中间 = 存档安全铁律）；QML MaterialIcon case 与 hotbar 名面 / 调色板用同字面量互钉。
+static_assert(RecipeRegistry::SplashWaterBottleId         == 0x294, "SplashWaterBottleId 须为材料段 0x294（金苹果 0x293 之上段尾追加，t1120）");
+static_assert(RecipeRegistry::SplashInstantHealthPotionId == 0x295, "SplashInstantHealthPotionId 须为材料段 0x295（喷溅水瓶 0x294 之上段尾追加，t1120）");
 // t1097 酿造链 id 段位钉（工程惯例）：0x264..0x26A = 蕴辉瓶 0x263 之上**段尾连续追加**（不插中间 = 存档
 //   安全铁律）。Core 层 resourcepackmanager / QML MaterialIcon case 用同字面量互钉。
 static_assert(RecipeRegistry::GlassBottleId    == 0x264, "GlassBottleId 须为材料段 0x264（蕴辉瓶 0x263 之上段尾追加）");

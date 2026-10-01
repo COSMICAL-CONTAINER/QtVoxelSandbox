@@ -24,9 +24,13 @@ int BrewingStore::brewResult(int ingredientId, int bottleId)
     if (ingredientId == RecipeRegistry::RedstoneId)
         return extendedPotionResult(bottleId);
     // t1101 三级酿造门行（MC 1.0 gunpowder modifier）：火药只作用于**成品药水（基础 6 + 延长 6）**
-    //   → 对应喷溅版 ×12。水（任务负例口径：喷溅水瓶不交付）/ 粗制（无效果载体不可喷溅化）/ 瞬间
-    //   治疗（即时效果喷溅 = 效能衰减面，候选池登记）/ 喷溅版再酿（喷溅 + 火药 = 无映射，任务负例）/
+    //   → 对应喷溅版 ×12。粗制（无效果载体不可喷溅化）/ 喷溅版再酿（喷溅 + 火药 = 无映射，任务负例）/
     //   非瓶 → splashPotionResult 答零 = 无映射。
+    //   [lawful 修订 t1120]：水 / 瞬间治疗自「无映射负例」**转正**——喷溅水瓶（水瓶 + 火药，Beta 1.9
+    //   pre4 喷溅族首两件之一，era 核实留痕见 recipe.h 0x294 注）+ 喷溅瞬间治疗（瞬间治疗 + 火药，
+    //   即时效果效能邻近衰减面）两对映射入 splashPotionResult 小表（行位沿革注见该表头注）；t1101
+    //   既录负例对（水 + 火药 → 0 / 瞬间治疗 + 火药 → 0）随交付撤销（矩阵 r2071a / r2072a 负例族
+    //   lawful 修订沿革注见各腿）。
     //   NEG 面登记：本门行 + splashPotionResult 本体 = t1101 火药映射 NEG-1 恰红触达面（摘除后编译
     //   仍绿——函数仅此一处调用、声明在 .h 幸存——行为柱 r2071a 恰红，其余腿不受影响）。
     if (ingredientId == RecipeRegistry::GunpowderId)
@@ -95,12 +99,15 @@ int BrewingStore::extendedPotionResult(int potionId)
 
 // ── t1101 三级酿造映射小表（成品药水 → 喷溅版产物；extendedPotionResult 同门）────────────────────
 // MC 1.0 gunpowder modifier 口径核实（wiki 2026 实读留痕，机制等价实现）：火药作用在**成品药水**上 =
-//   对应喷溅版（基础 6 + 延长 6 各一喷溅位，id 段位见 recipe.h 0x27B..0x286 注）；水瓶 + 火药 = 无映射
-//   （任务负例口径：喷溅水瓶不交付，候选池登记）；粗制 + 火药 = 无映射（无效果载体不可喷溅化）；
-//   瞬间治疗 + 火药 = 无映射（即时效果喷溅 = 效能邻近衰减面，本单不交付，候选池登记）；喷溅版 + 火药
-//   再酿 = 无映射（喷溅版非酿造底物）。表形态留痕：12 行成对映射取独立 switch 小表（t1100 同门——
-//   小表 = 映射单一权威 + 负例面集中）。喷溅版效果 / 时长结算面 = playercontroller（splashEffectType /
-//   splashBaseSeconds / applySplashPotion，Game 层单一权威）。
+//   对应喷溅版（基础 6 + 延长 6 各一喷溅位，id 段位见 recipe.h 0x27B..0x286 注）；粗制 + 火药 = 无映射
+//   （无效果载体不可喷溅化）；喷溅版 + 火药再酿 = 无映射（喷溅版非酿造底物）。表形态留痕：12 行成对
+//   映射取独立 switch 小表（t1100 同门——小表 = 映射单一权威 + 负例面集中）。喷溅版效果 / 时长结算面
+//   = playercontroller（splashEffectType / splashBaseSeconds / applySplashPotion，Game 层单一权威）。
+//   [lawful 修订 t1120] 表尾追加两行（段尾追加不插中间 = 既有 12 行零扰动）：水瓶 + 火药 → 喷溅水瓶
+//   （SplashWaterBottleId 0x294——t1101 时点「任务负例口径：喷溅水瓶不交付」本单转正，era = Beta 1.9
+//   pre4 喷溅族首两件之一，核实留痕 recipe.h 0x294 注）+ 瞬间治疗 + 火药 → 喷溅瞬间治疗（SplashInstant
+//   HealthPotionId 0x295——t1101 时点「即时效果喷溅 = 效能邻近衰减面，候选池登记」本单交付）；行注 =
+//   既录负例撤销沿革。
 int BrewingStore::splashPotionResult(int potionId)
 {
     switch (potionId) {
@@ -116,7 +123,10 @@ int BrewingStore::splashPotionResult(int potionId)
     case RecipeRegistry::ExtendedRegenerationPotionId:   return RecipeRegistry::SplashExtendedRegenerationPotionId;
     case RecipeRegistry::ExtendedPoisonPotionId:         return RecipeRegistry::SplashExtendedPoisonPotionId;
     case RecipeRegistry::ExtendedWeaknessPotionId:       return RecipeRegistry::SplashExtendedWeaknessPotionId;
-    default: return 0; // 水 / 粗制 / 瞬间治疗 / 喷溅版再酿 / 非瓶 / 延长版喷溅再喷溅（火药对喷溅版无映射）
+    // t1120 转正两行（水瓶 / 瞬间治疗自 t1101 既录负例入表；NEG-1 恰红触达面 = 水瓶行[行为柱 r2090a]）。
+    case RecipeRegistry::WaterBottleId:                  return RecipeRegistry::SplashWaterBottleId;
+    case RecipeRegistry::InstantHealthPotionId:          return RecipeRegistry::SplashInstantHealthPotionId;
+    default: return 0; // 粗制 / 喷溅版再酿 / 非瓶 / 延长版喷溅再喷溅（火药对喷溅版无映射）
     }
 }
 

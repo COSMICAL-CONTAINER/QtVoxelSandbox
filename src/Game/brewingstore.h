@@ -38,8 +38,10 @@
 //   if 链已 8 行，再平铺 6 行可读性崩；小表 + 单 gate 行 = 映射单一权威 + 负例面集中）。
 //   t1101：三级酿造面 = 成品药水（基础 6 + 延长 6）+ 火药 → 对应喷溅版 ×12（右键投掷弹丸，落地碎裂
 //   范围结算；口径留痕见 recipe.h 0x27B..0x286 注 + playercontroller.h 喷溅常量族）。映射 =
-//   splashPotionResult 小表（extendedPotionResult 同门：12 行成对映射 + 单 gate 行；水 / 粗制 /
-//   瞬间治疗 / 喷溅版再酿 / 非瓶 = 无映射负例面）。
+//   splashPotionResult 小表（extendedPotionResult 同门：12 行成对映射 + 单 gate 行；粗制 /
+//   喷溅版再酿 / 非瓶 = 无映射负例面）。[lawful 修订 t1120] 表尾追加水瓶 / 瞬间治疗两行（喷溅水瓶
+//   SplashWaterBottleId 0x294 + 喷溅瞬间治疗 SplashInstantHealthPotionId 0x295——t1101 既录负例对
+//   「水 / 瞬间治疗 = 无映射」随交付撤销，行位沿革注见 brewingstore.cpp 该表头注）。
 //   t1102：水瓶直酿面交付两行（水瓶 + 发酵蛛眼 → 虚弱——喷溅虚弱链前置 / 水瓶 + 糖 → 凡庸药水
 //   MundanePotionId 0x287 可饮无效果同粗制口径），行位接在水瓶分支粗制三元组**之前**（t1097 既录
 //   三元组行原样幸存 = r2067d 源钉零修订）；其余 1.0 面（辉光强化 / 即时效果喷溅 / modifier 对喷溅
@@ -117,11 +119,12 @@ public:
     //   对外承接转换——调用面唯一 = brewingstore.cpp 内 gate 行；矩阵探针也只经 brewResult 断言，
     //   保 NEG 恰红单腿归因：摘映射 = gate 行 + 本体一并摘除，编译仍绿、行为柱恰红）。
     static int extendedPotionResult(int potionId);
-    // t1101 三级酿造映射（火药 modifier）：成品药水（基础 6 + 延长 6）→ 喷溅版产物 id（水 / 粗制 /
-    //   瞬间治疗 / 喷溅版再酿 / 非瓶 → 0）。**仅经 brewResult 的火药门行接入**（机制 tick / 探针统一走
+    // t1101 三级酿造映射（火药 modifier）：成品药水（基础 6 + 延长 6）→ 喷溅版产物 id（粗制 /
+    //   喷溅版再酿 / 非瓶 → 0）。**仅经 brewResult 的火药门行接入**（机制 tick / 探针统一走
     //   brewResult 单一入口，本函数不单独对外承接转换——调用面唯一 = brewingstore.cpp 内 gate 行；
     //   矩阵探针也只经 brewResult 断言，保 NEG 恰红单腿归因：摘映射 = gate 行 + 本体一并摘除，编译
-    //   仍绿、行为柱恰红。extendedPotionResult 同门先例）。
+    //   仍绿、行为柱恰红。extendedPotionResult 同门先例）。[lawful 修订 t1120] 水瓶 / 瞬间治疗自
+    //   负例转正入表（→ 0x294 / 0x295；行位沿革注见 brewingstore.cpp 该表头注）。
     static int splashPotionResult(int potionId);
     // 燃料燃烧值：itemId 可燃 → 剩余可酿次数（燃烬粉 20）；非燃料 → 0。
     static int fuelOpsFor(int itemId);
