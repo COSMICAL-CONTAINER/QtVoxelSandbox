@@ -1606,14 +1606,17 @@ void MatrixRun::section67_brewing()
     //   NEG-1（摘 brewingstore.cpp 火药门行 + splashPotionResult 本体）→ 恰红 = {r2071a}：静态表
     //   12 对断言 + 真驱转换断言全失（饮面回归断言 isDrinkableItem 面不在摘面 → 幸存绿；本腿以
     //   t1/t3 两段失 FAIL）；b / c（不经酿造转换）/ d（源钉豁免面）均不受影响。
+    //   [lawful 修订 t1120] 负例族两对撤销：火药 × 水 / 瞬间治疗自「→ 0 负例」转正为「→ 喷溅水瓶 /
+    //   喷溅瞬间治疗交付行」（era 核实留痕 recipe.h 0x294 注；交付面行为级断言由本单 r2090a 承接）；
+    //   本腿负例族收窄为粗制 / 喷溅再酿 / 零瓶三对（沿革：t1101 时点既录负例对 t1120 交付撤销）。
     runLeg("r2071a gunpowder tertiary brewing conversion behavior column (the brew table maps"
         " gunpowder acting on each of the six finished effect potions to its splash variant and on"
-        " each of the six extended potions to its extended splash variant, gunpowder on a water"
-        " bottle or an awkward potion or the instant health potion or an already splash potion or a"
-        " zero bottle answers zero with redstone and every other ingredient on splash potions"
-        " answering zero too, a placed brewing stand driven through a full twenty-second cycle"
-        " converts a speed potion to its splash variant on the ember powder fuel meter, and none of"
-        " the twelve splash ids is a drinkable item while all twelve answer the splash predicate)",
+        " each of the six extended potions to its extended splash variant, gunpowder on an awkward"
+        " potion or an already splash potion or a zero bottle answers zero with redstone and every"
+        " other ingredient on splash potions answering zero too, a placed brewing stand driven"
+        " through a full twenty-second cycle converts a speed potion to its splash variant on the"
+        " ember powder fuel meter, and none of the twelve splash ids is a drinkable item while all"
+        " twelve answer the splash predicate)",
         [&]() {
         bool ok = true;
         QString diag;
@@ -1631,11 +1634,10 @@ void MatrixRun::section67_brewing()
             && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::ExtendedRegenerationPotionId) == RecipeRegistry::SplashExtendedRegenerationPotionId
             && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::ExtendedPoisonPotionId) == RecipeRegistry::SplashExtendedPoisonPotionId
             && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::ExtendedWeaknessPotionId) == RecipeRegistry::SplashExtendedWeaknessPotionId;
-        // (2) 负例族：火药 × {水 / 粗制 / 瞬间治疗 / 喷溅再酿 / 零瓶} → 0；红石 / 他料 × 喷溅版 → 0。
+        // (2) 负例族：火药 × {粗制 / 喷溅再酿 / 零瓶} → 0；红石 / 他料 × 喷溅版 → 0。
+        //   [lawful 修订 t1120] 火 × 水 / 瞬间治疗两对负例撤销（转正交付行断言由 t1120 新段 r2090a 承接）。
         const bool t2 =
-            BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::WaterBottleId) == 0
-            && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::AwkwardPotionId) == 0
-            && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::InstantHealthPotionId) == 0
+            BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::AwkwardPotionId) == 0
             && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::SplashSpeedPotionId) == 0
             && BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::SplashExtendedWeaknessPotionId) == 0
             && BrewingStore::brewResult(RecipeRegistry::GunpowderId, 0) == 0
@@ -1689,12 +1691,12 @@ void MatrixRun::section67_brewing()
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
             << "| r2071a gunpowder tertiary brewing conversion behavior column (the brew table maps"
                " gunpowder acting on each of the six finished effect potions to its splash variant and on"
-               " each of the six extended potions to its extended splash variant, gunpowder on a water"
-               " bottle or an awkward potion or the instant health potion or an already splash potion or a"
-               " zero bottle answers zero with redstone and every other ingredient on splash potions"
-               " answering zero too, a placed brewing stand driven through a full twenty-second cycle"
-               " converts a speed potion to its splash variant on the ember powder fuel meter, and none of"
-               " the twelve splash ids is a drinkable item while all twelve answer the splash predicate)"
+               " each of the six extended potions to its extended splash variant, gunpowder on an awkward"
+               " potion or an already splash potion or a zero bottle answers zero with redstone and every"
+               " other ingredient on splash potions answering zero too, a placed brewing stand driven"
+               " through a full twenty-second cycle converts a speed potion to its splash variant on the"
+               " ember powder fuel meter, and none of the twelve splash ids is a drinkable item while all"
+               " twelve answer the splash predicate)"
             << (ok ? QString() : diag);
     });
 
@@ -2186,15 +2188,18 @@ void MatrixRun::section67_brewing()
 
     // ── r2072a：水瓶直酿转换行为柱（NEG-1 敏感面）─────────────────────────────────────────────────
     //   NEG-1（摘 brewResult 水瓶分支两行新对）→ 恰红 = {r2072a}：直酿两对静态断言 + 两真驱断言全失；
-    //   凡庸饮面 / 负例族断言幸存但腿体判 FAIL。既有三小表零冲突负例族同柱断言（红石 / 火药门行「水
-    //   → 0」既录负例 + 未交付行负例）。
+    //   凡庸饮面 / 负例族断言幸存但腿体判 FAIL。既有三小表零冲突负例族同柱断言（红石「水 → 0」既录
+    //   负例 + 未交付行负例）。
+    //   [lawful 修订 t1120] 负例族一对撤销：火药 × 水自「→ 0 负例」转正为「→ 喷溅水瓶交付行」（era 核实
+    //   留痕 recipe.h 0x294 注；交付面行为级断言由本单 r2090a 承接）；本腿负例族收窄为红石门行「水 → 0」
+    //   （红石门行序在先不变）+ 未交付行负例（沿革：t1102 时点既录负例对 t1120 交付撤销）。
     runLeg("r2072a water-bottle direct brewing conversion behavior column (the brew table maps a"
         " water bottle plus fermented spider eye to the weakness potion and plus sugar to the"
         " mundane potion while the ash-wort row still answers the awkward potion, the modifier"
-        " gate rows keep answering zero on water bottles with gunpowder and redstone and the"
-        " undelivered glistering-melon row stays zero, the direct-brew ingredients answer zero on"
-        " extended and splash bottles, a placed brewing stand driven through a full twenty-second"
-        " cycle converts water bottles to the mundane potion and to the weakness potion on the"
+        " gate rows keep the redstone row answering zero on water bottles and the undelivered"
+        " glistering-melon row stays zero, the direct-brew ingredients answer zero on extended"
+        " and splash bottles, a placed brewing stand driven through a full twenty-second cycle"
+        " converts water bottles to the mundane potion and to the weakness potion on the"
         " ember powder fuel meter, and the mundane potion is a drinkable item outside the splash"
         " predicate that drinks through the real chain with one empty bottle returned and no"
         " status effect raised)",
@@ -2207,9 +2212,9 @@ void MatrixRun::section67_brewing()
             && BrewingStore::brewResult(RecipeRegistry::SugarId, RecipeRegistry::WaterBottleId) == RecipeRegistry::MundanePotionId
             && BrewingStore::brewResult(RecipeRegistry::AshWartId, RecipeRegistry::WaterBottleId) == RecipeRegistry::AwkwardPotionId;
         // (2) 负例族（与既有三小表零冲突 + 未交付行恒零）。
+        //   [lawful 修订 t1120] 火 × 水负例对撤销（转正交付行断言由 t1120 新段 r2090a 承接）。
         const bool t2 =
-            BrewingStore::brewResult(RecipeRegistry::GunpowderId, RecipeRegistry::WaterBottleId) == 0
-            && BrewingStore::brewResult(RecipeRegistry::RedstoneId, RecipeRegistry::WaterBottleId) == 0
+            BrewingStore::brewResult(RecipeRegistry::RedstoneId, RecipeRegistry::WaterBottleId) == 0
             && BrewingStore::brewResult(RecipeRegistry::GlisteringMelonId, RecipeRegistry::WaterBottleId) == 0
             && BrewingStore::brewResult(RecipeRegistry::FermentedSpiderEyeId, RecipeRegistry::ExtendedWeaknessPotionId) == 0
             && BrewingStore::brewResult(RecipeRegistry::SugarId, RecipeRegistry::ExtendedWeaknessPotionId) == 0
@@ -2300,10 +2305,10 @@ void MatrixRun::section67_brewing()
             << "| r2072a water-bottle direct brewing conversion behavior column (the brew table maps a"
                " water bottle plus fermented spider eye to the weakness potion and plus sugar to the"
                " mundane potion while the ash-wort row still answers the awkward potion, the modifier"
-               " gate rows keep answering zero on water bottles with gunpowder and redstone and the"
-               " undelivered glistering-melon row stays zero, the direct-brew ingredients answer zero on"
-               " extended and splash bottles, a placed brewing stand driven through a full twenty-second"
-               " cycle converts water bottles to the mundane potion and to the weakness potion on the"
+               " gate rows keep the redstone row answering zero on water bottles and the undelivered"
+               " glistering-melon row stays zero, the direct-brew ingredients answer zero on extended"
+               " and splash bottles, a placed brewing stand driven through a full twenty-second cycle"
+               " converts water bottles to the mundane potion and to the weakness potion on the"
                " ember powder fuel meter, and the mundane potion is a drinkable item outside the splash"
                " predicate that drinks through the real chain with one empty bottle returned and no"
                " status effect raised)"

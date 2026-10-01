@@ -223,6 +223,16 @@ void MatrixRun::runAll()
                               //   持有 + 触发权威源钉 + 机制面零触碰负面钉族（骑乘钉位行/推挤豁免
                               //   行/下猪链两行/骑乘互斥守卫双行 r2082d 源钉幸存复核）+ CMake 段行]。
                               //   行为腿真链 pc rig fresh 48×48×96 s82，rig 世界零接触，接 section81）
+    section83_potion_cauldron_t1120(); // t1120 酿造/炼药锅残面批探针段（置尾先例沿用：r2090a
+                              //   酿造转换柱[转正两对经 brewResult + 门行序 + 真驱 + 饮面回归 +
+                              //   物品三面 + NEG-1 摘面行本腿钉]，r2090b 投掷 + 即时疗效柱[真 rig
+                              //   创造掷喷溅水瓶恰一次碎裂零效果 + 生存耗 1 + 直落瞬间治疗满档
+                              //   healed 4 + 直调缩放档 2/1/0 + 创造门 + 零效果快照 + NEG-2 摘面
+                              //   行本腿钉]，r2090c 炼药锅裁定锚柱[空桶右键满锅无效应 + 雨态 tick
+                              //   双态水位恒定 + 瓶取/桶灌复绿 + 裁定注锚 + 降水权威三行源钉]，
+                              //   r2090d 结构钉族[段位/枚举尾/映射行/呈现三面/CMake/负面禁出钉——
+                              //   NEG 双摘面豁免不钉]。行为腿真链 pc rig fresh 48×48×96 s82，
+                              //   rig 世界零接触，接 section82）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";
