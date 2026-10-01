@@ -3862,14 +3862,22 @@ bool PlayerController::isSplashPotionItem(int itemId)
     case RecipeRegistry::SplashExtendedRegenerationPotionId:
     case RecipeRegistry::SplashExtendedPoisonPotionId:
     case RecipeRegistry::SplashExtendedWeaknessPotionId:
+    // t1120 转正两件（Beta 1.9 pre4 喷溅族首两件，era 核实留痕 recipe.h 0x294 注）：喷溅水瓶（零
+    //   状态效果，破裂面全走既有链）+ 喷溅瞬间治疗（即时效果，结算面见 applySplashPotion 即时分支）。
+    case RecipeRegistry::SplashWaterBottleId:
+    case RecipeRegistry::SplashInstantHealthPotionId:
         return true;
     default:
         return false;
     }
 }
 
-// 喷溅药水 → 效果枚举映射（12 行；非喷溅 id → 0 = EffectNone）。Q_INVOKABLE 暴露 = 呈现层碎裂粒子
-//   取色同源调用（Main.qml onSplashBottleBreak → burstSplashPotion 色参），Game 层单一权威不 QML 重抄。
+// 喷溅药水 → 效果枚举映射（12 行 + t1120 转正两件；非喷溅 id → 0 = EffectNone）。Q_INVOKABLE 暴露 =
+//   呈现层碎裂粒子取色同源调用（Main.qml onSplashBottleBreak → burstSplashPotion 色参），Game 层单一
+//   权威不 QML 重抄。t1120：喷溅水瓶走 **0 = EffectNone**（零状态效果——MC 1.0 首批喷溅水瓶无效果
+//   破裂，Jeb 评注留痕 recipe.h 0x294 注；勿占用 0 语义之反即：有状态效果的喷溅 id 恒映射非零枚举位）；
+//   喷溅瞬间治疗 → EffectInstantHeal（纯映射枚举位，非时序效果不入快照——结算面即时分支见
+//   applySplashPotion）。
 int PlayerController::splashEffectType(int itemId)
 {
     switch (itemId) {
@@ -3885,11 +3893,15 @@ int PlayerController::splashEffectType(int itemId)
     case RecipeRegistry::SplashExtendedRegenerationPotionId: return PlayerState::EffectRegeneration;
     case RecipeRegistry::SplashExtendedPoisonPotionId:       return PlayerState::EffectPoison;
     case RecipeRegistry::SplashExtendedWeaknessPotionId:     return PlayerState::EffectWeakness;
-    default: return 0; // EffectNone（非喷溅 id）
+    // t1120 即时效果映射位（EffectInstantHeal = playerstate.h 枚举尾追加；枚举位即呈现层粒子取色键）。
+    case RecipeRegistry::SplashInstantHealthPotionId:        return PlayerState::EffectInstantHeal;
+    default: return 0; // EffectNone（非喷溅 id + 喷溅水瓶——零状态效果破裂）
     }
 }
 
 // 喷溅药水基础时长映射（d1=1 满档口径；对应饮用版时长常量逐行同源——非喷溅 id → 0）。
+//   t1120：喷溅瞬间治疗显式返 0（即时效果无时长——durEffect 表与 instant 分支协同核实：结算面见
+//   applySplashPotion 即时分支，本表 0 值 = 防御面，即时效果绝不入 applyStatusEffect 时长链）。
 float PlayerController::splashBaseSeconds(int itemId)
 {
     switch (itemId) {
@@ -3905,7 +3917,8 @@ float PlayerController::splashBaseSeconds(int itemId)
     case RecipeRegistry::SplashExtendedRegenerationPotionId: return kRegenExtPotionDurationSec;    // 90s
     case RecipeRegistry::SplashExtendedPoisonPotionId:       return kPoisonExtPotionDurationSec;   // 90s
     case RecipeRegistry::SplashExtendedWeaknessPotionId:     return kWeaknessExtDurationSec;       // 240s
-    default: return 0.0f; // 非喷溅 id
+    case RecipeRegistry::SplashInstantHealthPotionId:        return 0.0f;                          // t1120 即时效果无时长
+    default: return 0.0f; // 非喷溅 id + 喷溅水瓶（EffectNone 载体零时长）
     }
 }
 
@@ -3917,12 +3930,19 @@ float PlayerController::splashBaseSeconds(int itemId)
 //   NEG 面登记：本函数体的半径判定 + applyStatusEffect 结算尾段 = t1101 范围结算 NEG-2 恰红触达面
 //   （摘除后编译仍绿——Q_INVOKABLE 声明 / 静态映射族幸存——行为柱 r2071b / r2071c 恰红，其余腿不受
 //   影响）。
+//   [t1120 扩即时效果分支]：EffectNone（喷溅水瓶）→ 零效果注入静默返（破裂粒子 / 音由呈现层路由完成，
+//   机制面无操作）；EffectInstantHeal（喷溅瞬间治疗）→ **即时效果分支**（无时长不挂 applyStatusEffect，
+//   MC 1.0 instant potion 走 affectEntity 直结）——治疗基值 kInstantHealthHealHp=4（I 级 2 心，同饮用
+//   面常量），疗效按邻近系数缩放：healHp = int(d1 × 4 + 0.5)（**取整口径核实留痕**：MC 1.0 Potion::
+//   affectEntity 的 (int)(potency × (4 << level) + 0.5) 截断式 = 四舍五入半进位，中心 d1=1 → 4 /
+//   d1=0.5 → 2 / d1≈0.375 → 2 / d1≈0.125 → 0）；Survival 门内联（饮用面 :3074 同门——创造无敌不注入）；
+//   healed 信号链与饮用面同沿（PlayerState::heal 的 amount≤0 早退 = 零疗效 no-op 天然安全）。出圈静默 /
+//   无世界静默全同既有口径。
 void PlayerController::applySplashPotion(int cx, int cy, int cz, int itemId)
 {
     if (!m_world) return;
+    if (!isSplashPotionItem(itemId)) return; // 喷溅族单一权威谓词（含 t1120 两件；非喷溅 id 静默）
     const int eff = splashEffectType(itemId);
-    if (eff == 0 || !isSplashPotionItem(itemId)) return; // 非喷溅 id（双重防御：表与谓词同源 12 id）
-    const float baseSecs = splashBaseSeconds(itemId);
     // 命中格中心（Entities 层 floor 口径 +0.5）到玩家脚位的欧氏距（MC getDistanceSqToEntity 口径，
     //   玩家 pos = 脚底中心——lessons「pos 存脚底中心」契约）。
     const float dx = m_pos.x() - (float(cx) + 0.5f);
@@ -3931,7 +3951,15 @@ void PlayerController::applySplashPotion(int cx, int cy, int cz, int itemId)
     const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
     if (dist >= kSplashRadiusBlocks) return; // 出圈（d1 ≤ 0）→ 无效果（MC 半径 4 格硬界）
     const float d1 = 1.0f - dist / kSplashRadiusBlocks; // 邻近线性衰减（中心 1.0 → 边缘 0）
-    applyStatusEffect(eff, d1 * baseSecs + kSplashTickFloorSec, 1);
+    if (eff == 0)
+        return; // 喷溅水瓶（EffectNone）：零状态效果注入——破裂面由呈现层粒子 / 音路由，机制面无操作
+    if (eff == PlayerState::EffectInstantHeal) { // t1120 即时效果分支（NEG-2 摘面行本腿持有）
+        const int healHp = int(d1 * float(kInstantHealthHealHp) + 0.5f); // MC 1.0 (int)(potency×4+0.5) 半进位
+        if (m_mode == Survival)
+            emit healed(healHp); // 饮用面 :3074 同沿（PlayerState::heal 零值早退安全）
+        return; // 即时效果不落 applyStatusEffect 时长链（无 timer 不入快照——MC 口径）
+    }
+    applyStatusEffect(eff, d1 * splashBaseSeconds(itemId) + kSplashTickFloorSec, 1);
 }
 
 // t715 清全部状态效果（/effect clear；重生 / 存档加载同源调内部字段清，见各处注释）。

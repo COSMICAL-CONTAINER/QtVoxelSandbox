@@ -806,7 +806,12 @@ QVariantList Hotbar::creativeMaterials() const
         //   橡树叶 1/200 掉苹果（苹果；1.0 口径）+ 8 金锭环+苹果心合成（金苹果；创造调色板行为兜底获取
         //   面，同族口径）。全员 maxStack 64 可堆叠（材料段默认零特判）。MaterialIcon 自绘双苹果（§9 原创）。
         int(RecipeRegistry::AppleId),            // 苹果：橡树叶 1/200 掉落；可食 +4；金苹果合成心
-        int(RecipeRegistry::GoldenAppleId)       // 金苹果：8 金锭环+苹果心合成；可食 +4 + 再生 I 30s
+        int(RecipeRegistry::GoldenAppleId),      // 金苹果：8 金锭环+苹果心合成；可食 +4 + 再生 I 30s
+        // t1120 喷溅水瓶 + 喷溅瞬间治疗两件（0x294/0x295，金苹果之上段尾追加不插中间 = 存档安全铁律）：
+        //   获取面 = 三级酿造（水瓶 / 瞬间治疗 + 火药，t1101 既录负例转正）+ 右键投掷，创造调色板行为
+        //   唯一兜底获取面（同族口径）。全员可堆叠 64（材料段默认零特判）。MaterialIcon 自绘色液瓶族。
+        int(RecipeRegistry::SplashWaterBottleId),         // 喷溅水瓶：水瓶 + 火药；掷出破裂零效果（不可饮）
+        int(RecipeRegistry::SplashInstantHealthPotionId)  // 喷溅瞬间治疗药水：瞬间治疗 + 火药；范围即时回血
     };
 }
 
@@ -1442,6 +1447,10 @@ QString Hotbar::nameForBlock(int blockId) const
         // t1115 苹果 + 金苹果（0x292/0x293，填充地图之上段尾追加）：名面两件（通用描述词，§9 合法）。
         if (blockId == RecipeRegistry::AppleId)            return QStringLiteral("苹果");           // 橡树叶 1/200 掉落；可食 +4；金苹果合成心
         if (blockId == RecipeRegistry::GoldenAppleId)      return QStringLiteral("金苹果");         // 8 金锭环+苹果心合成；可食 +4 + 再生 I 30s
+        // t1120 喷溅水瓶 + 喷溅瞬间治疗（0x294/0x295，金苹果之上段尾追加）：名面两件 = 「喷溅」+ 基础名
+        //   （通用描述词，§9 合法，t1101 十二件同门；可掷不可饮——投掷分流见 playercontroller 谓词）。
+        if (blockId == RecipeRegistry::SplashWaterBottleId)         return QStringLiteral("喷溅水瓶");         // 水瓶 + 火药；掷出破裂零效果
+        if (blockId == RecipeRegistry::SplashInstantHealthPotionId) return QStringLiteral("喷溅瞬间治疗药水"); // 瞬间治疗 + 火药；范围即时回血
         // t761 燧石（材料段 0x248；机制等价 MC 1.0 flint）：挖沙砾小概率掉落；打火石配方原料。零 MC 专名（§9）。
         if (blockId == RecipeRegistry::FlintId) return QStringLiteral("燧石"); // 挖沙砾概率掉落；打火石配方原料
         // t891② 烈焰弹（材料段 0x25C；机制等价 MC fire charge）：燃烬粉+煤/炭+火药合成 3 发；右键发射火球
