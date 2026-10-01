@@ -772,4 +772,16 @@ private:
                               //   QML 谓词行/overlay/三呈现面/CMake/双负面钉——NEG 双摘面豁免不钉]。
                               //   行为腿 fresh 48×48×96 s82 + 真链 EntityManager rig（t829 同门）+
                               //   setWanderFrozen 确定性缝（t1029 同门），rig 世界零接触，接 section83）
+    void section85_instant_damage_t1122(); // t1122 瞬间伤害族探针段（置尾先例沿用：r2092a 酿造转换柱
+                              //   [对偶腐化行经 brewResult 单一入口 + 门行序在先 + 真驱 20s 一轮转换 +
+                              //   饮面回归 + 物品三面 + NEG-1 摘面行本腿钉]，r2092b 饮用自伤柱[真链
+                              //   喝满恰一次 magicDamageTaken 6HP/死因 Magic + 死亡链（dead+deathCause
+                              //   Magic+文案）+ 创造门 + 返瓶/消耗 + 可饮互斥面 + 饮面两行源钉]，
+                              //   r2092c 喷溅柱[真 rig 直落喷溅瞬间伤害恰一次碎裂 self 伤 5 带断言 +
+                              //   直调缩放档 6/5/4/3/2/出圈 0 半进位式 + 创造门 + 零效果快照 +
+                              //   NEG-2 摘面行本腿钉]，r2092d 结构钉族[段位/双枚举尾/映射行/时长零行/
+                              //   呈现三面/死因文案行/Main.qml 路由行/信号+常量声明/CMake/负面禁出钉
+                              //   （Main.qml 零新 id 字面）+ 相邻族零污染——NEG 双摘面豁免不钉]。
+                              //   行为腿真链 pc rig fresh 48×48×96 s82 + drop rig（r2090b 同门），
+                              //   rig 世界零接触，接 section84）
 };

@@ -480,8 +480,10 @@ void MatrixRun::section78_golden_apple_t1115()
             //   [lawful 修订 t1120] 枚举尾追加 EffectInstantHeal（喷溅瞬间治疗纯映射位，非时序效果
             //   不入快照——Absorption 面仍不在枚举内，本钉锁面语义不变；枚举尾前移沿革注，
             //   t1097→t1099→t1120 同门）。
+            //   [lawful 修订 t1122] 枚举尾再追加 EffectInstantDamage（喷溅瞬间伤害纯映射位，同门
+            //   纪律——Absorption 面仍不在枚举内，本钉锁面语义不变；枚举尾前移沿革续，t1120→t1122）。
             const QStringList missPsH = pinSet(srcDir + QStringLiteral("/Game/playerstate.h"), {
-                SrcPin("effect enum verbatim", "enum StatusEffect { EffectNone = 0, EffectPoison, EffectSlowness, EffectFire, EffectSpeed, EffectStrength, EffectFireResistance, EffectRegeneration, EffectWeakness, EffectInstantHeal };", 1)});
+                SrcPin("effect enum verbatim", "enum StatusEffect { EffectNone = 0, EffectPoison, EffectSlowness, EffectFire, EffectSpeed, EffectStrength, EffectFireResistance, EffectRegeneration, EffectWeakness, EffectInstantHeal, EffectInstantDamage };", 1)});
             ok = ok && missPsH.isEmpty();
             if (!missPsH.isEmpty())
                 diag += QStringLiteral("[psH %1]").arg(missPsH.join(QLatin1Char(',')));

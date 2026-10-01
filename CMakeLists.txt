@@ -1233,6 +1233,18 @@ add_executable(redstone_matrix_test
     #   行为腿 fresh 48×48×96 s82 小世界族 + 真链 EntityManager rig（t829 同门）+ setWanderFrozen
     #   确定性缝（t1029 同门），rig 世界零接触）。
     tools/matrix/section84_pumpkin_helmet_t1121.cpp
+    # t1122 瞬间伤害族探针段（4 腿 r2092a-d，filter 词 r2092；矩阵 901→905。酿造转换柱[对偶腐化行
+    #   瞬间治疗+发酵蛛眼→伤害经 brewResult + 门行序在先（红石 0/火药→喷溅治疗既钉负例不动）+ 真驱
+    #   20s 一轮转换 + 负例族（伤害瓶再酿 0/非对偶料 0/喷溅再酿 0）+ 饮面回归 + 物品三面 + NEG-1 摘面
+    #   行本腿钉] + 饮用自伤柱[真链喝满恰一次 magicDamageTaken 6HP 死因 Magic + 死亡链 dead/死因/文案
+    #   + 创造门 + 生存耗 1 返 1 空瓶 + 可饮互斥面 + 饮面两行源钉] + 喷溅柱[真 rig 直落喷溅瞬间伤害
+    #   恰一次碎裂 self 伤 + 直调缩放档 6/5/4/3/2/出圈 0 半进位式（(int)(d1×6+0.5) jar 实证）+ 创造门
+    #   + 零效果快照 + NEG-2 摘面行本腿钉] + 结构钉族[段位源钉 + 双枚举尾追加（StatusEffect/
+    #   DeathCause）+ 映射/时长/酿造表行 + 呈现三面（名/调色板/图标/碎裂色）+ 死因文案行 +
+    #   Main.qml 魔法伤路由行 + 信号/常量声明行 + CMake 段行 + 负面禁出钉（Main.qml 零新 id 字面）+
+    #   相邻族零污染——NEG 双摘面豁免不钉]。行为腿真链 pc rig fresh 48×48×96 s82 + drop rig
+    #   （r2090b 同门），rig 世界零接触）。
+    tools/matrix/section85_instant_damage_t1122.cpp
     src/Game/signboardfont.cpp
     src/Game/signboardfont.h
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
