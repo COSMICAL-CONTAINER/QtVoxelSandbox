@@ -636,6 +636,11 @@ public:
     static constexpr float kWeaknessDurationSec = 90.0f;     // 虚弱时长（MC 1.0 weakness 1:30）
     static constexpr float kWeaknessMeleePenaltyPerLevel = 4.0f; // 虚弱近战减伤（MC 1.0 近战伤害 -4/级）
     static constexpr int   kInstantHealthHealHp = 4;         // 瞬间治疗饮毕即回血量（MC 1.0 instant health I = 2 心 = 4HP）
+    // t1122 瞬间伤害常量（MC 1.0 原值；public = 矩阵探针直读面，t1099 同门）：官方 1.0.0 client jar
+    //   字节码实证即时施放路径 `attackEntityFrom(DamageSource.magic, 6 << amplifier)`——伤害基值 6
+    //   （3 心，I 级），与瞬间治疗 4 不对称（jar 核实留痕见 recipe.h 0x296 注）。喷溅即时分支同式
+    //   `(int)(potency × 6 + 0.5)` 半进位（邻近系数 potency = d1）。
+    static constexpr int   kInstantDamageHurtHp = 6;         // 瞬间伤害饮毕即扣血量（MC 1.0 instant damage I = 3 心 = 6HP，魔法系绕甲）
     // t1100 延长药水时长常量族（MC 1.0 extended 原值，wiki 2026 实读逐链留痕；public = 矩阵探针直读面，
     //   t1099 同门）。红石延长口径：3:00 基础 → 8:00（迅捷 / 力量 / 火抗）；0:45 基础 → 1:30（再生 /
     //   中毒）；1:30 基础 → 4:00（虚弱）；瞬间治疗无延长变体（即时效果，红石无作用——brewingstore.cpp
@@ -1025,6 +1030,15 @@ signals:
     //   PlayerState.takeDamage(hp, Generic)（红闪 / 视角晃照旧经 damaged）。复用 fallDamageTaken 会被
     //   Main.qml 的「任意伤害 → damageArmor()」无条件磨甲（8s 毒 = 8 次免费护甲损耗）。
     void poisonDamageTaken(int hp);
+    // t1122 魔法伤独立信号（t690 poisonDamageTaken 姊妹链）：瞬间伤害药水饮毕 / 喷溅自伤的结算沿。
+    //   绕护甲不磨甲（机制等价 MC 1.0 magic 系伤害绕过盔甲公式——复用 fallDamageTaken 会被 Main.qml
+    //   「任意伤害 → damageArmor()」无条件磨甲，t690 同因故同门独立链）；**可致死**（区别 t690 毒链
+    //   呈现层「剩 1 血不致死」下限守卫——毒 1.0 口径不致死而魔法伤致死），死因 cause 透传（致死时
+    //   deathCause = Magic，1.0 death.magic jar 实证留痕见 recipe.h 0x296 注）。呈现层 Connections
+    //   路由直走 PlayerState.takeDamage(hp, cause)（红闪 / 视角晃照旧经 damaged；同 poisonDamageTaken
+    //   → takeDamage 模式，cause 由毒链 Generic 升为透传）。Survival 门在 Game 层发行处内联（创造
+    //   无敌不发行，同饮用面 healed / 喷溅面 healed 同门）。
+    void magicDamageTaken(int hp, int cause);
     // t238 饥饿回血（仅 Survival，饱腹态）：饥饿充足（>= kRegenHungerThreshold）且未满血时，每
     //   kHungerRegenInterval 秒发本信号携 1HP → 呈现层 Connections 路由到 PlayerState.heal（与 fallDamageTaken
     //   → takeDamage 反向配对：扣血走 fallDamageTaken、回血走 healed；同 airUpdated→setAir 模式）。

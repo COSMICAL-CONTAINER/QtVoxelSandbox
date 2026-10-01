@@ -69,6 +69,14 @@ int BrewingStore::brewResult(int ingredientId, int bottleId)
         if (ingredientId == RecipeRegistry::GlisteringMelonId)
             return RecipeRegistry::InstantHealthPotionId;
     }
+    // t1122 对偶腐化分支（行位段尾追加不插中间——awkward 五链之后、函数尾 return 0 之前）：发酵蛛眼
+    //   作用在**成品瞬间治疗药水**上 = 瞬间伤害（MC 1.0 corruption 门——腐化剂对成品药水改性，与水瓶
+    //   直酿虚弱行同料异底；瞬间伤害药水 1.0 实有 jar 实证留痕见 recipe.h 0x296 注）。红石 / 火药门行
+    //   **在先**已拦截（瞬间治疗 + 红石 → 0 即时不可延长 / 瞬间治疗 + 火药 → splashPotionResult 尾行
+    //   喷溅治疗），本分支只接非门行原料；非对偶料（糖 / 闪烁西瓜等）对瞬间治疗瓶 → 0（负例族）；
+    //   瞬间伤害瓶非酿造底物（腐化不可逆——伤害瓶再酿恒 0，同喷溅版口径）。
+    if (bottleId == RecipeRegistry::InstantHealthPotionId)
+        return ingredientId == RecipeRegistry::FermentedSpiderEyeId ? RecipeRegistry::InstantDamagePotionId : 0;
     return 0;
 }
 
@@ -107,7 +115,9 @@ int BrewingStore::extendedPotionResult(int potionId)
 //   （SplashWaterBottleId 0x294——t1101 时点「任务负例口径：喷溅水瓶不交付」本单转正，era = Beta 1.9
 //   pre4 喷溅族首两件之一，核实留痕 recipe.h 0x294 注）+ 瞬间治疗 + 火药 → 喷溅瞬间治疗（SplashInstant
 //   HealthPotionId 0x295——t1101 时点「即时效果喷溅 = 效能邻近衰减面，候选池登记」本单交付）；行注 =
-//   既录负例撤销沿革。
+//   既录负例撤销沿革。[t1122 沿革] 表尾追加一行（段尾追加不插中间 = 既有 14 行零扰动）：瞬间伤害 +
+//   火药 → 喷溅瞬间伤害（SplashInstantDamagePotionId 0x297——t1120 附带核实申报的瞬间伤害族本单
+//   交付，era 核实留痕 recipe.h 0x296 注）。
 int BrewingStore::splashPotionResult(int potionId)
 {
     switch (potionId) {
@@ -126,6 +136,9 @@ int BrewingStore::splashPotionResult(int potionId)
     // t1120 转正两行（水瓶 / 瞬间治疗自 t1101 既录负例入表；NEG-1 恰红触达面 = 水瓶行[行为柱 r2090a]）。
     case RecipeRegistry::WaterBottleId:                  return RecipeRegistry::SplashWaterBottleId;
     case RecipeRegistry::InstantHealthPotionId:          return RecipeRegistry::SplashInstantHealthPotionId;
+    // t1122 表尾追加一行（瞬间伤害 + 火药 → 喷溅瞬间伤害；即时效果喷溅结算面 = applySplashPotion
+    //   即时伤害分支，与瞬间治疗行同门异值 6）。
+    case RecipeRegistry::InstantDamagePotionId:          return RecipeRegistry::SplashInstantDamagePotionId;
     default: return 0; // 粗制 / 喷溅版再酿 / 非瓶 / 延长版喷溅再喷溅（火药对喷溅版无映射）
     }
 }

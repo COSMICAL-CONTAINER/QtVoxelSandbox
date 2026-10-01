@@ -686,6 +686,27 @@ public:
     //   候选池登记（喷溅水瓶灭火 / 浇水 sub-face 留档）。
     static constexpr int SplashWaterBottleId       = 0x294; // 喷溅水瓶：水瓶 + 火药酿成；掷出破裂零状态效果（可掷不可饮）
     static constexpr int SplashInstantHealthPotionId = 0x295; // 喷溅瞬间治疗药水：瞬间治疗 + 火药；掷出范围即时回血（邻近缩放）
+    // t1122 瞬间伤害族两件（材料段 0x296/0x297，喷溅瞬间治疗 0x295 之上**段尾追加**不插中间 = 存档
+    //   安全铁律）。机制等价 MC 1.0 瞬间伤害药水（potion of harming）饮用版 + 喷溅版——t1120 附带核实
+    //   申报面（「瞬间伤害族全 src grep 零命中，候选池条目」）本单转正交付。**era 核实留痕（官方
+    //   1.0.0 client jar 实解包 + 字节码反汇编；2026-10-01 wiki 双端 bot 门不可达，按 t1121 先例以官方
+    //   jar 实证为准，来源如实注明）**：版本 manifest sha1 锚 b679fea27f2284836202e9365e13a82552092e5d
+    //   （= t1121 南瓜糊面同锚）——① lang/en_US.lang 物理在场 `potion.harm=Instant Damage` +
+    //   `potion.harm.postfix=of Harming`（名面）与 `death.magic=%1$s was killed by magic`（魔法死因面，
+    //   喝自伤致死死因 era 实有）；② Potion 类（abg）静态装配 id 7 =「potion.harm」bad=true 液色
+    //   4393481，即时施放路径 `attackEntityFrom(DamageSource.magic, 6 << amplifier)`——**伤害基值 6
+    //   （3 心，I 级）jar 实证**（与瞬间治疗不对称的半心口径：治疗 4 / 伤害 6 即本单交付值 6 的双重
+    //   佐证——1.0 jar 同式 6<<level 与现代 wiki 值对伤害面同值，era 无歧义）。命名「瞬间伤害（药水）」
+    //   （通用机制词，§9 合法，零 MC 专名）；无 pack 映射（越表界 → -1 → 资源包回退自绘，同药水族）；
+    //   可堆叠 64（材料段默认零特判）。
+    //   **不交付子面裁定（核实留痕，不确证禁硬造）**：① II 级（闪烁石/glowstone 强化）1.0 实有
+    //   （jar Potion.b() 二级装配面 + 现代 wiki 同证），但工程 II 级药水管线上不存在（酿造面只有红石
+    //   延长一级，无辉光岩粉物品与强化表——t1101 候选池「强化二级链」既录）→ 本单只交付 I 级族，
+    //   II 级候选池登记不硬造；② 亡灵反转面（jar 字节码实证 1.0 在场：isEntityUndead 门内 instant
+    //   heal ↔ magic attack 互换）——工程 mob 无 undead 效果面（t1101 降级既录）→ 候选池登记，
+    //   玩家非亡灵恒伤害口径不受影响。
+    static constexpr int InstantDamagePotionId       = 0x296; // 瞬间伤害药水：瞬间治疗 + 发酵蛛眼腐化酿成；饮毕即扣 6HP（3 心，I 级，魔法系绕甲）无持续
+    static constexpr int SplashInstantDamagePotionId = 0x297; // 喷溅瞬间伤害药水：瞬间伤害 + 火药；掷出范围即时扣血（邻近缩放，魔法系绕甲）
     // t345 护甲段（ArmorIdBase=0x300）：5 套材质（皮革 / 铁 / 铜 / 金 / 钻石）× 4 部位（头盔 / 胸甲 / 护腿 / 靴子）= 20 件。
     //   spec t345「recipe.h（Armor ids）」—— id 段定义在此（单一权威），护甲属性（护甲值 / 耐久 / 名）由
     //   ArmorRegistry（src/Game/armor.*，同层 Game）持有。机制等价 MC 1.0 护甲系统；§9 改名（零 MC 专名）。

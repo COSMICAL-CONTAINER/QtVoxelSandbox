@@ -96,7 +96,10 @@ public:
     //   t1120 追加：EffectInstantHeal 即时治疗——**纯映射枚举位，非时序效果**（无 timer 不入快照，与
     //   瞬间治疗饮用面口径一致）：仅供喷溅面 splashEffectType 映射（喷溅瞬间治疗药水 → 本位 → 结算面
     //   走 healed 信号即时分支 + 呈现层碎裂粒子取色路由键）。**追加在末尾**（同门纪律）。
-    enum StatusEffect { EffectNone = 0, EffectPoison, EffectSlowness, EffectFire, EffectSpeed, EffectStrength, EffectFireResistance, EffectRegeneration, EffectWeakness, EffectInstantHeal };
+    //   t1122 追加：EffectInstantDamage 即时伤害——同门纯映射位（无 timer 不入快照）：仅供喷溅面
+    //   splashEffectType 映射（喷溅瞬间伤害药水 → 本位 → 结算面走 magicDamageTaken 信号即时分支 +
+    //   呈现层碎裂粒子取色路由键）。**追加在末尾**（同门纪律）。
+    enum StatusEffect { EffectNone = 0, EffectPoison, EffectSlowness, EffectFire, EffectSpeed, EffectStrength, EffectFireResistance, EffectRegeneration, EffectWeakness, EffectInstantHeal, EffectInstantDamage };
     Q_ENUM(StatusEffect)
     // t311 死亡原因枚举（机制等价 MC 1.0 各来源死因，§9 改名为通用词）。Q_ENUM 暴露给 QML：
     //   PlayerState.Fall 等（同 EntityManager.MobPig 模式）。避免命名 None（Linux CI 下 X11 头 None 宏冲突）。
@@ -120,7 +123,12 @@ public:
     //   mobAttackedPlayer 携 MobAnvil 哨兵 → 呈现层映射本死因，同 MobTnt 先例）。
     //   t1107 再追 1：Slime=被史莱姆撞杀（1.0 死讯「slain by Slime」同源；aiSlime 接触伤害 mobAttackedPlayer
     //   携 MobSlime → 呈现层映射本死因）。**追加在末尾**（同上纪律）。
-    enum DeathCause { Generic = 0, Fall, Suffocation, Drowning, Starvation, Shambler, Bones, Spider, Stalker, Fire, Cactus, Tnt, GolemLaunchFall, GolemSlain, Nightwalker, Emberling, AbyssPearlTp, Anvil, Slime };
+    //   t1122 再追 1：Magic=被魔法夺去生命（瞬间伤害药水饮毕 / 喷溅自伤致死死因；机制等价 MC 1.0
+    //   death.magic「was killed by magic」——官方 1.0.0 client jar lang 物理在场实证，era 核实留痕见
+    //   recipe.h 0x296 注）。走 magicDamageTaken 独立链（绕护甲不磨甲，同 t690 毒链魔法系口径）→
+    //   呈现层直路由 takeDamage(hp, Magic)，本死因不达 armorProtectionFactor 查表面（序数尾追加
+    //   default 兜底零特例）。**追加在末尾**（同上纪律）。
+    enum DeathCause { Generic = 0, Fall, Suffocation, Drowning, Starvation, Shambler, Bones, Spider, Stalker, Fire, Cactus, Tnt, GolemLaunchFall, GolemSlain, Nightwalker, Emberling, AbyssPearlTp, Anvil, Slime, Magic };
     Q_ENUM(DeathCause)
 
     explicit PlayerState(QObject *parent = nullptr);
