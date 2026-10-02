@@ -95,14 +95,19 @@ void MatrixRun::section76_roster_sign_t1113()
 {
     // ── r2083a:站牌柱(NEG-2 敏感面 = 放置朝向写入)──────────────────────────────────────────
     //   合成面**反证**(6 木板 2 行 → 恒答活板门 = {Planks:6} 2×3 网格归属早注册活板门行的勘误在案
-    //   ——r2081 楼梯反证面同门;牌子合成面降级裁定见 recipe.cpp t1113 注)+ 木门形状孪生零污染
+    //   ——r2081 楼梯反证面同门;牌子合成面勘误沿革见 recipe.cpp t1113 注[t1128 翻案重写——降级
+    //   裁定撤销、配方行在册,本反证钉语义仍真])  + 木门形状孪生零污染
     //   (门纵列各行其答)+ 调色板双 id 在册钉 + def 行逐字段(tiles 209 / solid=false / ShapeNone /
     //   hardness 1.0 / Axe tier0 / drop 自身)+ 零碰撞/列顶 + 站牌板面盒(朝向 state 驱动)+ 谓词路由
     //   + 光照全透 + 木质音色 + kMc 63 + 放置真链(站牌落格 state = horizontalFacing^1 + signPlaced
     //   恰一次)+ 站牌拒放面(底面悬空点 → 拒)。
+    //   [t1128 lawful 修订——仅腿文名与段注:外部审查翻案后「6 板 2×3 不可合成牌子」旧论证撤回
+    //   (era 真配方 6 板+底棍与活板门不同形,配方行已在册),本腿「6 板 2×3 恒答活板门」反证钉
+    //   语义仍真原样幸存(活板门行未被扰),勘误沿革见 recipe.cpp t1113 注重写段。]
     runLeg("r2083a standing sign column (the six plank two by three grid still answers the"
-        " trapdoor row proving the briefed sign craft face infeasible under the first match"
-        " law while the wood door twin keeps its own answer and both sign ids sit in the"
+        " trapdoor row which keeps its own answer under the first match law while the sign"
+        " recipe row now exists beside it as a different shape and the wood door twin keeps"
+        " its own answer and both sign ids sit in the"
         " creative palette, the definition row answers the sign board tile with no collision"
         " and the axe tier drop self fields, the selection and raycast answer the state driven"
         " standing board box, a real placement writes the standing form facing away from the"
@@ -235,8 +240,9 @@ void MatrixRun::section76_roster_sign_t1113()
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
             << "| r2083a standing sign column (the six plank two by three grid still answers the"
-               " trapdoor row proving the briefed sign craft face infeasible under the first"
-               " match law while the wood door twin keeps its own answer and both sign ids sit"
+               " trapdoor row which keeps its own answer under the first match law while the sign"
+               " recipe row now exists beside it as a different shape and the wood door twin keeps"
+               " its own answer and both sign ids sit"
                " in the creative palette, the definition row answers the sign board tile with"
                " no collision and the axe tier drop self fields, the selection and raycast"
                " answer the state driven standing board box, a real placement writes the"
@@ -587,10 +593,13 @@ void MatrixRun::section76_roster_sign_t1113()
             ok = ok && missRc.isEmpty();
             if (!missRc.isEmpty())
                 diag += QStringLiteral("[rc %1]").arg(missRc.join(QLatin1Char(',')));
-            const bool noSignRow = !rawContainsRosterSign(srcDir + QStringLiteral("/Game/recipe.cpp"),
-                                                          QStringLiteral("int(BlockRegistry::StandingSign), 1, 1, \"standing_sign\""));
-            ok = ok && noSignRow;
-            if (!noSignRow) diag += QStringLiteral("[noSignRow]");
+            // [t1128 lawful 修订——外部审查翻案] 旧负面钉「牌子配方行不在册」翻转：「牌子行在册」
+            //   (era jar 定谳 6 板+底中棍 → 1,与活板门不同形,t1113 降级裁定撤销,工件
+            //   build/t1128_jar_crafting_map_sign.txt;沿革注同见 recipe.cpp t1113 注重写段)。
+            const bool signRow = rawContainsRosterSign(srcDir + QStringLiteral("/Game/recipe.cpp"),
+                                                       QStringLiteral("int(BlockRegistry::StandingSign), 1, 1, \"standing_sign\""));
+            ok = ok && signRow;
+            if (!signRow) diag += QStringLiteral("[signRow]");
             const QStringList missHb = pinSet(srcDir + QStringLiteral("/Game/hotbar.cpp"), {
                 SrcPin("sign icon case", "case BlockRegistry::StandingSign:     return \"icon_sign.png\";", 1),
                 SrcPin("wall icon case", "case BlockRegistry::WallSign:         return \"icon_sign.png\";", 1),

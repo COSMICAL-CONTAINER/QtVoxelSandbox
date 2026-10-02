@@ -9,11 +9,13 @@
 //     安全铁律)。**派工勘误留痕三面(源码注 + 本腿文 + 提交注)**:①1.0 无「空地图」独立物品
 //     (1.0 唯一地图物品 id 358 合成即得持手即绘;空地图 id 395 = 1.6+ 面不取)——两形态拆分 =
 //     工程激活链简化(负面钉锁非 1.0 原生面);②合成无罗盘芯(罗盘芯 = 12w34a/1.4.2+ 面,实读
-//     留痕不取——8 纸环行零 CompassId);③**maxStack 64 可堆叠(派工预期「填充地图不可堆叠」
+//     留痕不取——8 纸环行零 CompassId)[**t1128 外部审查翻案:本 ② 读法失真撤销**——era jar 定谳
+//     sl=CraftingManager 偏移 3187..3248 罗盘芯 1.0.0 在册(工件 build/t1128_jar_crafting_map_sign.txt
+//     留痕),配方勘误为罗盘+8 纸环 → r2084a 合成网格行随本翻案 lawful 修订(沿革注见该腿)];③**maxStack 64 可堆叠(派工预期「填充地图不可堆叠」
 //     翻案)**——地图不可堆叠是 12w34a/1.4.2+ 面(per-map 数据时代),1.0 地图可堆叠 64,工程走
 //     材料段默认 64 零特判(数据集 = 每会话单份全幅,同栈多张读同一视图,Beta 1.6-1.7.3「全图
-//     共享一份数据」期口径一致)。合成 = 8 纸环(multiset {Paper:8} 唯一;熔炉 8 圆石环 / 画作
-//     8 棒环异料逐格比对不冲突)。kMc 面不扩(近期材料段物品同模式,mcMaterialId 越表界 -1 →
+//     共享一份数据」期口径一致)。合成 = 罗盘+8 纸环(multiset {Paper:8, Compass:1} 唯一;熔炉 8
+//     圆石环 / 画作 8 棒环异料逐格比对不冲突)。kMc 面不扩(近期材料段物品同模式,mcMaterialId 越表界 -1 →
 //     自绘回退)。
 //   ② 探索填充面:数据集 = **每会话单份全幅**(MapStore,Game 层纯像素存储零 World 依赖)。范围
 //     裁定:MC 1.0 是 128×128 激活锚点制,工程取全幅(width×depth,1 格 = 1 像素单缩放)=「有限
@@ -41,6 +43,9 @@
 //     单语句行删除,编译仍绿——分支体余行完整)→ 恰红 = {r2084a}(激活真链:摘行后槽 id 恒
 //     EmptyMapId ≠ FilledMapId = 腿级 FAIL;建库/首绘行不在摘面,b/c/d 不触达)。**豁免设计:
 //     r2084c/r2084d 均不含该语句行任何形态的源钉**(摘面行豁免不钉——t1111/t1112/t1113 同门)。
+//     [t1128 沿革] 本 NEG-2 已随 t1114 关单归档(行已还原);t1128 件一修把旧整栈替换行撤换为
+//     消耗+入包新面,激活断言面随 r2084a lawful 修订(新面 NEG 见 section91 r2098 头注——消耗行
+//     摘面由 t1128 自己的 NEG-2 承接)。
 namespace {
 
 // fixed 宿主小世界 incantation(section69..76 同款四 setter)。
@@ -100,33 +105,38 @@ inline void driveRosterMapExplore(PlayerController &pc, int beats)
 
 void MatrixRun::section77_roster_map_t1114()
 {
-    // ── r2084a:激活链柱(NEG-2 敏感面 = 激活转换行)──────────────────────────────────────────
-    //   合成命中(8 纸环 → 1 空地图) + 环孪生零污染(熔炉 8 圆石环 / 画作 8 棒环各行其答) + 双 id
-    //   段位钉(0x290/0x291 追加序 + 0x28F 牛奶桶原位) + maxStack 64(翻案面:不可堆叠是 1.4.2+)
-    //   + 名面双行 + 调色板双 id 在册 + kMc -1(近期材料段不扩表) + 激活真链(空地图右键 → 槽内
-    //   转 FilledMapId 恰 1 件 + 建库全幅 + 首绘中心区 + 世界零写入)。
-    runLeg("r2084a activation chain column (the eight paper ring answers one empty map while"
-        " the furnace ring and the painting ring keep their own answers, the two map ids sit"
-        " at the material segment tail with milk bucket at 0x28F, both ids stack to sixty"
-        " four per the one point zero read, the name and palette rows carry both forms, the"
-        " mc mapping stays absent for both, and a real right click converts the held empty"
-        " map into one filled map in place, builds the whole world extent dataset and draws"
+    // ── r2084a:激活链柱([t1128 lawful 修订]——外部审查翻案 era jar 定谳罗盘芯在册 + 件一激活
+    //   新面;沿革注见本段头 ② 与 NEG-2 注)──────────────────────────────────────────────────
+    //   合成命中(罗盘+8 纸环 → 1 空地图;era 样板 "###/#X#/###" + #=paper + X=compass,期望网格
+    //   独立抄自 jar 工件 build/t1128_jar_crafting_map_sign.txt 非旧实现) + 环孪生零污染(熔炉
+    //   8 圆石环 / 画作 8 棒环各行其答) + 双 id 段位钉(0x290/0x291 追加序 + 0x28F 牛奶桶原位)
+    //   + maxStack 64(翻案面:不可堆叠是 1.4.2+) + 名面双行 + 调色板双 id 在册 + kMc -1(近期
+    //   材料段不扩表) + 激活真链新面(创造持 1 张:激活不耗,手持空地图原样 + 产物填充地图入
+    //   背包空槽 + 建库全幅 + 首绘中心区 + 世界零写入)。
+    runLeg("r2084a activation chain column (the compass centered eight paper ring answers one"
+        " empty map per the one point zero jar read while the furnace ring and the painting"
+        " ring keep their own answers, the two map ids sit at the material segment tail with"
+        " milk bucket at 0x28F, both ids stack to sixty four per the one point zero read,"
+        " the name and palette rows carry both forms, the mc mapping stays absent for both,"
+        " and a real right click in creative keeps the held empty map unconsumed while one"
+        " filled map lands in the inventory, builds the whole world extent dataset and draws"
         " the central area around the player with zero world writes)", [&]() {
         bool ok = true;
         QString diag;
         // (1) 合成命中 + 环孪生零污染(熔炉 / 画作 / 闪烁西瓜环各行其答——异料逐格比对)。
         const int PA = int(RecipeRegistry::PaperId);
+        const int CP = int(RecipeRegistry::CompassId);               // [t1128] era 罗盘芯(独立建证自 jar 工件)
         const int CO = int(BR::Cobble);
         const int ST = int(RecipeRegistry::StickId);                 // 木棒是物品段 id（recipe 段）
         const int WO = int(BR::Wool);
-        const int gMap[9]   = { PA, 0,  PA, PA, 0, PA, PA, 0,  PA }; // 8 纸中空环
+        const int gMap[9]   = { PA, PA, PA, PA, CP, PA, PA, PA, PA }; // 罗盘居中 8 纸环(t1128 勘误形)
         const int gFurn[9]  = { CO, CO, CO, CO, 0, CO, CO, CO, CO }; // 熔炉环(同形异料)
         const int gPaint[9] = { ST, ST, ST, ST, WO, ST, ST, ST, ST }; // 画作环
         const auto *rMap   = RecipeRegistry::match(gMap, 3);
         const auto *rFurn  = RecipeRegistry::match(gFurn, 3);
         const auto *rPaint = RecipeRegistry::match(gPaint, 3);
         const bool craftOk = rMap && rMap->outputId == int(RecipeRegistry::EmptyMapId)
-            && rMap->outputCount == 1
+            && rMap->outputCount == 1 && rMap->consumeCount == 1     // 每原料格耗 1(CRAFT-01 消耗断言)
             && rFurn && rFurn->outputId == int(BR::Furnace)
             && rPaint && rPaint->outputId == int(RecipeRegistry::PaintingId)
             && RecipeRegistry::recipeCount() > 0;                    // 全表自匹配审计归 t802 在册
@@ -150,7 +160,7 @@ void MatrixRun::section77_roster_map_t1114()
             && RecipeRegistry::mcMaterialId(int(RecipeRegistry::FilledMapId)) == -1;
         ok = ok && itemOk;
         if (!itemOk) diag += QStringLiteral("[item]");
-        // (3) 激活真链(NEG-2 敏感面:槽内转换 + 建库 + 首绘 + 零世界写入)。
+        // (3) 激活真链新面([t1128 件一修]:创造不耗 + 产物入背包;建库 + 首绘 + 零世界写入)。
         {
             World w;
             initRosterMapWorld(w);
@@ -172,29 +182,32 @@ void MatrixRun::section77_roster_map_t1114()
             pc.tick();
             pumpRosterMap(320); // 越过放置 CD
             pc.placeBlock();
-            const bool actOk = hb.blockIdAt(0) == int(RecipeRegistry::FilledMapId) // 激活转换(NEG-2 摘面 → 恒 EmptyMapId 红)
-                && hb.countAt(0) == 1                                             // 恰 1 件(创造亦不耗)
+            const bool actOk = hb.blockIdAt(0) == int(RecipeRegistry::EmptyMapId) // 创造不耗:手持空地图原样
+                && hb.countAt(0) == 1
+                && hb.blockIdAt(1) == int(RecipeRegistry::FilledMapId)            // 产物入背包空槽
+                && hb.countAt(1) == 1
                 && ms.hasMap()
                 && ms.mapWidth() == 48 && ms.mapDepth() == 48                     // 全幅定版
                 && ms.revision() > 0
                 && ms.columnColor(24, 24) != MapStore::kUnexploredColor            // 首绘中心区(脚下列已绘)
                 && w.blockAt(25, 81, 24) == quint8(BR::Air);                       // 零世界写入(非方块放置)
             ok = ok && actOk;
-            if (!actOk) diag += QStringLiteral("[act id=%1 n=%2 map=%3 col=%4]")
-                .arg(hb.blockIdAt(0)).arg(hb.countAt(0)).arg(ms.hasMap())
+            if (!actOk) diag += QStringLiteral("[act id0=%1 n0=%2 id1=%3 n1=%4 map=%5 col=%6]")
+                .arg(hb.blockIdAt(0)).arg(hb.countAt(0))
+                .arg(hb.blockIdAt(1)).arg(hb.countAt(1)).arg(ms.hasMap())
                 .arg(ms.columnColor(24, 24) != MapStore::kUnexploredColor ? 1 : 0);
         }
 
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-            << "| r2084a activation chain column (the eight paper ring answers one empty map"
-               " while the furnace ring and the painting ring keep their own answers, the two"
-               " map ids sit at the material segment tail with milk bucket at 0x28F, both ids"
-               " stack to sixty four per the one point zero read, the name and palette rows"
-               " carry both forms, the mc mapping stays absent for both, and a real right"
-               " click converts the held empty map into one filled map in place, builds the"
-               " whole world extent dataset and draws the central area around the player with"
-               " zero world writes)"
+            << "| r2084a activation chain column (the compass centered eight paper ring answers one"
+               " empty map per the one point zero jar read while the furnace ring and the painting"
+               " ring keep their own answers, the two map ids sit at the material segment tail with"
+               " milk bucket at 0x28F, both ids stack to sixty four per the one point zero read,"
+               " the name and palette rows carry both forms, the mc mapping stays absent for both,"
+               " and a real right click in creative keeps the held empty map unconsumed while one"
+               " filled map lands in the inventory, builds the whole world extent dataset and draws"
+               " the central area around the player with zero world writes)"
             << (ok ? QString() : diag);
     });
 
@@ -385,7 +398,8 @@ void MatrixRun::section77_roster_map_t1114()
     runLeg("r2084d structure pin family (the two map ids ride the material segment tail with"
         " milk bucket in place and the atlas unchanged, the recipe and hotbar and controller"
         " and map store and icon and cmake rows are pinned on file with the two negative"
-        " lesion faces exempt, no compass core sits in the map recipe row, no zoom or clone"
+        " lesion faces exempt, the map recipe row carries the compass core per the one point"
+        " zero jar read, no zoom or clone"
         " symbol exists, no unstackable special case exists, and no map table rides the"
         " world store per the session caliber)", [&]() {
         bool ok = true;
@@ -488,24 +502,29 @@ void MatrixRun::section77_roster_map_t1114()
             if (!missCm.isEmpty())
                 diag += QStringLiteral("[cm %1]").arg(missCm.join(QLatin1Char(',')));
         }
-        // (D3) 四负面钉(1.0 实读裁定锁面):罗盘芯不取(8 纸环行零 CompassId)+ 缩放/克隆不取
+        // (D3) 四钉([t1128 lawful 修订一处]——罗盘芯钉自「负面钉:行内零 CompassId」翻转为
+        //     「era 定谳钉:行内含 CompassId」,沿革=外部审查翻案 jar 定谳,工件
+        //     build/t1128_jar_crafting_map_sign.txt;其余三负面钉原样):缩放/克隆不取
         //     (无缩放/克隆符号)+ 不可堆叠不取(maxStackSize 无地图特例)+ 存档表零加(会话口径,
         //     worldstore 无 map 表)。
         {
             const QString srcDir = srcRootForRosterMapPins();
-            // 罗盘芯:定位地图配方行,断言行内无罗盘(罗盘芯 = 12w34a/1.4.2+ 面实读留痕不取)。
+            // 罗盘芯([t1128 翻案钉]):定位地图配方行(pattern 三行 + 产物行四行窗口),断言窗口内含
+            //   罗盘(era 1.0.0 罗盘芯在册——旧负面钉「行内零 CompassId = 12w34a+ 面不取」随 jar
+            //   定谳撤销翻转)。
             QFile rc(srcDir + QStringLiteral("/Game/recipe.cpp"));
-            QString mapRowLine;
+            bool compassCore = false;
             if (rc.open(QIODevice::ReadOnly)) {
                 const QStringList lines = QString::fromUtf8(rc.readAll()).split(QLatin1Char('\n'));
-                for (const QString &l : lines) {
-                    if (l.contains(QStringLiteral("\"empty_map\""))) { mapRowLine = l; break; }
+                for (int i = 0; i < lines.size(); ++i) {
+                    if (!lines.at(i).contains(QStringLiteral("\"empty_map\""))) continue;
+                    for (int j = qMax(0, i - 3); j <= i && !compassCore; ++j)
+                        compassCore = lines.at(j).contains(QStringLiteral("CompassId"));
+                    break;
                 }
             }
-            const bool noCompassCore = !mapRowLine.isEmpty()
-                && !mapRowLine.contains(QStringLiteral("CompassId"));
-            ok = ok && noCompassCore;
-            if (!noCompassCore) diag += QStringLiteral("[noCompassCore]");
+            ok = ok && compassCore; // [t1128] era 罗盘芯(旧钉翻转,沿革注见上)
+            if (!compassCore) diag += QStringLiteral("[compassCore]");
             // 缩放 / 克隆面不取(12w34a/1.4.2+ 面留痕不取——无缩放/克隆符号)。
             const bool noZoom = !rawContainsRosterMap(srcDir + QStringLiteral("/Game/recipe.h"),
                                                       QStringLiteral("MapZoom"))
@@ -534,8 +553,9 @@ void MatrixRun::section77_roster_map_t1114()
             << "| r2084d structure pin family (the two map ids ride the material segment tail"
                " with milk bucket in place and the atlas unchanged, the recipe and hotbar and"
                " controller and map store and icon and cmake rows are pinned on file with the"
-               " two negative lesion faces exempt, no compass core sits in the map recipe row,"
-               " no zoom or clone symbol exists, no unstackable special case exists, and no"
+               " two negative lesion faces exempt, the map recipe row carries the compass core"
+               " per the one point zero jar read, no zoom or clone symbol exists, no"
+               " unstackable special case exists, and no"
                " map table rides the world store per the session caliber)"
             << (ok ? QString() : diag);
     });

@@ -344,8 +344,11 @@ void MatrixRun::section78_golden_apple_t1115()
     // ── r2085d:合成柱(8 金锭环命中 + 环孪生零污染 + 心片权威负例)─────────────────────────────
     //   {GoldIngot:8, Apple:1} 命中 1 金苹果(3×3 仅工作台;2×2 负例) + 四环孪生各行其答(熔炉/
     //   地图/画作/闪烁西瓜——多重集零污染) + 心片权威负例(金锭环+瓜片心 / 金锭环+金粒心 → 无行)。
+    //   [t1128 lawful 修订——地图孪生网格随外部审查翻案勘误更新为罗盘+8 纸环 era 形,腿文名同步
+    //   「paper ring → compass centered paper ring」,沿革注见孪生块。]
     runLeg("r2085d craft column (the eight gold ingot ring with the apple core answers one"
-        " golden apple at the three by three table only, the furnace ring and the paper ring"
+        " golden apple at the three by three table only, the furnace ring and the compass"
+        " centered paper ring"
         " and the painting ring and the glistering melon ring keep their own answers, and a"
         " melon slice core or a nugget core under the ingot ring answers nothing)", [&]() {
         bool ok = true;
@@ -368,8 +371,12 @@ void MatrixRun::section78_golden_apple_t1115()
         if (!craftOk) diag += QStringLiteral("[craft id=%1]")
             .arg(rGA ? rGA->outputId : -1);
         // (2) 环孪生零污染(四环各行其答——多重集/逐格 id 比对零遮蔽)。
+        //   [t1128 lawful 修订——地图孪生网格随外部审查翻案勘误更新:era jar 定谳罗盘芯 1.0.0
+        //   在册(工件 build/t1128_jar_crafting_map_sign.txt),地图行改罗盘+8 纸环,孪生网格
+        //   同步换 era 形(期望仍独立自 era 网格非旧实现);沿革同见 section77 r2084a。]
+        const int CP = int(RecipeRegistry::CompassId);
         const int gFurn[9]  = { CO, CO, CO, CO, 0,  CO, CO, CO, CO };    // 熔炉:8 圆石缺心
-        const int gMap[9]   = { PA, 0,  PA, PA, 0,  PA, PA, 0,  PA };    // 地图:8 纸缺心
+        const int gMap[9]   = { PA, PA, PA, PA, CP, PA, PA, PA, PA };    // 地图:罗盘芯+8 纸环(t1128 勘误形)
         const int gPaint[9] = { ST, ST, ST, ST, WO, ST, ST, ST, ST };    // 画作:8 棒+心毛
         const int gGlist[9] = { GN, GN, GN, GN, MS, GN, GN, GN, GN };    // 闪烁西瓜:8 金粒+心片
         const auto *rFurn  = RecipeRegistry::match(gFurn, 3);
@@ -397,7 +404,8 @@ void MatrixRun::section78_golden_apple_t1115()
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
             << "| r2085d craft column (the eight gold ingot ring with the apple core answers"
                " one golden apple at the three by three table only, the furnace ring and the"
-               " paper ring and the painting ring and the glistering melon ring keep their"
+               " compass centered paper ring and the painting ring and the glistering melon"
+               " ring keep their"
                " own answers, and a melon slice core or a nugget core under the ingot ring"
                " answers nothing)"
             << (ok ? QString() : diag);

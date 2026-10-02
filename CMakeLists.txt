@@ -1291,6 +1291,14 @@ add_executable(redstone_matrix_test
     #   [heal 权威面 + 钳制式双子恰两 + 亡灵谓词单一 + 半径零泄漏负面钉 + CMake+QML 门——NEG 双
     #   摘面豁免不钉]。行为腿真链 pc / 投掷瓶 rig fresh 小世界族，rig 世界零接触）。
     tools/matrix/section90_splash_mob_t1127.cpp
+    # t1128 交互正确性批（用户第三方只读审查五件；置尾先例沿用：runAll 末执行，filter 词 r2098；
+    #   6 腿 r2098a-f = 激活四场景柱[数量 1/2/64 三档 + 产物放置三态 + 背包满保守拒绝 + 连续激活
+    #   + 创造面] / 配方勘误柱[罗盘+8 纸环 era 网格 + 负例族 + 2×2 不命中 + 消耗断言] / 牌子合成
+    #   柱[6 板+底棍 → 1 + 活板门回归] / 牌子全回路柱[合成→放置→写四行→存→重进→破坏掉落] /
+    #   换料柱[近满换料重开 + 同 id 数量不清 + 移除/无效/插回三态 + 重载复位] / 结构钉族[era 工
+    #   件锚 + 燃料定谳注 + 瓶槽口径钉 + CMake+QML 门——NEG 双摘面豁免不钉]。行为腿真链 pc /
+    #   rig fresh 小世界族，rig 世界零接触）。
+    tools/matrix/section91_interact_fix_t1128.cpp
     src/Game/signboardfont.cpp
     src/Game/signboardfont.h
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
