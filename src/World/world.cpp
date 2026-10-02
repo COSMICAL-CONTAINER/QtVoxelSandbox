@@ -262,8 +262,11 @@ void World::sparseGenerateChunk(int cx, int cz)
 //                                                    与 fixed 语义自洽）
 //   fillWater                                 (b)窗   逐列读自身列（seaColumnHeight 纯）
 //   freezeSurfaceWater                        (b)窗   逐列读自身列 y=waterLevel
-//   placeSurfaceLakes                         (b)全   低洼判定 = heightAt 纯 disc ±rad+1；
-//                                                    carve/灌水读=写位 ⊆ 中心±8
+//   placeSurfaceLakes                         (b)窗   低洼判定 = heightAt 纯 disc ±rad+1；
+//                                                    carve/灌水读=写位 ⊆ 中心±8；t1126 起非 ext
+//                                                    锚窗口化 lattice 界（lattice 格写域 ⊆ ±6
+//                                                    ⊆ 带界——原 (b)全 整域循环经 t1126 单 adopt
+//                                                    成本剖析改窗：逐位等价论证见函数内削减面注）
 //   placeSwampPools                           (b)窗   逐列自列读（biome/sea/height 纯）
 //   placeTrees / placeJungleTrees             (b)窗   树冠 ≤3 IfAir 写 ⊆ scaffold；surf/
 //                                                    under1 = 自列 ∈ scaffold；间距 occupied
@@ -402,9 +405,11 @@ void World::sparsePopulateChunk(int cx, int cz)
     // 写域钳制（锚 ±1 chunk = scaffold 窗）：窗外候选溢写恒拒——「邻块已/未物化」两序下同为
     // 拒 = 顺序无关（r2023c 恰红实证的溢写污染面）；真邻块终态由此免受他块 population 触碰。
     // scatterOres 传窗 = cell 循环 + tryOre 读写域双钳（脉形走向的体素态耦合 → 读域出窗即两
-    // 序不齐；处置表 (c) 替代条目）。其余全域 pass（gravel/entrances/pools/lakes）候选循
-    // 环本身 O(核心域网格) 廉价，窗外写入被本钳制拒绝 = 与 fixed 对 C 列的影响逐位同空。静默
-    // 标志避免每 chunk 重放的确定性计数日志刷屏（fixed 全域运行恒 false = 日志逐字原样）。
+    // 序不齐；处置表 (c) 替代条目）。其余全域 pass（gravel/entrances/pools）候选循
+    // 环本身 O(核心域网格) 廉价，窗外写入被本钳制拒绝 = 与 fixed 对 C 列的影响逐位同空
+    //（lakes 同属此类直至 t1126：整域 lattice + 逐候选 heightAt 低洼扫描实测 ≈33ms/adopt =
+    // 窗口重放主导面 → 非 ext 锚窗口化 lattice 界入 (b)窗族，见 placeSurfaceLakes 削减面注）。
+    // 静默标志避免每 chunk 重放的确定性计数日志刷屏（fixed 全域运行恒 false = 日志逐字原样）。
     // ── t1073 外环扩展域：锚 chunk 在核心域 chunk 盒外（负 / ≥ 核心 chunk 计数）→ m_popWindow
     // Extended 置位——populationWindow() 归一不钳核心域 + setVoxelIfAir / carve 原语让位检查跳过。
     // 旧码窗口归一恒钳入 [0,m_width)×[0,m_depth)（= 核心域）：外环锚的窗 ∩ 核心域恒空/缺自身列
@@ -11350,6 +11355,15 @@ void World::placeSurfaceLakes(int wx0, int wx1, int wz0, int wz1)
     int caverns = 0; // t340：湖下空心穹顶气室计数（形态混排核对）
     const int lakeSeed = m_seed + 7309; // 湖泊哈希偏移（与其它 worldgen hashColumn 解耦）
     constexpr int kBand = 16; // t1073：ext lattice 带
+    // t1126 削减面（单 adopt 成本削减——剖析裁定交付面；t1123 件① 调研链延伸）：
+    //   非 ext 窗口化 lattice 界（win 分支）。逐位等价论证：湖泊锚点自 lattice 格 ± 抖动 3，
+    //   写域（carve/灌水/穹顶，rad ≤ 3）⊆ 锚 ±3 → 自 lattice 格写域 ⊆ ±6（读域 = 纯函数
+    //   heightAt/seaColumnHeight/biomeAt/villageSites/hashColumn，零体素读——与 carveCaves
+    //   §29.5-W1b「阈值噪声逐体素纯函数 → 窗口化逐位等价」同门：lattice 格 [bx±6] 与窗口
+    //   [xLo,xHi) 不相交的候选其全部写落窗外 = 写域钳制恒拒 = 与跳过同空（「两序同空」铁律
+    //   不破）；候选判定全纯 → 无第二通道影响他列；kept 候选序 = 原序子序列 → 窗内写入序与
+    //   fixed 逐位同。fixed（win=false）循环保留整域原样 = 逐位零变化面；ext 分支原样。
+    constexpr int kLakeReach = kLakeGrid / 2 + 3; // 抖动 3 + 半径 3 → lattice 格写域 ±6
     int bxLo = kLakeGrid / 2, bxHi = m_width, bzLo = kLakeGrid / 2, bzHi = m_depth;
     if (ext) {
         bxLo = kLakeGrid / 2
@@ -11358,6 +11372,13 @@ void World::placeSurfaceLakes(int wx0, int wx1, int wz0, int wz1)
         bzLo = kLakeGrid / 2
              + kLakeGrid * floorDiv(zLo - kBand - kLakeGrid / 2 + kLakeGrid - 1, kLakeGrid);
         bzHi = zHi + kBand;
+    } else if (pw.win) {
+        bxLo = kLakeGrid / 2
+             + kLakeGrid * floorDiv(xLo - kLakeReach - kLakeGrid / 2 + kLakeGrid - 1, kLakeGrid);
+        bxHi = xHi + kLakeReach;
+        bzLo = kLakeGrid / 2
+             + kLakeGrid * floorDiv(zLo - kLakeReach - kLakeGrid / 2 + kLakeGrid - 1, kLakeGrid);
+        bzHi = zHi + kLakeReach;
     }
     for (int bx = bxLo; bx < bxHi; bx += kLakeGrid) {
         for (int bz = bzLo; bz < bzHi; bz += kLakeGrid) {
