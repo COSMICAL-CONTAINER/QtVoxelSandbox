@@ -270,6 +270,10 @@ void MatrixRun::runAll()
     section89_adopt_cost_t1126(); // t1126 单 adopt 成本剖析/削减探针段（置尾先例沿用：r2096
                               //   腿族，自建 fresh sparse 小世界族 + 真线程 worker，rig 世界零
                               //   接触，接 section88）
+    section90_splash_mob_t1127(); // t1127 喷溅瞬间族 mob 结算面探针段（置尾先例沿用：r2097
+                              //   a-d 腿族 = mob 结算柱 / 投掷碰撞柱 / 反转柱 / 结构钉族，
+                              //   行为腿真链 pc / 投掷瓶 rig fresh 48×48×96 s92..94 小世界族，
+                              //   rig 世界零接触，接 section89）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";
