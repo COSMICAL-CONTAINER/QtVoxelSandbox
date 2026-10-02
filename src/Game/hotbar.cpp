@@ -809,10 +809,11 @@ QVariantList Hotbar::creativeMaterials() const
         //   同蘑菇汤 / 铁桶族——maxStackSize 特判）。MaterialIcon 自绘白液桶（§9 原创）。
         int(RecipeRegistry::MilkBucketId),       // 牛奶桶：空桶右键牛挤奶；可饮清效果返空桶；蛋糕原料
         // t1114 空地图 + 填充地图两件（0x290/0x291，牛奶桶之上段尾追加不插中间 = 存档安全铁律）：
-        //   获取面 = 8 纸环合成空地图（罗盘芯 1.4.2+ 面不取）+ 右键激活转填充地图（创造调色板行为
-        //   兜底获取面，同族口径）。全员 maxStack 64 可堆叠（1.0 实读：地图不可堆叠是 12w34a/1.4.2+
-        //   面，翻案留痕见 recipe.h 行 ③——材料段默认零特判）。MaterialIcon 自绘双地图（§9 原创）。
-        int(RecipeRegistry::EmptyMapId),         // 空地图：8 纸环合成；右键激活 → 填充地图
+        //   获取面 = 罗盘+8 纸环合成空地图（[t1128 外部审查翻案]——era jar 定谳罗盘芯 1.0.0 在册，
+        //   见 recipe.h 行 ②）+ 右键激活转填充地图（创造调色板行为兜底获取面，同族口径）。全员
+        //   maxStack 64 可堆叠（1.0 实读：地图不可堆叠是 12w34a/1.4.2+ 面，翻案留痕见 recipe.h 行 ③
+        //   ——材料段默认零特判）。MaterialIcon 自绘双地图（§9 原创）。
+        int(RecipeRegistry::EmptyMapId),         // 空地图：罗盘+8 纸环合成；右键激活 → 填充地图
         int(RecipeRegistry::FilledMapId),        // 填充地图：激活产物；手持显地图 overlay（会话数据集）
         // t1115 苹果 + 金苹果两件（0x292/0x293，填充地图之上段尾追加不插中间 = 存档安全铁律）：获取面 =
         //   橡树叶 1/200 掉苹果（苹果；1.0 口径）+ 8 金锭环+苹果心合成（金苹果；创造调色板行为兜底获取
@@ -1459,7 +1460,7 @@ QString Hotbar::nameForBlock(int blockId) const
         // t1112 牛奶桶（0x28F，村民蛋之上段尾追加）：名面一件（通用描述词，§9 合法）。
         if (blockId == RecipeRegistry::MilkBucketId)       return QStringLiteral("牛奶桶");         // 空桶右键牛挤奶；可饮清效果返空桶；蛋糕原料
         // t1114 空地图 + 填充地图（0x290/0x291，牛奶桶之上段尾追加）：名面两件（通用描述词，§9 合法）。
-        if (blockId == RecipeRegistry::EmptyMapId)         return QStringLiteral("空地图");         // 8 纸环合成；右键激活 → 填充地图
+        if (blockId == RecipeRegistry::EmptyMapId)         return QStringLiteral("空地图");         // 罗盘+8 纸环合成；右键激活 → 填充地图
         if (blockId == RecipeRegistry::FilledMapId)        return QStringLiteral("填充地图");       // 激活产物；手持显地图 overlay；随走随更新
         // t1115 苹果 + 金苹果（0x292/0x293，填充地图之上段尾追加）：名面两件（通用描述词，§9 合法）。
         if (blockId == RecipeRegistry::AppleId)            return QStringLiteral("苹果");           // 橡树叶 1/200 掉落；可食 +4；金苹果合成心
@@ -1612,6 +1613,28 @@ int Hotbar::addStack(int id, int n, int durability, const QVariantList &enchants
                       << " slots=[" << m_slots[0].id << m_slots[1].id << m_slots[2].id << m_slots[3].id
                       << m_slots[4].id << m_slots[5].id << m_slots[6].id << m_slots[7].id << m_slots[8].id << "]";
     return remaining;
+}
+
+// t1128 容量探针（件一空地图激活守卫面；头注 = hotbar.h canFitStack 行）。
+// 容量公式 = Σ 同 id 未满无名槽 (cap - count) + 空槽 × cap（countFreedSelectedSlot=true 再加一格 cap
+// ——选中槽按消耗后腾空计入；caller 须精确传「该槽消耗后确为空」）。与 addStack 的落位次序（先合并
+// 后开新）无关——放置总容量是次序不变量，探针恰为 addStack 全收的充要判据。
+bool Hotbar::canFitStack(int id, int n, bool countFreedSelectedSlot) const
+{
+    if (!isValidItemId(id) || id == 0 || n <= 0) return n <= 0; // 非法 id / 0 件：0 件恒真、非法恒否（addStack 同门守卫）
+    const int cap = maxStackSize(id);
+    int capacity = 0;
+    for (size_t i = 0; i < m_slots.size(); ++i) {
+        const ItemStack &s = m_slots[i];
+        if (s.id == 0) capacity += cap; // 空槽开新栈容量
+        else if (s.id == id && s.customName.isEmpty() && s.count < cap)
+            capacity += cap - s.count;  // 同 id 未满无名槽合并容量（带名不并入——rev2-C5 双向守卫同门）
+    }
+    // countFreedSelectedSlot：选中槽当前非空（持被消耗物）、消耗 1 件后腾空 → 再计一格 cap。
+    if (countFreedSelectedSlot && m_selectedSlot >= 0 && m_selectedSlot < int(m_slots.size())
+        && m_slots[size_t(m_selectedSlot)].id != 0)
+        capacity += cap;
+    return capacity >= n;
 }
 
 // ── t97 主栏 VM 栈操作（27 槽，三菜单共享）──

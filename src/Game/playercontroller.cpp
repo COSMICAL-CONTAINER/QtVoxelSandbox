@@ -5929,16 +5929,30 @@ void PlayerController::placeBlock()
         return; // 睡莲（放置成功 / 水未中 / 非静水）均不再走方块放置路径
     }
     // t1114 空地图激活（机制等价 MC 1.0「地图持于手即开始绘制」的两形态工程面：空地图右键 → 即刻
-    //   变填充地图 + 建库 + 首绘玩家周界中心区）。**实读裁定留痕**（1.0 三面勘误，详注 recipe.h
+    //   产填充地图 + 建库 + 首绘玩家周界中心区）。**实读裁定留痕**（1.0 三面勘误，详注 recipe.h
     //   EmptyMapId 行）：①1.0 无「空地图」独立物品（唯一地图物品 358 合成即得持手即绘；空地图 id
-    //   395 = 1.6+ 面不取）——两形态拆分 = 工程激活链简化（负面钉锁非 1.0 原生面）；②合成无罗盘芯
-    //   （12w34a/1.4.2+ 面不取）；③数据集 = 每会话单份全幅（Beta 1.6-1.7.3「全图共享一份数据」期
-    //   口径 + ItemStack 无 id 外附加面[normalizeDurability 材料段恒 0 实读]——per-map 数据 1.4.2+
-    //   不取）。空地图非方块（材料段）→ 须在 `m_selectedBlock == Air` 守卫之前分流（同桶 / 雪球分支
-    //   模式）；右键无命中要求（激活不依赖视线，同 beginEating 非视线语义）。生存 / 创造同转换
-    //   （创造调色板取的空地图 count 恒 1，转换后仍 1 件不耗）。
+    //   395 = 1.6+ 面不取）——两形态拆分 = 工程激活链简化（负面钉锁非 1.0 原生面）；②合成含罗盘芯
+    //   （[t1128 外部审查翻案]——era jar 定谳罗盘芯 1.0.0 在册，见 recipe.h 行 ②）；③数据集 =
+    //   每会话单份全幅（Beta 1.6-1.7.3「全图共享一份数据」期口径 + ItemStack 无 id 外附加面
+    //   [normalizeDurability 材料段恒 0 实读]——per-map 数据 1.4.2+ 不取）。空地图非方块（材料段）
+    //   → 须在 `m_selectedBlock == Air` 守卫之前分流（同桶 / 雪球分支模式）；右键无命中要求（激活
+    //   不依赖视线，同 beginEating 非视线语义）。
+    //   **[t1128 件一修]** 旧实现 `setStack(选中槽, FilledMap, 1)` 整栈替换——持 N>1 张空地图激活丢
+    //   N-1 张（外部审查 P1）。新面：**只耗 1 张**（takeStack 选中槽 1 件，归 0 清槽）+ 产物填充地图
+    //   **入背包**（addStack 智能放置权威：同 id 合并 → 空槽；canFitStack 容量探针守卫——腾手 credit
+    //   仅在「生存 + 手持恰 1 张」时计入，背包满 → **保守拒绝激活**（原物零动零消耗零产物，era 无
+    //   空地图物品场景不可考，保守面留痕——禁物品凭空消失）。创造：不耗（takeStack 不执行——创造
+    //   资源免扣同全物品族），产物照给（era「持手即绘」的两形态工程承载面，激活仍得填充地图入背包；
+    //   调色板空地图 count 恒 1，不消耗不丢失）。
     if (m_hotbar && m_world && heldItemId == RecipeRegistry::EmptyMapId) {
-        m_hotbar->setStack(m_hotbar->selectedSlot(), int(RecipeRegistry::FilledMapId), 1); // t1114 激活转换行（NEG-2 摘面行——摘行 → 激活腿 r2084a 恰红）
+        const bool creativeMode = (m_mode == Creative);
+        const int heldCnt = m_hotbar->countAt(m_hotbar->selectedSlot());
+        const bool freesHand = !creativeMode && heldCnt == 1; // 生存持 1 张：消耗后腾出选中槽（addStack 可落此格）
+        if (!m_hotbar->canFitStack(int(RecipeRegistry::FilledMapId), 1, freesHand))
+            return; // 保守拒绝：背包满（含腾手仍不可容）→ 激活不发生（原物不动，留痕见上）
+        if (!creativeMode)
+            m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // t1128 激活消耗行（NEG-2 摘面行——摘行 → 消耗族腿 r2098a 恰红；t1114 旧转换行已随件一修撤换）
+        m_hotbar->addStack(int(RecipeRegistry::FilledMapId), 1); // 产物入背包（合并 → 空槽；探针已守卫全收）
         if (m_mapStore && !m_mapStore->hasMap()) {
             m_mapStore->initialize(m_world->width(), m_world->depth()); // 全幅定版（1bpp 单缩放；有限世界全幅先例）
             refreshMapAroundPlayer(kMapInitialRadius);                  // 首绘玩家周界（「即刻绘制中心区域」面）
@@ -7602,6 +7616,13 @@ void PlayerController::scanHoppers(float dt)
 // 机制等价 MC 1.0 酿造循环，每帧推进（dt 累积；连续进度型，无冷却相位）：
 //   (1) 原料空 / 无合格瓶位 → 进度清零静默（MC：无原料或瓶不可酿 → 酿造箭复位）。
 //   (2) 有合格瓶位且 fuelOps<=0 → 补燃 1 燃烬粉（kPowderFuelOps=20，MC 原值）；燃料空 → 不推进。
+//       [t1128 件五 era 定谳注] jar tt=TileEntityBrewingStand 全文（工件 build/t1128_jar_brewing_tile.txt
+//       留痕）：**1.0.0 酿造零燃料面**（零燃料字段 / 零燃料槽 / NBT 仅 BrewTime+Items）——工程燃烬粉
+//       燃料面 = 1.2 期后加面的机制平移，era 忠实性标注失真随本注勘正；纪元勘正候选登记（摘燃料面
+//       须动 store 状态面 + r2067a-d 既钉族 + UI 面三条线，本单不修）。
+//   (2.5) [t1128 件四] 原料身份门：开酿点记录本轮原料 id；进度中 id 变 → 进度清零重开（era tt.b()
+//       k≠id → b=0 同式；同 id 数量变化不清；身份会话态不入存档——era k 不在 NBT，重载首拍复位字节
+//       等价）。详见扫描体内注。
 //   (3) 推进进度 += dt；满 kBrewSecs(20s) → 消耗 1 原料 + 全部合格瓶位原位转换 + 燃料计量 -1
 //       （MC 1.0 原值口径：1 燃烬粉=恰好 20 次酿造操作，一次操作=一批转换全部合格瓶位、与瓶数无关；
 //       计量归零即停追赶——燃料空暂停语义，进度保留、下一 tick 复判由 (2) 补燃接手）。
@@ -7639,6 +7660,26 @@ void PlayerController::scanBrewingStands(float dt)
                                   quint8(idleSt & ~BlockRegistry::BrewingStandStateLitFlag));
             continue;
         }
+        // [t1128 件四] 原料身份门（NEG-1 摘面块——整块移除编译仍绿[progBase 退化 = prog0 旧行为]，
+        //   换料族腿 r2098e 恰红）。era 定谳（jar tt=TileEntityBrewingStand 更新循环 b()，工件
+        //   build/t1128_jar_brewing_tile.txt 留痕）：开酿点 b==0 且 p() → b=600 + **k=原料 item id**
+        //   缓存；b>0 中 **k != a[3].c（id 变）→ b=0**（偏移 54..78）——era 有「本轮原料 id 比对、
+        //   换 id 即进度清零重开」面。工程旧态无比对 → 换料继承旧进度出错误产物（外部审查 BREW-01）。
+        //   同口径面：同 id 增减**数量**不清进度（era 比对仅 item id）；原料身份 = **会话态不入存档**
+        //   （era k 不在 NBT——BrewTime 持久化而 k 不持久化，重进后 k 缺省 0 首拍 ≠ id → 复位，
+        //   工程重载字节等价面如实留痕）。写入守卫：仅 recorded != ing 才写（怠速零信号抖动）。
+        qreal progBase = prog0;
+        {
+            const int recordedIng = m_brewingStore->activeIngredientAt(bx, by, bz);
+            if (prog0 <= 0.0) {
+                if (recordedIng != ing)
+                    m_brewingStore->setActiveIngredient(bx, by, bz, ing); // 开酿点记录本轮原料（era k=id 同点）
+            } else if (recordedIng != ing) {
+                m_brewingStore->setBrewProgress(bx, by, bz, 0.0);          // 换料取消重开（era b=0 同式）
+                m_brewingStore->setActiveIngredient(bx, by, bz, ing);
+                progBase = 0.0;                                            // 本 tick 自零重进（禁旧进度秒完）
+            }
+        }
         const int fuelOps0 = m_brewingStore->fuelOpsAt(bx, by, bz);
         if (fuelOps0 <= 0 && fuelId == RecipeRegistry::BlazePowderId && fuelCnt > 0) {
             // 补燃：燃料槽扣 1 粉 + fuelOps 重置满（MC：计量不足时才烧新粉）。
@@ -7655,8 +7696,9 @@ void PlayerController::scanBrewingStands(float dt)
         const int fuelOps = m_brewingStore->fuelOpsAt(bx, by, bz);
         if (fuelOps <= 0) continue; // 燃料空 → 不推进（进度保留，MC 暂停语义）
         // 推进（钳大 dt 防漏产多产：20s 一轮，大 dt 一次跨满 → while 循环按 20s 步进多轮；
-        //   追加 fuelOpsNow>0 门——计量归零即停追赶，MC 燃料空暂停语义）。
-        qreal prog = prog0 + double(dt);
+        //   追加 fuelOpsNow>0 门——计量归零即停追赶，MC 燃料空暂停语义）。基准 = progBase（件四
+        //   身份门后基准——换料重开时已归零，不再携带旧进度）。
+        qreal prog = progBase + double(dt);
         int fuelOpsNow = fuelOps;
         int ingCntNow = ingCnt;
         bool completed = false;
@@ -7678,7 +7720,11 @@ void PlayerController::scanBrewingStands(float dt)
             } else {
                 m_brewingStore->setSlot(bx, by, bz, si, ing, left, e, nm, dr);
             }
-            // 瓶原位转换（当前原料对该槽位瓶的映射；转换保留瓶栈数量——MC 1.0 瓶槽可堆叠 64，整栈同变）。
+            // 瓶原位转换（当前原料对该槽位瓶的映射；转换保留瓶栈数量——工程瓶槽可堆叠 64，整栈同变。
+            //   [t1128 件五附带核] era 瓶槽口径 = 药水物品 maxStack **1**（jar abk=Item.potion 构造体
+            //   iconst_1 h(I) setMaxStackSize，工件 build/t1128_jar_brewing_tile.txt 留痕；空玻璃瓶
+            //   abo 无特判=64）→ era 槽内恒 1 件药水、1 原料 ≤3 瓶无放大面；工程 64 栈 + 1 原料整栈
+            //   转换 = 放大偏差，候选池登记本单不修——「1.0 瓶槽可堆叠 64」旧注对药水失真随本注勘正）。
             for (int i = 0; i < 3; ++i) {
                 const int bottleId = m_brewingStore->slotIdAt(bx, by, bz, i);
                 const int bottleCnt = m_brewingStore->slotCountAt(bx, by, bz, i);

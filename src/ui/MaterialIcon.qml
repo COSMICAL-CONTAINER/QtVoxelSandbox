@@ -2468,7 +2468,7 @@ Item {
             case 0x28F: drawMilkBucket(); break // 牛奶桶：空桶右键牛挤奶；可饮清效果返空桶；蛋糕原料
             // t1114 空地图 + 填充地图（0x290/0x291，牛奶桶之上段尾追加）：drawMapBlank / drawMapFilled
             //   双自绘（空 = 折叠空白纸面；填充 = 同纸面 + 地形色斑 + 位点白点，读作「已绘制的地图」）。
-            case 0x290: drawMapBlank(); break  // 空地图：8 纸环合成；右键激活 → 填充地图
+            case 0x290: drawMapBlank(); break  // 空地图：罗盘+8 纸环合成（t1128 勘误）；右键激活 → 填充地图
             case 0x291: drawMapFilled(); break // 填充地图：激活产物；手持显地图 overlay；随走随更新
             // t1115 苹果 + 金苹果（0x292/0x293，填充地图之上段尾追加）：drawRedApple / drawGoldenApple
             //   双自绘（同形苹果基座异色——红果食物 / 金壳食物，读作「掉落食物 + 金合成食物」）。

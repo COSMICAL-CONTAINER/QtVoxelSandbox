@@ -1145,16 +1145,18 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         RecipeRegistry::SugarId,      RecipeRegistry::EggId,        RecipeRegistry::SugarId,
         RecipeRegistry::WheatId,      RecipeRegistry::WheatId,      RecipeRegistry::WheatId },
       int(BlockRegistry::Cake), 1, 1, "cake" },
-    // ── t1113 牌子合成面裁定（**派工勘误留痕——配方不交付，degradation 同门 t1111 金苹果**）：
-    //   MC 1.0 sign 配方实读 = 6 木板 2 行 × 3 列满阵 → 1（Alpha 入版原值；「6 → 3」产率是 1.3/12w18a
-    //   改版越基线不取）。**该网格与 1.0 活板门配方模式全等**（6 木板 2×3 → 2，本表 trapdoor 行
-    //   t134 实读在册）——vanilla 自身即是一对同格配方，靠匹配器注册序裁定归属（现代版手工摆 6 板
-    //   2×3 答牌子、活板门被遮于后）。工程匹配器 = 先答先得（matchExact 包围盒归一化 + 首行命中）+
-    //   t802 全表自匹配审计**禁遮蔽行**（任一行须被自身 pattern 答回）→ 两行不可能共存：牌子行注册
-    //   在后永不可达；前置则活板门行被遮蔽 → t802 红。**裁定**：{Planks:6} 2×3 网格归属维持早注册
-    //   的活板门行（追加不插行 + 不动他人行存档纪律），牌子**合成面如实降级候选池**（获取面 = 创造
-    //   调色板双 id 在册），生存链配方待匹配器法演进（配方优先级位 / 同格多产物消歧）后接回。负面钉
-    //   由 r2083a 反证面承载（6 板 2×3 恒答活板门 = 勘误在案）。
+    // ── t1113 牌子合成面裁定（**[t1128 外部审查翻案]**——原裁定「配方不交付降级候选池」随 era jar
+    //   定谳撤销，牌子配方本单补回）：
+    //   era 定谳（jar 反汇编工件 build/t1128_jar_crafting_map_sign.txt 留痕）：1.0.0 sign 配方 =
+    //   字符串样板 "###"/"###"/" X" + #=yy.x(wood 木板) + X=acy.C(stick 木棒) → 1× acy.at(sign 323)
+    //   （字节码偏移 1215..1276，产量 iconst_1——historic「产 3」= 1.3/12w18a 越基线不取，原裁定的
+    //   产量读法维持）。**底行中列 1 木棍在册**——旧裁定段「6 木板 2 行 × 3 列满阵与活板门配方模式
+    //   全等」前提失真（漏读底棍行样板 " X" 解析器补齐为 空-棍-空），「vanilla 靠匹配器注册序消歧、
+    //   两行不可共存」旧论证随之**撤回**：era 真配方与活板门（6 板 2×3 无棍）**不同形**，两行零冲突
+    //   共存（shaped 最小包围盒 3×3 vs 3×2，逐格比对互不遮蔽，t802 全表自匹配审计自洽）。
+    //   交付 = 段尾追加一行（追加不插中间 + 先答先得序与 t802 自洽——牌子行与活板门行不同形无遮蔽），
+    //   降级候选池登记清偿；获取面 = 合成（生存链闭合）+ 创造调色板双 id（原状不动）。r2083a 反证钉
+    //   「6 板 2×3 恒答活板门」语义仍真（活板门行原样幸存），勘误沿革见本注。
 
     // dispenser：7 圆石 + 中心 1 弓 + 底中 1 红石 → 1 发射器（有序 3×3，仅工作台）。机制等价 MC 1.0
     //   dispenser（7 cobble + bow + redstone；顶行圆石 / 中行 圆-弓-圆 / 底行 圆-红石-圆）。审计发现
@@ -1436,23 +1438,28 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
       { int(BlockRegistry::Pumpkin), int(BlockRegistry::Torch), 0, 0, 0, 0, 0, 0, 0 },
       int(BlockRegistry::JackOLantern), 1, 1, "jack_o_lantern" },
     // ── t1114 地图合成一行（表尾追加；机制等价 MC 1.0）──
-    //   8 纸环（中空 3×3）→ 1 空地图（有序 3×3 仅工作台，机制等价 MC 1.0 map 配方 8 paper——
-    //   **罗盘芯 12w34a/1.4.2+ 面实读留痕不取**，勘误裁定见 recipe.h EmptyMapId 行 ②）。
-    //   多重集 {Paper:8} 唯一：全表 8 件环行仅熔炉（8 圆石缺心）与画作（8 棒 + 心毛）与闪烁西瓜
-    //   （8 金粒 + 心片）——异料 shaped 逐格 id 比对不冲突（中心空 + 八纸满环与熔炉同形但 id 全异）。
-    //     [0]=paper [1]=空    [2]=paper
-    //     [3]=paper [4]=空    [5]=paper
-    //     [6]=paper [7]=空    [8]=paper
+    //   **[t1128 外部审查翻案]** era 定谳（jar 反汇编工件 build/t1127_jar_disasm sl=CraftingManager，
+    //   誊录 build/t1128_jar_crafting_map_sign.txt 留痕）：1.0.0 地图配方 = 字符串样板
+    //   "###"/"#X#"/"###" + #=acy.aJ(paper 339) + X=acy.aP(compass 345) → 1× acy.bc(map 358)
+    //   （字节码偏移 3187..3248，**罗盘芯 1.0.0 在册**——旧注「罗盘芯 12w34a/1.4.2+ 面不取」为
+    //   错误记载随本单撤销；12w34a 加入的是独立空地图 id 395 面）。勘误裁定见 recipe.h
+    //   EmptyMapId 行 ②。工程罗盘物品在场（CompassId 0x23F，t567 4 铁锭+红石合成行在册）→
+    //   交付 era 全形：8 纸环 + 罗盘居中 → 1 空地图（有序 3×3 仅工作台）。
+    //   多重集 {Paper:8, Compass:1} 唯一：全表环+心行仅熔炉（8 圆石缺心）与画作（8 棒 + 心毛）与
+    //   闪烁西瓜（8 金粒 + 心片）与金苹果（8 锭 + 心果）——异料 shaped 逐格 id 比对不冲突。
+    //     [0]=paper [1]=paper  [2]=paper
+    //     [3]=paper [4]=罗盘   [5]=paper
+    //     [6]=paper [7]=paper  [8]=paper
     { int(RecipeRegistry::Table3x3), false,
-      { RecipeRegistry::PaperId,  0,                       RecipeRegistry::PaperId,
-        RecipeRegistry::PaperId,  0,                       RecipeRegistry::PaperId,
-        RecipeRegistry::PaperId,  0,                       RecipeRegistry::PaperId },
+      { RecipeRegistry::PaperId,    RecipeRegistry::PaperId,  RecipeRegistry::PaperId,
+        RecipeRegistry::PaperId,    RecipeRegistry::CompassId, RecipeRegistry::PaperId,
+        RecipeRegistry::PaperId,    RecipeRegistry::PaperId,  RecipeRegistry::PaperId },
       RecipeRegistry::EmptyMapId, 1, 1, "empty_map" },
     // ── t1115 金苹果合成一行（表尾追加；机制等价 MC 1.0）──
     //   8 金锭环 + 1 苹果心 → 1 金苹果（有序 3×3 仅工作台；Beta 1.2 金块环初版 → Beta 1.9 pre2 改
     //   8 金锭 + 1 苹果 = 1.0.0 在册形态，本单交付行——勘误裁定见 recipe.h GoldenAppleId 行 ③）。
     //   多重集 {GoldIngot:8, Apple:1} 全表唯一：同形环行异料**逐格 id 比对**不冲突（熔炉 8 圆石缺心 /
-    //   地图 8 纸缺心 / 画作 8 棒+心毛 / 闪烁西瓜 8 金粒+心片——环料异 id + 心片异料，零遮蔽）。
+    //   地图 8 纸+心罗盘[t1128 勘误后形] / 画作 8 棒+心毛 / 闪烁西瓜 8 金粒+心片——环料异 id + 心片异料，零遮蔽）。
     //     [0]=金锭 [1]=金锭 [2]=金锭
     //     [3]=金锭 [4]=苹果 [5]=金锭
     //     [6]=金锭 [7]=金锭 [8]=金锭
@@ -1461,6 +1468,22 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         RecipeRegistry::GoldIngotId, RecipeRegistry::AppleId,       RecipeRegistry::GoldIngotId,
         RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId, RecipeRegistry::GoldIngotId },
       RecipeRegistry::GoldenAppleId, 1, 1, "golden_apple" },
+    // ── t1128 牌子合成一行（表尾追加不插中间；[t1128 外部审查翻案]——t1113 降级裁定的 era jar
+    //   定谳清偿，裁定沿革注见上方 t1113 段）──
+    //   6 木板（顶两行）+ 底行中列 1 木棒 → 1 站牌（有序 3×3 仅工作台；era 样板 "###"/"###"/" X"
+    //   字节读定谳，产量 1——「6 → 3」产率是 1.3/12w18a 越基线不取）。与活板门行（6 板 2×3 无棍，
+    //   本表 t134 行）**不同形零遮蔽**（包围盒 3×3 vs 3×2）——t802 全表自匹配审计自洽（两行各答
+    //   自身 pattern）。经板材族等价回退，云杉木板同合（橡木行兜底——牌子 1.0 仅橡木，云杉板回退
+    //   合入牌子是板材族既定通配口径，t1112 栅栏门同门登记简化）。多重集 {Planks:6, Stick:1} 唯一
+    //   （栅栏门 {Stick:4, Planks:2} / 梯子 {Stick:7} / 活板门 {Planks:6} 均异 → 不冲突）。
+    //     [0]=板 [1]=板 [2]=板
+    //     [3]=板 [4]=板 [5]=板
+    //     [6]=空 [7]=棒 [8]=空
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Planks), int(BlockRegistry::Planks), int(BlockRegistry::Planks),
+        int(BlockRegistry::Planks), int(BlockRegistry::Planks), int(BlockRegistry::Planks),
+        0,                           kStickId,                   0 },
+      int(BlockRegistry::StandingSign), 1, 1, "standing_sign" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。
@@ -1567,8 +1590,9 @@ static_assert(int(BlockRegistry::SandstoneSlab)   == 156, "SandstoneSlab 方块 
 static_assert(int(BlockRegistry::FenceGate)       == 157, "FenceGate 方块 id 须为 157（栅栏门合成行产物锚；段尾追加，t1112）");
 static_assert(int(BlockRegistry::GlassPane)       == 158, "GlassPane 方块 id 须为 158（玻璃板合成行产物锚；段尾追加，t1112）");
 static_assert(int(BlockRegistry::Cake)            == 159, "Cake 方块 id 须为 159（蛋糕合成行产物锚；段尾追加，t1112）");
-// t1113 牌子双 id 编译期互钉（放置形态分流两端同源锚；段尾追加不插中间。合成面降级裁定见配方表
-//   t1113 注——{Planks:6} 2×3 与活板门行模式全等，牌子行不注册）。
+// t1113 牌子双 id 编译期互钉（放置形态分流两端同源锚；段尾追加不插中间。合成面 = 6 板+底中棍
+//   配方行在册 [t1128 外部审查翻案]——旧「{Planks:6} 2×3 与活板门行模式全等、牌子行不注册」裁定
+//   撤销，沿革见配方表 t1113 注重写段）。
 static_assert(int(BlockRegistry::StandingSign)    == 160, "StandingSign 方块 id 须为 160（牌子放置链 canonical id 锚；段尾追加，t1113）");
 static_assert(int(BlockRegistry::WallSign)        == 161, "WallSign 方块 id 须为 161（挂墙牌放置形态分流锚；段尾追加，t1113）");
 static_assert(RecipeRegistry::MilkBucketId        == 0x28F, "MilkBucketId 物品 id 须为 0x28F（蛋糕合成行原料锚；材料段尾追加，t1112）");

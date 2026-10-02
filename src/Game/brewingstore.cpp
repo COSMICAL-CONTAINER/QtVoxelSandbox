@@ -319,6 +319,22 @@ void BrewingStore::setFuelOps(int x, int y, int z, int val)
     emit brewingChanged();
 }
 
+// [t1128 件四] 本轮原料身份读写（引擎面；头注 = brewingstore.h activeIngredientAt 行）。
+// 写入即建条目（同族口径）；身份是会话态——allBrewingStands / loadAll 不携带（era k 不在 NBT 同口径）。
+int BrewingStore::activeIngredientAt(int x, int y, int z) const
+{
+    const auto it = m_stands.find(key(x, y, z));
+    if (it == m_stands.end()) return 0;
+    return it->second.activeIngredient;
+}
+
+void BrewingStore::setActiveIngredient(int x, int y, int z, int ingredientId)
+{
+    m_stands[key(x, y, z)].activeIngredient = ingredientId < 0 ? 0 : ingredientId; // 写入即建条目
+    ++m_revision;
+    emit brewingChanged();
+}
+
 // 引擎键快照（scanBrewingStands 遍历用；HopperStore::hopperKeys 同门——值拷贝防迭代失效）。
 QStringList BrewingStore::standKeys() const
 {
