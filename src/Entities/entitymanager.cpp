@@ -3233,6 +3233,25 @@ void EntityManager::damageEntity(int i, int amount)
     notifyEntitiesChanged();
 }
 
+// t1127 通用治疗单点（契约见头文件声明；t1101 降级载体 mob 效果注入首切片治疗向权威面）：
+//   health += amount 钳 maxHealth（era healEntity 同式——反汇编 nq.a_(I)V：aM += amt; 若 aM > f_()
+//   则 aM = f_()；health≤0 零操作；工件 build/t1127_jar_nq_heal_attack.txt 留痕）。与 damageEntity
+//   对偶：bump revision → QML 血条刷新；**零红闪零击退**（era 治疗无受击呈现——era healEntity 尾段
+//   hurtTime 半闪子面工程缺席，如实降级候选）。空槽 / 非 Mob / dead / amount≤0 防御早退同
+//   damageEntity 门序；已满血早退 = era 钳制式天然 no-op 同口径（零观察变化不 notify，防信号抖动）。
+//   分层（PLAN §2）：与 damageEntity 同层（Entities），只改自身数据，无向下依赖；由 Game 层
+//   （PlayerController::applySplashPotion mob 结算面）调。
+void EntityManager::healEntity(int i, int amount)
+{
+    if (i < 0 || i >= int(m_entities.size())) return;
+    Entity &e = m_entities[size_t(i)];
+    if (!e.alive || e.kind != Mob || e.dead || amount <= 0) return; // 空/尸/非 Mob/负治疗防御（damageEntity 同门）
+    if (e.health >= e.maxHealth) return; // 已满血 → 零观察变化早退（era 钳制式 no-op 同口径）
+    e.health = std::min(e.maxHealth, e.health + amount);
+    qCInfo(lcEnt) << "mob" << i << "healed +" << amount << "->" << e.health << "/" << e.maxHealth;
+    notifyEntitiesChanged();
+}
+
 // t242 攻击射线 vs mob AABB 命中测试（spec「玩家左键攻击生物」前置：选体）。slab-based ray-AABB
 //   对每个活体 mob 的 AABB（pos ± radius 的 1×1×1 立方）求交，取最近命中。dir 须归一（caller
 //   PlayerController::lookDirection 已归一）。跳过 dead（尸体不可打，防鞭尸重复扣血 / 触发多次掉落）

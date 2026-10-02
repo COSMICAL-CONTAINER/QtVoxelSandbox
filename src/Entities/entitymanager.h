@@ -836,6 +836,16 @@ public:
     //   [0, maxHealth]；hurtFlash = kHurtFlashTime（QML 红闪）。health≤0 且未 dead → dead=true + deathTimer=
     //   kDeathTime + emit mobDied（t242 据它掉落）。dead / 非 Mob / 越界 / amount≤0 → 静默早退。bump revision。
     Q_INVOKABLE void damageEntity(int i, int amount);
+    // t1127 通用治疗单点（t1101 降级载体「mob 效果注入系统」首切片——喷溅瞬间族 mob 结算面治疗向）：
+    //   第 i 个活体 mob 回 amount 血，health += amount 钳 maxHealth（机制等价 MC 1.0 EntityLiving.
+    //   healEntity——era 反汇编 nq.a_(I)V：health≤0 零操作 / 加后钳上限；工件
+    //   build/t1127_jar_nq_heal_attack.txt 留痕）。**治疗权威单点注**：通用 mob 治疗只活本面（钳制式
+    //   一处）；healTamedPet（t831）语义有意分立——驯宠喂食**流控门**（满血返 false 驱动 caller 繁殖
+    //   分支），非通用治疗入口，不动（行为腿 section03 在守）。dead / 非 Mob / 越界 / amount≤0 /
+    //   已满血 → 静默早退（满血早退 = era 钳制式天然 no-op 同口径，零观察变化不 notify）。**零红闪
+    //   零击退**（era 治疗无受击呈现——hurtTime 半闪子面工程缺席，如实降级候选）。bump revision →
+    //   QML 血条刷新（healthAt 读口家族）。Q_INVOKABLE 同 damageEntity 双入口纪律（调试 / 矩阵直驱）。
+    Q_INVOKABLE void healEntity(int i, int amount);
     // t485 TNT 方块爆炸（playercontroller scanTntTraps 触发——玩家踩压力板、板下垫 TNT 即引爆时调）。机制等价
     //   MC 1.0 TNT 爆炸：以 (x,y,z) TNT 格为中心、kExplosionRadius 为半径的球内破坏方块（destroySphereSilent
     //   一次收口 N 写 + 1 次 refloodBox + 1 次 worldChanged + 1 次 clearAllDirty，同 Stalker t320 批量收口模式）
