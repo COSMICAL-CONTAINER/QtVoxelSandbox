@@ -1284,6 +1284,13 @@ add_executable(redstone_matrix_test
     #   腿族按结局交付——剖析/等价/结构钉面，自建 fresh sparse 小世界族 + 真线程 worker，
     #   rig 世界零接触）。
     tools/matrix/section89_adopt_cost_t1126.cpp
+    # t1127 喷溅瞬间族 mob 结算面探针段（置尾先例沿用：runAll 末执行，filter 词 r2097；4 腿
+    #   r2097a-d = mob 结算柱[非亡灵伤害/治疗恰值带 + 钳上限 + 创造门 + 水瓶/尸体零结算 + 既有
+    #   死亡链承接 + NEG-1 摘面行本腿钉] / 投掷碰撞柱[真 rig 命中实体/触地双碎裂沿恰值 + 瓶体零
+    #   直伤面] / 反转柱[undead 三族双向恰值 + 反转致死死亡链 + NEG-2 判定行本腿钉] / 结构钉族
+    #   [heal 权威面 + 钳制式双子恰两 + 亡灵谓词单一 + 半径零泄漏负面钉 + CMake+QML 门——NEG 双
+    #   摘面豁免不钉]。行为腿真链 pc / 投掷瓶 rig fresh 小世界族，rig 世界零接触）。
+    tools/matrix/section90_splash_mob_t1127.cpp
     src/Game/signboardfont.cpp
     src/Game/signboardfont.h
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
