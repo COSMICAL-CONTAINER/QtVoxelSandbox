@@ -1272,6 +1272,14 @@ add_executable(redstone_matrix_test
     #   注 + 相邻族结构钉复钉]。行为腿自建 fresh sparse 小世界族 + 真线程 worker，rig 世界零
     #   接触）。
     tools/matrix/section87_stream_pacing_t1124.cpp
+    # t1125 小件合集探针段（置尾先例沿用：runAll 末执行，filter 词 r2095；4 腿 r2095a-d =
+    #   治疗饮用柱[真链喝满恰 6HP 勘正面 + 金苹果零波及 + 常量行/发行行钉 + era 锚 raw 钉] /
+    #   喷溅新带柱[直落恰 5 + 直调带 5/4/3/1/0 + 创造门 + 零快照 + NEG-1 摘面行本腿钉] /
+    #   件二裁定锚柱[南瓜灯 152 全槽拒 + 152 注入不压制 + 三面南瓜独行钉 + 守卫行钉——era 四问
+    #   零代码收口] / 结构钉族 + 措辞勘正 raw 面[CMake 行/邻族钉/6HP 四文件措辞/section85
+    #   erratum 锚]——NEG 双摘面豁免不钉。行为腿真链 pc / drop / 瞪视 rig fresh 小世界族，
+    #   rig 世界零接触）。
+    tools/matrix/section88_heal_value_jack_t1125.cpp
     src/Game/signboardfont.cpp
     src/Game/signboardfont.h
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =

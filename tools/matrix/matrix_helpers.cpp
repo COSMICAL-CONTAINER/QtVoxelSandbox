@@ -227,7 +227,8 @@ void MatrixRun::runAll()
                               //   酿造转换柱[转正两对经 brewResult + 门行序 + 真驱 + 饮面回归 +
                               //   物品三面 + NEG-1 摘面行本腿钉]，r2090b 投掷 + 即时疗效柱[真 rig
                               //   创造掷喷溅水瓶恰一次碎裂零效果 + 生存耗 1 + 直落瞬间治疗满档
-                              //   healed 4 + 直调缩放档 2/1/0 + 创造门 + 零效果快照 + NEG-2 摘面
+                              //   healed 5 + 直调缩放档 4/3/1/0[t1125 勘正 6<<level lawful 修订] +
+                              //   创造门 + 零效果快照 + NEG-2 摘面
                               //   行本腿钉]，r2090c 炼药锅裁定锚柱[空桶右键满锅无效应 + 雨态 tick
                               //   双态水位恒定 + 瓶取/桶灌复绿 + 裁定注锚 + 降水权威三行源钉]，
                               //   r2090d 结构钉族[段位/枚举尾/映射行/呈现三面/CMake/负面禁出钉——
@@ -259,6 +260,13 @@ void MatrixRun::runAll()
                               //   动行本腿钉]，r2094c 结构钉族 + r2094d 幸存复核/沿革锚柱——NEG 双
                               //   摘面豁免不钉。自建 fresh sparse 小世界族 + 真线程 worker，rig
                               //   世界零接触，接 section86）
+    section88_heal_value_jack_t1125(); // t1125 小件合集探针段（置尾先例沿用：r2095a 治疗饮用柱
+                              //   [真链喝满恰 6HP 勘正面 + 金苹果零波及 + 常量行钉 + era 锚 raw 钉]，
+                              //   r2095b 喷溅新带柱[直落恰 5 + 直调带 5/4/3/1/0 + 创造门 + NEG-1 摘
+                              //   面行本腿钉]，r2095c 件二裁定锚柱[152 全槽拒 + 152 注入不压制 +
+                              //   三面南瓜独行钉 + 守卫行钉——era 四问零代码收口]，r2095d 结构钉族 +
+                              //   措辞勘正 raw 面——NEG 双摘面豁免不钉。行为腿真链 pc / drop / 瞪视
+                              //   rig fresh 小世界族，rig 世界零接触，接 section87）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";
