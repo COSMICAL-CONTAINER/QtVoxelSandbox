@@ -763,7 +763,7 @@ QVariantList Hotbar::creativeMaterials() const
         int(RecipeRegistry::RegenerationPotionId),   // 再生药水：每 2.5s 回 1HP 45s
         int(RecipeRegistry::PoisonPotionId),         // 中毒药水：每 1.25s 扣 1HP 45s 不致死
         int(RecipeRegistry::WeaknessPotionId),       // 虚弱药水：近战 -4/级 90s
-        int(RecipeRegistry::InstantHealthPotionId),  // 瞬间治疗药水：饮毕即回 4HP（无持续）
+        int(RecipeRegistry::InstantHealthPotionId),  // 瞬间治疗药水：饮毕即回 6HP（无持续；t1125 jar 实证 6<<level 勘正，旧 4 = 现代口径）
         // t1100 延长药水族六件（0x275..0x27A，瞬间治疗之上段尾追加不插中间 = 存档安全铁律）：
         //   延长版获取面 = 二级酿造（成品药水 + 红石粉），创造调色板行为唯一兜底获取面（同族口径）。
         int(RecipeRegistry::ExtendedSpeedPotionId),          // 迅捷药水（延长）：迅捷 + 红石；8:00
@@ -1422,7 +1422,7 @@ QString Hotbar::nameForBlock(int blockId) const
         if (blockId == RecipeRegistry::RegenerationPotionId)   return QStringLiteral("再生药水");   // 粗制+幽灵泪；每 2.5s 回 1HP 45s
         if (blockId == RecipeRegistry::PoisonPotionId)         return QStringLiteral("中毒药水");   // 粗制+蜘蛛眼；每 1.25s 扣 1HP 45s
         if (blockId == RecipeRegistry::WeaknessPotionId)       return QStringLiteral("虚弱药水");   // 粗制+发酵蛛眼；近战 -4/级 90s
-        if (blockId == RecipeRegistry::InstantHealthPotionId)  return QStringLiteral("瞬间治疗药水"); // 粗制+闪烁西瓜；饮毕即回 4HP
+        if (blockId == RecipeRegistry::InstantHealthPotionId)  return QStringLiteral("瞬间治疗药水"); // 粗制+闪烁西瓜；饮毕即回 6HP（t1125 勘正）
         // t1100 延长药水族（0x275..0x27A）：名面六件 = 基础名 +「（延长）」后缀（通用描述词，§9 合法）。
         if (blockId == RecipeRegistry::ExtendedSpeedPotionId)          return QStringLiteral("迅捷药水（延长）");
         if (blockId == RecipeRegistry::ExtendedStrengthPotionId)       return QStringLiteral("力量药水（延长）");

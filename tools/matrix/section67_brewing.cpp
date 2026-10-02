@@ -791,8 +791,10 @@ void MatrixRun::section67_brewing()
     //   NEG-2（摘 finishEating t1099 else-if 分流块）→ 恰红 = {r2069b}：虚弱快照 + 瞬间治疗回血断言
     //   全失；a（静态表 / 真驱，不经 finishEating）/ c（applyStatusEffect 直调）/ d（源钉不钉分流块——
     //   NEG-2 豁免面）均不受影响。
+    //   [t1125 lawful 修订：瞬间治疗 I 级 jar 实证 6<<level 勘正 4→6（era-first，t1115 先例同门）——
+    //   饮面断言 4→6 与腿文 four-point→six-point 随行，常量行钉同批修订]
     runLeg("r2069b round-two drink chain behavior column (a real survival player drinking the instant"
-        " health potion through the full eat chain emits exactly one four-point heal with no"
+        " health potion through the full eat chain emits exactly one six-point heal with no"
         " persistent effect entry left in the snapshot and one empty bottle returned, and drinking"
         " the weakness potion raises the weakness effect on the active-effects snapshot at level one"
         " with the ninety-second caliber while consuming one potion)", [&]() {
@@ -853,7 +855,7 @@ void MatrixRun::section67_brewing()
         lastSize = -1;
         pc.tick(); // 一帧推进 → 快照刷新（瞬间治疗不应产生任何持续项）
         const bool instantOk = eatingStarted
-                               && healedCount - healedBase == 1 && healedSum == 4 // 恰一次 4HP
+                               && healedCount - healedBase == 1 && healedSum == 6 // 恰一次 6HP（t1125 勘正 4→6，jar 实证 6<<level）
                                && lastSize <= 0 // 无 timer → 快照恒空（空→空不发信号，lastSize 留 -1 同过）
                                && bottlesA == 1; // 返 1 空瓶
         ok = ok && instantOk;
@@ -884,7 +886,7 @@ void MatrixRun::section67_brewing()
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
             << "| r2069b round-two drink chain behavior column (a real survival player drinking the instant"
-               " health potion through the full eat chain emits exactly one four-point heal with no"
+               " health potion through the full eat chain emits exactly one six-point heal with no"
                " persistent effect entry left in the snapshot and one empty bottle returned, and drinking"
                " the weakness potion raises the weakness effect on the active-effects snapshot at level one"
                " with the ninety-second caliber while consuming one potion)"
@@ -1059,7 +1061,7 @@ void MatrixRun::section67_brewing()
                             && PlayerController::kPoisonPotionDurationSec == 45.0f
                             && PlayerController::kWeaknessDurationSec == 90.0f
                             && PlayerController::kWeaknessMeleePenaltyPerLevel == 4.0f
-                            && PlayerController::kInstantHealthHealHp == 4
+                            && PlayerController::kInstantHealthHealHp == 6 // t1125 勘正 4→6（jar 实证 6<<level）
                             && PlayerController::kPotionDurationSec == 180.0f
                             && PlayerController::kSpeedBoostPerLevel == 0.20f
                             && PlayerController::kStrengthBonusPerLevel == 1.30f
@@ -1113,7 +1115,10 @@ void MatrixRun::section67_brewing()
         const QStringList missPcH = pinSet(srcRoot + QStringLiteral("/Game/playercontroller.h"), {
             SrcPin("regen interval", "static constexpr float kRegenPotionIntervalSec = 2.5f;", 1),
             SrcPin("weak penalty", "static constexpr float kWeaknessMeleePenaltyPerLevel = 4.0f;", 1),
-            SrcPin("instant heal", "static constexpr int   kInstantHealthHealHp = 4;", 1),
+            // [t1125 lawful 修订] 常量行钉 4→6：era-first 勘正（1.0 jar 字节码实证即时两族同式
+            //   6<<level，t1115 golden apple 1.0 原值先例同门）；旧 4 = 现代 wiki 口径沿革见
+            //   playercontroller.h 常量行注与 applySplashPotion 头注 t1125 段。
+            SrcPin("instant heal", "static constexpr int   kInstantHealthHealHp = 6;", 1),
             SrcPin("fire res member", "float m_fireResTimer = 0.0f;", 1),
             SrcPin("regen member", "float m_regenPotionTimer = 0.0f;", 1)});
         const QStringList missPc = pinSet(srcRoot + QStringLiteral("/Game/playercontroller.cpp"), {
@@ -1481,7 +1486,7 @@ void MatrixRun::section67_brewing()
                             && PlayerController::kRegenPotionDurationSec == 45.0f
                             && PlayerController::kPoisonPotionDurationSec == 45.0f
                             && PlayerController::kWeaknessDurationSec == 90.0f
-                            && PlayerController::kInstantHealthHealHp == 4
+                            && PlayerController::kInstantHealthHealHp == 6 // t1125 勘正 4→6（jar 实证 6<<level）
                             && BrewingStore::kPowderFuelOps == 20
                             && BrewingStore::kBrewSecs == 20.0;
         ok = ok && consts;
@@ -2039,7 +2044,7 @@ void MatrixRun::section67_brewing()
                             && PlayerController::kRegenExtPotionDurationSec == 90.0f
                             && PlayerController::kPoisonExtPotionDurationSec == 90.0f
                             && PlayerController::kWeaknessExtDurationSec == 240.0f
-                            && PlayerController::kInstantHealthHealHp == 4
+                            && PlayerController::kInstantHealthHealHp == 6 // t1125 勘正 4→6（jar 实证 6<<level）
                             && BrewingStore::kPowderFuelOps == 20
                             && BrewingStore::kBrewSecs == 20.0;
         ok = ok && consts;

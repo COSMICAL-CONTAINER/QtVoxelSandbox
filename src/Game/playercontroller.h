@@ -635,7 +635,13 @@ public:
     static constexpr float kPoisonPotionDurationSec = 45.0f; // 中毒药水时长（MC 1.0 poison 0:45）
     static constexpr float kWeaknessDurationSec = 90.0f;     // 虚弱时长（MC 1.0 weakness 1:30）
     static constexpr float kWeaknessMeleePenaltyPerLevel = 4.0f; // 虚弱近战减伤（MC 1.0 近战伤害 -4/级）
-    static constexpr int   kInstantHealthHealHp = 4;         // 瞬间治疗饮毕即回血量（MC 1.0 instant health I = 2 心 = 4HP）
+    //   [t1125 勘正 4→6]：era-first 纪律复核——官方 1.0.0 client jar 字节码实证即时两族**同式
+    //   6<<level**（abg 类 a(nq,nq,int,double) 路径：dload potency × bipush 6 × iload level ishl +
+    //   0.5 dadd d2i → heal 发行；反汇编工件 build/t1125_jar_abg.txt 与 build/t1125_jar_disasm/ 留痕），
+    //   t1122 jar 旁证注经主控全权裁定勘正执行（t1115 golden apple 1.0 原值先例同门：era 真值优先，
+    //   偏差才需要登记）；旧值 4 = 现代 wiki I 级口径（t1097-era 交付早于 era-取证纪律成熟），沿革
+    //   全链注见 applySplashPotion 头注 t1122 段。饮用 / 喷溅两消费面经本常量自动跟随。
+    static constexpr int   kInstantHealthHealHp = 6;         // 瞬间治疗饮毕即回血量（MC 1.0 instant health I = 3 心 = 6HP；t1125 jar 实证 6<<level 勘正）
     // t1122 瞬间伤害常量（MC 1.0 原值；public = 矩阵探针直读面，t1099 同门）：官方 1.0.0 client jar
     //   字节码实证即时施放路径 `attackEntityFrom(DamageSource.magic, 6 << amplifier)`——伤害基值 6
     //   （3 心，I 级），与瞬间治疗 4 不对称（jar 核实留痕见 recipe.h 0x296 注）。喷溅即时分支同式

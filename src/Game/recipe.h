@@ -525,7 +525,7 @@ public:
     static constexpr int RegenerationPotionId   = 0x271; // 再生药水：粗制 + 幽灵泪；每 2.5s 回 1HP 45s（MC 1.0 regeneration 0:45）
     static constexpr int PoisonPotionId         = 0x272; // 中毒药水：粗制 + 蜘蛛眼；每 1.25s 扣 1HP 45s 不致死（MC 1.0 poison 0:45）
     static constexpr int WeaknessPotionId       = 0x273; // 虚弱药水：粗制 + 发酵蛛眼；近战 -4/级 90s（MC 1.0 weakness 1:30）
-    static constexpr int InstantHealthPotionId  = 0x274; // 瞬间治疗药水：粗制 + 闪烁西瓜；饮毕即回 4HP（2 心，I 级）无持续
+    static constexpr int InstantHealthPotionId  = 0x274; // 瞬间治疗药水：粗制 + 闪烁西瓜；饮毕即回 6HP（3 心，I 级；t1125 jar 实证 6<<level 勘正）无持续
     // t1100 延长药水族（材料段 0x275..0x27A，瞬间治疗 0x274 之上**段尾追加**不插中间 = 存档安全铁律）：
     //   机制等价 MC 1.0 红石 modifier 二级酿造——成品效果药水 + 红石粉 → 对应延长版（时长 ×8/3 档原值，
     //   见 playercontroller.h 延长常量族逐链 wiki 核实留痕）。映射单一权威 = BrewingStore::extendedPotion
