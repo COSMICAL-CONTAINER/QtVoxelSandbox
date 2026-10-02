@@ -274,6 +274,11 @@ void MatrixRun::runAll()
                               //   a-d 腿族 = mob 结算柱 / 投掷碰撞柱 / 反转柱 / 结构钉族，
                               //   行为腿真链 pc / 投掷瓶 rig fresh 48×48×96 s92..94 小世界族，
                               //   rig 世界零接触，接 section89）
+    section91_interact_fix_t1128(); // t1128 交互正确性批探针段（置尾先例沿用：r2098
+                              //   a-f 腿族 = 激活四场景柱 / 配方勘误柱 / 牌子合成柱 /
+                              //   牌子全回路柱 / 换料柱 / 结构钉族，行为腿真链 pc /
+                              //   rig fresh 48×48×96 s95..97 小世界族，rig 世界零接触，
+                              //   接 section90）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";
