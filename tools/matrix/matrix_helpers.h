@@ -813,4 +813,7 @@ private:
                               //   行/邻族钉/6HP 四文件措辞/section85 erratum 锚]——NEG 双摘面豁免
                               //   不钉。行为腿真链 pc / drop / 瞪视 rig fresh 小世界族，rig 世界零
                               //   接触，接 section87）
+    void section89_adopt_cost_t1126(); // t1126 单 adopt 成本剖析/削减探针段（置尾先例沿用：
+                              //   r2096 腿族自建 fresh sparse 小世界族 + 真线程 worker，rig
+                              //   世界零接触，接 section88）
 };

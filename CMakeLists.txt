@@ -1280,6 +1280,10 @@ add_executable(redstone_matrix_test
     #   erratum 锚]——NEG 双摘面豁免不钉。行为腿真链 pc / drop / 瞪视 rig fresh 小世界族，
     #   rig 世界零接触）。
     tools/matrix/section88_heal_value_jack_t1125.cpp
+    # t1126 单 adopt 成本剖析/削减探针段（置尾先例沿用：runAll 末执行，filter 词 r2096；
+    #   腿族按结局交付——剖析/等价/结构钉面，自建 fresh sparse 小世界族 + 真线程 worker，
+    #   rig 世界零接触）。
+    tools/matrix/section89_adopt_cost_t1126.cpp
     src/Game/signboardfont.cpp
     src/Game/signboardfont.h
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =
