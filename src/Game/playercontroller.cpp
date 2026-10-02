@@ -3969,11 +3969,73 @@ float PlayerController::splashBaseSeconds(int itemId)
 //   d1=0.875 → 5 / d1≈0.25 → 2 / d1 < 1/12 → 0）；magicDamageTaken 独立链发行（绕甲不磨甲 + 可致死
 //   + 死因透传 Magic——1.0 death.magic jar 实证留痕见 recipe.h 0x296 注）与饮用面同沿；Survival 门
 //   内联同门；出圈 / 无世界静默同口径。
+//   [t1127 扩 mob 结算分支]：t1101 降级载体「mob 效果注入系统」首切片——**喷溅瞬间族 mob 结算面**
+//   （治疗 / 伤害两即时效果；时长族效果 mob 面仍为 t1101 登记降级候选，本切片不触）。era 取证
+//   （官方 1.0.0 client jar 全量反汇编工件 build/t1127_jar_potion_ab.txt / t1127_jar_abg_instant.txt /
+//   t1127_jar_nq_heal_attack.txt 留痕）：①喷溅命中面 = EntityPotion.onImpact（ab.a(gv)）半径内
+//   **全部活体**（getEntitiesWithinAABB(nq/EntityLiving, AABB expand(4,2,4))，dSq<16——含 mob 与玩家，
+//   直接命中实体 d1=1.0 子面工程信号未携带命中者，如实降级候选）；②亡灵反转真值 = Potion.a
+//   （abg.a(nq,nq,int,double)）：heal×非亡灵→healEntity / heal×亡灵→attackEntityFrom(magic) /
+//   harm×非亡灵→attackEntityFrom(magic) / harm×亡灵→healEntity，amt=(int)(d×(6<<amp)+0.5) 半进位
+//   同式两向对称；③mob 数值面 = magic 伤**绕甲**（pm.h() 置旁甲旗 n → nq.c 盔甲段跳过；工程 mob
+//   无甲减免面 = 全链生伤直扣，殊途同归）+ 治疗钳上限（nq.a_(I)V healEntity）；致死走既有死亡链
+//   （damageEntity→deathTimer→mobDied 掉落 / Slime 分裂自然承接，零新码）；④投掷碰撞面 = 弹丸
+//   命中实体 / 触地**同一 onImpact 单点结算**（工程 SplashBottle tick 命中 mob / 触地同沿单发
+//   splashBottleBreak，mob 结算挂碎裂沿与玩家面并行同构——选型留痕）。**半径 / 衰减 / 基值 / 半进位
+//   与玩家面同函数分域同源**（kSplashRadiusBlocks / kInstant*Hp / int(d1×base+0.5) 单一权威零复制；
+//   目标坐标 = mob 脚位到命中格中心，与玩家脚位同基——era 为 AABB 最近点距，工程取中心距与玩家
+//   面家族一致，如实登记）；亡灵判定 = EntityManager::isUndeadFamily 单一权威谓词（review0830 #26，
+//   名册 {Shambler, Bones, BabyShambler} 与 era nq.av()Z 覆写族 {僵尸, 骷髅, 僵尸猪人} 在本工程
+//   mob 集上等价——本面**不**新抄名册）；**创造门不在 mob 面**（era 投掷者模式不参与 mob 结算——
+//   创造投掷照常伤 mob，与玩家自伤面创造无敌门分域不冲突）。era attackEntityFrom 有 hurtTime 差额
+//   窗（magic 不豁免）——工程 mob 无免疫帧面（damageEntity 直扣，全 mob 伤害路径通用降级面，非本
+//   切片新增缺口），如实登记候选。结算次序 mob 先于玩家（era 逐实体遍历无观察面差异——本函数
+//   玩家段既有行零移动）。
 void PlayerController::applySplashPotion(int cx, int cy, int cz, int itemId)
 {
     if (!m_world) return;
     if (!isSplashPotionItem(itemId)) return; // 喷溅族单一权威谓词（含 t1120 两件；非喷溅 id 静默）
     const int eff = splashEffectType(itemId);
+    // [t1127 mob 结算分支——t1101 降级载体「mob 效果注入系统」首切片：喷溅瞬间族 mob 结算面]。
+    //   机制等价 MC 1.0 EntityPotion.onImpact 全活体结算 + Potion.a 亡灵反转（era 头注本函数四步留痕）。
+    //   半径 / 邻近衰减 / 基值 / 半进位与玩家面**同函数分域同源**（kSplashRadiusBlocks / kInstant*Hp /
+    //   int(d1×base+0.5) 单一权威零复制）；逐 mob 距离 = mob 脚位（posAt，lessons「pos 存脚底中心」
+    //   契约）到命中格中心（玩家面同基同式）。仅即时两族入本面（时长族 mob 面仍为 t1101 降级候选）；
+    //   EffectNone（喷溅水瓶）在玩家段既有早退，mob 面同静默（era 无效果表零结算同口径）。
+    if ((eff == PlayerState::EffectInstantHeal || eff == PlayerState::EffectInstantDamage)
+        && m_entityManager) {
+        const int baseHp = (eff == PlayerState::EffectInstantHeal) ? kInstantHealthHealHp
+                                                                   : kInstantDamageHurtHp; // 即时两族同基值 6（t1125 勘正同源）
+        const int mobSlots = m_entityManager->count(); // 槽快照上界（结算内 re-entry 增员不入本轮——t1107 槽位契约）
+        for (int i = 0; i < mobSlots; ++i) {
+            // 活体 mob 门（尸体不结算——era attackEntityFrom / healEntity 双 health≤0 免疫同口径）。
+            //   逐槽 fresh accessor（damageEntity / healEntity 内 notify 即重入边界，不持引用跨调——
+            //   t583 / t1107 纪律）。
+            if (!m_entityManager->aliveAt(i)
+                || m_entityManager->kindAt(i) != int(EntityManager::Mob)
+                || m_entityManager->deadAt(i))
+                continue;
+            const QVector3D mobPos = m_entityManager->posAt(i);
+            const float mdx = mobPos.x() - (float(cx) + 0.5f);
+            const float mdy = mobPos.y() - (float(cy) + 0.5f);
+            const float mdz = mobPos.z() - (float(cz) + 0.5f);
+            const float mdist = std::sqrt(mdx * mdx + mdy * mdy + mdz * mdz);
+            if (mdist >= kSplashRadiusBlocks)
+                continue; // 出圈（d1 ≤ 0）→ 零结算（玩家面同界同源——MC 半径 4 格硬界）
+            const float md1 = 1.0f - mdist / kSplashRadiusBlocks; // 邻近线性衰减（玩家面同式）
+            const int amt = int(md1 * float(baseHp) + 0.5f); // MC 1.0 (int)(potency×6+0.5) 半进位同式两向对称
+            if (amt <= 0)
+                continue; // 零疗效 no-op（era dSq<16 界内零值依赖 no-op 面——工程显式门等价无副作用差）
+            // 亡灵反转（era Potion.a 真值：heal×亡灵 / harm×非亡灵 → magic 伤；余 → 治疗）。判定走
+            //   EntityManager::isUndeadFamily 单一权威谓词——本面不新抄亡灵名册（review0830 #26 同门）。
+            const bool undead = EntityManager::isUndeadFamily(m_entityManager->mobTypeAt(i));
+            const bool healDirection = (eff == PlayerState::EffectInstantHeal) != undead;
+            if (healDirection)
+                m_entityManager->healEntity(i, amt); // 治疗向：治疗×非亡灵 / 伤害×亡灵 → 钳上限单点（heal 权威面）
+            else
+                m_entityManager->damageEntity(i, amt); // 伤害向：治疗×亡灵 / 伤害×非亡灵 → magic 直扣（绕甲——era pm.n 旁甲旗；工程 mob 无甲减免面同归）；致死走既有死亡链
+        }
+    }
     // 命中格中心（Entities 层 floor 口径 +0.5）到玩家脚位的欧氏距（MC getDistanceSqToEntity 口径，
     //   玩家 pos = 脚底中心——lessons「pos 存脚底中心」契约）。
     const float dx = m_pos.x() - (float(cx) + 0.5f);
