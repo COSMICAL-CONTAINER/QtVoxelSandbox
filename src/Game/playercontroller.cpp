@@ -3951,15 +3951,18 @@ float PlayerController::splashBaseSeconds(int itemId)
 //   影响）。
 //   [t1120 扩即时效果分支]：EffectNone（喷溅水瓶）→ 零效果注入静默返（破裂粒子 / 音由呈现层路由完成，
 //   机制面无操作）；EffectInstantHeal（喷溅瞬间治疗）→ **即时效果分支**（无时长不挂 applyStatusEffect，
-//   MC 1.0 instant potion 走 affectEntity 直结）——治疗基值 kInstantHealthHealHp=4（I 级 2 心，同饮用
-//   面常量），疗效按邻近系数缩放：healHp = int(d1 × 4 + 0.5)（**取整口径核实留痕**：MC 1.0 Potion::
-//   affectEntity 的 (int)(potency × (4 << level) + 0.5) 截断式 = 四舍五入半进位，中心 d1=1 → 4 /
-//   d1=0.5 → 2 / d1≈0.375 → 2 / d1≈0.125 → 1〔t1122 触面修正：原注「→ 0」算术滑记，按 audit 25
-//   F3 next-touch 先例修正〕；**t1122 jar 旁证注**：官方 1.0.0 client jar 字节码实证即时两族同式
-//   6<<level（abg 类 a(nq,nq,int,double) 路径）——治疗面交付值 4 = 现代 wiki I 级口径如实并档不翻案，
-//   伤害面 jar 与 wiki 同值 6 见下）；Survival 门内联（饮用面 :3074 同门——创造无敌不注入）；
-//   healed 信号链与饮用面同沿（PlayerState::heal 的 amount≤0 早退 = 零疗效 no-op 天然安全）。出圈静默 /
-//   无世界静默全同既有口径。
+//   MC 1.0 instant potion 走 affectEntity 直结）——治疗基值 kInstantHealthHealHp=6（I 级 3 心，同饮用
+//   面常量；**t1125 勘正 4→6 已执行**：官方 1.0.0 client jar 字节码实证即时两族同式 6<<level——abg 类
+//   a(nq,nq,int,double) 路径 (int)(d × (6<<level) + 0.5) 半进位后 heal 发行〔反汇编工件
+//   build/t1125_jar_abg.txt 留痕〕，t1122 jar 旁证注「如实并档不翻案」经主控全权裁定升级为勘正执行，
+//   t1115 golden apple 1.0 原值先例同门；旧值 4 = 现代 wiki I 级口径，t1097-era 交付早于 era-取证纪律
+//   成熟——沿革如实登记），疗效按邻近系数缩放：healHp = int(d1 × 6 + 0.5)（**取整口径核实留痕**：MC
+//   1.0 Potion::affectEntity 的 (int)(potency × (6 << level) + 0.5) 截断式 = 四舍五入半进位，逐档实算
+//   d1=1 → 6 / d1=0.875 → 5 / d1=0.75 → 5 / d1=0.625 → 4 / d1=0.5 → 3 / d1=0.375 → 2 / d1=0.25 → 2 /
+//   d1=0.125 → 1〔t1125 新带推导：rig 几何带 24/25/26/27/29 格 = 5/4/3/1/0 见 section88 r2095b；
+//   旧 4 值带 4/3/2/1/0 退役，t1122 触面算术滑记修正注随旧带同撤〕；伤害面 jar 与 wiki 同值 6 见下）；
+//   Survival 门内联（饮用面 :3074 同门——创造无敌不注入）；healed 信号链与饮用面同沿
+//   （PlayerState::heal 的 amount≤0 早退 = 零疗效 no-op 天然安全）。出圈静默 / 无世界静默全同既有口径。
 //   [t1122 扩即时伤害分支]：EffectInstantDamage（喷溅瞬间伤害）→ **即时效果分支镜像**（治疗分支旁
 //   同门）——伤害基值 kInstantDamageHurtHp=6（I 级 3 心；官方 1.0.0 jar 字节码实证 6<<level，现代
 //   wiki 同值——伤害面 era 无歧义），dmgHp = int(d1 × 6 + 0.5) 半进位同式（中心 d1=1 → 6 /
@@ -3982,7 +3985,7 @@ void PlayerController::applySplashPotion(int cx, int cy, int cz, int itemId)
     if (eff == 0)
         return; // 喷溅水瓶（EffectNone）：零状态效果注入——破裂面由呈现层粒子 / 音路由，机制面无操作
     if (eff == PlayerState::EffectInstantHeal) { // t1120 即时效果分支（t1120 NEG-2 摘面行本腿持有）
-        const int healHp = int(d1 * float(kInstantHealthHealHp) + 0.5f); // MC 1.0 (int)(potency×4+0.5) 半进位
+        const int healHp = int(d1 * float(kInstantHealthHealHp) + 0.5f); // MC 1.0 (int)(potency×6+0.5) 半进位（t1125 勘正 4→6 同式）
         if (m_mode == Survival)
             emit healed(healHp); // 饮用面 :3074 同沿（PlayerState::heal 零值早退安全）
         return; // 即时效果不落 applyStatusEffect 时长链（无 timer 不入快照——MC 口径）

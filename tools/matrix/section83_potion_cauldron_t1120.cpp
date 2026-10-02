@@ -16,9 +16,12 @@
 //   件二 喷溅瞬间治疗(SplashInstantHealthPotionId 0x295 段尾追加):**era 确证交付**——同批首两面之一
 //     (splash potion of healing);瞬间治疗 + 火药自 t1101 既录负例转正。结算面 = applySplashPotion 扩
 //     **即时效果分支**:无时长(splashBaseSeconds 显式返 0),疗效按邻近系数缩放 d1 = 1 − dist/4(:3933
-//     既有同门系数),治疗基值 = 饮用面 kInstantHealthHealHp=4(I 级 2 心);**取整口径核实留痕** =
-//     MC 1.0 Potion::affectEntity 的 (int)(potency×(4<<level)+0.5) 截断式 = 半进位取整(中心 d1=1 → 4 /
-//     d1≈0.485 → 2 / d1≈0.240 → 1);Survival 门内联(饮用面 emit healed 同门)+ healed 信号链同沿
+//     既有同门系数),治疗基值 = 饮用面 kInstantHealthHealHp(**t1125 勘正 4→6 = I 级 3 心**;官方 1.0.0
+//     client jar 字节码实证即时两族同式 6<<level,era-first 裁定 t1115 先例同门——本注为勘误随行:
+//     交付时记「4(I 级 2 心)」= 现代 wiki 口径,旧 (int)(potency×(4<<level)+0.5) 式与中心带 4/0.485→2
+//     /0.240→1 留痕一并退役);**取整口径核实留痕** =
+//     MC 1.0 Potion::affectEntity 的 (int)(potency×(6<<level)+0.5) 截断式 = 半进位取整(中心 d1=1 → 6 /
+//     d1=0.875 → 5 / d1≈0.485 → 3 / d1≈0.240 → 1);Survival 门内联(饮用面 emit healed 同门)+ healed 信号链同沿
 //     (PlayerState::heal 零值早退 = 零疗效天然安全);映射面 splashEffectType → EffectInstantHeal
 //     (playerstate.h 枚举尾追加,纯映射位非时序效果不入快照;勿占用 0=EffectNone 语义——喷溅水瓶走 0);
 //     碎裂粒子取色 case 9 疗红同链。
@@ -220,16 +223,19 @@ void MatrixRun::section83_potion_cauldron_t1120()
     });
 
     // ── r2090b:投掷 + 即时疗效柱(NEG-2 敏感面 = applySplashPotion 即时分支块)────────────────────
+    //   [t1125 lawful 修订] 治疗基值勘正 4→6(1.0 jar 实证 6<<level,era-first)——链 B 落地带与链 B2
+    //     直调带随新基值重推(满档 d1=0.875 → 5;rig 几何带 5/4/3/1/0;半进位边界窗移至 dist=1/3,
+    //     观测落点 0.5001 与精确 0.5 两侧均答 5 → 带断言收窄为恰 5),旧 4/3/2/1/0 带退役留痕。
     //   链 A 真 rig 创造掷喷溅水瓶:恰一次碎裂 + 载荷原样 + 创造不耗 + 零状态效果快照(EffectNone
     //     破裂面)+ 挥手;链 A2 生存重掷消耗 1 瓶;链 B 真 rig 直落喷溅瞬间治疗(满档 d1=0.875 →
-    //     healed 4)+ 直调缩放档(半档 2 / 边缘档 1)+ 出圈零注入 + 创造门零注入 + 即时面零效果快照
+    //     healed 5)+ 直调缩放档(衰减带 4 / 3 / 1)+ 出圈零注入 + 创造门零注入 + 即时面零效果快照
     //     (无 timer 不入快照——MC 口径);NEG-2 摘面行本腿钉。
     runLeg("r2090b throw and instant heal column (a real creative throw of the splash water bottle"
         " shatters exactly once with the carried id and raises zero status effect snapshots while"
         " creative keeps the bottle and the survival re-throw consumes exactly one, a real drop of"
-        " the splash instant health potion shattering at the player's feet heals once inside the"
-        " full-band window the half-up formula answers around the half-block tie, the direct-drive"
-        " full band heals exactly four hit points and the decay bands heal exactly three and two"
+        " the splash instant health potion shattering at the player's feet heals exactly five hit"
+        " points inside the full-band window on both sides of the landing epsilon, the direct-drive"
+        " full band heals exactly five hit points and the decay bands heal exactly four and three"
         " and one and nothing at and beyond the four-block radius and nothing for a creative"
         " controller at point-blank, no instant heal raises a status effect snapshot, and the"
         " instant branch rows are pinned on file)", [&]() {
@@ -317,10 +323,10 @@ void MatrixRun::section83_potion_cauldron_t1120()
         for (int t = 0; t < 100 && breakCount == breakAfterA2; ++t)
             ents.tick(0.05f, &w, farL, 0.3f, 1.8f, false);
         // 链 B:真 rig 直落喷溅瞬间治疗(物理落差 + 镜像路由——heal 真发面)。
-        //   **满档带断言(边界诚实化留痕)**:MC 1.0 半进位式 (int)(d1×4+0.5) 在 dist 恰 0.5 处落整数
-        //   边界——rig 物理落定脚位带接触 ε(观测 81.0001)使 dist=0.5001 → 恒答 3;精确站位 81.0 →
-        //   恰 4。两侧均为该式在边界带的诚实答(MC 同式同敏),本腿物理落差面取带断言 hp∈[3,4],
-        //   精确满档 4 由链 B2 直调面(零 ε 精确站位于 float 幂分数)承接。
+        //   **满档带断言(t1125 勘正后重推)**:MC 1.0 半进位式 (int)(d1×6+0.5) 的 4/5 取整界移至
+        //   dist=1/3——rig 物理落定脚位带接触 ε(观测 81.0001)使 dist=0.5001 → 答 5;精确站位 81.0 →
+        //   恰 5。观测带两侧均恰 5(旧 4 值式的 0.5 整数边界随勘正退役),本腿物理落差面收窄为恰 5,
+        //   精确满档 5 由链 B2 直调面(零 ε 精确站位于 float 幂分数)同值承接。
         hb.setStack(0, 0, 0, 0);
         const int healedBase = healedCount;
         const int b3 = ents.spawnSplashBottle(QVector3D(24.5f, 85.0f, 24.5f), QVector3D(0.0f, -6.0f, 0.0f),
@@ -328,17 +334,18 @@ void MatrixRun::section83_potion_cauldron_t1120()
         for (int t = 0; t < 100 && healedCount == healedBase; ++t)
             ents.tick(0.05f, &w, farL, 0.3f, 1.8f, false);
         const bool centerHealOk = b3 >= 0 && healedCount == healedBase + 1
-                                  && healedHp >= 3 && healedHp <= 4;
+                                  && healedHp == 5; // t1125 勘正 6<<level:ε 两侧(0.5001/0.5)均恰 5
         ok = ok && centerHealOk;
         if (!centerHealOk)
             diag += QStringLiteral("[center b=%1 healed=%2 hp=%3]")
                         .arg(b3).arg(healedCount - healedBase).arg(healedHp);
-        // 链 B2 直调缩放档(精确值面;半进位式 int(d1×4+0.5) 逐档锁值;r2071c 直调同门):
-        //   满档 4:loadSavedState 复位脚位至精确 (24.5,81,24.5)(复位不 tick,零落定 ε)→ dist 恰 0.5
-        //     → d1 恰 0.875(2^-3 幂分数,float 精确无舍入)→ int(3.5+0.5) = 4;
+        // 链 B2 直调缩放档(精确值面;半进位式 int(d1×6+0.5) 逐档锁值[t1125 勘正新带];r2071c 直调同门):
+        //   满档 5:loadSavedState 复位脚位至精确 (24.5,81,24.5)(复位不 tick,零落定 ε)→ dist 恰 0.5
+        //     → d1 恰 0.875(2^-3 幂分数,float 精确无舍入)→ int(5.25+0.5) = 5;
         //   衰减三档(同精确脚位;带中安全距,距各取整界 ≥0.38):
-        //     (25,80,24):dist=√1.25≈1.118 → d1≈0.7205 → 3;(26):dist=√4.25≈2.062 → 2;
-        //     (27):dist=√9.25≈3.041 → 1;出圈 (29):dist=√25.25≈5.02 ≥ 4 → 零注入。
+        //     (25,80,24):dist=√1.25≈1.118 → d1≈0.7205 → int(4.3229+0.5)=4;(26):dist=√4.25≈2.062
+        //     → int(2.9077+0.5)=3;(27):dist=√9.25≈3.041 → int(1.4379+0.5)=1;
+        //     出圈 (29):dist=√25.25≈5.02 ≥ 4 → 零注入。
         const auto snapBand = [&](int cellX, int &hp) {
             const int before = healedCount;
             hp = -1;
@@ -355,8 +362,8 @@ void MatrixRun::section83_potion_cauldron_t1120()
         const int n1 = snapBand(27, h1b);
         const int n0 = snapBand(29, h0b);
         const int snapBase = effectSnapCount;
-        const bool bandsOk = nF == 1 && hF == 4 && n3 == 1 && h3b == 3 && n2 == 1 && h2b == 2
-                             && n1 == 1 && h1b == 1 && n0 == 0
+        const bool bandsOk = nF == 1 && hF == 5 && n3 == 1 && h3b == 4 && n2 == 1 && h2b == 3
+                             && n1 == 1 && h1b == 1 && n0 == 0 // t1125 勘正新带 5/4/3/1/0
                              && effectSnapCount == snapBase; // 即时面零效果快照(无 timer 不入快照)
         ok = ok && bandsOk;
         if (!bandsOk)
@@ -392,9 +399,9 @@ void MatrixRun::section83_potion_cauldron_t1120()
                " bottle shatters exactly once with the carried id and raises zero status effect"
                " snapshots while creative keeps the bottle and the survival re-throw consumes exactly"
                " one, a real drop of the splash instant health potion shattering at the player's feet"
-               " heals once inside the full-band window the half-up formula answers around the"
-               " half-block tie, the direct-drive full band heals exactly four hit points and the"
-               " decay bands heal exactly three and two and one and nothing at and beyond the"
+               " heals exactly five hit points inside the full-band window on both sides of the"
+               " landing epsilon, the direct-drive full band heals exactly five hit points and the"
+               " decay bands heal exactly four and three and one and nothing at and beyond the"
                " four-block radius and nothing for a creative controller at point-blank, no instant"
                " heal raises a status effect snapshot, and the instant branch rows are pinned on"
                " file)"

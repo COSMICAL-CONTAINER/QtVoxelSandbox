@@ -2416,7 +2416,7 @@ Item {
             case 0x271: drawPotion("#d05a7a", "#f0a0b8", "#ffd0e0"); break // 再生药水（粗制 + 幽灵泪；每 2.5s 回 1HP 45s）
             case 0x272: drawPotion("#3a7a28", "#68b050", "#b0e0a0"); break // 中毒药水（粗制 + 蜘蛛眼；每 1.25s 扣 1HP 45s 不致死）
             case 0x273: drawPotion("#5a5a6a", "#9090a5", "#c8c8d8"); break // 虚弱药水（粗制 + 发酵蛛眼；近战 -4/级 90s）
-            case 0x274: drawPotion("#e8c8d8", "#f8e0ec", "#fff4f8"); break // 瞬间治疗药水（粗制 + 闪烁西瓜；饮毕即回 4HP）
+            case 0x274: drawPotion("#e8c8d8", "#f8e0ec", "#fff4f8"); break // 瞬间治疗药水（粗制 + 闪烁西瓜；饮毕即回 6HP；t1125 勘正）
             // t1100 延长药水族六件（0x275..0x27A，段尾追加）：drawPotion 同构异色（延长版 = 基础版
             //   液色深一档 / 偏暗——「同一味但更浓」读感；原创自绘 §9a，零 MC 资产）。
             case 0x275: drawPotion("#2a78c8", "#60b0e8", "#b0e0f8"); break // 迅捷药水（延长）：迅捷 + 红石；8:00
