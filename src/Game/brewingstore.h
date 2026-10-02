@@ -26,6 +26,21 @@
 //   ③ 基础链 = 水瓶（水瓶 + 地狱疣 → 粗制药水）→ 效果材料 → 效果药水；瓶**在原位转换**（药水槽自身
 //     id 变为产物，非炉式独立输出槽；机制等价 MC 酿造台瓶原位变换）。
 //
+// **[t1128 era 定谳注——外部审查两问只核不修，代码面零行为改动]**（jar 全文工件
+// build/t1128_jar_brewing_tile.txt 留痕：tt=TileEntityBrewingStand / abk=Item.potion / bq=mappings）：
+//   件五（燃料）：era tt 字段全集 {dk[4] 槽, BrewTime, 位图 j, 原料 id k}——**零燃料字段 / 零燃料槽 /
+//     零燃料消耗路径，NBT 仅 BrewTime+Items** → 1.0.0 酿造**无燃料**；上方 ①「1 粉=20 次（MC 原值）」
+//     的 era 忠实性标注失真（燃料面 = 1.2 期后加面）→ **纪元勘正候选登记**（摘燃料面须动 store 状态
+//     面 + r2067a-d 既钉族 + UI 面三条线，本单不修）。同读附带发现：era 开酿 **BrewTime=600 ticks
+//     （tt.b() sipush 600，20tps = 30s）**——上方 ②「400 ticks = 20 秒（MC 原值）」标注同失真
+//     （400 = 后期改版值）→ kBrewSecs 30s 勘正**同入候选池**本单不修（r2067a 族 20s 既钉随候选
+//     一并评估）。
+//   BREW-02（瓶槽堆叠）：era 药水物品 maxStack=**1**（abk 构造体 iconst_1 h(I) setMaxStackSize；空玻璃
+//     瓶 abo 缺省 64）→ era 槽内恒 1 件药水、1 原料 ≤3 瓶；工程瓶槽 64 栈 + 1 原料整栈转换 = 放大
+//     偏差 → **候选池登记**本单不修（playercontroller.cpp 整栈转换行注同源勘正）。
+//   件四（换料）：era tt.b() 有原料 id 比对面（k≠id → BrewTime 归零重开）→ activeIngredient 字段 +
+//     扫描身份门交付（上方成员注 + playercontroller.cpp 扫描体注）。
+//
 // 酿造配方表（静态纯数据，本类持有 = Game 层单一权威；第一轮 3 行 + t1099 第二轮 5 行 + 周边静态查询）：
 //   水瓶 + 灰烬疣（AshWartId）→ 粗制药水；粗制药水 + 糖（SugarId）→ 迅捷药水；
 //   粗制药水 + 燃烬粉（BlazePowderId）→ 力量药水（MC 1.0 烈焰粉既是燃料又是力量原料的同置双语义照搬）；
@@ -97,6 +112,13 @@ public:
     Q_INVOKABLE int fuelOpsAt(int x, int y, int z) const;
     Q_INVOKABLE void setBrewProgress(int x, int y, int z, qreal val);
     Q_INVOKABLE void setFuelOps(int x, int y, int z, int val);
+    // [t1128 件四] 本轮原料身份（引擎面非 Q_INVOKABLE——scanBrewingStands 专读专写，UI 面零扩张）：
+    //   开酿点记录原料 item id；进度中扫描读到 ≠ 当前原料 id → 进度清零重开（era tt.b() k≠id → b=0
+    //   同式，jar 工件 build/t1128_jar_brewing_tile.txt 留痕）。**会话态不入存档**（allBrewingStands /
+    //   loadAll 不携带——era k 不在 NBT：BrewTime 持久化而 k 不持久化，重进后身份缺省 0 首拍 ≠ id
+    //   → 进度复位，与 era 重载字节等价，如实留痕非缺陷）。
+    int activeIngredientAt(int x, int y, int z) const;
+    void setActiveIngredient(int x, int y, int z, int ingredientId);
     Q_INVOKABLE bool hasBrewing(int x, int y, int z) const;
     Q_INVOKABLE void clearBrewing(int x, int y, int z);
     Q_INVOKABLE void clearAll();
@@ -140,12 +162,14 @@ private:
         QString name;
         int durability = -1;
     };
-    // 单台酿造台条目 = 5 槽 + 酿造进度（0..kBrewSecs 秒）+ 剩余可酿次数（燃烬粉燃烧计量）。
+    // 单台酿造台条目 = 5 槽 + 酿造进度（0..kBrewSecs 秒）+ 剩余可酿次数（燃烬粉燃烧计量）+
+    // 本轮原料身份（[t1128 件四] activeIngredient——会话态，不入 allBrewingStands/loadAll，头注同源）。
     //   成员名禁用 `slots`（Qt 关键字宏，lessons-learned）→ slotArr。
     struct Entry {
         std::array<Slot, kSlotsPerBrewing> slotArr;
         qreal progress = 0.0;
         int fuelOps = 0;
+        int activeIngredient = 0;
 
         Slot &operator[](int i) { return slotArr[std::size_t(i)]; }
         const Slot &operator[](int i) const { return slotArr[std::size_t(i)]; }

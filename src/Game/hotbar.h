@@ -379,6 +379,13 @@ public:
     //   enchants（t475）：同 setStack（工具 / 护甲单件入空槽时写其实例附魔；可堆叠物品合并路径附魔恒 0）。
     //   name（t622）：同 enchants（工具 / 护甲 / 附魔书等 cap=1 物品空槽开新时写实例名；合并路径不传）。
     Q_INVOKABLE int addStack(int id, int n, int durability = -1, const QVariantList &enchants = {}, const QString &name = QString());
+    // t1128 容量探针（件一空地图激活守卫面；引擎面非 Q_INVOKABLE——C++ 消费，QML 面零扩张）：
+    //   「n 件 id 能否全放入」只读预判（**零变更**——addStack 是唯一放置权威，本探针镜像其容量：
+    //   同 id 未满无名槽可并入量 + 空槽 × cap；countFreedSelectedSlot=true 时选中槽按「消耗后腾空」
+    //   再计一格 cap——生存消耗 1 件腾手场景由 caller 精确传入）。放置总容量与 addStack 落位次序
+    //   无关（先合并后开新不影响总量）→ 探针恰为 addStack 全收的充要判据。调用点 = 空地图激活
+    //   （背包满 → 保守拒绝激活，禁产物凭空消失——era 无空地图物品不可考，保守面留痕注释）。
+    bool canFitStack(int id, int n, bool countFreedSelectedSlot) const;
     // 从 slot 取最多 n 件（不超过该栈实际持有）；返回实际取走数；栈空则 id 归 0。
     Q_INVOKABLE int takeStack(int slot, int n);
     // 单件最大堆叠：方块段 64、工具段（id>=0x100，t33 预留）1（不可堆叠）。
