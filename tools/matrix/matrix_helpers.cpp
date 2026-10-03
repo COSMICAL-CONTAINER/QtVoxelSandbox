@@ -283,6 +283,11 @@ void MatrixRun::runAll()
                               //   a-e 腿族 = 复现柱 / 失败点矩阵柱 / 重复中断柱 / 旧档兼容柱 /
                               //   结构钉族，行为腿协调层直驱 + GameSession 同事务冲洗缝
                               //   fresh 小世界族，rig 世界零接触，接 section91）
+    section93_redstone_fix_t1130(); // t1130 红石正确性批探针段（置尾先例沿用：r2100 a-i 腿族 =
+                              //   延长面 4x4 矩阵 / 短关吞没 + 长关穿透 / 恒开恒关 + 串联时序 /
+                              //   定点单 pass 计量 / 挂起态存读续程 / 四朝向方位矩阵 + 背驮面 /
+                              //   六消费面前 vs 侧 / 既有源零回归 + 负坐标跨区块 / 结构钉族，
+                              //   行为腿 fresh 小世界族，rig 世界零接触，接 section92）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";

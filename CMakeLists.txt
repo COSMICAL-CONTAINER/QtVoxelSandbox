@@ -1309,6 +1309,12 @@ add_executable(redstone_matrix_test
     #   幸存复核——NEG 双摘面行由 a/b 持有]。行为腿协调层直驱 + GameSession 同事务冲洗缝 fresh
     #   小世界族，rig 世界零接触）。
     tools/matrix/section92_save_consistency_t1129.cpp
+    # t1130 红石正确性批探针段（置尾先例沿用：runAll 末执行，filter 词 r2100；9 腿 r2100a-i =
+    #   RED-01 短开脉冲延长面 4x4 矩阵 + 短关吞没 + 长关穿透 + 恒开恒关 + 串联时序 + 定点单 pass
+    #   计量 + 挂起态存读续程 + RED-02 四朝向方位矩阵 + 背驮面 + 六消费面前 vs 侧 + 既有源零回归
+    #   + 负坐标跨区块 + 结构钉族[era 工件在盘非空 + 勘误注 raw + 跨任务词元零命中 + 注册三行]。
+    #   行为腿 fresh 小世界族，rig 世界零接触）。
+    tools/matrix/section93_redstone_fix_t1130.cpp
     # t1129 杀进程探针（CLI 模式 TU：--killprobe inject|inject-old|child|child-old|parent|
     #   parent-old——父 spawn 自身子进程 + 标记文件锚定保存窗 + QProcess::kill 真实终止 + 重开
     #   库四面读回。inject-old/child-old/parent-old = 旧协议提交序原语级重放（复现实验面——
