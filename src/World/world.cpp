@@ -5671,15 +5671,31 @@ bool World::repeaterInputOn(int x, int y, int z, quint8 state) const
         && (m_chunks.stateAt(bx, y, bz) & BlockRegistry::RedstoneDustPowerMask) > 0;
 }
 
-// (x,y,z) 接收器是否被邻格供电（邻源激活 → 15；或邻粉电力级 >0）。v1 简化：全向 6 正交邻读
-// （机制等价 MC 接收器 any 邻信号；无前后向输入面语义 —— MC 的 directional 接收器留后续任务）。
+// (x,y,z) 接收器是否被邻格供电（邻源激活 → 15；或邻粉电力级 >0）。
+//   **t1130 RED-02 era 定谳（build/t1130_jar_worldpower.txt）**：1.0.0 接收器供电查询 = ry.v（六正交
+//   邻 OR 的逐面定向读 l(邻格, 朝本格的面)），源侧 b(kq,IIII) 逐面自述——亮中继器（mz.b）**仅输出面**
+//   true，其余五面 false；拉杆 / 按钮 / 压力板 / 探测轨 / 火把（除贴附面）/ 通电粉（连接形状面）各按
+//   自身口径。本工程 v1 全向 6 邻读源对非中继器源恰同口径（这些源全面馈电），唯中继器方向面失真——
+//   亮中继器背 / 侧邻接收器也被点亮。修法 = **中继器源统一走 sourceFeedsCell 同门**（t1095 已建的
+//   单一方向权威：repeaterInputOn ① 与 Phase A 粉播种水平 4 向在用；禁第二份方向判定）。垂直面：era
+//   中继器 b() 无垂直输出 → 垂直邻中继器恒不馈电（中继器立接收器顶上的「背驮」形态不亮 = era 同；
+//   贴地薄板无垂直朝向故几何上也不可指向垂直格）。非中继器源全向逐字保留 → 既有电路零变化。
+//   v1 仍未收子面（如实登记，era 口径见 jar 工件）：粉形状输入（kw.b 连接形状面）、实块间接承载
+//   （era l→u/k 强弱供电分层——solid cube 被 c() 面供电再转馈 v），均留后续任务（t869 粉形状面已
+//   在火把反相读数侧先行，接收器侧全向粉读法不变）。
 bool World::isReceivingPower(int x, int y, int z) const
 {
     static constexpr int kNb[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
     for (const auto &d : kNb) {
         const int nx = x + d[0], ny = y + d[1], nz = z + d[2];
-        if (powerSourceLevel(nx, ny, nz) > 0) return true; // 邻源直供
         const quint8 nb = m_chunks.blockAt(nx, ny, nz);
+        if (d[1] == 0) {
+            // t1130 水平定向同门（中继器仅朝向格）。实参写 nx-x/nz-z 形：与 Phase A 播种调用点
+            //   （r2065d 源钉 d[0]/d[2] 形恰 1 处）文本分流，钉计数不漂移。
+            if (sourceFeedsCell(x, y, z, nx - x, nz - z)) return true;
+        } else if (nb != BlockRegistry::Repeater && powerSourceLevel(nx, ny, nz) > 0) {
+            return true; // 垂直邻源直供（中继器无垂直输出面——era mz.b 五面 false 口径）
+        }
         if (BlockRegistry::isRedstoneDust(nb)
             && (m_chunks.stateAt(nx, ny, nz) & BlockRegistry::RedstoneDustPowerMask) > 0)
             return true; // 邻粉通电
@@ -6367,36 +6383,63 @@ bool World::recomputePowerLocal()
             }
         } else if (b == BlockRegistry::Repeater) {
             // t1095 中继器：定向输入 + 延迟档翻转输出（机制等价 MC 1.0 repeater 延迟 1..4 redstone tick；
-            //   本工程红石 tick = tickRedstone 一 pass）。挂起计数（state bit[7:5]）= 输入≠输出已持续的
-            //   pass 数——首评置 1、每评 +1、达「档+1」翻转并清零（档=1 → 首评后下一 pass 翻 = 恰 1 tick
-            //   延迟）。输入回同步 → 取消挂起清零（脉冲短于延迟档不穿透，MC 同口径）。挂起期间自回插脏集
-            //   （定点迭代——同火把重亮回插模式）；翻转时把前端格入脏集（前端粉定向播种 15 / 前端接收器
-            //   复查）；输出位翻转不改 lightEmission → 无光场重 flood；中继器格自身不入（输入恒后端 /
-            //   输出恒前端，self-feedback 振荡无几何路径）。
+            //   本工程红石 tick = tickRedstone 一 pass，10Hz 驱动）。挂起计数（state bit[7:5]）= 距已排定
+            //   翻转的已计 pass 数——首评（武装）置 1、每评 +1、达「档+1」fire 并清零（档=1 → 首评后下一
+            //   pass 翻 = 恰 1 tick 延迟）。
+            //   **t1130 RED-01 era 定谳（build/t1130_jar_diode.txt，mz=BlockDiode id 93/94 javap）**：era
+            //   排定面 = 邻变沿排定 cb[档]*2 game tick 的一次翻转（cb={1,2,3,4}，1 redstone tick = 2 game
+            //   tick → 档 d = d pass），**排定一经排定不可撤销**——灭中继器 fire 时无条件翻亮，翻亮后输入
+            //   已回落再排定 +d 的灭翻转（⇒ 短于档的开启脉冲**延长面**：输出恰在 [武装+d, 武装+2d) 亮 =
+            //   脉宽拉成恰 d）；亮中继器 fire 时复读输入，输入已回 on → no-op（短关脉冲吞没 = era 本就
+            //   如此，非本批病灶）。旧实现「输入回同态即取消挂起」把短开脉冲整个吞掉——其注释自称「MC
+            //   同口径」系误注，本批勘误（era 真值 = 短开脉冲延长为恰档宽，jar mz.updateTick 立证）。
+            //   挂起目标态恒 = !out（排定只在 input≠out 沿武装 → 无需独立方向位，bit[7:5] 计数域编码与
+            //   数值语义连续：旧档挂起行必处 input≠out（旧机器仅在该态写计数），新机器续数至 fire 与旧
+            //   轨迹同点翻转 = 旧档零迁移兼容）。挂起期自回插脏集（定点迭代——同火把重亮回插模式；每
+            //   pass 恰评一次 = 计数即 pass 数，编辑噪声的多余脏命中被 receivers 集去重，不加速计数）；
+            //   fire 翻转时把前端格入脏集（前端粉定向播种 15 / 前端接收器复查）；输出位翻转不改
+            //   lightEmission → 无光场重 flood；中继器格自身不入（输入恒后端 / 输出恒前端，self-feedback
+            //   振荡无几何路径）。
             const int delay = BlockRegistry::repeaterDelayTicks(st);        // 1..4
             const bool input = repeaterInputOn(x, y, z, st);                // 定向读后端（仅后端格）
             const bool out = (st & BlockRegistry::RepeaterStatePoweredFlag) != 0;
             int cnt = BlockRegistry::repeaterPendingCount(st);
-            if (input == out) {
-                if (cnt != 0) { // 取消挂起：输入与输出一致（稳态收敛 / 脉冲短于延迟档不穿透）
-                    m_chunks.setBlock(x, y, z, b, BlockRegistry::repeaterPendingCountState(st, 0));
+            if (cnt == 0) {
+                // 稳态：仅「输入≠输出」沿武装挂起（目标 = !out），首评计数 1。
+                if (input != out) {
+                    m_chunks.setBlock(x, y, z, b, BlockRegistry::repeaterPendingCountState(st, 1));
+                    m_powerDirty.insert(k); // 自回插：本格为锚点，下一 pass addReceiver 直达续算
                     any = true;
                 }
             } else {
                 ++cnt;
-                if (cnt > delay) {
-                    // 达档翻转：输出位翻 + 计数清零（input=on → 置位 / input=off → 清位）。
-                    const quint8 ns = (input ? quint8(st | BlockRegistry::RepeaterStatePoweredFlag)
-                                             : quint8(st & quint8(~BlockRegistry::RepeaterStatePoweredFlag)));
-                    m_chunks.setBlock(x, y, z, b, BlockRegistry::repeaterPendingCountState(ns, 0));
+                if (cnt <= delay) {
+                    // 未达档：排定保持 + 自回插（**输入回落不取消**——era 调度器不可撤销，t1130 RED-01
+                    //   修复面：旧版在此取消挂起 = 短开脉冲被吞）。
+                    m_chunks.setBlock(x, y, z, b, BlockRegistry::repeaterPendingCountState(st, cnt));
+                    m_powerDirty.insert(k); // 自回插：下一 pass 续数
+                    any = true;
+                } else {
+                    // fire（cnt==档+1 = 武装后第 d pass）：era mz.updateTick 两分支口径——
+                    if (!out) {
+                        // 目标亮（era 灭中继器 fire）：**无条件**翻亮；翻亮后输入已回落 → 当场排定
+                        //   +d 的灭翻转（短脉冲延长面的收尾段——输出净宽恰 d）。
+                        m_chunks.setBlock(x, y, z, b, BlockRegistry::repeaterPendingCountState(
+                            quint8(st | BlockRegistry::RepeaterStatePoweredFlag), input ? 0 : 1));
+                        if (!input)
+                            m_powerDirty.insert(k); // 延长面续排定：下一 pass 续数灭翻转
+                    } else if (!input) {
+                        // 目标灭且输入确已断（era 亮中继器 fire 复读输入通过）：翻灭收口。
+                        m_chunks.setBlock(x, y, z, b, BlockRegistry::repeaterPendingCountState(
+                            quint8(st & quint8(~BlockRegistry::RepeaterStatePoweredFlag)), 0));
+                    } else {
+                        // 目标灭但输入已回 on（短关脉冲，era 亮中继器 fire no-op）：排定消费即取消，
+                        //   输出保持——吞没面为 era 同口径（短**关**脉冲本就不穿透）。
+                        m_chunks.setBlock(x, y, z, b, BlockRegistry::repeaterPendingCountState(st, 0));
+                    }
                     int fx = 0, fz = 0;
                     BlockRegistry::repeaterOutDelta(st, fx, fz); // 前端格 = 朝向格
                     m_powerDirty.insert(packGrowthCell(x + fx, y, z + fz)); // 前端粉播种 / 接收器复查
-                    any = true;
-                } else {
-                    // 未达档：持久化计数 + 自回插（下一 pass 继续数——定点迭代，同火把重亮回插）。
-                    m_chunks.setBlock(x, y, z, b, BlockRegistry::repeaterPendingCountState(st, cnt));
-                    m_powerDirty.insert(k); // 自回插：本格为锚点，下一 pass addReceiver 直达续算
                     any = true;
                 }
             }
@@ -6500,7 +6543,14 @@ bool World::recomputePowerLocal()
             for (const auto &d : kNb2) {
                 const int nx = sx + d[0], ny = sy + d[1], nz = sz + d[2];
                 if (nx == x && ny == y && nz == z) continue; // 跳过火把自身（防自反馈振荡）
-                if (powerSourceLevel(nx, ny, nz) > 0) return true; // 真实源（拉杆 / 红石块…）在任意位也照常供电
+                // t1130 RED-02 同门（era：火把反相判定 = 附着格 v() 查询，中继器源同受 mz.b 仅输出面
+                //   口径约束——sourceFeedsCell 单一权威，禁第二份方向判定；非中继器源全向原样）。
+                if (d[1] == 0) {
+                    if (sourceFeedsCell(sx, sy, sz, d[0], d[2])) return true;
+                } else if (m_chunks.blockAt(nx, ny, nz) != BlockRegistry::Repeater
+                           && powerSourceLevel(nx, ny, nz) > 0) {
+                    return true; // 垂直邻源直供（中继器无垂直输出面）
+                }
                 const quint8 nb = m_chunks.blockAt(nx, ny, nz);
                 if (BlockRegistry::isRedstoneDust(nb)
                     && (m_chunks.stateAt(nx, ny, nz) & BlockRegistry::RedstoneDustPowerMask) > 0

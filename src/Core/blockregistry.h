@@ -1199,10 +1199,12 @@ public:
         //   ③ 输出强充能 15——亮态自身即电源（powerSourceLevel 15），前端格粉从 15 重新起步 = 信号续距
         //     （红石粉 15 格衰减重置，机制等价 MC 中继器续距）。
         //   ④ **锁定面 1.0 无**——中继器锁存（locked repeater）是 1.5+ 机制，如实登记非 1.0 不做。
-        //   **v1 简化登记**（world.h 红石系统头注释同面）：接收器（灯 / TNT / 轨）经 isReceivingPower
-        //   全向 6 邻读源 → 中继器亮态时**侧邻**接收器也点亮（MC 仅前端格强充能；isReceivingPower 的
-        //   「无前后向语义」既有 v1 口径自然外延，directional 接收器留后续任务）。粉的定向馈电（seed 面）
-        //   是准确的：中继器只喂朝向格的粉（sourceFeedsCell 定向判定）。
+        //   **v1 简化登记**（world.h 红石系统头注释同面；t1130 RED-02 收口中继器方向子面后的现状）：
+        //   接收器（灯 / TNT / 轨 / 音符盒 / 漏斗锁停 / 发射器 / 火把反相）经 isReceivingPower 读源——
+        //   中继器源已走 sourceFeedsCell 定向同门（仅朝向格馈电；垂直面恒不馈 = era mz.b 仅水平输出面
+        //   口径，jar 工件 build/t1130_jar_worldpower.txt 立证）；**仍未收子面**：粉形状输入（era kw.b
+        //   连接形状面——接收器侧全向粉读法）与实块间接承载（era l→u/k 强弱供电分层）留后续任务。粉的
+        //   定向馈电（seed 面）是准确的：中继器只喂朝向格的粉（sourceFeedsCell 定向判定）。
         //   **形态**：贴地薄板 2/16 厚（ShapeRepeater，机制等价 MC 中继器 2px hitbox；solid=false 非整立方
         //   → 邻居不剔面；isFullCube=false 落体分支语义同漏斗；lightOpacity 全透）。渲染走 PartialBlockGeometry
         //   （底板 + 双焰标 + 档位滑标三盒，滑标位随延迟档移动——调档视觉可辨）。支撑语义同压力板族：放置
@@ -1218,9 +1220,13 @@ public:
         //                                           放置 = 玩家面向 = 输出沿玩家视向续传，输入端在玩家侧）。
         //     bit[3:2]（RepeaterStateDelayMask）  = 延迟档-1（0..3 → 1..4 redstone tick；右键循环写）。
         //     bit4   （RepeaterStatePoweredFlag） = 输出强充能记忆位（亮态 → powerSourceLevel 15；亮贴图）。
-        //     bit[7:5]（RepeaterStateCountMask）  = 挂起计数（运行期瞬态：输入≠输出的 pass 数；达档+1 翻转。
-        //                                           随 state 落盘无害——重载后续算幂等；无运行期侧表 =
-        //                                           「重置契约」教训的零登记面）。
+        //     bit[7:5]（RepeaterStateCountMask）  = 挂起计数（运行期瞬态：距已排定翻转的已计 pass 数；
+        //                                           目标恒 = !out；达档+1 fire。t1130 RED-01 勘误：
+        //                                           排定不随输入回同态取消——era 调度器不可撤销，短于
+        //                                           档的开启脉冲延长为恰档宽。随 state 落盘无害——era
+        //                                           1.0.0 同面持久化（ChunkLoader TileTicks 表，gy
+        //                                           javap 立证）；无运行期侧表 =「重置契约」教训的
+        //                                           零登记面）。
         Repeater         = 147, // 红石中继器：延迟四档 + 二极管整流 + 输出强充能 15（续距）；贴地薄板；右键调档
         // ── t1097 酿造台（BrewingStand）：酿造系统载体方块（机制等价 MC 1.0 brewing stand，Beta 1.9 pre
         //   系列引入、1.0.0 正式版沿用；MC 1.0 存在 id 117）。**四语义**（wiki 2026 实读口径）：

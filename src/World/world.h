@@ -1248,9 +1248,17 @@ public:
     //   中继器，经 sourceFeedsCell 定向）或后端通电粉 → 挂起计数达延迟档（1..4 redstone tick，右键循环调档）
     //   翻转输出位；亮态自身即电源（powerSourceLevel 15，前端粉从 15 重新起步 = 续距）。二极管整流：粉播种
     //   经 sourceFeedsCell 水平定向（中继器只喂朝向格的粉）+ 输入只读后端（输出不回输入）。挂起计数存
-    //   state bit[7:5]（无运行期侧表 → 零重置契约面；落盘无害重载续算幂等）。**v1 简化登记**：接收器经
-    //   isReceivingPower 全向读源 → 中继器亮态时侧邻接收器也点亮（MC 仅前端格强充能；isReceivingPower
-    //   既有「无前后向语义」v1 口径自然外延，directional 接收器留后续任务）。**1.0 无锁存面**：中继器
+    //   state bit[7:5]（无运行期侧表 → 零重置契约面；随方块 state 落盘——**t1130 era 核实：1.0.0 挂起
+    //   面同样持久化**（ChunkLoader gy TileTicks 表 = 排定翻转随区块存读，t = 余量 game tick），工程以
+    //   计数域随 state 存读为等价面，零新表面）。**t1130 RED-01 挂起语义勘误**：挂起 = 已排定翻转
+    //   （目标恒 = !out），**输入回同态不取消**（era 调度器不可撤销——jar mz.updateTick：灭中继器
+    //   fire 无条件翻亮 + 输入已回落再排定灭翻转 = 短于档的开启脉冲**延长**为恰档宽；亮中继器 fire
+    //   复读输入 = 短关脉冲吞没为 era 同口径）。旧「输入回同态即取消挂起」版吞掉短开脉冲，其「MC
+    //   同口径」注系误注（t1130 勘误，jar 工件 build/t1130_jar_diode.txt 立证）。**v1 简化登记
+    //   （t1130 收口中继器方向子面）**：接收器经 isReceivingPower 读源——中继器源已走 sourceFeedsCell
+    //   定向同门（侧 / 背邻接收器不再被亮中继器点亮，era mz.b 仅输出面口径）；垂直面中继器恒不馈电
+    //   （era b() 无垂直输出）。**仍未收子面**（留后续）：粉形状输入（era kw.b 连接形状面——接收器
+    //   侧全向粉读法）、实块间接承载（era l→u/k 强弱供电分层）。**1.0 无锁存面**：中继器
     //   锁存（locked repeater）是 1.5+ 机制，如实登记非 1.0 不做。
     //   **t740 火把斜下供粉**（机制等价 MC 1.0 立式火把为贴地一圈斜角粉供电）：立在方块顶面的红石火把
     //   额外喂 4 个斜下格的粉（BFS 距 1 = 电力 15）——「火把立块上、地面粉环绕」经典布线在旧 v1 整圈死粉。
@@ -1322,6 +1330,9 @@ public:
     int railChainWalkCount() const { return m_railChainWalks; }
     // t656/t658 查询：(x,y,z) 处接收器是否被邻格供电（邻源激活或邻粉电力 >0）。供 MinecartManager
     //   boost 判定 / 调试。只读，不改栅格。
+    //   **t1130 RED-02**：中继器源走 sourceFeedsCell 定向同门（era mz.b 仅输出面馈电）；垂直邻中继器
+    //   恒不馈电；其余源全向原样（消费面 = tickRedstone 全接收器族 / 漏斗锁停 / 发射器沿检测 /
+    //   MinecartManager boost / 火把反相 attachPowered 同门）。
     bool isReceivingPower(int x, int y, int z) const;
     // t657 查询：(x,y,z) 处方块是否为「有效电源」（对 6 邻供强电 15）。含：红石块恒源；红石火把亮态
     //   （未熄灭）；拉杆 / 按钮按下态（state bit0）；压力板压下态（state bit0）；探测轨有车标记
@@ -2431,6 +2442,8 @@ private:
     //   ① 水平邻 (dx,dz) 是否向 (x,y,z) 定向供电：非中继器源全向（powerSourceLevel>0）；**中继器仅输出端**
     //     （其输出朝向指向本格 = 朝向 == -(dx,dz)）——二极管整流的判定核心，Phase A 粉播种与中继器输入
     //     读取同源共用（禁第二套定向判定漂移，goldenRailChainStep 单一权威同门）。
+    //     t1130 RED-02 起接收器供电查询 isReceivingPower 与火把反相 attachPowered 亦走本门（单一权威
+    //     三消费端；era mz.b 仅输出面馈电 jar 立证）。
     bool sourceFeedsCell(int x, int y, int z, int dx, int dz) const;
     //   ② 中继器 (x,y,z)（state 带朝向）的输入端是否通电：只读「后端格」（输出反向水平邻）——后端格
     //     电源（含链上中继器，经 ① 定向）或后端格通电粉（v1 全向读邻简化：不做粉形状判定，与
