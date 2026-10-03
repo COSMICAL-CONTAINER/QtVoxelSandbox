@@ -1299,6 +1299,22 @@ add_executable(redstone_matrix_test
     #   件锚 + 燃料定谳注 + 瓶槽口径钉 + CMake+QML 门——NEG 双摘面豁免不钉]。行为腿真链 pc /
     #   rig fresh 小世界族，rig 世界零接触）。
     tools/matrix/section91_interact_fix_t1128.cpp
+    # t1129 SAVE-01 存档一致性探针段（置尾先例沿用：runAll 末执行，filter 词 r2099；5 腿
+    #   r2099a-e = 复现柱[Player 段注入 → 关库重开四面恰上一完整代 + 物品守恒账平（固定/流式
+    #   两模式）+ 同店重试恰 B] / 失败点矩阵柱[五注入点 × 两模式 → 四面恰 A + 台账如实分类 +
+    #   流式附加面恰 A + Player 点重试恰 B] / 重复中断柱[三连中断代次单调消耗 + 四面恒 A + 重存
+    #   收敛恰新代] / 旧档兼容柱[无台账裸三写库 + 手工最小库 + 旧中断标记库——读入不丢不崩 +
+    #   新码统一保存收敛（零 schema 变化 = 旧档兼容硬门）] / 结构钉族[原子域原语 + 戳入事务 +
+    #   冲洗缝转发 + QML 退役面（StreamingBridge. 计数 2→1 lawful 修订）+ worldstore 盲区钉
+    #   幸存复核——NEG 双摘面行由 a/b 持有]。行为腿协调层直驱 + GameSession 同事务冲洗缝 fresh
+    #   小世界族，rig 世界零接触）。
+    tools/matrix/section92_save_consistency_t1129.cpp
+    # t1129 杀进程探针（CLI 模式 TU：--killprobe inject|inject-old|child|child-old|parent|
+    #   parent-old——父 spawn 自身子进程 + 标记文件锚定保存窗 + QProcess::kill 真实终止 + 重开
+    #   库四面读回。inject-old/child-old/parent-old = 旧协议提交序原语级重放（复现实验面——
+    #   语句与 HEAD^ savecoordinator.cpp 步⑤⑥⑦ 同源）；inject/child/parent = 新序真实面。
+    #   矩阵主运行零触碰——runAll 路径不进本 TU 的任何函数体）。
+    tools/matrix/killprobe_t1129.cpp
     src/Game/signboardfont.cpp
     src/Game/signboardfont.h
     # D6 worker meshing 探针段（置尾先例沿用：runAll 末执行，filter 词 r2020；4 腿 r2020a-d =

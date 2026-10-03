@@ -279,6 +279,10 @@ void MatrixRun::runAll()
                               //   牌子全回路柱 / 换料柱 / 结构钉族，行为腿真链 pc /
                               //   rig fresh 48×48×96 s95..97 小世界族，rig 世界零接触，
                               //   接 section90）
+    section92_save_consistency_t1129(); // t1129 SAVE-01 存档一致性探针段（置尾先例沿用：r2099
+                              //   a-e 腿族 = 复现柱 / 失败点矩阵柱 / 重复中断柱 / 旧档兼容柱 /
+                              //   结构钉族，行为腿协调层直驱 + GameSession 同事务冲洗缝
+                              //   fresh 小世界族，rig 世界零接触，接 section91）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";

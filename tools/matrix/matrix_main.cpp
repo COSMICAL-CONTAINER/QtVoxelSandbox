@@ -7,11 +7,18 @@
 //   名单（绝对出现断言退役 → 确定性源钉 + 统计带，≥10 连跑全绿实证）。
 #include "matrix_helpers.h"
 
+// t1129 杀进程探针（CLI 模式；矩阵主运行零触碰——matric run 只在无该参数时进入）。
+int runKillProbe(int argc, char *argv[]);
+
 int main(int argc, char *argv[])
 {
     // t814：QCoreApplication → QGuiApplication —— Game 层 PlayerController 直编（QQuickItem 派生，
     //   构造需 Gui 平台集成；无窗口创建，探针纯对象交互）。
     QGuiApplication app(argc, argv);
+
+    // t1129 SAVE-01 杀进程实验入口（argv[1] == "--killprobe" → CLI 模式，exit 后不进矩阵主运行）。
+    if (argc > 1 && QLatin1String(argv[1]) == QLatin1String("--killprobe"))
+        return runKillProbe(argc, argv);
 
     // R20.03 目标 B：--filter <substring> —— 腿名含子串才执行，未命中计 SKIP；
     // 不加该参数时行为与原先逐位一致（全 545 跑）。

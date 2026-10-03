@@ -424,10 +424,12 @@ void MatrixRun::section19_savecoordinator()
         " marker-first protocol abort before any part is attempted (receipt fails with the ledger"
         " error, saveOkCount moves by exactly zero, the ledger still reads Clean at generation 1,"
         " and after release the previous save reloads bit-identical); an injected Player-stage"
-        " fault lands the world part but not the player part - the mixed state is honestly"
-        " classified Interrupted (generation 2 > complete 1) while the old player data stays"
-        " readable (partial-write protection); an injected Finalize fault persists every part yet"
-        " still must not report success (the complete stamp is the only success authority),"
+        " fault rolls the whole transaction back with zero parts written - honestly classified"
+        " Interrupted (generation 2 > complete 1) while every face stays at the previous"
+        " complete generation [t1129 lawful revision: the old world-new/player-old mixed face"
+        " retired with the partial-write window]; an injected Finalize fault aborts the commit"
+        " and still must not report success (the complete stamp lands atomically with the data"
+        " under the single-transaction protocol [t1129]),"
         " classified Interrupted 3>1 and fully readable; the next clean save advances"
         " monotonically to generation 4 (interrupted attempts consume but never reset or reuse"
         " the counter); deleting the ledger keys reclassifies Fresh with every read path"
@@ -524,8 +526,10 @@ void MatrixRun::section19_savecoordinator()
                         .arg(pdA.value(QStringLiteral("px")).toDouble())
                         .arg(prA.value(QStringLiteral("statPlayedMinutes")).toInt());
 
-        // (b) 注入 Player 段（磁盘错误形态）：world 部分落、player 部分未落 = 部分写形态，
-        //   如实 Interrupted（gen2>complete1）；旧 player 数据照读（短路：progress 不试）。
+        // (b) 注入 Player 段（磁盘错误形态）：【t1129 单事务原子化 lawful 修订】任一后续失败 =
+        //   整事务回滚 = 零部分写（旧协议「world 已落、player 未落」的混合写窗已消灭——旧断言
+        //   worldSaved=true + 计数 +1 随窗退役，携本沿革注）。receipt 全 false + Interrupted
+        //   （gen2>complete1）；旧数据照读 = 全面恰上一完整代（不再是「player 旧值」的混合面）。
         coord.setFaultHook([](SaveFaultStage st) { return st == SaveFaultStage::Player; });
         SaveRequest rq3;
         rq3.name = QStringLiteral("r2015c");
@@ -535,8 +539,8 @@ void MatrixRun::section19_savecoordinator()
         const SaveGenerationInfo fb3 = coord.recover();
         const int c3 = store.saveOkCount();
         const bool partOk = !rc3.ok() && rc3.error.code == kErrSaveFaultInjected
-            && rc3.generation == 2 && rc3.worldSaved && !rc3.playerSaved && !rc3.progressSaved
-            && c3 == c0 + 4 // 只 world 部分计入（+1）
+            && rc3.generation == 2 && !rc3.worldSaved && !rc3.playerSaved && !rc3.progressSaved
+            && c3 == c0 + 3 // t1129：回滚 = 零部分写零计数（旧 +4 = 只 world 计入随窗退役）
             && fb3.state == SaveRecoveryState::Interrupted && fb3.generation == 2
             && fb3.completeGeneration == 1;
         ok = ok && partOk;
@@ -553,7 +557,7 @@ void MatrixRun::section19_savecoordinator()
             const QVariantMap pd3 = store.loadPlayerData();
             const QVariantMap pr3 = store.loadProgress();
             const bool mixedReadable = load3 && gridOf(wL) == gRef
-                && pd3.value(QStringLiteral("px")).toDouble() == 11.5 // player 部分未落 = 旧值
+                && pd3.value(QStringLiteral("px")).toDouble() == 11.5 // t1129：零部分写 = 全面恰基线代
                 && pr3.value(QStringLiteral("statPlayedMinutes")).toInt() == 1;
             ok = ok && mixedReadable;
             if (!mixedReadable)
@@ -563,8 +567,9 @@ void MatrixRun::section19_savecoordinator()
                             .arg(pr3.value(QStringLiteral("statPlayedMinutes")).toInt());
         }
 
-        // (c) 注入 Finalize 段（崩溃在收尾前）：各部分**已写**仍不得报成功——complete 戳是唯一
-        //   成功权威；分类 Interrupted 3>1；中断档照常读（数据完好，分类在台账面）。
+        // (c) 注入 Finalize 段（【t1129】新语义：注入 = 提交 abort——崩在收尾的剩余形态）：
+        //   零部分写仍不得报成功——complete 戳与数据同事务，提交失败 = 全回滚；分类 Interrupted
+        //   3>1；中断档照常读 = 全面恰基线代（旧「各部分已写仍不报成功」面随戳出窗退役）。
         coord.setFaultHook([](SaveFaultStage st) { return st == SaveFaultStage::Finalize; });
         SaveRequest rq4;
         rq4.name = QStringLiteral("r2015c");
@@ -574,8 +579,8 @@ void MatrixRun::section19_savecoordinator()
         const SaveGenerationInfo fc4 = coord.recover();
         const int c4 = store.saveOkCount();
         const bool crashOk = !rc4.ok() && rc4.error.code == kErrSaveFaultInjected
-            && rc4.generation == 3 && rc4.worldSaved && rc4.playerSaved && rc4.progressSaved
-            && c4 == c0 + 7 // 三部分全计（+3）
+            && rc4.generation == 3 && !rc4.worldSaved && !rc4.playerSaved && !rc4.progressSaved
+            && c4 == c0 + 3 // t1129：回滚 = 零计数（旧 +7 = 三部分全计随窗退役）
             && fc4.state == SaveRecoveryState::Interrupted && fc4.generation == 3
             && fc4.completeGeneration == 1;
         ok = ok && crashOk;
@@ -584,7 +589,7 @@ void MatrixRun::section19_savecoordinator()
                                    " st=%9 g=%10/%11] ")
                         .arg(rc4.ok()).arg(rc4.error.code).arg(rc4.generation)
                         .arg(rc4.worldSaved).arg(rc4.playerSaved).arg(rc4.progressSaved)
-                        .arg(c4).arg(c0 + 7).arg(int(fc4.state))
+                        .arg(c4).arg(c0 + 3).arg(int(fc4.state))
                         .arg(fc4.generation).arg(fc4.completeGeneration);
         {
             const bool load4 = reloadWorld(store, wL, 9, whyL);
@@ -592,8 +597,8 @@ void MatrixRun::section19_savecoordinator()
             const QVariantMap pd4 = store.loadPlayerData();
             const QVariantMap pr4 = store.loadProgress();
             const bool interruptedReadable = load4 && gridOf(wL) == gRef
-                && pd4.value(QStringLiteral("px")).toDouble() == 44.5
-                && pr4.value(QStringLiteral("statPlayedMinutes")).toInt() == 4;
+                && pd4.value(QStringLiteral("px")).toDouble() == 11.5 // t1129：零部分写 = 全面恰基线代
+                && pr4.value(QStringLiteral("statPlayedMinutes")).toInt() == 1;
             ok = ok && interruptedReadable;
             if (!interruptedReadable)
                 diag += QStringLiteral("[intread load=%1 px=%2 pr=%3] ")
@@ -618,7 +623,7 @@ void MatrixRun::section19_savecoordinator()
             const QVariantMap pr5 = store.loadProgress();
             const bool convOk = rc5.ok() && rc5.generation == 4
                 && f5.state == SaveRecoveryState::Clean && f5.generation == 4
-                && f5.completeGeneration == 4 && c5 == c0 + 10
+                && f5.completeGeneration == 4 && c5 == c0 + 6 // t1129：三次注入零计数（旧 +10）
                 && load5 && gridOf(wL) == gRef
                 && pd5.value(QStringLiteral("px")).toDouble() == 55.5
                 && pr5.value(QStringLiteral("statPlayedMinutes")).toInt() == 5;
@@ -626,7 +631,7 @@ void MatrixRun::section19_savecoordinator()
             if (!convOk)
                 diag += QStringLiteral("[conv rok=%1 gen=%2 st=%3 c=%4/%5 load=%6 px=%7] ")
                             .arg(rc5.ok()).arg(rc5.generation).arg(int(f5.state))
-                            .arg(c5).arg(c0 + 10).arg(whyL.isEmpty() ? QStringLiteral("ok") : whyL)
+                            .arg(c5).arg(c0 + 6).arg(whyL.isEmpty() ? QStringLiteral("ok") : whyL)
                             .arg(pd5.value(QStringLiteral("px")).toDouble());
         }
 
@@ -669,12 +674,15 @@ void MatrixRun::section19_savecoordinator()
                           << "| r2015c fault injection + recovery state machine: real EXCLUSIVE"
                              " lock aborts marker-first with zero parts attempted and zero"
                              " counter movement (old save readable after release); injected"
-                             " Player fault leaves world new / player old, honestly Interrupted"
-                             " 2>1; injected Finalize fault persists every part yet reports"
-                             " failure (complete stamp is the only success authority),"
-                             " Interrupted 3>1 and readable; clean save converges at generation"
-                             " 4 (monotonic, interrupted numbers never reused); a wiped ledger"
-                             " reads Fresh with every read path intact"
+                             " Player fault rolls the whole transaction back - zero parts"
+                             " written, honestly Interrupted 2>1 [t1129 lawful revision: the"
+                             " old world-new/player-old mixed face retired with the window];"
+                             " injected Finalize fault aborts the commit and reports failure"
+                             " with the complete stamp committed atomically with the data"
+                             " [t1129], Interrupted 3>1 and the baseline generation readable;"
+                             " clean save converges at generation 4 (monotonic, interrupted"
+                             " numbers never reused); a wiped ledger reads Fresh with every"
+                             " read path intact"
                           << (ok ? QString() : diag);
     });
 
@@ -756,11 +764,17 @@ void MatrixRun::section19_savecoordinator()
             SrcPin("r2015 single freeze capture point", "captureSnapshot(", 2),
             SrcPin("r2015 snapshot replay step", "applySnapshotToBuffer(", 2),
             SrcPin("r2015 generation marker write point", "coordUpsert(kCoordKeyGeneration", 1),
-            SrcPin("r2015 complete stamp write point", "coordUpsert(kCoordKeyComplete", 1),
+            // t1129 lawful 修订：complete 戳随单事务原子化移入数据事务（kConn 内经注入名写——
+            //   旧独立连接 coordUpsert(kCoordKeyComplete 面 = 「数据已写、戳未盖」假中断窗本体，
+            //   随窗退役），新写点词元同位换形携沿革注。
+            SrcPin("r2015 complete stamp write point",
+                   "m_store->stampLedgerKeyInTxn(kCoordTable, kCoordKeyComplete, newGen)", 1),
             SrcPin("r2015 generation key authority", "kCoordKeyGeneration", 2),
             SrcPin("r2015 interrupted classification", "SaveRecoveryState::Interrupted", 1),
-            SrcPin("r2015 player part via adapter", "m_store->savePlayerData(req.playerData)", 1),
-            SrcPin("r2015 progress part via adapter", "m_store->saveProgress(req.progress)", 1),
+            // t1129 lawful 修订：部件写调用随单事务原子化改道 worldstore 原语（savePlayerData/
+            //   saveProgress 裸面保留给裸调用 caller——协调层面 = write*Part 事务内写体）。
+            SrcPin("r2015 player part via adapter", "m_store->writePlayerPart(req.playerData)", 1),
+            SrcPin("r2015 progress part via adapter", "m_store->writeProgressPart(req.progress)", 1),
         });
         for (const QString &m : missScp) {
             ok = false;

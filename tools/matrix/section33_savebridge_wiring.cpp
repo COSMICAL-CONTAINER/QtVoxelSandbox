@@ -27,9 +27,10 @@
 //     桥保存拒存零部分尝试 + 锁释放后台账历史不失真[代次键原样]；open 级失败[库路径为目录]同
 //     归 open-error——两面目可区分且都不谎报）；
 //   「结构钉」→ r2031d（worldstore 零触碰反探[SaveBridge/save_coord 禁入 + schema 版本原样] +
-//     additive 正面钉[save_coord 幂等建表 + OpenError 守卫落位] + QML 两处例外面钉
-//     [saveViaCoordinator/recoveryState 各恰一处 + StreamingBridge 恰两处 + 会话类型禁入复述 +
-//     toast 文案在位] + 生产零挂载反探[setFaultHook 不入 Main.qml/main.cpp]）。
+//     additive 正面钉[save_coord 幂等建表 + OpenError 守卫落位] + QML 例外面钉
+//     [saveViaCoordinator/recoveryState 各恰一处 + StreamingBridge 恰一处——t1129 lawful 修订
+//     随前置冲洗行退役收窄 + 会话类型禁入复述 + toast 文案在位] +
+//     生产零挂载反探[setFaultHook 不入 Main.qml/main.cpp]）。
 // 恰红面设计（先于腿文；双变异双还原，存证 build/ 终名四日志）：
 //   NEG-1 摘 complete 戳（savecoordinator.cpp 收尾戳条件加 false && 前缀 = 写完不盖且 receipt
 //     仍报成功）→ 每次保存 gen>complete 恒在 → 声明红面 = r2031 族内 {r2031b, r2031c} + **跨族
@@ -356,10 +357,12 @@ Item {
         " (real saves through the bridge land both ledger keys with raw reads proving it: the"
         " first coordinated save writes the in-flight generation and the complete stamp at 1/1"
         " and the second advances monotonically to 2/2; a bridge-mounted fault at the player"
-        " stage returns false with only the world part counted and the recovery state honestly"
-        " Interrupted 3>2 while the previous player data stays readable after reload; a fault at"
-        " the finalize stage persists all three parts (counter +3) yet still must not report"
-        " success - the complete stamp is the only success authority, Interrupted 4>2; clearing"
+        " stage returns false with zero parts counted [t1129 lawful revision: the whole"
+        " transaction rolls back so the old world-part-counted face retired with the window]"
+        " and the recovery state honestly Interrupted 3>2 while every face stays at the"
+        " previous complete generation after reload; a fault at the finalize stage aborts the"
+        " commit (zero parts counted [t1129]) yet still must not report success - the complete"
+        " stamp lands atomically with the data, Interrupted 4>2; clearing"
         " the hook converges at generation 5/5 Clean (interrupted numbers consumed, never reset"
         " or reused)"), [&]() {
         bool ok = true;
@@ -419,20 +422,21 @@ Item {
                                      k1.value(QStringLiteral("complete_generation")).toString())
                         .arg(int(f2.state));
 
-        // 中途失败（Player 段经桥钩注入）：world 部分落、player 不落 → false + Interrupted 2 域
-        // 面如实（计数只动已写部分）+ 旧 player 数据重读照旧（短路保护生产面）。
+        // 中途失败（Player 段经桥钩注入）：【t1129 单事务原子化 lawful 修订】整事务回滚 = 零
+        // 部分写（旧「world 部分落、player 不落」混合窗已消灭——旧 +1 计数随窗退役，携沿革注）
+        // → false + Interrupted 3>2 域面如实 + 基线数据全面照读（恰上一完整代，非混合面）。
         bridge.setFaultHook([](SaveFaultStage st) { return st == SaveFaultStage::Player; });
         const bool s3 = qmlExitSave(rig, 33.5, 3);
         const SaveGenerationInfo f3 = bridge.recoveryInfo(db);
         const int c3 = store.saveOkCount();
         const bool partOk = !s3 && f3.state == SaveRecoveryState::Interrupted
             && f3.generation == 3 && f3.completeGeneration == 2
-            && c3 == c1 + 4; // +3（#2）+1（#3 只 world 部分计入）
+            && c3 == c1 + 3; // +3（#2）+0（t1129：回滚 = 零部分写零计数）
         ok = ok && partOk;
         if (!partOk)
             diag += QStringLiteral("[r3 s=%1 st=%2 g=%3/%4 c=%5/%6] ")
                         .arg(s3).arg(int(f3.state)).arg(f3.generation)
-                        .arg(f3.completeGeneration).arg(c3).arg(c1 + 4);
+                        .arg(f3.completeGeneration).arg(c3).arg(c1 + 3);
         {
             World wL;
             freshWorld48(wL);
@@ -450,19 +454,20 @@ Item {
                             .arg(pd3.value(QStringLiteral("px")).toDouble());
         }
 
-        // Finalize 段注入（崩溃在收尾前形态）：三部分全写仍不得报成功——戳是成功唯一权威。
+        // Finalize 段注入（【t1129】新语义 = 提交 abort——崩在收尾的剩余形态）：零部分写仍不得
+        // 报成功——戳与数据同事务，提交失败 = 全回滚；分类 Interrupted 4>2。
         bridge.setFaultHook([](SaveFaultStage st) { return st == SaveFaultStage::Finalize; });
         const bool s4 = qmlExitSave(rig, 44.5, 4);
         const SaveGenerationInfo f4 = bridge.recoveryInfo(db);
         const int c4 = store.saveOkCount();
         const bool stampOk = !s4 && f4.state == SaveRecoveryState::Interrupted
             && f4.generation == 4 && f4.completeGeneration == 2
-            && c4 == c3 + 3; // 三部分全计 = 数据已写，但成功仍不报
+            && c4 == c3 + 0; // t1129：回滚 = 零计数（旧 +3 三部分全计随窗退役）
         ok = ok && stampOk;
         if (!stampOk)
             diag += QStringLiteral("[r4 s=%1 st=%2 g=%3/%4 c=%5/%6] ")
                         .arg(s4).arg(int(f4.state)).arg(f4.generation)
-                        .arg(f4.completeGeneration).arg(c4).arg(c3 + 3);
+                        .arg(f4.completeGeneration).arg(c4).arg(c3 + 0);
 
         // 清钩重存收敛：代次跨中断单调 5/5、恢复态 Clean（中断号消耗不重置不复用）。
         bridge.setFaultHook(SaveFaultHook()); // 生产形态复位
@@ -727,7 +732,9 @@ Item {
         if (!sbNoProp) diag += QStringLiteral("[bridge-value-prop] ");
 
         // ④ QML 两处例外面钉（变更面集中：saveViaCoordinator 恰 1 / recoveryState 恰 1 +
-        //   StreamingBridge 恰 2 复述 + toast 文案 + 类型名禁入复述）。
+        //   StreamingBridge 恰 1【t1129 lawful 修订：旧恰 2 复述随 Main.qml 前置冲洗行退役收窄
+        //   ——冲洗随统一保存链同事务执行，StreamingBridge 面仅存 enterWorld 分流行】 +
+        //   toast 文案 + 类型名禁入复述）。
         {
             QFile f(srcRoot + QStringLiteral("/ui/Main.qml"));
             QString src;
@@ -736,7 +743,8 @@ Item {
             const int saveCalls = int(src.count(QLatin1String("SaveBridge.saveViaCoordinator")));
             const int recCalls = int(src.count(QLatin1String("SaveBridge.recoveryState")));
             const int streamCalls = int(src.count(QLatin1String("StreamingBridge.")));
-            const bool concentrated = saveCalls == 1 && recCalls == 1 && streamCalls == 2
+            const bool concentrated = saveCalls == 1 && recCalls == 1 && streamCalls == 1
+                && !src.contains(QLatin1String("if (!StreamingBridge.flushForSave())"))
                 && src.contains(QString::fromUtf8(
                     "上次保存未完成，已载入最后完整数据；建议立即重新保存"))
                 && src.contains(QStringLiteral("return SaveBridge.saveViaCoordinator(worldStore"));
@@ -776,8 +784,10 @@ Item {
                              " ledger is a pure additive idempotent-create table with the"
                              " distinguishable-error machinery pinned at its authority points,"
                              " the bridge exposes exactly the singleton invokable pair with a"
-                             " single hook seam, the QML exception face is exactly two bridge"
-                             " calls with the registered toast copy, and the fault hook is"
+                             " single hook seam, the QML exception face keeps the enter handoff"
+                             " as the single streaming-bridge call [t1129: the pre-save flush"
+                             " line retired with the flush moved inside the coordinated save]"
+                             " with the registered toast copy, and the fault hook is"
                              " mounted nowhere in production"
                           << (ok ? QString() : diag);
     });

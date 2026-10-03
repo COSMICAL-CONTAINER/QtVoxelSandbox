@@ -604,7 +604,8 @@ Item {
         " QML exception surface concentrated in its hunks: the world list carries the default-off"
         " infinite toggle with its label and exactly one creation-chain flag call, the convert"
         " action with its three-point confirm copy and exactly one conversion call, the enter"
-        " handoff and the persist-side flush hook are the only two bridge touches in Main, the"
+        " handoff is the only bridge touch in Main [t1129 lawful revision: the persist-side"
+        " flush hook line retired - the flush now rides the coordinated save transaction], the"
         " bridge type exposes exactly five invokables with zero value-component properties, the"
         " world pair and the session shell carry the minimal mode-migration and pump seams,"
         " gameplay markers stay put with zero session-type mentions, and every frozen-domain"
@@ -700,12 +701,13 @@ Item {
                 diag += QStringLiteral("[list-calls %1] ").arg(calls);
         }
 
-        // ④ Main.qml 变更面（进入分流 + 保存链冲洗——桥调用恰两处）+ 玩法标记在位 + r2007b 复述。
+        // ④ Main.qml 变更面（进入分流——桥调用恰一处【t1129 lawful 修订：保存链前置冲洗行退役，
+        //    冲洗随统一保存链同事务执行，save-chain flush hook 钉退役改钉退役面】）+ 玩法标记
+        //    在位 + r2007b 复述。
         const QStringList missMain = pinSet(mainPath, {
             SrcPin("enter handoff branch",
                 "if (StreamingBridge.enterWorld(theWorld, worldStore, worldClock, player, file,"
                 " seed)) {", 1),
-            SrcPin("save-chain flush hook", "if (!StreamingBridge.flushForSave())", 1),
             SrcPin("gameplay entry intact: enterWorld", "function enterWorld(", 1),
             SrcPin("gameplay bridge intact: worldClock onTicked", "function onTicked(dt)", 1),
             SrcPin("gameplay entry intact: startGame", "function startGame()", 1),
@@ -720,8 +722,8 @@ Item {
             if (f.open(QIODevice::ReadOnly))
                 src = QString::fromUtf8(f.readAll());
             const int calls = int(src.count(QLatin1String("StreamingBridge.")));
-            ok = ok && calls == 2;
-            if (calls != 2)
+            ok = ok && calls == 1; // t1129 lawful 修订：恰 2 → 恰 1（前置冲洗行退役，随统一保存链同事务）
+            if (calls != 1)
                 diag += QStringLiteral("[main-calls %1] ").arg(calls);
             // r2007b 站立钉复述（裸字面含注释——Main.qml 禁出会话类型名）。
             const bool noSession = !src.contains(QLatin1String("GameSession"));
@@ -754,8 +756,9 @@ Item {
                              " concentrated in its hunks with the default-off infinite toggle and"
                              " its label and one creation-chain flag call, the convert action with"
                              " its three-point confirm copy and one conversion call, the enter"
-                             " handoff and the persist-side flush hook are the only two bridge"
-                             " touches in Main, the bridge type exposes exactly five invokables"
+                             " handoff is the only bridge touch in Main [t1129: the persist-side"
+                             " flush line retired into the coordinated save transaction], the"
+                             " bridge type exposes exactly five invokables"
                              " with zero value-component properties, the world pair and the"
                              " session shell carry the minimal mode-migration and pump seams,"
                              " gameplay markers stay put with zero session-type mentions, and"

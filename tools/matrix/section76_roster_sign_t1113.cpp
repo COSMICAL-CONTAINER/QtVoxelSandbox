@@ -659,8 +659,10 @@ void MatrixRun::section76_roster_sign_t1113()
                                                           QStringLiteral("req.signs = signs;"))
                 && rawContainsRosterSign(srcDir + QStringLiteral("/Game/savebridge.cpp"),
                                          QStringLiteral("req.brewingStands = brewingStands;"))
+                // t1129 lawful 修订：转发尾词元随单事务原子化改道（saveAll 直调 → writeWorldPart
+                // 事务内转发），尾词元 `req.brewingStands, req.signs))` 同位换形携沿革注。
                 && rawContainsRosterSign(srcDir + QStringLiteral("/World/savecoordinator.cpp"),
-                                         QStringLiteral("req.brewingStands, req.signs);"));
+                                         QStringLiteral("req.brewingStands, req.signs))"));
             ok = ok && bridgeRows;
             if (!bridgeRows) diag += QStringLiteral("[bridge]");
             const QStringList missCm = pinSet(QCoreApplication::applicationDirPath()
