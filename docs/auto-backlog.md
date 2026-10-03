@@ -148,6 +148,8 @@
 - scaffold 地形跨 adopt 缓存（t1126 登记——≈2.9ms/adopt；terrain 纯函数可缓存但引入跨 adopt 状态面，待评估）
 - ChunkManager sparse 单访问器双哈希查找（t1126 登记——refloodBox 2-3ms 承载形态，引擎级 accessor 形状，动则全引擎读径统一评估）
 - 经验库候选（t1126 剖析实证）：全域 lattice pass 在 population 重放下隐性 O(核心域) 放大——新增全域候选 pass 必须随附写域 reach 推导，否则每 chunk 物化付整域价
+- **WORLD-01 结构族余量（t1131 第一族地牢交付后逐单排）**：mineshaft[±26 写域需跨 chunk 计划切片面或 envelope 重构]/desert temple[21²+12 深地表结构需双锚切片]/jungle temple[15² 同门]/stronghold[全图唯一+环带选一座纪律+跨多 chunk]/village[多建筑离散分布，t1108 候选表三路同源已备]
+- 经验库候选（t1131 定理）：population 窗口重放接结构族的通用门形=「读写域⊆锚窗闭合 + 非自身列写惰性」——可迁移其余族评估
 - 接收器侧粉形状输入面 / 实块间接承载（era l→u/k 强弱分层）/ 火把贴附面不馈电（t1130 登记三子面——era 口径见 jar 工件，逐面评估后收）
 - lessons 候选（t1130 申报）：排定态编码须可推导目标（目标=!out 恒成立免新位）+ era 调度不可撤销语义
 - 亡灵反转面（t1122 登记——1.0 jar 实证 undead 门在场[伤害/治疗互换]；工程 mob 无 undead 效果面=t1101 降级载体，随 mob 效果注入系统同域）
