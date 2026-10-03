@@ -1315,6 +1315,13 @@ add_executable(redstone_matrix_test
     #   + 负坐标跨区块 + 结构钉族[era 工件在盘非空 + 勘误注 raw + 跨任务词元零命中 + 注册三行]。
     #   行为腿 fresh 小世界族，rig 世界零接触）。
     tools/matrix/section93_redstone_fix_t1130.cpp
+    # t1131 流式世界结构族第一员（地牢 era 门）探针段（置尾先例沿用：runAll 末执行，filter 词
+    #   r2101；4 腿 r2101a-d = 计划确定性柱[同 seed 孪生足迹逐位 + 双序物化 + 部分相交远锚写惰
+    #   性面 + 跨 chunk 连续] + 行为柱[era 体素落位逐面 + 贴墙旗面箱 + 玩家编辑保护] + era 形态
+    #   柱[池聚合对照 jar 定谳面：尺寸/高 3/苔率 25% 带/箱层/三态池] + 结构钉族[接入门/定义/
+    #   单一权威帮手/era 工件在盘/跨任务词元零命中/注册三行/计划绝对面]。
+    #   行为腿 fresh sparse 小世界族，rig 世界零接触）。
+    tools/matrix/section94_structure_t1131.cpp
     # t1129 杀进程探针（CLI 模式 TU：--killprobe inject|inject-old|child|child-old|parent|
     #   parent-old——父 spawn 自身子进程 + 标记文件锚定保存窗 + QProcess::kill 真实终止 + 重开
     #   库四面读回。inject-old/child-old/parent-old = 旧协议提交序原语级重放（复现实验面——

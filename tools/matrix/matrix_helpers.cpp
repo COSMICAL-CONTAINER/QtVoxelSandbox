@@ -288,6 +288,11 @@ void MatrixRun::runAll()
                               //   定点单 pass 计量 / 挂起态存读续程 / 四朝向方位矩阵 + 背驮面 /
                               //   六消费面前 vs 侧 / 既有源零回归 + 负坐标跨区块 / 结构钉族，
                               //   行为腿 fresh 小世界族，rig 世界零接触，接 section92）
+    section94_structure_t1131(); // t1131 流式世界结构族第一员（地牢 era 门）探针段（置尾先例
+                              //   沿用：r2101 a 计划确定性柱 / b 行为柱[era 体素落位 + 玩家
+                              //   编辑保护] / c era 形态柱[池聚合 jar 定谳面] / d 结构钉族[接
+                              //   入门/定义/权威帮手/工件在盘/计划绝对面]，行为腿 fresh sparse
+                              //   小世界族，rig 世界零接触，接 section93）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";

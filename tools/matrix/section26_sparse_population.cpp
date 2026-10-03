@@ -10,13 +10,14 @@
 //     调用序列字面钉[全域调用形态] + generate 体禁出 population 反探）；
 //   「同 seed sparse ≡ fixed 逐位恒等（r2022c 收窄面重新收宽）」→ r2023b parity 承重墙
 //     （9 个核内内部 chunk[窗口 ⊆ 核心域]全 16×16×H 体素 id+state 逐位恒等；(b) 级重放 pass
-//     全部纳入断言；豁免 pass（结构族五员）按 world.cpp sparsePopulateChunk 处置表在腿注释
-//     排除——固定世界的结构块若落入被比 chunk 会使断言失真，故前置扫描确认被比区结构块为零
-//     并记录 (b) pass 签名在位（非空转））；
+//     全部纳入断言；结构族足迹按 world.cpp sparsePopulateChunk 处置表在腿注释掩蔽——结构
+//     体素面不具恒等面（fixed 落位形态；t1131 起 sparse 面地牢 = era 门形态，写域 ⊆ 站点
+//     足迹 bbox → 掩蔽对入窗后同样闭合），并记录 (b) pass 签名在位（非空转））；
 //   「加载顺序无关确定性」→ r2023c（radius 0 双世界按两种次序 loadChunkAt 同一组 chunk[含
 //     负坐标 (-1,2)]→ 内容逐位恒等，含跨 chunk 树冠越界枝叶面）；
 //   「结构钉」→ r2023d（fixed 分支字面钉 + 重放=调用单一权威[populate 调 shared pass 本体] +
-//     结构族豁免反探[populate 体禁出五结构调用] + pending/拆卸单点收口[releaseSparseChunk]）。
+//     结构族豁免反探[populate 体禁出余五员结构调用；t1131 lawful 修订——地牢第一员入窗正面
+//     钉] + pending/拆卸单点收口[releaseSparseChunk]）。
 // 恰红面设计（先于腿文；双变异双还原，存证 build/ 终名日志）：
 //   变异一（NEG-1）= 摘 sparsePopulateChunk 内 placeTrees 窗口调用（sparse 树缺失）→ 恰红
 //     {r2023b} 单腿（树冠/树干体素差 = 被摘语义本体；r2023c 双世界同缺树仍互等、r2022c 修订
@@ -139,10 +140,10 @@ void MatrixRun::section26_sparse_population()
 
     // ── r2023b：parity 承重墙（r2022c 收窄面的重新收宽）──────────────────────────────────
     // 处置表豁免面（world.cpp sparsePopulateChunk 头注释全录）在断言中的落法：
-    //   (c) 结构族五员（dungeon/mineshaft/desertTemple/jungleTemple/stronghold）不重放 → 逐体
-    //       素结构区域掩蔽（五类 inside* + xz 9 点偏移栅格 {0,±6,±12} 覆盖地牢豁口 ±12 挖掘
-    //       域），掩蔽面计数入 diag；
-    //   (c) scatterOres 替代（cell 窗 + tryOre 读写域双钳窗 = MC per-chunk vein 同构；块缘
+    //   结构族足迹掩蔽（t1131 起 = 余五员 (c) 豁免 + 地牢 (b)窗 era 门[体素形态 ≠ fixed 演化
+    //       形态，写域 ⊆ 站点足迹 bbox]）→ 逐体素结构区域掩蔽（六类 inside*/region + xz 9 点
+    //       偏移栅格 {0,±6,±12} 覆盖足迹溢出域），掩蔽面计数入 diag；
+    //   (c)替 scatterOres 替代（cell 窗 + tryOre 读写域双钳窗 = MC per-chunk vein 同构；块缘
     //       ±8 列跨 cell 脉形交互差异如实登记）→ 比对掩蔽双侧矿族方块（矿差仅限矿体素自身，
     //       其余 pass 不读矿态——carve 族 skip 判定对 Stone/Ore 同义 = 不外溢）；
     //   (b) 级重放 pass 签名（矿/洞/水/树/草）非空转计数在位。
@@ -369,8 +370,10 @@ void MatrixRun::section26_sparse_population()
         " population replay on its single-authority seams: the populate driver windowizes the"
         " quiet flag around a same-order replay of the shared fixed-domain pass bodies,"
         " representative windowed calls and the scaffold teardown are pinned, the five"
-        " structure-family passes are textually absent from the populate body per the"
-        " disposition table exemptions, generate() never enters the population replay, and the"
+        " remaining structure-family passes are textually absent from the populate body per"
+        " the disposition table exemptions while the dungeon family enters as the first"
+        " windowed replay member through its pinned integration gate line per the t1131 era"
+        " gate form, generate() never enters the population replay, and the"
         " scaffold release primitive exists exactly once as the teardown single point)"), [&]() {
         bool ok = true;
         QString diag;
@@ -411,12 +414,15 @@ void MatrixRun::section26_sparse_population()
                 popBody = src.mid(b, e - b);
         }
         const bool exemptOk = popBody.size() > 0
-            && !popBody.contains(QStringLiteral("placeDungeons("))
             && !popBody.contains(QStringLiteral("placeMineshaft("))
             && !popBody.contains(QStringLiteral("placeDesertTemple("))
             && !popBody.contains(QStringLiteral("placeJungleTemple("))
             && !popBody.contains(QStringLiteral("placeStronghold("))
-            && !popBody.contains(QStringLiteral("placeVillages(")); // t1108 lawful 修订：村庄第六员入豁免反探
+            && !popBody.contains(QStringLiteral("placeVillages("))
+            // t1131 lawful 修订：地牢第一员出豁免入窗口重放（era 门——处置表 placeDungeons 行
+            //   (c)→(b)窗）；余五员豁免反探原样 + 窗口接入门行正面钉（行文本含窗参四元组，
+            //   NEG-1 摘行即本面红——与 section94 r2101d 双住申报）。
+            && popBody.contains(QStringLiteral("placeDungeonsWindowed(wx0, wx1, wz0, wz1);"));
 
         // ③ chunkmanager 拆卸原语单点（声明 + 定义各恰一处；擦槽语义面）。
         const QStringList missCm = pinSet(
@@ -435,7 +441,8 @@ void MatrixRun::section26_sparse_population()
         }
         if (!exemptOk) {
             ok = false;
-            diag += QStringLiteral("[exempt probe found structure calls in populate body] ");
+            diag += QStringLiteral("[exempt probe failed: five-member absence or dungeon"
+                                   " windowed-gate presence broken] ");
         }
 
         if (!ok) ++totalFail;
@@ -444,7 +451,9 @@ void MatrixRun::section26_sparse_population()
                              " single-authority seams (quiet-windowed same-order replay of the"
                              " shared pass bodies, scaffold lifecycle through the guarded"
                              " forwarder, teardown through the single release primitive,"
-                             " structure-family passes textually absent from the populate body,"
+                             " five remaining structure-family passes textually absent from"
+                             " the populate body while the dungeon era-gate member enters"
+                             " through its pinned windowed integration line,"
                              " and generate() free of population tokens)"
                           << (ok ? QString() : diag);
     });
