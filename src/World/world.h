@@ -368,6 +368,8 @@ public:
     //    引用，防字面量漂移；同 kStrongholdHalf 上收先例）──
     static constexpr int kDungeonSeedOff = 12037;        // 地牢 worldgen hash 偏移（placeDungeons / dungeonSites 同源）
     static constexpr int kDungeonRoomH = 4;              // 地牢房间内部高度（选择 y 范围 + 周界几何同源）
+    static constexpr int kDungeonEraRoomH = 3;           // t1131 地牢 era 室内高（jar acj b0=3 定谳；仅窗口重放面消费，
+                                                         //   fixed kDungeonRoomH=4 计划面原样——两常量并存零漂移）
     static constexpr int kMineshaftSeedOff = 15047;      // 废弃矿井 hash 偏移（placeMineshaft / mineshaftSites 同源）
     static constexpr int kDesertTempleSeedOff = 19487;   // 沙漠神殿 hash 偏移（placeDesertTemple / desertTempleSites 同源）
     static constexpr int kDesertTempleHalf = 10;         // 金字塔足迹半边（21×21 外圈；几何 kPyramidHalf 同源）
@@ -1957,6 +1959,21 @@ private:
     //   出生请求经 refillVillageSpawnRequests 登记、上层 takeVillageSpawnRequests 取走派生（桥面契约
     //   见其声明头注）。sparse 流式世界 = 结构族 (c) 豁免同门（sparsePopulateChunk 处置表），不重放。
     void placeVillages();
+    // t1131 W1c 结构族第一员入流式（地牢 era 门）——**仅 sparse population 调用**（fixed 世界
+    //   地牢 = placeDungeons t995/t999 演化形态原样，t995a-c 源钉冻结，零变化墙）。era 取证 =
+    //   build/t1131_jar_dungeon.txt（1.0.0 client jar acj = WorldGenDungeons 反汇编定谳）：
+    //   生成规则 = 扫描门（底/顶行全实心 + 墙环 1..5 根空气柱）→ 自顶向下建造（内部清空 / 框架
+    //   悬空塌落 / 既有空气豁口保留 / 底行 25% 苔石）→ 中心刷怪笼 → 2 箱位×3 尝试贴墙箱。室内
+    //   高 = kDungeonEraRoomH=3（era b0=3；fixed 内空高 4 = kDungeonRoomH 保留为其计划面）。
+    //   **计划单源不变**：站点 = dungeonSites() 同表（fixed 落位 / 区域表 / 本 pass 三面同源），
+    //   同 seed 同站点；体素形态与 fixed 的分歧如实登记（fixed=演化形态、sparse=era 形态），
+    //   被站点足迹 bbox（= 本 pass 读写域）完全覆盖 → r2023b 掩蔽面零缺口。
+    //   确定性定理（承重墙，详见 world.cpp 实现头注）：读写域 = 站点足迹 ⊆ 锚 scaffold 窗恒
+    //   成立 → 完整应用锚（自身锚 + 足迹不溢出的相邻锚）读 pass-k 时刻真值 → 决策与锚无关 =
+    //   逐位同片；部分相交锚的写恒落非自身列（scaffold/快照双路皆被拆卸恢复丢弃）= 写惰性 →
+    //   每 chunk 终态 = f(seed, 自身坐标)：加载序无关（A→B ≡ B→A）、跨 chunk 连续、玩家编辑
+    //   零触碰（population 只跑新生 + 已物化邻走快照恢复）。
+    void placeDungeonsWindowed(int wx0, int wx1, int wz0, int wz1);
     // t309 地表小湖泊（部分露出；spec「地表小湖泊（部分露出）」）：fillWater 之后，plains/forest 平坦地表
     //   确定性散布小型浅水湖——在局部低洼（disc heightAt 轻微起伏、湖岸外圈 ≥ surfaceY）的草地 carve 一个浅水盘
     //   （surfaceY-1 / surfaceY-2 两层水源），周围等高草地天然围成不溢漏的湖岸。湖部分露出（水面 = 周围草地顶 -1，

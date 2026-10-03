@@ -233,15 +233,34 @@ void World::sparseGenerateChunk(int cx, int cz)
 //                                                    写 ⊆ 中心±4（近 C 候选读全 ∈ scaffold）
 //   placeUndergroundWaterPools                (b)全   海检/高度纯；disc 读=写位守卫 ⊆ 中心±7
 //   placeLavaLakes                            (b)全   同上（网格 16）
-//   placeDungeons                             (c)    豁口搜空气读域 = 足迹±12 曼哈顿（跨
-//                                                    scaffold 读闭合破缺）。MC 引证
-//                                                    （minecraft.wiki/w/World_generation，
-//                                                    2026-09 实读）：monster room 属
-//                                                    underground_structures decoration step
-//                                                    的 per-chunk feature，结构生成只读自身
-//                                                    模板与噪声地形、不读邻块 worldgen 体素
-//                                                    态——本 pass 的体素态依赖恰为与 MC 异构
-//                                                    之处，如实豁免不硬造
+//   placeDungeons                             (b)窗   t1131 W1c 结构族第一员入流式（era 门）：
+//                                                    era 形态 pass（build/t1131_jar_dungeon.txt
+//                                                    acj 反汇编定谳：扫描门[底/顶行全实心 + 墙环
+//                                                    1..5 空气柱]→自顶向下建造[内部清空/悬框塌落/
+//                                                    空气豁口保留/底行 25% 苔]→中心刷怪笼→2 箱位
+//                                                    ×3 尝试贴墙箱）。读写域 = 站点足迹本身
+//                                                    [cx-1,cx+roomW]×[cz-1,cz+roomD]（≤9 列跨）
+//                                                    ⊆ 锚窗恒闭合 → 全部读 = pass-k 时刻真值 →
+//                                                    扫描门与建造决策 = (seed, 站点, 足迹 pass-k
+//                                                    态) 纯函数与锚无关 → 完整应用锚（自身锚 +
+//                                                    足迹不溢出的相邻锚）逐位同片；部分相交锚
+//                                                    （足迹跨出其窗）的决策虽读窗外终态，但其写
+//                                                    ⊆ 窗∩足迹 ⊆ **非锚自身列**（足迹至多溢出邻
+//                                                    chunk 一列/七列，恒不触及部分相交锚自身列）
+//                                                    → 落 scaffold（未物化）或快照（已物化）双路
+//                                                    皆被 ③ 拆卸/恢复丢弃 = 写惰性。故每 chunk
+//                                                    终态 = 其自身锚完整应用同片 = f(seed, 自身
+//                                                    坐标)：加载序无关、跨 chunk 连续、玩家编辑
+//                                                    零触碰。与 fixed 面（placeDungeons t999 形
+//                                                    态）的体素分歧如实登记：fixed 保留 t995/t999
+//                                                    演化形态（t995a-c 源钉冻结零变化墙），sparse
+//                                                    = era 形态（天然豁口门 + 底行 25% 苔 + 内空
+//                                                    高 3）；计划单源不变（同 dungeonSites 表——
+//                                                    区域表/结构区域判定/fixed 落位三面零变化），
+//                                                    体素分歧被 r2023b 掩蔽面（站点足迹 bbox）完
+//                                                    全覆盖。era 位置算法（per-chunk 8 次尝试
+//                                                    rng 定位）与工程 24 网格计划的有意分歧同登
+//                                                    记：计划单源纪律优先，era 位置算法不移植。
 //   placeMineshaft                            (c)    写域 ⊆ 中心±26 超 scaffold；t1012 地板
 //                                                    政策读支撑体素跨 chunk。MC 引证：同页
 //                                                    "A structure set determines the placement
@@ -401,7 +420,8 @@ void World::sparsePopulateChunk(int cx, int cz)
         if (nb[i].created)
             createdKeys[createdN++] = ChunkKey{ nb[i].cx, nb[i].cz };
 
-    // ── ② (b) 级 pass 同序重放（fixed generate() 内执行序原样；结构族 (c) 豁免不调）──────
+    // ── ② (b) 级 pass 同序重放（fixed generate() 内执行序原样；结构族余五员 (c) 豁免不调，
+    //     地牢第一员自 t1131 起 (b)窗 era 门重放——处置表 placeDungeons 行）──────────────────
     // 写域钳制（锚 ±1 chunk = scaffold 窗）：窗外候选溢写恒拒——「邻块已/未物化」两序下同为
     // 拒 = 顺序无关（r2023c 恰红实证的溢写污染面）；真邻块终态由此免受他块 population 触碰。
     // scatterOres 传窗 = cell 循环 + tryOre 读写域双钳（脉形走向的体素态耦合 → 读域出窗即两
@@ -428,6 +448,11 @@ void World::sparsePopulateChunk(int cx, int cz)
     carveCaveEntrances(wx0, wx1, wz0, wz1);
     placeUndergroundWaterPools(wx0, wx1, wz0, wz1);
     placeLavaLakes(wx0, wx1, wz0, wz1);
+    // t1131 W1c：结构族第一员接入门（era 门地牢窗口重放——与 fixed generate() 的 placeDungeons()
+    // 同执行序槽位：placeLavaLakes 之后、carveCanyon 之前）。era 形态 + 足迹闭合确定性论证见
+    // placeDungeonsWindowed 实现头注与处置表 placeDungeons 行；r2023d 豁免反探已 lawful 修订
+    // （余五员仍禁出，本行正面钉在案）。
+    placeDungeonsWindowed(wx0, wx1, wz0, wz1);
     carveCanyon(wx0, wx1, wz0, wz1);
     pruneFloatingSnowLayers(wx0, wx1, wz0, wz1);
     pruneUnsupportedWorldgenRails(wx0, wx1, wz0, wz1);
@@ -9445,6 +9470,29 @@ void World::placeLavaLakes(int wx0, int wx1, int wz0, int wz1)
 //   穿墙暴露）。t343 岩浆湖之后（避免岩浆湖填进地牢房间 —— placeLavaLakes 不动 Cobble 墙体，地牢墙体先于
 //   岩浆湖不存在 → 顺序无关；此处放其后保持「流体 worldgen 优先于结构」惯例，避免岩浆与房间争夺同列）。
 //   fillWater 之前（房间独立于海平面；fillWater 仅填地表低洼 → 地下房间不被灌水）。
+
+// t1131：地牢刷怪笼类型加权单一权威（fixed placeDungeons / 窗口重放 placeDungeonsWindowed
+//   两面共用）。t999 分布 = 僵尸 50% / 骷髅 25% / 蜘蛛 25%（era nextInt(4) Skeleton 25 /
+//   Zombie 50 / Spider 25 同分布——jar acj b(Random) 定谳，build/t1131_jar_dungeon.txt）；
+//   抽源 = 站点 hash r bit20-27（概率/jitter/cy/尺寸位域零耦合），同站点跨路径同类型。
+static quint8 dungeonSpawnerStateFor(quint32 siteR)
+{
+    static constexpr quint8 kDungeonSpawnerStates[3] = {
+        BlockRegistry::SpawnerStateShambler,  // 僵尸笼（128/256，最常见 → 创造放置默认亦此型）
+        BlockRegistry::SpawnerStateBones,     // 骷髅笼（64/256）
+        BlockRegistry::SpawnerStateSpider,    // 蜘蛛笼（64/256）
+    };
+    static constexpr int kDungeonSpawnerWeights[3] = { 128, 64, 64 }; // 合计 256（t999 50/25/25；改权重须保持和 256）
+    const int spawnerPick = int((siteR >> 20) & 0xFFu); // [0, 255]
+    quint8 spawnerState = BlockRegistry::SpawnerStateShambler; // 兜底（权重和 <256 时最常见型）
+    int spawnerAcc = 0;
+    for (int si = 0; si < 3; ++si) {
+        spawnerAcc += kDungeonSpawnerWeights[si];
+        if (spawnerPick < spawnerAcc) { spawnerState = kDungeonSpawnerStates[si]; break; }
+    }
+    return spawnerState;
+}
+
 void World::placeDungeons()
 {
     constexpr int kRoomH           = kDungeonRoomH; // 房间内部高度（Y 方向格子数；与 dungeonSites() 选择窗同源类常量）
@@ -9512,20 +9560,9 @@ void World::placeDungeons()
             //    不依赖 Entities → 表存 BlockRegistry 完整 state 常量（数值契约 = EntityManager::MobType）；
             //    tickSpawners 经 EntityManager::spawnerMobTypeForState 解码同刷。
             //    确定性（PLAN §2-K）：同 seed 同分布；r 低 20 位已被概率/jx/jz/cy 用走，bit20-27 独立采样。
-            static constexpr quint8 kDungeonSpawnerStates[3] = {
-                BlockRegistry::SpawnerStateShambler,  // 僵尸笼（128/256，最常见 → 创造放置默认亦此型）
-                BlockRegistry::SpawnerStateBones,     // 骷髅笼（64/256）
-                BlockRegistry::SpawnerStateSpider,    // 蜘蛛笼（64/256）
-            };
-            static constexpr int kDungeonSpawnerWeights[3] = { 128, 64, 64 }; // 合计 256（t999 50/25/25；改权重须保持和 256）
-            const int spawnerPick = int((r >> 20) & 0xFFu); // [0, 255]
-            quint8 spawnerState = BlockRegistry::SpawnerStateShambler; // 兜底（权重和 <256 时最常见型）
-            int spawnerAcc = 0;
-            for (int si = 0; si < 3; ++si) {
-                spawnerAcc += kDungeonSpawnerWeights[si];
-                if (spawnerPick < spawnerAcc) { spawnerState = kDungeonSpawnerStates[si]; break; }
-            }
-            m_chunks.setBlock(cx + roomW / 2, cy + 1, cz + roomD / 2, BlockRegistry::Spawner, spawnerState);
+            //    t1131：类型加权上收 dungeonSpawnerStateFor 单一权威（窗口重放面同表同型共享）。
+            m_chunks.setBlock(cx + roomW / 2, cy + 1, cz + roomD / 2, BlockRegistry::Spawner,
+                              dungeonSpawnerStateFor(r));
             // 4) 墙脚豁口（t999 考据：1-5 个 2 高空气开口，通向邻近空气 / 洞穴 —— MC 地牢「被洞穴暴露」
             //    的生成显式化；项目有限世界洞穴不一定贴邻 → 先搜「最近空气柱」再挖，搜不到 → 全封，日志
             //    登记）。豁口数 = 1 + (r>>14 & 7)%5 ∈ [1,5]（r bit14-16，与既有位域零耦合；旧对角二箱位
@@ -9668,6 +9705,141 @@ void World::placeDungeons()
     // t999 豁口登记（同 seed → 同数值；全封 = 四向皆无空气邻域的房间，考据允许态）
     qInfo() << "worldgen: dungeon wall-foot openings =" << totalOpeningCells
             << "(fully sealed rooms" << sealedRooms << "/" << placed << ")";
+}
+
+// ── t1131 W1c 结构族第一员入流式（地牢 era 门）——窗口重放实现 ─────────────────────────────
+// era 取证（build/t1131_jar_dungeon.txt，1.0.0 client jar acj = WorldGenDungeons 反汇编定谳）：
+//   ①扫描门：足迹 [x±(l+1)]×[y-1..y+b0+1]×[z±(i1+1)]（era l,i1 ∈ {2,3}，b0=3）逐格 material
+//     ——底行 (l1=y-1) 任一非 solid → 放弃；顶行 (l1=y+b0+1) 任一非 solid → 放弃；墙环上
+//     (l1=y) 与其上一格 (l1=y+1) 同为空气的环柱计数 j1，j1 ∉ [1,5] → 放弃（= 结构只在与既有
+//     空气邻域[洞穴]相接处落成；环空气柱经建造面保留 = era 唯一「豁口」机制，无人工挖洞）。
+//   ②建造：y 自顶 (y+3) 向下至底 (y-1) 逐层——内部格无条件 air；框架格：下方格非 solid →
+//     air（era 悬框塌落面，读 = 下方行未处理的原 pass-k 态 = 自顶向下序保证）；自身非 solid →
+//     跳过（既有空气豁口保留）；底行 25% 苔石 / 75% 圆石（era nextInt(4)==0 → 苔），其余框架
+//     恒普通圆石。不动基岩（era 同：基岩 material solid 会被覆盖为圆石？——era 无基岩守卫，
+//     但本站 cy ≥ 6 → 足迹 y ≥ cy-1 ≥ 5 > 基岩带，不可达 = 守卫仅防御）。
+//   ③刷怪笼：era 中心 (x0, cy, z0)（x0 = 内空中心）覆盖写 Spawner + 类型 state；类型加权 = r
+//     bit20-27 128/64/64（= era nextInt(4) 25/50/25 同分布；本表与 fixed placeDungeons 共享
+//     dungeonSpawnerStateFor 单一权威，计划同表 → 同站点同类型跨路径一致）。
+//   ④箱：era 2 箱位 × 各 3 尝试；位 = 中心 + nextInt(2l+1)-l / nextInt(2i1+1)-i1、y = cy（era
+//     箱层 = 底内空层，与 fixed cy+1 层分歧登记）；门 = 目标格 air 且四水平邻恰一 solid（Chest
+//     不计实心 = 沿墙第二箱可邻接，t999 同口径）；落箱带 ChestStateDungeonFlag（战利品 =
+//     首开填充面 Main.qml t393 单一权威，era 8-roll 战利品表 = 该面族系，worldgen 零内容写
+//     入 → 「重载不重置战利品」由旗随方块 state 存读 + blob/population 跳过既有面保证）。
+// era 位置算法（per-chunk 8 次 rng 尝试定位）**不移植**——计划单源纪律优先（处置表行尾登记）。
+// 确定性定理（本 pass 承重墙，处置表 placeDungeons 行同文）：读写域 = 站点足迹
+//   [site.cx-1, site.cx+roomW]×[site.cz-1, site.cz+roomD]（≤9 列跨）⊆ 锚 scaffold 窗恒成立
+//   → 完整应用锚（自身锚 + 足迹不溢出的相邻锚）读 pass-k 时刻真值 → 决策与锚无关 = 逐位同
+//   片；部分相交锚（足迹跨出其窗）的决策虽读窗外终态/OOB，但其写 ⊆ 窗 ∩ 足迹 ⊆ 非锚自身列
+//   （足迹至多溢出邻 chunk 一列/七列）→ scaffold（未物化）/快照（已物化）双路皆被 ③ 拆卸/
+//   恢复丢弃 = 写惰性 → 每 chunk 终态 = f(seed, 自身坐标)：A→B ≡ B→A、跨 chunk 连续、玩家
+//   编辑零触碰（population 只跑新生；blob/存档回灌跳过 population = 既有面）。
+// 与 fixed 面（placeDungeons）的体素分歧如实登记：fixed = t995/t999 演化形态（t995a-c 源钉
+//   冻结零变化墙）；sparse = era 形态（天然豁口门 + 底行 25% 苔 + 内空高 3 + 箱层 cy）。
+//   计划单源不变（同 dungeonSites 表 → 区域表/insideDungeon/fixed 落位三面零变化），体素分
+//   歧被站点足迹 bbox 完全覆盖（r2023b 掩蔽面零缺口）。
+void World::placeDungeonsWindowed(int wx0, int wx1, int wz0, int wz1)
+{
+    const std::vector<StructureSite> sites = dungeonSites(); // 计划单源（fixed 落位/区域表同表）
+    const int dungSeed = m_seed + kDungeonSeedOff;
+    int placed = 0;
+    // era material.isSolid() 的工程映射：地下带现实非实心 = Air / Water / Lava / Chest（Chest
+    // 非实心 = t999「沿墙第二箱可邻接」同口径；Spawner 计实心 = t999 同口径）。era 扫描读
+    // 经 ChunkManager::blockAt：未物化 chunk / y 域外恒答 0（Air）= 非实心 → 部分相交锚的窗
+    // 外足迹读天然弃置（扫描门放弃该站点 = 部分应用零写入的承重面之一）。
+    auto eraSolid = [&](int x, int y, int z) {
+        const quint8 b = m_chunks.blockAt(x, y, z);
+        return b != BlockRegistry::Air && b != BlockRegistry::Water
+            && b != BlockRegistry::Lava && b != BlockRegistry::Chest;
+    };
+    for (const StructureSite &site : sites) {
+        // 足迹 ∩ population 窗相交才消费（窗外站点零接触；wx 界 = [wx0, wx1) 半开约定与
+        //   populationWindow 各 pass 循环界同形）。足迹 = [site.cx-1, site.cx+roomW] 闭区间。
+        if (site.maxX < wx0 || site.minX >= wx1 || site.maxZ < wz0 || site.minZ >= wz1)
+            continue;
+        const int l = site.roomW / 2;  // era 半跨 ∈ {2,3}（site 内空宽 5/7 同源位域 → 尺寸面 era 对齐）
+        const int i1 = site.roomD / 2;
+        const int x0 = site.cx + l;    // era 中心 = 内空中心（era generate 的 x 参量）
+        const int z0 = site.cz + i1;
+        const int cy = site.y;
+        constexpr int kB0 = kDungeonEraRoomH; // era b0 = 3（kDungeonRoomH=4 为 fixed 计划面保留）
+        // ①扫描门（era scan phase 逐格同序：x 外 → y 中 → z 内；底/顶行任一非实心即弃此站）。
+        int ringAir = 0;
+        bool ok = true;
+        for (int lx = x0 - l - 1; lx <= x0 + l + 1 && ok; ++lx) {
+            for (int lz = z0 - i1 - 1; lz <= z0 + i1 + 1 && ok; ++lz) {
+                if (!eraSolid(lx, cy - 1, lz) || !eraSolid(lx, cy + kB0 + 1, lz)) {
+                    ok = false; // era：底行/顶行非实心 → generate 返 false（放弃整站）
+                    break;
+                }
+                const bool xFrame = (lx == x0 - l - 1 || lx == x0 + l + 1);
+                const bool zFrame = (lz == z0 - i1 - 1 || lz == z0 + i1 + 1);
+                if ((xFrame || zFrame) && m_chunks.blockAt(lx, cy, lz) == BlockRegistry::Air
+                    && m_chunks.blockAt(lx, cy + 1, lz) == BlockRegistry::Air)
+                    ++ringAir; // era 环空气柱（豁口候选；建造面保留 = 天然豁口）
+            }
+        }
+        if (!ok || ringAir < 1 || ringAir > 5)
+            continue; // era：j1 ∉ [1,5] → 放弃（结构只落洞穴邻域；全埋石头 = 无地牢，era 同）
+        // ②建造（era 自顶向下：顶板 kB0 → 底板 -1；下方行未处理 = 悬框塌落读 pass-k 原态）。
+        for (int dy = kB0; dy >= -1; --dy) {
+            const int yy = cy + dy;
+            const bool floorRow = (dy == -1);
+            for (int lx = x0 - l - 1; lx <= x0 + l + 1; ++lx) {
+                for (int lz = z0 - i1 - 1; lz <= z0 + i1 + 1; ++lz) {
+                    const bool frame = (lx == x0 - l - 1 || lx == x0 + l + 1
+                                        || lz == z0 - i1 - 1 || lz == z0 + i1 + 1
+                                        || floorRow || dy == kB0);
+                    if (!frame) {
+                        m_chunks.setBlock(lx, yy, lz, BlockRegistry::Air); // 内部无条件清空
+                        continue;
+                    }
+                    if (!eraSolid(lx, yy - 1, lz)) {
+                        m_chunks.setBlock(lx, yy, lz, BlockRegistry::Air); // 悬框塌落（下方非实心）
+                        continue;
+                    }
+                    if (!eraSolid(lx, yy, lz))
+                        continue; // 既有空气豁口保留（era 建造面不写非实心格）
+                    quint8 wall = BlockRegistry::Cobble;
+                    if (floorRow
+                        && (hashVoxel(dungSeed ^ 0x3A11u, lx, yy, lz) % 4u) == 0u)
+                        wall = BlockRegistry::MossyCobble; // era 底行 25% 苔（nextInt(4)==0）
+                    m_chunks.setBlock(lx, yy, lz, wall);
+                }
+            }
+        }
+        // ③刷怪笼（era 中心格；类型 = dungeonSpawnerStateFor 单一权威，同站点跨路径一致）。
+        m_chunks.setBlock(x0, cy, z0, BlockRegistry::Spawner, dungeonSpawnerStateFor(site.r));
+        // ④箱（era 2 箱位 × 3 尝试；位 = 内空 xz + y = cy；门 = air + 恰一实心水平邻）。
+        auto chestSolidNeighbors = [&](int px, int py, int pz) -> int {
+            static const int kChestDirs[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+            int n = 0;
+            for (const auto &d : kChestDirs) {
+                const quint8 nb = m_chunks.blockAt(px + d[0], py, pz + d[1]);
+                if (nb != BlockRegistry::Air && nb != BlockRegistry::Chest)
+                    ++n; // Chest 不计实心（era 同判据面；沿墙第二箱可邻接）
+            }
+            return n;
+        };
+        for (int slot = 0; slot < 2; ++slot) { // era 2 箱位 × 各 3 尝试（与 fixed 同规则形）
+            for (int attempt = 0; attempt < 3; ++attempt) {
+                const quint32 cb = hashVoxel(dungSeed ^ (0xC7E5u + quint32(slot * 4 + attempt)),
+                                             x0, cy, z0);
+                const int px = x0 - l + int(cb & 0xFu) % (2 * l + 1);  // era：中心 ± l = 内空 x
+                const int pz = z0 - i1 + int((cb >> 8) & 0xFu) % (2 * i1 + 1);
+                if (m_chunks.blockAt(px, cy, pz) != BlockRegistry::Air)
+                    continue; // 目标非空气（era 门）
+                if (chestSolidNeighbors(px, cy, pz) != 1)
+                    continue; // era 贴墙：恰一实心邻
+                m_chunks.setBlock(px, cy, pz, BlockRegistry::Chest,
+                                  BlockRegistry::ChestStateDungeonFlag);
+                break; // 本箱位落箱 → 下一箱位
+            }
+        }
+        ++placed;
+    }
+    if (!m_worldgenQuiet)
+        qInfo() << "worldgen: streaming dungeons (era gate) =" << placed; // 窗口重放登记（静默窗内不刷屏）
 }
 
 // t484/t565 废弃矿井（见 world.h 头注释）。机制等价 MC 1.0 废弃矿井 mineshaft；**t1001 逐方块重建**（考据
