@@ -111,6 +111,11 @@ public:
     SaveGenerationInfo recoveryInfo(const QString &worldFile) const;
     // 故障注入缝转发（测试专用，生产零挂载——挂载点全 src 树仅矩阵腿；r2015 五段语义原样）。
     void setFaultHook(SaveFaultHook hook) { m_faultHook = std::move(hook); }
+    // t1129 流式冲洗缝（生产装配点 = StreamingBridge::instance 一次性登记；矩阵腿可覆写挂
+    //   本地会话——r2028 同门「C++ 面零 QML 暴露」）。flush = 保存事务内执行（false = 回滚整
+    //   事务）；commit = 提交成功尾的内存账面收口。逐保存转发给桥内 coordinator（fault 钩同门）。
+    void setFlushHook(SaveFlushHook hook) { m_flushHook = std::move(hook); }
+    void setFlushCommitHook(SaveFlushCommitHook hook) { m_flushCommitHook = std::move(hook); }
     // t1070 件三诊断面（矩阵 r2044c 断言用；C++ only 非 QML）：桥内长活 coordinator 的冻结
     //   缓冲重建计数透传（语义与陈旧防面论证见 m_coord 注 / savecoordinator.h ensureBuffer 注）。
     int frozenBufferRebuildCount() const { return m_coord.bufferRebuildCount(); }
@@ -125,6 +130,8 @@ private:
     static QString resolveSavePath(const QString &file);
 
     SaveFaultHook m_faultHook; // 生产恒空（缺省无钩 = 生产形态；逐保存转发给 coordinator）
+    SaveFlushHook m_flushHook;             // t1129：生产由 StreamingBridge 登记（缺省空 = fixed 形态）
+    SaveFlushCommitHook m_flushCommitHook; // t1129：提交面账面收口（与 flush 钩成对登记）
     // **t1070 件三（Review_2026-09-18 #1 清偿）：长活 coordinator**——r2015「冻结缓冲跨保存
     //   复用」的实现前提（旧形态 = 逐保存栈上实例 → 复用被打断，每次保存重付 ≈4 次一次性
     //   worldgen + 4 条统计 qInfo）。桥是进程级 QML 单例（GUI 线程单线程消费），coordinator

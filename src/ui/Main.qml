@@ -899,12 +899,14 @@ Window {
             console.warn("[t176] openWorld failed:", file)
             return
         }
-        // t1057（refactor-plan §29.6，本单 QML 例外单第二处）：读档面恢复状态提示——台账
-        //   interrupted（上次保存未收尾，部分写可能存在）→ toast 告知已载入最后完整数据 + 建议
-        //   立即重新保存（重存收敛 = Interrupted 的唯一恢复动作，r2015 语义；不自动修复）；
-        //   clean / fresh（旧档无台账）静默；open-error（台账读不了，#5② 可区分态）→ qWarning
-        //   留痕诚实降级不弹窗（载入数据本身照常可用）。文案登记 md 可纠偏。只读台账面，
-        //   对 fixed / 流式（W5b overlay 以 complete_generation 为仲裁锚）两链皆只读无扰。
+        // t1057（refactor-plan §29.6，本单 QML 例外单第二处）→ t1129 语义如实化：读档面恢复
+        //   状态提示——台账 interrupted（上次保存未收尾）→ toast 告知已载入最后完整数据 + 建议
+        //   立即重新保存（重存收敛 = Interrupted 的唯一恢复动作，r2015 语义；不自动修复）。
+        //   【t1129】单事务原子化后本提示首次**如实**：中断尝试零部分写（四面 + 戳同事务回滚），
+        //   重进读到的四面恰为上一完整代次——旧协议下「世界已提交、玩家未写」的混合代次窗
+        //   （物品复制/丢失根因）已消灭，文案能力与实际一致。clean / fresh（旧档无台账）静默；
+        //   open-error（台账读不了，#5② 可区分态）→ qWarning 留痕诚实降级不弹窗（载入数据
+        //   本身照常可用）。只读台账面，对 fixed / 流式两链皆只读无扰。
         const recState = SaveBridge.recoveryState(file)
         if (recState === "interrupted") {
             console.info("[t1057] previous exit save was interrupted - last complete data loaded,"
@@ -1275,12 +1277,11 @@ Window {
     //   （成功 = 三部分各 +1 = +3；失败不计数）。参数 = 旧三写所需全集（分参序 = 桥载荷字段序，
     //   见 savebridge.h 选型立证）。
     function runExitSave() {
-        // §29.5-W5b（r2028）：保存链三写前置冲洗（流式世界把驻留编辑块落附加表 + 推进保存代次）。
-        //   非流式会话恒 true 零动作（固定世界保存链逐字节原样）；失败 → false 短路三写 = 写失败
-        //   不谎报（caller 幂等重试一次 + toast 兜底——t974 完成门同门；重试重放 = 已落盘行同键
-        //   盖写无副作用）。关窗兜底路径（onClosing）走本函数同门覆盖。
-        if (!StreamingBridge.flushForSave())
-            return false
+        // §29.5-W5b（r2028）→ t1129 修订：流式冲洗随统一保存链同事务执行（SaveBridge 桥内钩在
+        //   保存事务连接上落 chunk_edits + 推进保存代次；回滚面零残留 = 四面恰上一完整代）。
+        //   旧「Main.qml 前置冲洗行」退役——它把冲洗落在保存链外独立事务，「冲洗已提交、四面
+        //   未提交」中断窗即混合代次（t1129 SAVE-01 修复面之一）。关窗兜底路径（onClosing）走
+        //   本函数同门覆盖（冲洗语义同源，无第二份链）。
         // t188：箱子内容随地形 / meta 同事务落盘（第 3 参 = ChestStore::allChests() 产物）。
         // t177 二轮复盘：熔炉内容同事务落盘（第 4 参 = FurnaceStore::allFurnaces() 产物）。
         // t542：发射器内容同事务落盘（第 5 参 = DispenserStore::allDispensers() 产物）。

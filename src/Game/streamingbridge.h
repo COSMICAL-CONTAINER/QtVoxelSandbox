@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QMetaObject>
 #include <QPointer> // §29.7：fixed 收割宿主的世界引用（QPointer——世界随 QML/矩阵腿存亡，悬垂自动归零）
+#include <QSqlDatabase> // t1129 flushForSaveOn 签名（保存事务连接）
 #include <QString>
 #include <QtQml/qqml.h>
 
@@ -80,8 +81,13 @@ public:
     //   分流——sparse 世界七入口守卫本就早退，跳过是冗余保险）；false = 走既有 fixed 链（逐字节原样）。
     Q_INVOKABLE bool enterWorld(World *world, WorldStore *store, WorldClock *clock,
                                 PlayerController *player, const QString &file, int seed);
-    // 保存链三写前置冲洗（生产挂点 = Main.qml runExitSave 首行；onClosing 关窗路径同函数同门覆盖）。
+    // 保存链前置冲洗（t1129 修订：统一保存链已把冲洗收进保存事务——本 Q_INVOKABLE 保留为
+    //   独立冲洗面（矩阵腿/诊断直调；生产保存链不再经它——r2028c Main 面钉 lawful 修订留痕）。
+    //   非流式会话恒 true 零动作；流式 = 会话冲洗成败原样穿透。
     Q_INVOKABLE bool flushForSave();
+    // t1129 C++ 面（零 QML 暴露）：同事务冲洗执行体（生产 flush 钩的本体——经 SaveBridge 登记
+    //   的闭包调用；外部连接 = 保存事务持有方 kConn，本桥零连接管理）。非流式会话恒 true 放行。
+    bool flushForSaveOn(QSqlDatabase &db);
 
     // ── C++ 面（零 QML 暴露；矩阵腿 / 诊断消费）────────────────────────────────────────
     // 会话存活读面（fixed/未进入恒 false = D2 零活动墙的桥侧投影）。

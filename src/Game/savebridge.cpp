@@ -60,6 +60,9 @@ bool SaveBridge::saveViaCoordinator(WorldStore *store, const QString &worldFile,
     SaveCoordinator &coord = m_coord;
     coord.bind(store, resolveSavePath(worldFile));
     coord.setFaultHook(m_faultHook); // 生产 = 恒空钩 = 无注入形态；矩阵腿经 C++ 面挂
+    coord.setFlushHook(m_flushHook); // t1129：流式冲洗逐保存转发（生产 = StreamingBridge 登记；
+                                     //   矩阵腿覆写同门——缺省空 = fixed 形态零动作）
+    coord.setFlushCommitHook(m_flushCommitHook);
     // 载荷逐参透传（SaveRequest 字段序 = 本签名形参序——头注选型立证）；三写本体在
     // coordinator 内照旧调 WorldStore 现有 Q_INVOKABLE（worldstore 冻结域零改动）。
     SaveRequest req;

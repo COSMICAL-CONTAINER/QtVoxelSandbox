@@ -92,52 +92,91 @@ qint64 readStreamSaveGen(QSqlDatabase &db, const QString &worldId)
         return q.value(0).toLongLong();
     return 0;
 }
+
+// §29.5-W5 行元数据读的单一执行体（t1129 拆两壳：自持连接壳 readStreamWorldMeta 与外部事务
+//   域推进壳 advanceStreamSaveGenerationOn 共用——连接管理归壳，SQL 归体）。
+bool readStreamWorldMetaIntoDb(QSqlDatabase &db, const QString &worldId, StreamWorldMeta &out)
+{
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "SELECT streaming, core_w, core_d, base_gen, save_gen FROM %1 WHERE world = ?")
+                  .arg(QLatin1String(kStreamTable)));
+    q.addBindValue(worldId);
+    if (q.exec() && q.next()) {
+        out.streaming = q.value(0).toInt() != 0;
+        out.coreW = q.value(1).toInt();
+        out.coreD = q.value(2).toInt();
+        out.baseGen = q.value(3).toLongLong();
+        out.saveGen = q.value(4).toLongLong();
+        return true;
+    }
+    return false;
+}
+
+// t1129：persist 的单一执行体（自持连接壳 persistChunk 与同事务壳 persistChunkOn 共用——
+//   连接生命周期归壳，深拷贝 + 建表 + 刻度盖写 + upsert 归体）。
+Result<void> persistChunkIntoDb(QSqlDatabase &db, const QString &worldId, int cx, int cz,
+                                const Chunk &chunk)
+{
+    if (!db.isOpen()) {
+        qWarning() << "ChunkStore: db not open for persist:" << db.lastError().text();
+        return Result<void>::fail(kErrChunkStoreSql, "chunk store db not open");
+    }
+    if (!ensureTable(db) || !ensureStreamTable(db))
+        return Result<void>::fail(kErrChunkStoreSql, "chunk_edits ensure failed (lock/disk?)");
+    const size_t n = chunk.voxelCount();
+    // 三数组深拷贝（QByteArray 构造即拷贝——落盘时刻定格，此后活体再变与本次落盘无关）。
+    const QByteArray voxels(reinterpret_cast<const char *>(chunk.voxelData()), int(n));
+    const QByteArray states(reinterpret_cast<const char *>(chunk.stateData()), int(n));
+    const QByteArray light(reinterpret_cast<const char *>(chunk.lightData()), int(n));
+    // 代次盖写（§29.5-W5 契约，头注立证）：读 stream_worlds.save_gen，盖 stamp = save_gen
+    // + 1（驱逐写 = 在途待保存代次；保存时冲洗写 = 本次保存代次——两条写路径同一刻度，
+    // 读档 overlay 仲裁「行代次 vs 世界存代次」可比性的承重前提）。单语句 upsert 事务原子
+    // ——「没写进 = 旧行原样保留在旧代次」（头注 marker 等价论证；t1129 同事务壳下 =
+    // 整保存事务原子，回滚面零部分写）。
+    const qint64 stamp = readStreamSaveGen(db, worldId) + 1;
+    QSqlQuery u(db);
+    u.prepare(QStringLiteral(
+        "INSERT OR REPLACE INTO %1 (cx, cz, generation, voxels, states, light) VALUES"
+        " (?, ?, ?, ?, ?, ?)")
+        .arg(QLatin1String(kTable)));
+    u.addBindValue(cx);
+    u.addBindValue(cz);
+    u.addBindValue(QString::number(stamp));
+    u.addBindValue(voxels);
+    u.addBindValue(states);
+    u.addBindValue(light);
+    if (!u.exec()) {
+        qWarning() << "ChunkStore: persist failed for" << cx << cz << ":" << u.lastError().text();
+        return Result<void>::fail(kErrChunkStoreSql, "chunk_edits upsert failed (lock/disk?)");
+    }
+    return Result<void>::ok();
+}
 } // namespace
 
 Result<void> ChunkStore::persistChunk(int cx, int cz, const Chunk &chunk)
 {
     if (!isBound())
         return Result<void>::fail(kErrChunkStoreNotBound, "chunk store not bound");
-    const size_t n = chunk.voxelCount();
-    // 三数组深拷贝（QByteArray 构造即拷贝——落盘时刻定格，此后活体再变与本次落盘无关）。
-    const QByteArray voxels(reinterpret_cast<const char *>(chunk.voxelData()), int(n));
-    const QByteArray states(reinterpret_cast<const char *>(chunk.stateData()), int(n));
-    const QByteArray light(reinterpret_cast<const char *>(chunk.lightData()), int(n));
-
     bool ok = false;
     {
         // t1098 连接卫生：句柄收内层作用域——摘名时零活引用（"still in use" 清偿）。
         QSqlDatabase db = openStoreConnection(m_dbPath);
-        if (db.isOpen() && ensureTable(db) && ensureStreamTable(db)) {
-            // 代次盖写（§29.5-W5 契约，头注立证）：读 stream_worlds.save_gen，盖 stamp = save_gen
-            // + 1（驱逐写 = 在途待保存代次；保存时冲洗写 = 本次保存代次——两条写路径同一刻度，
-            // 读档 overlay 仲裁「行代次 vs 世界存代次」可比性的承重前提）。单语句 upsert 事务原子
-            // ——「没写进 = 旧行原样保留在旧代次」（头注 marker 等价论证）。
-            const qint64 stamp = readStreamSaveGen(db, m_worldId) + 1;
-            QSqlQuery u(db);
-            u.prepare(QStringLiteral(
-                "INSERT OR REPLACE INTO %1 (cx, cz, generation, voxels, states, light) VALUES"
-                " (?, ?, ?, ?, ?, ?)")
-                .arg(QLatin1String(kTable)));
-            u.addBindValue(cx);
-            u.addBindValue(cz);
-            u.addBindValue(QString::number(stamp));
-            u.addBindValue(voxels);
-            u.addBindValue(states);
-            u.addBindValue(light);
-            ok = u.exec();
-            if (!ok)
-                qWarning() << "ChunkStore: persist failed for" << cx << cz << ":"
-                           << u.lastError().text();
-        } else if (!db.isOpen()) {
-            qWarning() << "ChunkStore: open failed for persist:" << db.lastError().text();
-        }
+        ok = persistChunkIntoDb(db, m_worldId, cx, cz, chunk).isOk();
     } // db / u 先于摘名析构（t1098）
     if (QSqlDatabase::contains(kChunkStoreConn))
         QSqlDatabase::removeDatabase(kChunkStoreConn);
     if (!ok)
         return Result<void>::fail(kErrChunkStoreSql, "chunk_edits upsert failed (lock/disk?)");
     return Result<void>::ok();
+}
+
+Result<void> ChunkStore::persistChunkOn(QSqlDatabase &db, int cx, int cz, const Chunk &chunk)
+{
+    if (!isBound())
+        return Result<void>::fail(kErrChunkStoreNotBound, "chunk store not bound");
+    // 外部连接壳：零连接生命周期管理（开/关/摘名全归调用域 = 保存事务持有方）。
+    return persistChunkIntoDb(db, m_worldId, cx, cz, chunk);
 }
 
 bool ChunkStore::hasChunk(int cx, int cz) const
@@ -244,22 +283,8 @@ bool ChunkStore::readStreamWorldMeta(StreamWorldMeta &out) const
     bool ok = false;
     {
         QSqlDatabase db = openStoreConnection(m_dbPath);
-        if (db.isOpen()) {
-            // 只读；表缺席（旧档/未登记）→ SELECT 失败 → false（fixed 世界 = 无标志无活动）。
-            QSqlQuery q(db);
-            q.prepare(QStringLiteral(
-                "SELECT streaming, core_w, core_d, base_gen, save_gen FROM %1 WHERE world = ?")
-                          .arg(QLatin1String(kStreamTable)));
-            q.addBindValue(m_worldId);
-            if (q.exec() && q.next()) {
-                out.streaming = q.value(0).toInt() != 0;
-                out.coreW = q.value(1).toInt();
-                out.coreD = q.value(2).toInt();
-                out.baseGen = q.value(3).toLongLong();
-                out.saveGen = q.value(4).toLongLong();
-                ok = true;
-            }
-        }
+        if (db.isOpen())
+            ok = readStreamWorldMetaIntoDb(db, m_worldId, out); // 只读（表缺席 = false，fixed 零标志）
     } // db / q 先于摘名析构（t1098）
     if (QSqlDatabase::contains(kChunkStoreConn))
         QSqlDatabase::removeDatabase(kChunkStoreConn);
@@ -345,27 +370,33 @@ qint64 ChunkStore::advanceStreamSaveGeneration()
     if (!readStreamWorldMeta(meta))
         return 0; // 未登记流式世界：无代次可推进（调用方按失败上报，不谎报）
     qint64 next = 0;
-    bool ok = false;
     {
         QSqlDatabase db = openStoreConnection(m_dbPath);
-        if (db.isOpen() && ensureStreamTable(db)) {
-            // max(save, base) + 1：单调不重置不复用（r2015 代次口径同门——失败/中断消耗号段）。
-            next = qMax(meta.saveGen, meta.baseGen) + 1;
-            QSqlQuery q(db);
-            q.prepare(QStringLiteral("UPDATE %1 SET save_gen = ? WHERE world = ?")
-                          .arg(QLatin1String(kStreamTable)));
-            q.addBindValue(QString::number(next));
-            q.addBindValue(m_worldId);
-            ok = q.exec() && q.numRowsAffected() > 0;
-            if (!ok) {
-                qWarning() << "ChunkStore: advance save generation failed:"
-                           << q.lastError().text();
-                next = 0; // 写不进 = 未推进（调用方按失败上报；marker 同门——旧行原样保留）
-            }
-        }
+        next = advanceStreamSaveGenerationOn(db);
     } // db / q 先于摘名析构（t1098）
     if (QSqlDatabase::contains(kChunkStoreConn))
         QSqlDatabase::removeDatabase(kChunkStoreConn);
+    return next;
+}
+
+qint64 ChunkStore::advanceStreamSaveGenerationOn(QSqlDatabase &db)
+{
+    if (!isBound())
+        return 0;
+    StreamWorldMeta meta;
+    if (!readStreamWorldMetaIntoDb(db, m_worldId, meta))
+        return 0; // 行缺席（未登记流式世界）/ SQL 病：无代次可推进（调用方按失败处理）
+    // max(save, base) + 1：单调不重置不复用（r2015 代次口径同门——失败/中断消耗号段）。
+    const qint64 next = qMax(meta.saveGen, meta.baseGen) + 1;
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral("UPDATE %1 SET save_gen = ? WHERE world = ?")
+                  .arg(QLatin1String(kStreamTable)));
+    q.addBindValue(QString::number(next));
+    q.addBindValue(m_worldId);
+    if (!q.exec() || q.numRowsAffected() <= 0) {
+        qWarning() << "ChunkStore: advance save generation failed:" << q.lastError().text();
+        return 0; // 写不进 = 未推进（调用方按失败回滚；marker 同门——旧行原样保留）
+    }
     return next;
 }
 

@@ -18,8 +18,10 @@
 //     scan/rename 独立连接先例），每次操作开-用-关，无长活连接状态。
 //   - 台账表 IF NOT EXISTS 幂等（纯加表；旧库首次被协调层触碰时补建，不 bump 任何版本——
 //     兼容性论证见头注④）。
-//   - WorldStore 零改动：持久化面只走其现有 Q_INVOKABLE（saveAll/savePlayerData/saveProgress/
-//     isOpen/world/setWorld）。
+//   - WorldStore：持久化面 = 其 Q_INVOKABLE（saveAll/savePlayerData/saveProgress——裸调用
+//     caller 形态原样）+ t1129 原子多面保存域原语（beginAtomicSave/write*Part/
+//     stampLedgerKeyInTxn/commitAtomicSave/rollbackAtomicSave/runInSaveTransaction——表名键名
+//     由本域注入 = 单一权威不离开本文件；isOpen/world/setWorld）。
 //   - t1057 #5②（review0916 #5）：recover() 的 OpenError 可区分错误态——SQLite open 惰性，锁占
 //     常在读面才炸，故「open 失败」与「SELECT busy」两面目同归 OpenError，与「表真缺席=旧档
 //     Fresh」用 sqlite_master 只读探针辨析（实现见 recover() 内注）；saveAll 对 prior==OpenError
@@ -220,7 +222,7 @@ bool SaveCoordinator::applySnapshotToBuffer(const WorldSaveSnapshot &snap)
     return true;
 }
 
-// ── saveAll：marker-first 统一保存协议（五段流程；逐段注释 = 协议步号）────────────────────
+// ── saveAll：marker-first + 单事务原子统一保存协议（t1129 SAVE-01 修复本体；步号见头注）─────
 SaveReceipt SaveCoordinator::saveAll(const SaveRequest &req)
 {
     SaveReceipt r;
@@ -267,61 +269,102 @@ SaveReceipt SaveCoordinator::saveAll(const SaveRequest &req)
         return r; // gen 已标记、complete 未盖 → Interrupted（保守：尝试未完成）
     }
 
-    // 步④ 冻结缓冲回放 + 下游临时改绑（WorldStore::saveAll 从 m_world 读 → 缓冲世界承载冻结点；
-    //   收尾步⑧恢复原绑。回放失败在此早退——尚未改绑，无需恢复）。
+    // 步④ 冻结缓冲回放 + 下游临时改绑（WorldStore 从 m_world 读 → 缓冲世界承载冻结点；
+    //   收尾恢复原绑。回放失败在此早退——尚未改绑，无需恢复）。
     if (!ensureBuffer(snap) || !applySnapshotToBuffer(snap)) {
         r.error = Error{ kErrSaveSnapshotApply, "frozen snapshot apply failed" };
         return r;
     }
     m_store->setWorld(m_buffer);
 
-    // 步⑤ world 部分（下游事务性写：chunks+meta+containers 原子）。
-    r.worldSaved = m_store->saveAll(req.name, req.chests, req.furnaces, req.dispensers,
-                                    req.worldTime, req.bedSpawn, req.hoppers,
-                                    req.brewingStands, req.signs); // t1113：酿造（t1097 缺口补正）+ 牌子文本同事务转发
-
-    // 步⑥ player 部分（短路：world 失败则不试——杜绝新版 player 压旧版 world 的混合写）。
+    // 步⑤ 单事务开启（t1129 本体）：四面 + complete 戳全部收进下游 kConn 同一事务——任一后续
+    //   失败 / 注入 → rollback = 零部分写（四面恰为上一完整代次），提交成功 = 四面恰为本代次。
     const bool playerNeeded = !req.playerData.isEmpty();
-    bool playerFault = false;
-    if (r.worldSaved && playerNeeded) {
-        if (injected(SaveFaultStage::Player))
-            playerFault = true;
-        else
-            r.playerSaved = m_store->savePlayerData(req.playerData);
-    }
-
-    // 步⑦ progress 部分（同短路链）。
     const bool progressNeeded = !req.progress.isEmpty();
-    bool progressFault = false;
-    if (r.worldSaved && !playerFault && (!playerNeeded || r.playerSaved) && progressNeeded) {
-        if (injected(SaveFaultStage::Progress))
-            progressFault = true;
-        else
-            r.progressSaved = m_store->saveProgress(req.progress);
+    if (!m_store->beginAtomicSave()) {
+        m_store->setWorld(live);
+        r.error = Error{ kErrSaveStoreRejected, "atomic save begin failed" };
+        return r;
     }
-
-    // 步⑧ 恢复下游原绑（恒达——此后下游对调用方恢复保存前的观察面）。
-    m_store->setWorld(live);
-
-    // 步⑨ Finalize：全部请求部分成功（且无注入）才盖 complete 戳。崩溃/注入在其前 → gen>complete
-    //   = Interrupted 如实标记；戳写失败同样按失败上报（验收③：没盖戳 = 没成功）。
-    const bool partsOk = r.worldSaved && (!playerNeeded || r.playerSaved)
-        && (!progressNeeded || r.progressSaved);
-    const bool finalizeFault = injected(SaveFaultStage::Finalize);
-    if (partsOk && !playerFault && !progressFault && !finalizeFault) {
-        if (!coordUpsert(kCoordKeyComplete, newGen)) {
-            r.error = Error{ kErrSaveCoordSql, "complete stamp failed (lock/disk?)" };
+    // 步⑤b 流式冲洗（事务内；钩空 = fixed 形态零动作）：驻留编辑 chunk_edits + save_gen 推进
+    //   随保存事务同生共死（回滚面下行不残留 = 流式半边的「恰 A」保证）。
+    if (m_flushHook && !m_store->runInSaveTransaction(m_flushHook)) {
+        m_store->rollbackAtomicSave();
+        m_store->setWorld(live);
+        r.error = Error{ kErrSaveStoreRejected, "streaming flush failed (in-transaction)" };
+        return r;
+    }
+    // 步⑥ world 段（表写体 = 旧 saveAll 的表写段原样；失败 → rollback 零部分写）。
+    if (!m_store->writeWorldPart(req.name, req.chests, req.furnaces, req.dispensers,
+                                 req.worldTime, req.bedSpawn, req.hoppers,
+                                 req.brewingStands, req.signs)) {
+        m_store->rollbackAtomicSave();
+        m_store->setWorld(live);
+        r.error = Error{ kErrSaveStoreRejected, "downstream world part failed" };
+        return r;
+    }
+    // 步⑦ player 段（短路保留：world 段失败不至此；注入 = 回滚——【t1129】不再是「world 已落、
+    //   player 未落」的混合写，而是零部分写）。
+    if (playerNeeded) {
+        if (injected(SaveFaultStage::Player)) {
+            m_store->rollbackAtomicSave(); // t1129 NEG-2 摘面行：摘本行 = Player 段故障不再回滚
+            m_store->setWorld(live);
+            r.error = Error{ kErrSaveFaultInjected, "fault injected at player stage" };
             return r;
         }
-        return r; // ok()：本代次完整收尾（三部分共享同一 complete_generation）
+        if (!m_store->writePlayerPart(req.playerData)) {
+            m_store->rollbackAtomicSave();
+            m_store->setWorld(live);
+            r.error = Error{ kErrSaveStoreRejected, "downstream player part failed" };
+            return r;
+        }
     }
-    if (r.error.code == 0) {
-        if (!r.worldSaved)
-            r.error = Error{ kErrSaveStoreRejected, "downstream world save failed" };
-        else if (playerFault || progressFault || finalizeFault)
-            r.error = Error{ kErrSaveFaultInjected, "fault injected mid-save" };
-        else
-            r.error = Error{ kErrSaveStoreRejected, "downstream part save failed" };
+    // 步⑧ progress 段（同短路链）+ complete 戳入事务（【t1129】戳与数据同生共死——「数据已写、
+    //   戳未盖」的假 Interrupted 窗消灭）。
+    if (progressNeeded) {
+        if (injected(SaveFaultStage::Progress)) {
+            m_store->rollbackAtomicSave();
+            m_store->setWorld(live);
+            r.error = Error{ kErrSaveFaultInjected, "fault injected at progress stage" };
+            return r;
+        }
+        if (!m_store->writeProgressPart(req.progress)) {
+            m_store->rollbackAtomicSave();
+            m_store->setWorld(live);
+            r.error = Error{ kErrSaveStoreRejected, "downstream progress part failed" };
+            return r;
+        }
     }
-    return r; // 失败：generation 已消耗、complete 未盖（Interrupted 由 recover() 判读）
+    if (!m_store->stampLedgerKeyInTxn(kCoordTable, kCoordKeyComplete, newGen)) {
+        m_store->rollbackAtomicSave();
+        m_store->setWorld(live);
+        r.error = Error{ kErrSaveCoordSql, "complete stamp failed (lock/disk?)" };
+        return r;
+    }
+    // 步⑨ Finalize 段注入（【t1129】新语义：注入 = 提交 abort——崩在收尾的剩余形态，零部分
+    //   写；旧「三部分已写仍不报成功」的面升级为「零部分写且不报成功」）。
+    if (injected(SaveFaultStage::Finalize)) {
+        m_store->rollbackAtomicSave();
+        m_store->setWorld(live);
+        r.error = Error{ kErrSaveFaultInjected, "fault injected at finalize stage" };
+        return r;
+    }
+    // 步⑩ 提交（段=1 口径计数在提交成功尾补齐——t974 面逐位同旧；提交失败 = 方法内已回滚）。
+    const int partsWritten = 1 + (playerNeeded ? 1 : 0) + (progressNeeded ? 1 : 0);
+    if (!m_store->commitAtomicSave(partsWritten)) {
+        m_store->setWorld(live);
+        r.error = Error{ kErrSaveStoreRejected, "atomic save commit failed" };
+        return r;
+    }
+    // 步⑪ 提交成功尾：流式账面收口（内存侧清未落盘账——库零触碰；回滚路径绝不至此）。
+    if (m_flushCommitHook)
+        m_flushCommitHook();
+    // 步⑫ 恢复下游原绑（恒达——此后下游对调用方恢复保存前的观察面）。
+    m_store->setWorld(live);
+
+    // ok()：本代次完整收尾（四面 + complete_generation 同一事务落地；三部分共享同一戳）。
+    r.worldSaved = true;
+    r.playerSaved = playerNeeded;
+    r.progressSaved = progressNeeded;
+    return r;
 }

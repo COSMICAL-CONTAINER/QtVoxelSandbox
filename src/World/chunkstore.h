@@ -75,6 +75,7 @@
 //   同键内容推进，不删行不改写他行——兼容性底线同 SaveCoordinator「只增不改」）。
 
 #include <QByteArray>
+#include <QSqlDatabase> // t1129 同事务冲洗变体签名（外部连接直用，不开不管连接）
 #include <QString>
 #include <QVector>
 
@@ -134,6 +135,12 @@ public:
     //   上错误码段），旧行原样——调用方（ChunkEvictor 顺序铁律）据此中止驱逐。
     Result<void> persistChunk(int cx, int cz, const Chunk &chunk);
 
+    // t1129 SAVE-01 同事务冲洗变体：在**外部连接**（保存事务持有者 kConn）上执行——不开连接、
+    //   不管事务、零连接生命周期管理（与 persistChunk 共享同一 SQL 执行体与代次刻度，单一实现
+    //   拆两壳）。事务回滚面：行随事务回滚 = 零部分写（t1129 四面恰 A/B 保证的流式半边）。
+    //   失败 → Result fail（kErrChunkStoreSql 同域），调用方回滚整事务。
+    Result<void> persistChunkOn(QSqlDatabase &db, int cx, int cz, const Chunk &chunk);
+
     // 存在性查询（driver savedContentQuery 的生产绑定点 = Load kind 选择权威）：有行 = 该
     //   chunk 有已落盘内容 → 重载走 blob 物化。查询失败（锁 / 病）按 miss 处理（降级生成路径，
     //   诚实降级与 worldstore loadChunks 尺寸跳过同门；不抛不堵）。
@@ -172,6 +179,9 @@ public:
     //   （失败面 = 旧行原样，marker 同门）；返回新代次（无行 / SQL 失败 → 0 = 调用方按失败
     //   处理，冲洗据此上报不谎报）。
     qint64 advanceStreamSaveGeneration();
+    // t1129 同事务变体（advanceStreamSaveGeneration 同门）：外部连接上的 max(save,base)+1 推进
+    //   （行缺席 / SQL 失败 = 0，调用方按失败回滚整事务）。
+    qint64 advanceStreamSaveGenerationOn(QSqlDatabase &db);
     // 行全量读回（读档 overlay 的行回灌面）：成功返回行数；SQL 失败 → -1（调用方诚实降级
     //   + 告警，hasChunk 单行读同门）。
     int loadAllRows(QVector<ChunkStoreBlob> &out) const;

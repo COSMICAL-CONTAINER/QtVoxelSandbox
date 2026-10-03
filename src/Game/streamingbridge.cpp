@@ -6,12 +6,30 @@
 #include <QStandardPaths>
 
 #include "chunkstore.h" // stream_worlds 元数据域载体（独立命名连接开-用-关；worldstore 零涉）
+#include "savebridge.h" // t1129：生产冲洗缝登记宿主（Game 层同域——桥间单点装配）
 
 // ── §29.5-W5b 流式 UI 桥实现（r2028；语义与选型立证见头文件类头注）────────────────────────
 
 StreamingBridge *StreamingBridge::instance()
 {
     static StreamingBridge inst; // 进程全局唯一（会话状态面；QML create 同对象——BuildInfo 同款）
+    // t1129 SAVE-01：生产冲洗缝一次性登记（幂等守卫——首次 instance 即装配，main.cpp 零触碰 =
+    //   r2031d 生产零挂载反探幸存面）。两钩成对：flush = 保存事务内把驻留编辑落 chunk_edits
+    //   （外部连接直用）；commit = 提交成功尾清本批未落盘账（回滚面绝不调 = 账面收敛）。
+    //   【t1129 修订留痕】旧形态 = Main.qml runExitSave 前置行调 flushForSave()（保存链外独立
+    //   事务）——那在「冲洗已提交、四面未提交」中断窗留混合代次（新地形旧玩家）；现冲洗随保存
+    //   事务原子（saveViaCoordinator 钩内调度），Main.qml 前置行退役（r2028c/r2031d 面钉 lawful
+    //   修订：StreamingBridge. 计数 2→1 携沿革注）。
+    static bool flushSeamRegistered = false;
+    if (!flushSeamRegistered) {
+        flushSeamRegistered = true;
+        SaveBridge *sb = SaveBridge::instance();
+        sb->setFlushHook([](QSqlDatabase &db) { return instance()->flushForSaveOn(db); });
+        sb->setFlushCommitHook([]() {
+            if (instance()->m_session)
+                instance()->m_session->commitFlushResidentEditsOn();
+        });
+    }
     return &inst;
 }
 
@@ -157,6 +175,17 @@ bool StreamingBridge::flushForSave()
     // 流式：冲洗成败原样穿透（驻留 dirty 落附加表 + 保存代次推进；失败上报不谎报——caller 门三写，
     // 重试重放 = 已落盘行同键盖写无副作用[marker 同门]）。
     return m_session->flushResidentEditsForSave();
+}
+
+bool StreamingBridge::flushForSaveOn(QSqlDatabase &db)
+{
+    // t1129 同事务版 flushForSave：守卫同门（无会话 / 未登记流式 = 放行），执行体换外部连接
+    //   变体且不清账（提交面才清——GameSession::flushResidentEditsForSaveOn 头注立证）。
+    if (!m_session)
+        return true;
+    if (!m_session->isStreamingWorld())
+        return true;
+    return m_session->flushResidentEditsForSaveOn(db);
 }
 
 void StreamingBridge::pumpTick()

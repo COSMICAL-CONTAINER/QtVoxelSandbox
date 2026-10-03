@@ -489,12 +489,49 @@ bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const 
         qCWarning(lcSave) << "saveAll: no open db or world";
         return false;
     }
-    const ChunkManager &cm = m_world->chunks();
-    QSqlDatabase db = QSqlDatabase::database(kConn);
-    if (!db.transaction()) {
-        qCCritical(lcSave) << "saveAll: begin transaction failed:" << db.lastError().text();
+    // t1129 事务粒度原语化：裸 saveAll 面行为逐字节原样（自有事务 + 成功 +1 计数——r2015a 两域
+    //   正交钉 / 旧档 Fresh 回归腿的承重面），表写体与原子多面保存域（writeWorldPart）共用同一段
+    //   实现，杜绝第二份表写逻辑。
+    if (!beginAtomicSave())
+        return false;
+    if (!writeWorldPart(name, chests, furnaces, dispensers, worldTime, bedSpawn, hoppers,
+                        brewingStands, signs)) {
+        rollbackAtomicSave();
         return false;
     }
+    if (!commitAtomicSave(1))
+        return false;
+    return true;
+}
+
+// ── t1129 SAVE-01 原子多面保存域实现（契约见 worldstore.h 同名段）────────────────────────────
+
+bool WorldStore::beginAtomicSave()
+{
+    if (!m_open) {
+        qCWarning(lcSave) << "beginAtomicSave: no open db";
+        return false;
+    }
+    QSqlDatabase db = QSqlDatabase::database(kConn);
+    if (!db.transaction()) {
+        qCCritical(lcSave) << "beginAtomicSave: begin transaction failed:" << db.lastError().text();
+        return false;
+    }
+    m_lastWorldChunkCount = 0; // 提交日志面归位（本次事务的 chunk 数由 world 段回填）
+    return true;
+}
+
+bool WorldStore::writeWorldPart(const QString &name, const QVariantList &chests, const QVariantList &furnaces,
+                                const QVariantList &dispensers, const QVariantMap &worldTime,
+                                const QVariantMap &bedSpawn, const QVariantList &hoppers,
+                                const QVariantList &brewingStands, const QVariantList &signs)
+{
+    if (!m_open || !m_world) {
+        qCWarning(lcSave) << "writeWorldPart: no open db or world";
+        return false;
+    }
+    const ChunkManager &cm = m_world->chunks();
+    QSqlDatabase db = QSqlDatabase::database(kConn);
     // 清空旧 chunks（upsert 全量重写最简；25 chunk 量级全删全插 < 1ms，无需增量）。
     QSqlQuery(db).exec(QStringLiteral("DELETE FROM chunks"));
 
@@ -514,13 +551,13 @@ bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const 
             iq.addBindValue(QByteArray::fromRawData(reinterpret_cast<const char *>(c->stateData()), int(n)));
             iq.addBindValue(QByteArray::fromRawData(reinterpret_cast<const char *>(c->lightData()), int(n)));
             if (!iq.exec()) {
-                qCCritical(lcSave) << "saveAll: chunk insert failed at" << cx << cz << ":" << iq.lastError().text();
-                db.rollback();
+                qCCritical(lcSave) << "writeWorldPart: chunk insert failed at" << cx << cz << ":" << iq.lastError().text();
                 return false;
             }
             ++saved;
         }
     }
+    m_lastWorldChunkCount = saved; // 提交日志面（事务内暂存，commitAtomicSave 时如实打印）
     // 刷 meta：seed（terrain 确定性 + 旧版可重生兜底）/ dims / name / playedAt（= 本次保存时刻）。
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     QSqlQuery mq(db);
@@ -575,49 +612,119 @@ bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const 
         mq.addBindValue(kv.first);
         mq.addBindValue(kv.second);
         if (!mq.exec()) {
-            qCCritical(lcSave) << "saveAll: meta update failed:" << mq.lastError().text();
-            db.rollback();
+            qCCritical(lcSave) << "writeWorldPart: meta update failed:" << mq.lastError().text();
             return false;
         }
     }
     // t188 箱子内容同事务落盘（chests 表 DELETE 全量 + INSERT；与 chunks / meta 原子提交）。
-    if (!writeChests(chests)) {
-        db.rollback();
+    if (!writeChests(chests))
         return false;
-    }
     // t177 二轮复盘 熔炉内容同事务落盘（furnaces 表 DELETE 全量 + INSERT；与 chunks / meta / chests 原子提交）。
-    if (!writeFurnaces(furnaces)) {
-        db.rollback();
+    if (!writeFurnaces(furnaces))
         return false;
-    }
     // t542 发射器内容同事务落盘（dispensers 表 DELETE 全量 + INSERT；与 chunks / meta / chests / furnaces 原子提交）。
-    if (!writeDispensers(dispensers)) {
-        db.rollback();
+    if (!writeDispensers(dispensers))
         return false;
-    }
     // t1080 漏斗内容同事务落盘（hoppers 表 DELETE 全量 + INSERT；与 chunks / meta / 前述容器表原子提交）。
-    if (!writeHoppers(hoppers)) {
-        db.rollback();
+    if (!writeHoppers(hoppers))
         return false;
-    }
     // t1097 酿造内容同事务落盘（brewing 表 DELETE 全量 + INSERT；与 chunks / meta / 前述容器表原子提交）。
-    if (!writeBrewing(brewingStands)) {
-        db.rollback();
+    if (!writeBrewing(brewingStands))
         return false;
-    }
     // t1113 牌子文本同事务落盘（sign_texts 表 DELETE 全量 + INSERT；与 chunks / meta / 前述容器表原子提交）。
-    if (!writeSigns(signs)) {
-        db.rollback();
+    if (!writeSigns(signs))
         return false;
-    }
-    if (!db.commit()) {
-        qCCritical(lcSave) << "saveAll: commit failed:" << db.lastError().text();
-        db.rollback();
-        return false;
-    }
-    noteSaveOk();   // t974：commit 成功 = 本事务（chunks+meta+chests+furnaces+dispensers）已落盘
-    qCInfo(lcSave) << "saved" << saved << "chunks for world" << m_openFile;
     return true;
+}
+
+bool WorldStore::writePlayerPart(const QVariantMap &data)
+{
+    if (!m_open) {
+        qCWarning(lcSave) << "writePlayerPart: no open db";
+        return false;
+    }
+    // QVariantMap → JSON 文本（QJsonDocument::fromVariant 处理嵌套 QVariantList<QVariantMap> 等）。
+    const QJsonDocument doc = QJsonDocument::fromVariant(data);
+    const QString json = QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
+    QSqlQuery q(QSqlDatabase::database(kConn));
+    q.prepare(QStringLiteral("INSERT OR REPLACE INTO player_state (id, data) VALUES (0, ?)"));
+    q.addBindValue(json);
+    if (!q.exec()) {
+        qCCritical(lcSave) << "writePlayerPart: insert failed:" << q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool WorldStore::writeProgressPart(const QVariantMap &progress)
+{
+    if (!m_open) return false;
+    QSqlQuery q(QSqlDatabase::database(kConn));
+    q.prepare(QStringLiteral("INSERT OR REPLACE INTO progress (key, data) VALUES ('main', ?)"));
+    const QJsonDocument doc = QJsonDocument::fromVariant(progress);
+    q.addBindValue(QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
+    if (!q.exec()) {
+        qCCritical(lcSave) << "writeProgressPart failed:" << q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool WorldStore::stampLedgerKeyInTxn(const char *table, const char *key, qint64 value)
+{
+    if (!m_open) return false;
+    // 表名/键名由调用域注入（单一权威留在调用域——本域源文零台账域字面，r2015d 盲区钉幸存）。
+    //   表若缺席（异常序：本面只在协调层 marker 落地后可达）→ IF NOT EXISTS 幂等补建，事务内
+    //   DDL 合法（SQLite DDL 可回滚）。
+    QSqlQuery q(QSqlDatabase::database(kConn));
+    if (!q.exec(QStringLiteral("CREATE TABLE IF NOT EXISTS %1 (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+                    .arg(QLatin1String(table)))) {
+        qCCritical(lcSave) << "stampLedgerKeyInTxn: table ensure failed:" << q.lastError().text();
+        return false;
+    }
+    QSqlQuery u(QSqlDatabase::database(kConn));
+    u.prepare(QStringLiteral("INSERT OR REPLACE INTO %1 (key, value) VALUES (?, ?)")
+                  .arg(QLatin1String(table)));
+    u.addBindValue(QLatin1String(key));
+    u.addBindValue(QString::number(value));
+    if (!u.exec()) {
+        qCCritical(lcSave) << "stampLedgerKeyInTxn: upsert failed:" << u.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool WorldStore::commitAtomicSave(int partsWritten)
+{
+    QSqlDatabase db = QSqlDatabase::database(kConn);
+    if (!db.commit()) {
+        qCCritical(lcSave) << "commitAtomicSave: commit failed:" << db.lastError().text();
+        db.rollback();
+        return false; // 零计数零部分写（t974 口径：失败绝不计数）
+    }
+    // t974 段=1 口径逐位同旧：按本次事务实际写段数补计数（每段一次 noteSaveOk = 一次 emit）。
+    for (int i = 0; i < partsWritten; ++i)
+        noteSaveOk();
+    qCInfo(lcSave) << "atomic save committed (" << partsWritten << "part(s),"
+                   << m_lastWorldChunkCount << "chunks) for world" << m_openFile;
+    return true;
+}
+
+void WorldStore::rollbackAtomicSave()
+{
+    QSqlDatabase db = QSqlDatabase::database(kConn);
+    if (db.rollback())
+        qCInfo(lcSave) << "atomic save rolled back for world" << m_openFile;
+    else
+        qCCritical(lcSave) << "atomic save rollback failed:" << db.lastError().text();
+}
+
+bool WorldStore::runInSaveTransaction(const std::function<bool(QSqlDatabase &)> &work)
+{
+    if (!m_open) return false;
+    if (!work) return true; // 空缝 = 零动作放行（fixed 世界生产形态）
+    QSqlDatabase db = QSqlDatabase::database(kConn);
+    return work(db);
 }
 
 QVariantMap WorldStore::loadMeta() const
@@ -752,16 +859,9 @@ bool WorldStore::savePlayerData(const QVariantMap &data)
         qCWarning(lcSave) << "savePlayerData: no open db";
         return false;
     }
-    // QVariantMap → JSON 文本（QJsonDocument::fromVariant 处理嵌套 QVariantList<QVariantMap> 等）。
-    const QJsonDocument doc = QJsonDocument::fromVariant(data);
-    const QString json = QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
-    QSqlQuery q(QSqlDatabase::database(kConn));
-    q.prepare(QStringLiteral("INSERT OR REPLACE INTO player_state (id, data) VALUES (0, ?)"));
-    q.addBindValue(json);
-    if (!q.exec()) {
-        qCCritical(lcSave) << "savePlayerData: insert failed:" << q.lastError().text();
+    // t1129：写体与原子保存域共享（writePlayerPart 无计数）；裸面保持「exec 成功即 +1」口径。
+    if (!writePlayerPart(data))
         return false;
-    }
     noteSaveOk();   // t974：exec 成功 = 玩家态已落盘（调用返回即写完成，同步无 deferred）
     return true;
 }
@@ -1151,15 +1251,9 @@ QVariantList WorldStore::loadDispensers() const
 bool WorldStore::saveProgress(const QVariantMap &progress)
 {
     if (!m_open) return false;
-    QSqlDatabase db = QSqlDatabase::database(kConn);
-    QSqlQuery q(db);
-    q.prepare(QStringLiteral("INSERT OR REPLACE INTO progress (key, data) VALUES ('main', ?)"));
-    const QJsonDocument doc = QJsonDocument::fromVariant(progress);
-    q.addBindValue(QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
-    if (!q.exec()) {
-        qCCritical(lcSave) << "saveProgress failed:" << q.lastError().text();
+    // t1129：写体与原子保存域共享（writeProgressPart 无计数）；裸面口径逐位同旧。
+    if (!writeProgressPart(progress))
         return false;
-    }
     noteSaveOk();   // t974：exec 成功 = 进度已落盘（同步 upsert，无 deferred）
     return true;
 }

@@ -27,20 +27,26 @@
 //      窗口）；损坏 Chunk = 直接改库中 blob（worldstore loadChunks 的尺寸校验 + chunk_count
 //      对账是既有守卫，经协调层写入的档同样受其保护——降级一致语义不破）。
 //
-// 部分写防护协议（marker-first，崩溃窗口逐段枚举）：
+// 部分写防护协议（marker-first + t1129 单事务原子化，崩溃窗口逐段枚举）：
 //   步①BeginMark：先在 save_coord 落 generation=newGen（在途标记，独立连接独立事务）。此步失败
 //      （如外部锁）→ 立即放弃，**一个部分都不写** → 台账无在途痕迹 = Clean@旧代次。
 //   步②③冻结 + World 段注入窗：均未触库（活体只读一次）。注入 → 放弃（gen>complete = Interrupted，
 //      保守分类：尝试未完成）。
-//   步④-⑦ world/player/progress 逐部分写，**短 路**：前序失败后序不试（杜绝新 player 压旧 world
-//      的混合写）。崩在中途 → 已写部分是新版、未写部分是旧版，gen>complete = Interrupted 如实
-//      标记「部分写可能存在」，旧完整代次（complete_generation）照常可读。
-//   步⑨Finalize：全部成功 → 盖 complete_generation=newGen（独立事务）。崩在其前 → Interrupted。
-//   恢复语义（最小落地）：recover() 返回 {generation=最后尝试代次, completeGeneration=最后完整代次,
-//   state}；state = Fresh（无台账 = 旧档/新库）/ Clean（相等 = 最后一次保存完整）/ Interrupted
-//   （generation > completeGeneration = 最后一次保存未收尾）。Interrupted 的最小恢复动作 = 上报
-//   调用方（数据仍可读——SQLite 事务保证每个部分自身原子；调用方按需重存收敛），协调层不回滚
-//   不改写存档数据（只增不改 = 兼容性底线）。
+//   步④-⑨ **t1129 单事务原子化（SAVE-01 修复本体）**：world/player/progress 三部分 + 流式冲洗
+//      （钩可选）+ complete 戳全部收进下游 kConn **同一事务**（步⑤ BEGIN；步④-⑧ 内任一失败
+//      / 注入 → rollback = **零部分写**；步⑨ 提交）。SQLite 回滚日志保证：崩在提交前 = 库面
+//      恰为上一完整代次（重进读 = A，禁混合），崩在提交后 = 库面恰为本代次（B）+ Clean。
+//      【t1129 勘误留痕】旧协议 world 段单事务、player/progress 各自 autocommit——「世界已
+//      提交、玩家未写」窗 = 混合代次库（物品复制/丢失），「旧完整代次照常可读」的旧注在
+//      world 面失真（chunks 表已推进到新代次、无回退路径）。戳入事务同时消灭「数据已写、
+//      戳未盖」的假 Interrupted 窗。短语保护语义升级：短路（前序失败后序不试）保留，但失败
+//      现在连同已写前序一起回滚——「杜绝混合写」从隔离升级为原子。
+//   恢复语义（t1129 后如实化）：recover() 返回 {generation=最后尝试代次, completeGeneration=最后
+//      完整代次, state}；state = Fresh（无台账 = 旧档/新库）/ Clean（相等 = 最后一次保存完整）/
+//      Interrupted（generation > completeGeneration = 最后一次保存未收尾——**其数据面在 t1129
+//      后恒为上一完整代次**：中断尝试零部分写）。Interrupted 的最小恢复动作 = 上报调用方
+//      （重存收敛），协调层不改写存档数据（只增不改 = 兼容性底线；回滚由 SQLite 日志承担，
+//      协调层零手工回写）。
 //
 // 代次语义：generation 单调递增（max(最后尝试, 最后完整)+1），中断/失败消耗号段但不重置不复用；
 // complete_generation 只在全部请求部分成功后推进。台账唯一写点 = 本类（worldstore 对其全盲），
@@ -73,6 +79,7 @@
 
 #include <QByteArray>
 #include <QList>
+#include <QSqlDatabase> // t1129 SaveFlushHook 签名（保存事务连接供流式冲洗缝）
 #include <QString>
 #include <QVariant>
 #include <type_traits>
@@ -175,6 +182,15 @@ enum class SaveFaultStage
 };
 using SaveFaultHook = std::function<bool(SaveFaultStage)>;
 
+// ── t1129 SAVE-01 流式冲洗缝（Game 层闭包经桥登记；生产装配点 = StreamingBridge::instance，
+//    矩阵腿可覆写挂本地会话——与 SaveFaultHook 同门：缺省空 = 生产形态的 no-op 半边）──────
+// flush：在保存事务连接上落流式驻留编辑（chunk_edits + save_gen 推进，WorldStore::kConn 事务
+//   内——false = 冲洗失败，协调层回滚整事务）；commit：提交成功后的内存账面收口（库零触碰）。
+//   两钩分离的原因：回滚面绝不清账（fail-safe = 下次保存重报收敛），只有提交面清——故 commit
+//   钩只在 commitAtomicSave 成功尾调用一次，flush 钩在事务内调用。
+using SaveFlushHook = std::function<bool(QSqlDatabase &)>;
+using SaveFlushCommitHook = std::function<void()>;
+
 // ── SaveRequest：一次统一保存的请求载荷（全值；playerData/progress 空 map = 该部分不请求）──
 // name/chests/furnaces/dispensers/worldTime/bedSpawn 六参形状与 WorldStore::saveAll 现有签名
 // 逐一同构（下游原样转发）；playerData → savePlayerData、progress → saveProgress。
@@ -213,6 +229,11 @@ public:
 
     // 故障注入缝（验收⑤）。缺省无钩 = 生产形态，恒不注入。
     void setFaultHook(SaveFaultHook hook) { m_faultHook = std::move(hook); }
+    // t1129 流式冲洗缝（生产装配点 = StreamingBridge::instance 登记进 SaveBridge 桥，桥逐保存
+    //   转发；缺省空 = 无冲洗域放行——fixed 世界形态）。flush 在事务内调（false = 回滚整事务），
+    //   commit 在提交成功尾调（内存账面收口，零库触碰）。
+    void setFlushHook(SaveFlushHook hook) { m_flushHook = std::move(hook); }
+    void setFlushCommitHook(SaveFlushCommitHook hook) { m_flushCommitHook = std::move(hook); }
 
     // t1070 件三诊断面（矩阵 r2044c 断言用；C++ only 非 QML）：冻结缓冲 dims 重建累计
     //   （首建 + dims 变化才 ++；同 dims 连续保存复用不 ++ = 「跨保存复用」的行为级锚）。
@@ -246,6 +267,8 @@ private:
     WorldStore *m_store = nullptr; // 下游 SQLiteAdapter（不拥有；调用方保证存活期）
     QString m_dbPath;            // 存档库路径（与 WorldStore::openWorld 同一路径）
     SaveFaultHook m_faultHook;   // 故障注入缝（缺省空 = 生产形态）
+    SaveFlushHook m_flushHook;         // t1129 流式冲洗缝（缺省空 = fixed 形态零动作）
+    SaveFlushCommitHook m_flushCommitHook; // t1129 提交面账面收口缝（缺省空 = 无账可清）
     int m_bufferRebuilds = 0;    // t1070 件三：冻结缓冲 dims 重建累计（诊断面；见 ensureBuffer 注）
 };
 

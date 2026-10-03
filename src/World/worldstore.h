@@ -6,6 +6,7 @@
 #include <QByteArray>
 #include <QHash>
 #include <QList>
+#include <QSqlDatabase> // t1129 runInSaveTransaction 签名（保存事务连接供外部工作缝）
 #include <QVariantList>
 #include <functional>
 
@@ -177,6 +178,41 @@ public:
     //   无 → 新世界走 World.regenerate(seed)（deterministic worldgen）。无副作用（SELECT COUNT）。
     Q_INVOKABLE bool hasChunks() const;
 
+    // ── t1129 SAVE-01 原子多面保存域（四面 + complete 戳同事务；编排权在协调层，本类只供
+    //    事务粒度原语——旧三写 Q_INVOKABLE 面逐字节原样保留，裸调用 caller 行为零变化）──────
+    // 病灶（交接单 SAVE-01 根因，实读定谳）：旧协议 world 段单事务、player/progress 各自独立
+    //   autocommit——崩溃/注入落在「世界已提交、玩家未写」窗即得混合代次库（新世界+旧玩家 =
+    //   物品复制 / 丢失），读路径无代次过滤照读最新 = 提示「已载入最后完整数据」名不符实。
+    //   修法（同事务案，两案评估见交接单三）：四面写 + complete 戳全部收进 kConn 单事务，
+    //   SQLite 回滚日志保证「要么全 B 要么全 A」；读路径零改动 = 旧档兼容零迁移（无任何
+    //   schema/格式变化——戳只是换了写入连接与时机，表/键/值域逐位同旧）。
+    //   事务内写序 = 流式冲洗钩（可选）→ world 段 → player 段 → progress 段 → complete 戳。
+    //   失败 = rollback（零部分写）；成功 = commit 时按段数补计数（t974 段=1 口径逐位同）。
+    // 开事务（保存链专用）。失败（已有活动事务 / SQL 病）→ false（调用方放弃，零部分写）。
+    bool beginAtomicSave();
+    // world 段表写体（saveAll 的表写段原样搬移——调用方已开事务，本方法不 BEGIN/COMMIT 不计数）。
+    bool writeWorldPart(const QString &name, const QVariantList &chests, const QVariantList &furnaces,
+                        const QVariantList &dispensers, const QVariantMap &worldTime,
+                        const QVariantMap &bedSpawn, const QVariantList &hoppers,
+                        const QVariantList &brewingStands, const QVariantList &signs);
+    // player 段写体（savePlayerData 的 INSERT 段——不计数；调用方已开事务）。
+    bool writePlayerPart(const QVariantMap &data);
+    // progress 段写体（saveProgress 的 upsert 段——不计数；调用方已开事务）。
+    bool writeProgressPart(const QVariantMap &progress);
+    // 台账单键 upsert（**事务内**写面——调用方已开事务；表名/键名由调用方注入 = 单一权威留
+    //   调用域，本域对台账域零概念渗入（r2015d 盲区钉原样幸存：worldstore 源文零 save_coord
+    //   字面）。失败 → false（调用方 rollback）。
+    bool stampLedgerKeyInTxn(const char *table, const char *key, qint64 value);
+    // 提交（成功 = 按 partsWritten 补 t974 计数——段=1 口径逐位同旧；提交失败 = rollback +
+    //   false 零计数零部分写）。
+    bool commitAtomicSave(int partsWritten);
+    // 回滚（失败路径收口；无活动事务 = no-op）。
+    void rollbackAtomicSave();
+    // 在保存事务连接上执行外部工作缝（t1129 流式冲洗域挂点——Game 层闭包经协调层传入，本类
+    //   只供给连接不解析语义）。fn 返回 false → 本方法 false（调用方 rollback）。
+    bool runInSaveTransaction(const std::function<bool(QSqlDatabase &)> &work);
+
+
 signals:
     void worldChanged();
     void saveOkCountChanged();
@@ -196,6 +232,7 @@ private:
     bool m_open = false;       // 是否有库打开
     QString m_openFile;        // 当前打开库的相对文件名（saveAll 刷 meta 用）
     int m_saveOkCount = 0;     // t974 写完成计数（见 saveOkCount Q_PROPERTY 注释；只增不清零）
+    int m_lastWorldChunkCount = 0; // t1129 事务内暂存（writeWorldPart 回填 / commitAtomicSave 日志消费）
 
     // t974 成功落盘统一收口：++m_saveOkCount + emit（savePlayerData / saveAll / saveProgress 三处
     //   成功尾各调一次 —— 计数只增不清零，跨保存累计；失败路径绝不调用）。

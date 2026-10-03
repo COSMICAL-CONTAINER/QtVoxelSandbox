@@ -191,6 +191,7 @@
 
 #include <QDebug>  // qWarning（超界 dt 丢弃——背压可见，t1050）
 #include <QElapsedTimer> // t1124：流式收割拍数据面单拍预算墙钟（STEADY 同门——不新造第二时钟）
+#include <QSqlDatabase> // t1129：同事务冲洗变体签名（保存事务连接——外部连接直用）
 #include <QObject>
 #include <QSet>    // 读档仲裁胜者集（ChunkKey::packed 键）
 #include <QVector> // 未到期命令暂存（drain-then-replay；容量受 CommandQueue::kCapacity 上界）
@@ -379,6 +380,15 @@ public:
     //   同缝落盘（persistResidentChunk 唯一执行体——驱逐与冲洗共用）。任一 chunk 失败或代次
     //   推进失败 = 返回 false（上报不谎报；账不清 = 下次保存重报收敛；已成功行不回滚）。
     bool flushResidentEditsForSave();
+    // ── t1129 SAVE-01 同事务冲洗变体（保存链原子化的流式半边）─────────────────────────────
+    // 与 flushResidentEditsForSave 同一拍序（先冲洗后代次推进），但执行体换 **外部连接**
+    //   （保存事务持有方 kConn）且**不清未落盘账**：回滚面下账面天然未清 = 下次保存重报收敛
+    //   （fail-safe 方向 = 宁重冲不丢账；提交面才清账——commitFlushResidentEditsOn）。本批
+    //   冲洗键集记入 m_lastFlushKeys（提交面按此清账；每批开头重置）。
+    bool flushResidentEditsForSaveOn(QSqlDatabase &db);
+    // t1129 提交面清账（保存事务**提交成功后**由桥的 commit 钩调）：本批冲洗键集逐键清未落盘
+    //   账（persistResidentChunk 的成功面同款）+ 键集复位。回滚/崩溃路径绝不调用 = 账面收敛。
+    void commitFlushResidentEditsOn();
     // ── §29.5-W5 读档合并（overlay 语义；语义见类头注 W5 段）──────────────────────────────
     // 行全量回灌 + D3 核心区 blob 物化（store 须已 openWorld 本世界且 setWorld 指向本壳世界
     //   ——r2010d rebind 纪律；误绑防御 = qWarning + false）。非流式世界（无行 / streaming=0）
@@ -506,6 +516,8 @@ private:
     int m_flushFailedCount = 0;      // 冲洗失败 chunk 累计（失败上报可见面）
     int m_loadRestoredRowCount = 0;  // 读档行回灌累计（overlay 仲裁胜者面）
     int m_loadBlobChunkCount = 0;    // 读档 blob 物化累计（D3 核心区面）
+    QVector<QPair<int, int>> m_lastFlushKeys; // t1129：本批同事务冲洗键集（提交面清账依据；
+                                              //   每批开头重置——回滚面不进气 = 账面天然未清）
 };
 
 inline GameSession::GameSession(World &world, QObject *parent)
@@ -810,6 +822,50 @@ inline bool GameSession::flushResidentEditsForSave()
     if (m_chunkStore->advanceStreamSaveGeneration() <= 0)
         allOk = false;
     return allOk;
+}
+
+// t1129 同事务冲洗（实现体）：拍序与账面语义见声明处头注。逐 chunk 经 ChunkStore::persistChunkOn
+//   在保存事务连接上落行（不清账）；键集入 m_lastFlushKeys 供提交面清账；代次推进同事务。
+inline bool GameSession::flushResidentEditsForSaveOn(QSqlDatabase &db)
+{
+    if (!m_chunkStore || !m_chunkStore->isBound() || !m_world.isSparse())
+        return true; // 无冲洗域（fixed / 未 bind）→ 放行（保存链其余面照常——flushForSave 同门）
+    StreamWorldMeta meta;
+    if (!m_chunkStore->readStreamWorldMeta(meta) || !meta.streaming)
+        return true; // 未登记流式世界：放行（fixed 零标志零活动同门）
+    m_lastFlushKeys.clear(); // 每批重置（提交面只清本批——跨保存无残留键集）
+    bool allOk = true;
+    // 驻留集枚举（flushResidentEditsForSave 同序：cz 外 cx 内；dirtyQuery 同驱逐缝）。
+    const QVector<QPair<int, int>> resident = m_world.chunks().sparseResidentKeysOrdered();
+    for (const auto &k : resident) {
+        if (!m_world.chunkHasUnsavedEdits(k.first, k.second))
+            continue; // 已生成未编辑的地形块不存（确定性重生成承载）
+        const Chunk *c = m_world.chunks().chunk(k.first, k.second);
+        if (!c) {
+            allOk = false;
+            continue;
+        }
+        const Result<void> r = m_chunkStore->persistChunkOn(db, k.first, k.second, *c);
+        if (r.isOk()) {
+            ++m_flushPersistedCount;
+            m_lastFlushKeys.append(k); // 账面暂不清——提交面统一收口（回滚面天然未清）
+        } else {
+            ++m_flushFailedCount;
+            allOk = false; // 失败上报（该 chunk 账不清；后续 chunk 继续入事务，聚合后由调用方回滚）
+        }
+    }
+    // 代次推进收口（同事务）：写不进 = 上报失败（调用方回滚整事务——行/代次同生共死）。
+    if (m_chunkStore->advanceStreamSaveGenerationOn(db) <= 0)
+        allOk = false;
+    return allOk;
+}
+
+// t1129 提交面清账：保存事务提交成功后由桥的 commit 钩调用（库零触碰——纯内存账面收口）。
+inline void GameSession::commitFlushResidentEditsOn()
+{
+    for (const auto &k : m_lastFlushKeys)
+        m_world.clearChunkUnsavedEdits(k.first, k.second); // persistResidentChunk 成功面同款
+    m_lastFlushKeys.clear();
 }
 
 // 读档合并（overlay 语义）：行全量回灌 + D3 核心区 blob 物化 + 代次对代次仲裁。
