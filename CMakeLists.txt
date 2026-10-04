@@ -1322,6 +1322,15 @@ add_executable(redstone_matrix_test
     #   单一权威帮手/era 工件在盘/跨任务词元零命中/注册三行/计划绝对面]。
     #   行为腿 fresh sparse 小世界族，rig 世界零接触）。
     tools/matrix/section94_structure_t1131.cpp
+    # t1132 地图域批探针段（置尾先例沿用：runAll 末执行，filter 词 r2102；5 腿 r2102a-e =
+    #   扩展域数据面柱[建库核心域+四侧前沿带定版 + 四象限/零轴写读 + 带外双向拒写 + 出图随域]
+    #   + 探索扩展真链柱[sparse 三站走查——零轴/负象限/盒内未物化保底色/超核心域/地形变化刷新]
+    #   + 持久化柱[真临时库存取往返幂等 + 跨世界隔离 + 旧档手工最小库兼容] + 接线柱[QML 装载/
+    #   落盘行 + worldstore 表读写面 + SaveRequest/coordinator/桥透传 + CMake 段行] + 结构钉
+    #   族+裁定锚柱[带宽单一权威 + 双 id 原位 + 源钉族——NEG 双摘面豁免不钉 + 候选池登记注 +
+    #   跨任务词元零命中 + QML 玩法路径门复钉]。新 include 面零新增（mapstore/worldstore 系
+    #   均已列）。行为腿 sparse 构造缝 + 真临时库，rig 世界零接触）。
+    tools/matrix/section95_map_domain_t1132.cpp
     # t1129 杀进程探针（CLI 模式 TU：--killprobe inject|inject-old|child|child-old|parent|
     #   parent-old——父 spawn 自身子进程 + 标记文件锚定保存窗 + QProcess::kill 真实终止 + 重开
     #   库四面读回。inject-old/child-old/parent-old = 旧协议提交序原语级重放（复现实验面——

@@ -293,6 +293,10 @@ void MatrixRun::runAll()
                               //   编辑保护] / c era 形态柱[池聚合 jar 定谳面] / d 结构钉族[接
                               //   入门/定义/权威帮手/工件在盘/计划绝对面]，行为腿 fresh sparse
                               //   小世界族，rig 世界零接触，接 section93）
+    section95_map_domain_t1132(); // t1132 地图域批探针段（置尾先例沿用：r2102 a 扩展域数据面
+                              //   柱 / b 探索扩展真链柱[sparse 三站走查] / c 持久化柱[真临时
+                              //   库三面] / d 接线柱 / e 结构钉族+裁定锚柱，行为腿 sparse 构
+                              //   造缝 + 真临时库，rig 世界零接触，接 section94）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";
