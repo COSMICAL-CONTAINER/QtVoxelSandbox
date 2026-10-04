@@ -1070,10 +1070,12 @@ Window {
         //   enterWorld 时整体替换（清旧世界残留 + 填本世界牌子文本——存档 sign_texts 表 round-trip）。
         //   存档 signs 由 saveAndExitToWorldList 经 saveAll(name, ..., signStore.allSigns()) 第 9 参落盘。
         signStore.loadAll(worldStore.loadSigns())
-        // t1114 地图数据集按会话清理（跨世界泄漏收口——signStore.loadAll 同门位置）：地图数据是会话
-        //   口径（无存档门，mapstore.h 头注裁定表），进世界清旧数据集；持填充地图时 player 探索 tick
-        //   惰性重建（重探索再填充面）。
-        mapStore.clearAll()
+        // t1132 地图数据集按世界装载（跨世界泄漏收口——signStore.loadAll 同门位置；MAP-03 首片）：
+        //   进世界 loadVariant 整体替换内存（无存档行[旧档 / 新世界] → 空 map → 清 = t1114 会话口径
+        //   降级，持填充地图时 player 探索 tick 惰性重建；有行 → 探索面复原 = 存退重进保持）。
+        //   存档由 saveAndExitToWorldList 经统一保存链第 10 参 mapStore.exportVariant() 落 map_dataset
+        //   表（跨世界隔离 = 表随库文件）。
+        mapStore.loadVariant(worldStore.loadMapDataset())
         // progress 按世界持久化：进世界前 loadVariant 整体替换内存（清旧世界残留 + 填本世界进度）。无存档
         //   progress 表 → 空 map → 重置默认（全 0 统计 + 全未解锁成就）。存档由 saveAndExit saveProgress 落盘。
         progress.loadVariant(worldStore.loadProgress())
@@ -1307,7 +1309,10 @@ Window {
                                              // t1113：酿造（t1097 桥链缺口补正——第 12 参此前被旧 11 参
                                              //   签名静默丢弃）+ 牌子文本随统一保存链同事务落盘。
                                              brewingStore.allBrewingStands(),
-                                             signStore.allSigns())
+                                             signStore.allSigns(),
+                                             // t1132：地图数据集随统一保存链同事务落盘（第 10 参；
+                                             //   map_dataset 表纯加表——探索面与地形同一存档点）。
+                                             mapStore.exportVariant())
     }
     // t1064 退出存档失败退避重试（review0901 登记清偿，出处见 saveAndExitToWorldList 重试段注释）：
     //   「保存并退出」按钮与 onClosing 关窗两路径**共用唯一实现**（禁第二份退避逻辑散写；两处
@@ -15462,8 +15467,9 @@ Window {
     //   牌子编辑面板 / 画作 paintingHost 同门[纯 QtQuick 呈现层]；第一人称 3D 手部模型不涉）。显示条件 =
     //   playing 且捕获且选中槽恰为填充地图（0x291 字面量——Main.qml 物品 id 字面量约定同门[t1099 蛛眼
     //   掉落先例]）且数据集在库。纹理 = image://mapstore/<revision>（main.cpp 注册的 MapAtlasProvider；
-    //   revision 变更换 URL → QML 源缓存自动重取）。玩家位点小点（白芯黑描）按世界坐标比例投影（全幅
-    //   数据集恒覆全域——图无锚点偏移，坐标即比例）。z=50（HUD 层；面板族 150+ 之上被覆盖的从属面）。
+    //   revision 变更换 URL → QML 源缓存自动重取）。玩家位点小点（白芯黑描）按世界坐标比例投影
+    //   （t1132 扩展域口径：世界坐标 + mapMargin 前沿带平移后除数据集尺寸——带常量单一权威在
+    //   MapStore，QML 经属性取值零复制）。z=50（HUD 层；面板族 150+ 之上被覆盖的从属面）。
     Item {
         id: mapOverlay
         visible: window.appState === "playing" && player.captured
@@ -15496,7 +15502,8 @@ Window {
             border.color: "#d8cfae"
             border.width: 1
         }
-        // 玩家位点（白芯黑描小点；feetPosition = 脚底世界坐标，除以世界尺寸 = 图上比例位置）。
+        // 玩家位点（白芯黑描小点；feetPosition = 脚底世界坐标，+前沿带平移后除数据集尺寸 = 图上比例
+        //   位置——t1132 扩展域口径，带常量经 mapStore.mapMargin 属性取值）。
         Rectangle {
             width: 7
             height: 7
@@ -15504,8 +15511,8 @@ Window {
             color: "#ffffff"
             border.color: "#222222"
             border.width: 1
-            x: mapImage.width * (player.feetPosition.x / Math.max(1, theWorld.width)) - 3.5
-            y: mapImage.height * (player.feetPosition.z / Math.max(1, theWorld.depth)) - 3.5
+            x: mapImage.width * ((player.feetPosition.x + mapStore.mapMargin) / Math.max(1, mapStore.mapWidth)) - 3.5
+            y: mapImage.height * ((player.feetPosition.z + mapStore.mapMargin) / Math.max(1, mapStore.mapDepth)) - 3.5
         }
     }
 

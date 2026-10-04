@@ -187,7 +187,11 @@ void MatrixRun::section77_roster_map_t1114()
                 && hb.blockIdAt(1) == int(RecipeRegistry::FilledMapId)            // 产物入背包空槽
                 && hb.countAt(1) == 1
                 && ms.hasMap()
-                && ms.mapWidth() == 48 && ms.mapDepth() == 48                     // 全幅定版
+                // [t1132 lawful 修订] 全幅定版 → 扩展域定版（核心域 + 四侧 kDomainMargin 前沿带，
+                //   MAP-02 era 核实裁定面——era 128 画布有界封顶的工程对应；沿革 = t1114「全幅 =
+                //   世界尺寸」口径随扩展域修订）。
+                && ms.mapWidth() == 48 + 2 * MapStore::kDomainMargin
+                && ms.mapDepth() == 48 + 2 * MapStore::kDomainMargin               // 扩展域定版
                 && ms.revision() > 0
                 && ms.columnColor(24, 24) != MapStore::kUnexploredColor            // 首绘中心区(脚下列已绘)
                 && w.blockAt(25, 81, 24) == quint8(BR::Air);                       // 零世界写入(非方块放置)
@@ -231,7 +235,10 @@ void MatrixRun::section77_roster_map_t1114()
             ok = ok && freshOk;
             if (!freshOk) diag += QStringLiteral("[fresh]");
             ms.initialize(8, 6);
-            const bool initOk = ms.hasMap() && ms.mapWidth() == 8 && ms.mapDepth() == 6
+            // [t1132 lawful 修订] 数据集尺寸 = 核心域入参 + 四侧前沿带（扩展域口径，沿革注见 r2084a）。
+            const bool initOk = ms.hasMap()
+                && ms.mapWidth() == 8 + 2 * MapStore::kDomainMargin
+                && ms.mapDepth() == 6 + 2 * MapStore::kDomainMargin
                 && ms.columnColor(7, 5) == MapStore::kUnexploredColor  // 全图未探索底色
                 && ms.revision() > 0;
             ok = ok && initOk;
@@ -239,18 +246,20 @@ void MatrixRun::section77_roster_map_t1114()
             const quint32 c1 = 0xFF4e8f3c, c2 = 0xFF3b6cb0;
             ms.writeColumn(2, 3, c1);
             ms.writeColumn(7, 5, c2);
-            ms.writeColumn(99, 99, c1);                                 // 越界写 no-op
+            ms.writeColumn(99, 99, c1); // 带外写 no-op（99 > 8+kDomainMargin——[t1132]扩展域口径）
             ms.commitColumns();
             const bool writeOk = ms.columnColor(2, 3) == c1
                 && ms.columnColor(7, 5) == c2
                 && ms.columnColor(0, 0) == MapStore::kUnexploredColor   // 未写列保持底色
-                && ms.columnColor(-1, 3) == MapStore::kUnexploredColor  // 越界读兜底
+                && ms.columnColor(-1, 3) == MapStore::kUnexploredColor  // 未写列读兜底（[t1132]带内未写 = 底色）
                 && ms.revision() >= 2;                                  // 单调自增
             ok = ok && writeOk;
             if (!writeOk) diag += QStringLiteral("[write]");
             const QImage img = ms.renderImage();
-            const bool imgOk = img.width() == 8 && img.height() == 6
-                && img.pixelColor(2, 3).rgba() == c1;                   // 出图像素同源
+            // [t1132 lawful 修订] 出图尺寸随扩展域（核心域 + 前沿带；沿革注见 r2084a）。
+            const bool imgOk = img.width() == 8 + 2 * MapStore::kDomainMargin
+                && img.height() == 6 + 2 * MapStore::kDomainMargin
+                && img.pixelColor(2 + MapStore::kDomainMargin, 3 + MapStore::kDomainMargin).rgba() == c1; // 出图像素同源（+带平移）
             ok = ok && imgOk;
             if (!imgOk) diag += QStringLiteral("[img %1x%2]").arg(img.width()).arg(img.height());
             ms.clearAll();
@@ -261,7 +270,8 @@ void MatrixRun::section77_roster_map_t1114()
             ms.initialize(4, 4);
             ms.writeColumn(1, 1, c1);
             ms.commitColumns();
-            const bool rebuildOk = ms.hasMap() && ms.mapWidth() == 4
+            // [t1132 lawful 修订] 重建尺寸随扩展域（沿革注见 r2084a）。
+            const bool rebuildOk = ms.hasMap() && ms.mapWidth() == 4 + 2 * MapStore::kDomainMargin
                 && ms.columnColor(1, 1) == c1;                          // 惰性重建面
             ok = ok && rebuildOk;
             if (!rebuildOk) diag += QStringLiteral("[rebuild]");
@@ -288,7 +298,9 @@ void MatrixRun::section77_roster_map_t1114()
             pc.setSelectedBlock(int(BR::Air));
             pc.loadSavedState(10.5, 81.0, 10.5, 0.0, 0.0, 1 /* Creative */);
             driveRosterMapExplore(pc, 16);                              // 0.8s 相位 ≥ 0.5s → 盒一
-            const bool box1Ok = ms.hasMap() && ms.mapWidth() == 48
+            // [t1132 lawful 修订] 数据集尺寸随扩展域（沿革注见 r2084a）；无地形不绘门（MAP-02）在
+            //   盒一域内零影响（rig 平台列全部有地形）。
+            const bool box1Ok = ms.hasMap() && ms.mapWidth() == 48 + 2 * MapStore::kDomainMargin
                 && ms.columnColor(10, 10) != MapStore::kUnexploredColor // 盒一内脚下列已绘
                 && ms.columnColor(12, 12) != MapStore::kUnexploredColor
                 && ms.columnColor(40, 40) == MapStore::kUnexploredColor // 盒二区未至未绘
@@ -346,11 +358,13 @@ void MatrixRun::section77_roster_map_t1114()
     });
 
     // ── r2084c:显示面柱(NEG 双摘面不触达 = 对照腿)──────────────────────────────────────────
-    //   Main.qml 接线 raw 钉(MapStore 实例行 / 进世界清库行 / player 注入行 / overlay 显隐行 /
+    //   Main.qml 接线 raw 钉(MapStore 实例行 / 进世界装载行[t1132 lawful 修订——旧清库行随 MAP-03
+    //   首片退役] / player 注入行 / overlay 显隐行 /
     //   provider 源行) + main.cpp provider 钉(provider 类行 + 注册行) + 注入面 pc.h 钉(Q_PROPERTY
     //   行 + getter 行——NEG 双摘面在 pc.cpp 调用/语句行,本腿零重叠)。
-    runLeg("r2084c display face column (the qml wiring rows instantiate the map store, clear"
-        " it on world entry per the session caliber, inject it into the player, gate the"
+    runLeg("r2084c display face column (the qml wiring rows instantiate the map store, load"
+        " it per world on entry per the shared caliber revised by t one one three two, inject"
+        " it into the player, gate the"
         " hand held overlay on the filled map id with the provider source and project the"
         " player dot, the app glue registers the mapstore image provider, and the header"
         " carries the map store property row)", [&]() {
@@ -361,7 +375,10 @@ void MatrixRun::section77_roster_map_t1114()
                                      + QStringLiteral("/..")).absoluteFilePath(QStringLiteral("main.cpp"));
         const QString pcH = srcRootForRosterMapPins() + QStringLiteral("/Game/playercontroller.h");
         const bool qmlOk = rawContainsRosterMap(qml, QStringLiteral("MapStore { id: mapStore }"))
-            && rawContainsRosterMap(qml, QStringLiteral("mapStore.clearAll()"))     // 进世界清库(会话口径)
+            // [t1132 lawful 修订] 进世界清库行 → 按世界装载行（MAP-03 首片：loadVariant 整体替换
+            //   内存——无存档行[旧档] → 内部 clearAll 降级 = 本行旧口径的子集；沿革 = 会话口径 →
+            //   共享口径 per-world 持久化，mapstore.h 存档面裁定）。
+            && rawContainsRosterMap(qml, QStringLiteral("mapStore.loadVariant(worldStore.loadMapDataset())"))
             && rawContainsRosterMap(qml, QStringLiteral("mapStore: mapStore"))      // player 注入行
             && rawContainsRosterMap(qml, QStringLiteral("hotbarVM.selectedItemId === 0x291")) // overlay 显隐门
             && rawContainsRosterMap(qml, QStringLiteral("image://mapstore/"))       // provider 源行
@@ -384,7 +401,8 @@ void MatrixRun::section77_roster_map_t1114()
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
             << "| r2084c display face column (the qml wiring rows instantiate the map store,"
-               " clear it on world entry per the session caliber, inject it into the player,"
+               " load it per world on entry per the shared caliber revised by t one one three two,"
+               " inject it into the player,"
                " gate the hand held overlay on the filled map id with the provider source and"
                " project the player dot, the app glue registers the mapstore image provider,"
                " and the header carries the map store property row)"
@@ -394,14 +412,16 @@ void MatrixRun::section77_roster_map_t1114()
     // ── r2084d:结构钉族(NEG 双摘面全豁免 = 值面 + 源钉对照腿)────────────────────────────────
     //   值面(双 id / 牛奶桶原位 / 图集零变更 / 相邻族零污染) + 源钉族(recipe.h/.cpp + hotbar +
     //   playercontroller .h/.cpp[NEG-1 调用行与 NEG-2 转换行豁免不钉] + mapstore.h/.cpp +
-    //   MaterialIcon + CMake) + 四负面钉(罗盘芯不取 / 缩放克隆不取 / 不可堆叠不取 / 存档表零加)。
+    //   MaterialIcon + CMake) + 四钉(罗盘芯不取 / 缩放克隆不取 / 不可堆叠不取 / 存档表面——[t1132
+    //   lawful 修订]负面钉翻转为共享口径单行表在册钉,沿革注见 D3)。
     runLeg("r2084d structure pin family (the two map ids ride the material segment tail with"
         " milk bucket in place and the atlas unchanged, the recipe and hotbar and controller"
         " and map store and icon and cmake rows are pinned on file with the two negative"
         " lesion faces exempt, the map recipe row carries the compass core per the one point"
         " zero jar read, no zoom or clone"
-        " symbol exists, no unstackable special case exists, and no map table rides the"
-        " world store per the session caliber)", [&]() {
+        " symbol exists, no unstackable special case exists, and the world store carries the"
+        " single shared map dataset row per the shared caliber revised by t one one one four"
+        " and t one one three two)", [&]() {
         bool ok = true;
         QString diag;
         // (D1) 值面:双 id 段位 / 牛奶桶原位 / 图集零变更(物品零新瓦) / 相邻族零污染。
@@ -539,13 +559,19 @@ void MatrixRun::section77_roster_map_t1114()
                                                          QStringLiteral("RecipeRegistry::FilledMapId) return 1"));
             ok = ok && noUnstack;
             if (!noUnstack) diag += QStringLiteral("[noUnstack]");
-            // 存档表零加(会话口径:worldstore 无 map 表门)。
-            const bool noTable = !rawContainsRosterMap(srcDir + QStringLiteral("/World/worldstore.h"),
-                                                       QStringLiteral("map_data"))
+            // 存档表面([t1132 lawful 修订]——旧负面钉「map_data/loadMaps 零命中 = 会话口径零存档
+            //   门」随 MAP-03 首片翻转:共享口径 per-world 持久化落地,worldstore 单行表 map_dataset
+            //   (initSchema 纯追加)+ loadMapDataset 读面在册;era 真值 = per-map 独立持久化,偏离
+            //   登记见 mapstore.h 存档面裁定,per-map 身份族裁定入候选池)。旧 loadMaps API 名仍
+            //   不取(命名沿革独立钉)。
+            const bool tableRow = rawContainsRosterMap(srcDir + QStringLiteral("/World/worldstore.h"),
+                                                       QStringLiteral("map_dataset"))
+                && rawContainsRosterMap(srcDir + QStringLiteral("/World/worldstore.h"),
+                                        QStringLiteral("Q_INVOKABLE QVariantMap loadMapDataset() const;"))
                 && !rawContainsRosterMap(srcDir + QStringLiteral("/World/worldstore.h"),
                                          QStringLiteral("loadMaps"));
-            ok = ok && noTable;
-            if (!noTable) diag += QStringLiteral("[noTable]");
+            ok = ok && tableRow;
+            if (!tableRow) diag += QStringLiteral("[tableRow]");
         }
 
         if (!ok) ++totalFail;
@@ -555,8 +581,9 @@ void MatrixRun::section77_roster_map_t1114()
                " controller and map store and icon and cmake rows are pinned on file with the"
                " two negative lesion faces exempt, the map recipe row carries the compass core"
                " per the one point zero jar read, no zoom or clone symbol exists, no"
-               " unstackable special case exists, and no"
-               " map table rides the world store per the session caliber)"
+               " unstackable special case exists, and the world store carries the"
+               " single shared map dataset row per the shared caliber revised by t one one one"
+               " four and t one one three two)"
             << (ok ? QString() : diag);
     });
 }

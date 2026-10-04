@@ -207,6 +207,7 @@ struct SaveRequest
                                  //   酿造内容实际从未经统一保存链落盘。本单接牌子文本同门顺带补正（载荷
                                  //   加字段 + 桥加缺省参 + 转发行补齐，旧 caller 逐位不变）。
     QVariantList signs;          // t1113 牌子文本（缺省空 = 不写 sign_texts 表，旧构造 caller 向前兼容）
+    QVariantMap mapDataset;      // t1132 地图数据集（缺省空 = 不写行即表清空[会话无数据集]，旧构造 caller 向前兼容）
     QVariantMap worldTime;
     QVariantMap bedSpawn;
     QVariantMap playerData;

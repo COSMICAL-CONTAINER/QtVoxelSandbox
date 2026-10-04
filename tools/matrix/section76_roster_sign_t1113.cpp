@@ -641,7 +641,9 @@ void MatrixRun::section76_roster_sign_t1113()
             if (!missWc.isEmpty())
                 diag += QStringLiteral("[wc %1]").arg(missWc.join(QLatin1Char(',')));
             const QStringList missWs = pinSet(srcDir + QStringLiteral("/World/worldstore.h"), {
-                SrcPin("saveAll sign param", "const QVariantList &signs = {});", 1),
+                // [t1132 lawful 修订] 尾参词元随第 10 参 mapDataset 追加同位换形（signs 缺省参
+                //   行由 `);` 收尾变 `,` 收尾——参数语义原样，沿革注同 t1129 门）。
+                SrcPin("saveAll sign param", "const QVariantList &signs = {},", 1),
                 SrcPin("loadSigns decl", "Q_INVOKABLE QVariantList loadSigns() const;", 1),
                 SrcPin("writeSigns decl", "bool writeSigns(const QVariantList &signs);", 1)});
             ok = ok && missWs.isEmpty();
@@ -661,8 +663,10 @@ void MatrixRun::section76_roster_sign_t1113()
                                          QStringLiteral("req.brewingStands = brewingStands;"))
                 // t1129 lawful 修订：转发尾词元随单事务原子化改道（saveAll 直调 → writeWorldPart
                 // 事务内转发），尾词元 `req.brewingStands, req.signs))` 同位换形携沿革注。
+                // [t1132 lawful 修订] 尾词元再随 mapDataset 载荷追加同位换形（world 段第 10 参
+                // 透传——转发语义原样，沿革注同 t1129 门）。
                 && rawContainsRosterSign(srcDir + QStringLiteral("/World/savecoordinator.cpp"),
-                                         QStringLiteral("req.brewingStands, req.signs))"));
+                                         QStringLiteral("req.brewingStands, req.signs, req.mapDataset))"));
             ok = ok && bridgeRows;
             if (!bridgeRows) diag += QStringLiteral("[bridge]");
             const QStringList missCm = pinSet(QCoreApplication::applicationDirPath()

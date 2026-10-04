@@ -8160,8 +8160,8 @@ bool PlayerController::dispenseFromDispenser(int x, int y, int z, const QVector3
 //   1.0 口径实读留痕：vanilla 地图机制 = 持图玩家的周界列随移动逐格绘入地图数据（探索面），未到过的
 //   列保持未绘底色——工程同构：持 FilledMapId 时按 kMapExploreIntervalSec 相位对玩家周界
 //   kMapExploreRadius 半径做列扫描写 MapStore（随走随更新 + 按探索度绘制面）。空地图不扫描（未激活
-//   无数据集）；数据集缺失（跨世界 clearAll 后重持 / 换世界重进）→ 惰性建库（存档面会话口径：探索
-//   面可重探索再填充，t1013 箱车 / t1112 鞍面先例；建库恒全幅定版 = 世界尺寸，无中心丢失面）。
+//   无数据集）；数据集缺失（跨世界换档未命中后重持 / 换世界重进）→ 惰性建库（探索面可重探索再填充
+//   面；建库恒「核心域 + 前沿带」定版 = initialize(worldWidth, worldDepth)，t1132 扩展域口径）。
 void PlayerController::tickMapExploration(float dt)
 {
     if (!m_world || !m_mapStore || !m_hotbar) return;
@@ -8175,19 +8175,28 @@ void PlayerController::tickMapExploration(float dt)
 }
 
 // t1114 玩家周界列扫描写入（激活首绘 / 探索 tick 共用体）：以玩家脚底列（m_pos 为脚底，非眼位）为
-//   心、2R+1 方形盒逐列算顶面色写 MapStore（越界列跳过）+ 一批一次 commitColumns（revision 单次
-//   bump，免逐列抖 QML overlay）。色调 = 地形顶块定族色 + 群系 tint + 高度明暗（mapColumnColor）。
+//   心、2R+1 方形盒逐列算顶面色写 MapStore + 一批一次 commitColumns（revision 单次 bump，免逐列抖
+//   QML overlay）。色调 = 地形顶块定族色 + 群系 tint + 高度明暗（mapColumnColor）。
+//   **t1132 MAP-02 绘制域门（era 核实留痕见 mapstore.h 范围裁定）**：域 = 数据集扩展域（核心域四侧
+//   各 kDomainMargin 前沿带——流式世界负坐标 / 超核心域列可绘）+「无地形不绘」门（heightmapAt = -1
+//   = 列无实体：sparse 未物化 chunk / fixed 域外——保持未探索底色，不绘虚空；稀疏探索面如实：带内
+//   未物化列留待物化后随走补绘）。
 void PlayerController::refreshMapAroundPlayer(int radius)
 {
     if (!m_world || !m_mapStore || !m_mapStore->hasMap()) return;
     const int cx = int(std::floor(double(m_pos.x())));
     const int cz = int(std::floor(double(m_pos.z())));
+    const int xLo = -MapStore::kDomainMargin, zLo = -MapStore::kDomainMargin;
+    const int xHi = m_world->width() + MapStore::kDomainMargin;
+    const int zHi = m_world->depth() + MapStore::kDomainMargin;
     for (int dz = -radius; dz <= radius; ++dz) {
         for (int dx = -radius; dx <= radius; ++dx) {
             const int x = cx + dx;
             const int z = cz + dz;
-            if (x < 0 || z < 0 || x >= m_world->width() || z >= m_world->depth())
-                continue; // 盒过界列跳过（有限世界边缘；MapStore::writeColumn 侧再双保险）
+            if (x < xLo || z < zLo || x >= xHi || z >= zHi)
+                continue; // 出数据集扩展域跳过（era 画布有界封顶；MapStore::writeColumn 侧再双保险）
+            if (m_world->heightmapAt(x, z) < 0)
+                continue; // 无地形数据列不绘（未物化 / 域外——未探索保底色；物化后随走补绘）
             m_mapStore->writeColumn(x, z, mapColumnColor(x, z));
         }
     }

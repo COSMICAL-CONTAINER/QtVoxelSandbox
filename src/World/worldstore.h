@@ -120,7 +120,8 @@ public:
                              const QVariantMap &worldTime = {}, const QVariantMap &bedSpawn = {},
                              const QVariantList &hoppers = {},
                              const QVariantList &brewingStands = {}, // t1097 第 8 参酿造台（同 hoppers 模式；旧 caller 缺省 {} 不写不删向前兼容）
-                             const QVariantList &signs = {}); // t1113 第 9 参牌子文本（同 hoppers/brewing 模式——SignStore::allSigns() 产物，每项 {x,y,z,lines:[4 行]}；旧 caller 缺省 {} 不写不删向前兼容）
+                             const QVariantList &signs = {}, // t1113 第 9 参牌子文本（同 hoppers/brewing 模式——SignStore::allSigns() 产物，每项 {x,y,z,lines:[4 行]}；旧 caller 缺省 {} 不写不删向前兼容）
+                             const QVariantMap &mapDataset = {}); // t1132 第 10 参地图数据集（同容器模式——MapStore::exportVariant() 产物 {present,width,depth,revision,pixels}；空 map = 表清空[会话无数据集]）
     // t1016 读世界时钟快照（与 saveAll 第 5 参同形）：{phase: double, day: qlonglong, weather: int,
     //   hasWeather: bool, hasWeatherTimer: bool, weatherTimerMs: qlonglong}。旧存档缺键 → 逐键缺省
     //   （phase 0.0 = 新世界默认相位 / day 0 / weather 0 = Clear 晴天 / weatherTimerMs 0）——「新增字段
@@ -156,6 +157,11 @@ public:
     //   未打开 → 空列表。caller（Main.qml.enterWorld）转交 signStore.loadAll 整体替换内存（清旧世界
     //   残留 + 填本世界牌子文本）。
     Q_INVOKABLE QVariantList loadSigns() const;
+    // t1132 读当前库的 map_dataset 表为 QVariantMap（形状同 writeMapDataset 入参 = MapStore::
+    //   exportVariant 产物形 {present,width,depth,revision,pixels}）。未打开 / 无行 → 空 map。
+    //   caller（Main.qml.enterWorld）转交 mapStore.loadVariant 整体替换内存（无行 → 清 = t1114
+    //   会话口径降级，重探索再填充）。
+    Q_INVOKABLE QVariantMap loadMapDataset() const;
     // progress 新系统 写玩家进度（统计 + 成就）单行表 key='main'。progress = PlayerProgress::toVariant() 产物。
     //   独立 upsert（INSERT OR REPLACE）。未打开 → false。caller（Main.qml.saveAndExitToWorldList）调。
     Q_INVOKABLE bool saveProgress(const QVariantMap &progress);
@@ -194,7 +200,8 @@ public:
     bool writeWorldPart(const QString &name, const QVariantList &chests, const QVariantList &furnaces,
                         const QVariantList &dispensers, const QVariantMap &worldTime,
                         const QVariantMap &bedSpawn, const QVariantList &hoppers,
-                        const QVariantList &brewingStands, const QVariantList &signs);
+                        const QVariantList &brewingStands, const QVariantList &signs,
+                        const QVariantMap &mapDataset = {}); // t1132 地图数据集（同容器表尾参追加）
     // player 段写体（savePlayerData 的 INSERT 段——不计数；调用方已开事务）。
     bool writePlayerPart(const QVariantMap &data);
     // progress 段写体（saveProgress 的 upsert 段——不计数；调用方已开事务）。
@@ -269,6 +276,11 @@ private:
     // t1113 牌子文本落盘（writeBrewing 同门：坐标列 + lines JSON 文本；caller 已开事务，本方法不 BEGIN/COMMIT）。
     //   signs 形状 = SignStore::allSigns() 产物：每项 {x,y,z,lines:[l0..l3]}。
     bool writeSigns(const QVariantList &signs);
+    // t1132 地图数据集落盘（writeSigns 同门；调用方 saveAll 已开事务，本方法不 BEGIN/COMMIT）。
+    //   形状 = MapStore::exportVariant() 产物：{present:bool, width, depth, revision, pixels:QByteArray}。
+    //   单行表（id=0，每库一份 = 共享口径单份数据集）；DELETE 全量 + present 才 INSERT（空 map =
+    //   清空，与容器表 DELETE 口径一致）。
+    bool writeMapDataset(const QVariantMap &dataset);
 
     // ── t382 迁移注册表（world_version → kWorldVersion 的数据迁移；详见类头注释 + migrations()）──
     // 单条迁移：把存档数据从 (targetVersion-1) 推进到 targetVersion。apply 对一个 chunk 的三段 blob

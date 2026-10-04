@@ -297,7 +297,7 @@ SaveReceipt SaveCoordinator::saveAll(const SaveRequest &req)
     // 步⑥ world 段（表写体 = 旧 saveAll 的表写段原样；失败 → rollback 零部分写）。
     if (!m_store->writeWorldPart(req.name, req.chests, req.furnaces, req.dispensers,
                                  req.worldTime, req.bedSpawn, req.hoppers,
-                                 req.brewingStands, req.signs)) {
+                                 req.brewingStands, req.signs, req.mapDataset)) {
         m_store->rollbackAtomicSave();
         m_store->setWorld(live);
         r.error = Error{ kErrSaveStoreRejected, "downstream world part failed" };

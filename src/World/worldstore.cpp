@@ -233,6 +233,20 @@ bool WorldStore::initSchema()
         qCCritical(lcSave) << "create sign_texts table failed:" << q.lastError().text();
         return false;
     }
+    // t1132 地图数据集表：单行表（id=0，每库一份 = 共享口径单份数据集——era per-map 独立持久化的
+    //   工程偏离如实登记，见 mapstore.h 存档面裁定）。pixels BLOB 存全幅 ARGB32 字节（自描述尺寸三键
+    //   width/depth/revision 随行）。纯加表 —— 旧库 IF NOT EXISTS 幂等补建，无迁移负担；schema 版本
+    //   不 bump（纯加表对老库向前兼容，同 sign_texts 门）。
+    if (!q.exec(QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS map_dataset ("
+            "  id INTEGER PRIMARY KEY CHECK (id = 0),"
+            "  width INTEGER NOT NULL,"
+            "  depth INTEGER NOT NULL,"
+            "  revision INTEGER NOT NULL,"
+            "  pixels BLOB NOT NULL)"))) {
+        qCCritical(lcSave) << "create map_dataset table failed:" << q.lastError().text();
+        return false;
+    }
     // progress 表（progress 新系统）：玩家进度（统计 + 成就）单行表，key 固定 'main'，data 存 PlayerProgress::toVariant()
     //   的 JSON。IF NOT EXISTS 幂等补建（schema 版本不 bump，同 chests/furnaces，纯加表对老库向前兼容）。
     if (!q.exec(QStringLiteral(
@@ -483,7 +497,7 @@ void WorldStore::closeWorld()
 
 bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const QVariantList &furnaces, const QVariantList &dispensers,
                          const QVariantMap &worldTime, const QVariantMap &bedSpawn, const QVariantList &hoppers,
-                         const QVariantList &brewingStands, const QVariantList &signs)
+                         const QVariantList &brewingStands, const QVariantList &signs, const QVariantMap &mapDataset)
 {
     if (!m_open || !m_world) {
         qCWarning(lcSave) << "saveAll: no open db or world";
@@ -495,7 +509,7 @@ bool WorldStore::saveAll(const QString &name, const QVariantList &chests, const 
     if (!beginAtomicSave())
         return false;
     if (!writeWorldPart(name, chests, furnaces, dispensers, worldTime, bedSpawn, hoppers,
-                        brewingStands, signs)) {
+                        brewingStands, signs, mapDataset)) {
         rollbackAtomicSave();
         return false;
     }
@@ -524,7 +538,8 @@ bool WorldStore::beginAtomicSave()
 bool WorldStore::writeWorldPart(const QString &name, const QVariantList &chests, const QVariantList &furnaces,
                                 const QVariantList &dispensers, const QVariantMap &worldTime,
                                 const QVariantMap &bedSpawn, const QVariantList &hoppers,
-                                const QVariantList &brewingStands, const QVariantList &signs)
+                                const QVariantList &brewingStands, const QVariantList &signs,
+                                const QVariantMap &mapDataset)
 {
     if (!m_open || !m_world) {
         qCWarning(lcSave) << "writeWorldPart: no open db or world";
@@ -633,6 +648,10 @@ bool WorldStore::writeWorldPart(const QString &name, const QVariantList &chests,
         return false;
     // t1113 牌子文本同事务落盘（sign_texts 表 DELETE 全量 + INSERT；与 chunks / meta / 前述容器表原子提交）。
     if (!writeSigns(signs))
+        return false;
+    // t1132 地图数据集同事务落盘（map_dataset 表 DELETE 全量 + present 才 INSERT 单行；与 chunks /
+    //   meta / 前述容器表原子提交——探索面与地形同一存档点）。
+    if (!writeMapDataset(mapDataset))
         return false;
     return true;
 }
@@ -1126,6 +1145,55 @@ QVariantList WorldStore::loadSigns() const
         sm.insert(QStringLiteral("lines"), doc.toVariant());
         out.append(sm);
     }
+    return out;
+}
+
+// t1132 地图数据集落盘：DELETE 全量 + present 才 INSERT 单行（id=0）。调用方（saveAll /
+//   writeWorldPart）已开事务，本方法不 BEGIN/COMMIT（同事务原子）。dataset 形状 = MapStore::
+//   exportVariant() 产物：{present:bool, width, depth, revision, pixels:QByteArray}——尺寸三键 + 全幅
+//   ARGB32 像素 BLOB（自描述；空 map = 表清空，与容器表 DELETE 口径一致）。
+bool WorldStore::writeMapDataset(const QVariantMap &dataset)
+{
+    QSqlDatabase db = QSqlDatabase::database(kConn);
+    QSqlQuery del(db);
+    if (!del.exec(QStringLiteral("DELETE FROM map_dataset"))) {
+        qCCritical(lcSave) << "writeWorldPart: map_dataset delete failed:" << del.lastError().text();
+        return false;
+    }
+    if (dataset.isEmpty() || !dataset.value(QStringLiteral("present")).toBool())
+        return true; // 空 map / 缺 present = 会话无数据集 → 表保持空（清空语义）
+    QSqlQuery iq(db);
+    iq.prepare(QStringLiteral("INSERT INTO map_dataset (id, width, depth, revision, pixels)"
+                              " VALUES (0, ?, ?, ?, ?)"));
+    iq.addBindValue(dataset.value(QStringLiteral("width")).toInt());
+    iq.addBindValue(dataset.value(QStringLiteral("depth")).toInt());
+    iq.addBindValue(dataset.value(QStringLiteral("revision")).toInt());
+    iq.addBindValue(dataset.value(QStringLiteral("pixels")).toByteArray());
+    if (!iq.exec()) {
+        qCCritical(lcSave) << "writeWorldPart: map_dataset insert failed:" << iq.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+// t1132 读 map_dataset 表为 QVariantMap（形状同 writeMapDataset 入参 = MapStore::exportVariant
+//   产物形）。未打开 / 无行 → 空 map（caller loadVariant 空行降级——t1114 会话口径）。
+QVariantMap WorldStore::loadMapDataset() const
+{
+    QVariantMap out;
+    if (!m_open) return out;
+    QSqlQuery q(QSqlDatabase::database(kConn));
+    if (!q.exec(QStringLiteral("SELECT width, depth, revision, pixels FROM map_dataset WHERE id = 0"))) {
+        qCWarning(lcSave) << "loadMapDataset: select failed:" << q.lastError().text();
+        return out;
+    }
+    if (!q.next())
+        return out; // 无行（新世界 / 旧档未存过图）→ 空 map
+    out.insert(QStringLiteral("present"), true);
+    out.insert(QStringLiteral("width"), q.value(0).toInt());
+    out.insert(QStringLiteral("depth"), q.value(1).toInt());
+    out.insert(QStringLiteral("revision"), q.value(2).toInt());
+    out.insert(QStringLiteral("pixels"), q.value(3).toByteArray());
     return out;
 }
 
