@@ -148,6 +148,9 @@
 - scaffold 地形跨 adopt 缓存（t1126 登记——≈2.9ms/adopt；terrain 纯函数可缓存但引入跨 adopt 状态面，待评估）
 - ChunkManager sparse 单访问器双哈希查找（t1126 登记——refloodBox 2-3ms 承载形态，引擎级 accessor 形状，动则全引擎读径统一评估）
 - 经验库候选（t1126 剖析实证）：全域 lattice pass 在 population 重放下隐性 O(核心域) 放大——新增全域候选 pass 必须随附写域 reach 推导，否则每 chunk 物化付整域价
+- ~~[P2]扩展坐标绘制缺口 / 地图持久化~~（**t1132 闭环摘除 2026-10-04**——1faf482f/bac5801c，矩阵 948→953；件一 b 案带状扩展 [kDomainMargin=64 双门恒拒]定谳交付+件二部分裁定收口[多地图身份改动面过大→共享口径 per-world 单份持久化首片：map_dataset 纯追加+保存链第 10 参同事务原子+loadVariant 读入；per-map 六面设计单入候选池]）
+- **per-map 持久化全族（t1132 六面设计单）**：身份[mapOrdinal 玩家态 JSON 字段或 damage 列破例全链审计]/MapStore 多份/落盘 maps+map_pixels 表/overlay 键(ordinal,revision)/栈语义[同 ordinal 可堆叠]/缩小批=先 ②+⑤ 会话内多图
+- mapColumnColor 水深渐变/生物群系细分级（t1114 登记单色简化）/ 大世界 blob 差分压缩（t1132 申报——现 324KB/世界可接受暂不动）
 - **WORLD-01 结构族余量（t1131 第一族地牢交付后逐单排）**：mineshaft[±26 写域需跨 chunk 计划切片面或 envelope 重构]/desert temple[21²+12 深地表结构需双锚切片]/jungle temple[15² 同门]/stronghold[全图唯一+环带选一座纪律+跨多 chunk]/village[多建筑离散分布，t1108 候选表三路同源已备]
 - 经验库候选（t1131 定理）：population 窗口重放接结构族的通用门形=「读写域⊆锚窗闭合 + 非自身列写惰性」——可迁移其余族评估
 - 接收器侧粉形状输入面 / 实块间接承载（era l→u/k 强弱分层）/ 火把贴附面不馈电（t1130 登记三子面——era 口径见 jar 工件，逐面评估后收）
