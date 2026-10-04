@@ -28,6 +28,11 @@
 //     m_pixels); 单语句行删除，编译仍绿）→ 恰红 = {r2102c}（导出缺 pixels → 装载走账不平降级
 //     clearAll → 往返断言 FAIL；QML 落盘行运行期才消费 = 幸存；r2102d 钉的是 QML 行与 decl 行，
 //     载荷行豁免不钉 = 幸存）。
+//   【t1133 lawful 修订留痕】r2102d「exit save row」尾针自 t1133 起由 "mapStore.exportVariant())"
+//     迁至 "mapStore.exportVariant(), entityManager.exportPersistedEntities())"——统一保存链追加
+//     第 15 参（生物持久化）后地图第 14 参不再是调用尾，原尾针 "))" 闭合被接续实参顶替必失配；
+//     新针同时承载地图载荷行与新尾实参，第 10/14 参事实面逐位不弱化（worldstore / coordinator /
+//     桥三面第 10 参钉原样幸存）。
 namespace {
 
 // 源钉根路径（section77 同门：applicationDirPath/../src）。
@@ -450,7 +455,8 @@ void MatrixRun::section95_map_domain_t1132()
         const QString srcDir = srcRootForMapDomainPins();
         const QStringList missQml = pinSet(srcDir + QStringLiteral("/ui/Main.qml"), {
             SrcPin("entry load row", "mapStore.loadVariant(worldStore.loadMapDataset())", 1),
-            SrcPin("exit save row", "mapStore.exportVariant())", 1),
+            SrcPin("exit save row", // lawful 修订 t1133：尾针迁至第 15 参追加后的调用尾（本段头注留痕）
+                   "mapStore.exportVariant(), entityManager.exportPersistedEntities())", 1),
             SrcPin("dot offset x row",
                    "mapImage.width * ((player.feetPosition.x + mapStore.mapMargin) / Math.max(1, mapStore.mapWidth)) - 3.5", 1),
             SrcPin("dot offset z row",

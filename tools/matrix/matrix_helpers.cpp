@@ -297,6 +297,11 @@ void MatrixRun::runAll()
                               //   柱 / b 探索扩展真链柱[sparse 三站走查] / c 持久化柱[真临时
                               //   库三面] / d 接线柱 / e 结构钉族+裁定锚柱，行为腿 sparse 构
                               //   造缝 + 真临时库，rig 世界零接触，接 section94）
+    section96_entity_persist_t1133(); // t1133 实体持久化批探针段（置尾先例沿用：r2103 a 导出
+                              //   门与行形柱 / b 恢复恒等+防御门+容量柱 / c 统一保存链真链
+                              //   往返柱[NEG-1 敏感] / d 旧档兼容+隔离+死亡不复活柱 / e 接
+                              //   线钉+结构钉族柱[NEG-2 敏感]，行为腿 EntityManager 直驱 +
+                              //   真临时库 + 繁殖缝 rig，rig 世界零接触，接 section95）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";

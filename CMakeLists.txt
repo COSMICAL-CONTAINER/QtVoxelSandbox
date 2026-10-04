@@ -1331,6 +1331,15 @@ add_executable(redstone_matrix_test
     #   跨任务词元零命中 + QML 玩法路径门复钉]。新 include 面零新增（mapstore/worldstore 系
     #   均已列）。行为腿 sparse 构造缝 + 真临时库，rig 世界零接触）。
     tools/matrix/section95_map_domain_t1132.cpp
+    # t1133 实体持久化批探针段（置尾先例沿用：runAll 末执行，filter 词 r2103；5 腿 r2103a-e =
+    #   导出门与行形柱[死亡/非 Mob 不入档 + 持久键集 + AI 态零键] + 恢复恒等+防御门+容量柱
+    #   [kind/type 越界与 NaN 与 hp<=0 跳过 + 满槽即停] + 统一保存链真链往返柱[繁殖缝幼崽 +
+    #   驯狼仍坐 + 幂等二次存；NEG-1 = 摘 coordinator 步⑥b 实体段调用行] + 旧档兼容+隔离+
+    #   死亡不复活柱[手工最小库幂等补表空读入 + 第二库无行 + 致死快照 N-1 行] + 接线钉+结构
+    #   钉族柱[QML 四行 + worldstore 三面 + 载荷/桥透传 + CMake 段行 + era 锚注 + 词元零命中
+    #   + QML 玩法路径门复钉；NEG-2 = 摘 Main.qml 恢复注入行]。
+    #   行为腿 EntityManager 直驱 + 真临时库 + 繁殖缝 rig，rig 世界零接触）。
+    tools/matrix/section96_entity_persist_t1133.cpp
     # t1129 杀进程探针（CLI 模式 TU：--killprobe inject|inject-old|child|child-old|parent|
     #   parent-old——父 spawn 自身子进程 + 标记文件锚定保存窗 + QProcess::kill 真实终止 + 重开
     #   库四面读回。inject-old/child-old/parent-old = 旧协议提交序原语级重放（复现实验面——
