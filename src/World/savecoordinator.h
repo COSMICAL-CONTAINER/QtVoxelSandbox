@@ -208,6 +208,8 @@ struct SaveRequest
                                  //   加字段 + 桥加缺省参 + 转发行补齐，旧 caller 逐位不变）。
     QVariantList signs;          // t1113 牌子文本（缺省空 = 不写 sign_texts 表，旧构造 caller 向前兼容）
     QVariantMap mapDataset;      // t1132 地图数据集（缺省空 = 不写行即表清空[会话无数据集]，旧构造 caller 向前兼容）
+    QVariantList entities;       // t1133 生物持久化载荷（缺省空 = entities 表清空[全灭快照语义]，
+                                 //   旧构造 caller 在无行表上零扰动；生产链恒传全量活体快照）
     QVariantMap worldTime;
     QVariantMap bedSpawn;
     QVariantMap playerData;

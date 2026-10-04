@@ -162,6 +162,13 @@ public:
     //   caller（Main.qml.enterWorld）转交 mapStore.loadVariant 整体替换内存（无行 → 清 = t1114
     //   会话口径降级，重探索再填充）。
     Q_INVOKABLE QVariantMap loadMapDataset() const;
+    // t1133 读当前库的 entities 表为 QVariantList（形状同 writeEntitiesPart 入参 = EntityManager::
+    //   exportPersistedEntities 产物形，每项 {kind,type,x,y,z,color,mh,hp,baby,grow,wt,ws,ot,os,
+    //   ov,sw,swd,sh,ss,sd}）。未打开 → 空列表；**表缺席（旧档）→ 空列表不崩**（SELECT 失败
+    //   qCWarning 降级 = loadChests 同门；旧档无表读入不丢不崩硬门）。caller（Main.qml.enterWorld）
+    //   转交 entityManager.restorePersistedEntities 注入；行语义门（kind/type 越界 / NaN / 死亡）
+    //   归 Entities 层（本类只存取裸列，不解析生物语义——同 chests 的 slots JSON 不解析先例）。
+    Q_INVOKABLE QVariantList loadEntities() const;
     // progress 新系统 写玩家进度（统计 + 成就）单行表 key='main'。progress = PlayerProgress::toVariant() 产物。
     //   独立 upsert（INSERT OR REPLACE）。未打开 → false。caller（Main.qml.saveAndExitToWorldList）调。
     Q_INVOKABLE bool saveProgress(const QVariantMap &progress);
@@ -218,6 +225,14 @@ public:
     // 在保存事务连接上执行外部工作缝（t1129 流式冲洗域挂点——Game 层闭包经协调层传入，本类
     //   只供给连接不解析语义）。fn 返回 false → 本方法 false（调用方 rollback）。
     bool runInSaveTransaction(const std::function<bool(QSqlDatabase &)> &work);
+    // t1133 生物持久化部件写（t1129 原子多面保存域第八原语，同门）：**不属 saveAll/writeWorldPart
+    //   调用链**——SaveCoordinator 步⑥b 专用部件写，与 world 段同事务域（kConn 事务内，调用方已
+    //   BEGIN），任一失败回滚零部分写。裸 Q_INVOKABLE saveAll 面零变化（旧 caller 不感知实体面 =
+    //   不写不删，行为逐位同旧）。DELETE 全量 + INSERT（空载荷 = 表清空——「死亡后保存不复活」
+    //   全灭快照语义）。entities 形状 = EntityManager::exportPersistedEntities 产物（每项 {kind,
+    //   type,x,y,z,color,mh,hp,baby,grow,wt,ws,ot,os,ov,sw,swd,sh,ss,sd}）。kind/type 键缺 / 坐标
+    //   键缺 → 跳过该行（不写残条目，同 writeChests 缺坐标门）。
+    bool writeEntitiesPart(const QVariantList &entities);
 
 
 signals:
@@ -276,10 +291,10 @@ private:
     // t1113 牌子文本落盘（writeBrewing 同门：坐标列 + lines JSON 文本；caller 已开事务，本方法不 BEGIN/COMMIT）。
     //   signs 形状 = SignStore::allSigns() 产物：每项 {x,y,z,lines:[l0..l3]}。
     bool writeSigns(const QVariantList &signs);
-    // t1132 地图数据集落盘（writeSigns 同门；调用方 saveAll 已开事务，本方法不 BEGIN/COMMIT）。
-    //   形状 = MapStore::exportVariant() 产物：{present:bool, width, depth, revision, pixels:QByteArray}。
-    //   单行表（id=0，每库一份 = 共享口径单份数据集）；DELETE 全量 + present 才 INSERT（空 map =
-    //   清空，与容器表 DELETE 口径一致）。
+    // t1132 地图数据集落盘（writeSigns 同门；调用方 saveAll / writeWorldPart 已开事务，本方法
+    //   不 BEGIN/COMMIT）。形状 = MapStore::exportVariant() 产物：{present:bool, width, depth,
+    //   revision, pixels:QByteArray}。单行表（id=0，每库一份 = 共享口径单份数据集）；DELETE 全量 +
+    //   present 才 INSERT（空 map = 清空，与容器表 DELETE 口径一致）。
     bool writeMapDataset(const QVariantMap &dataset);
 
     // ── t382 迁移注册表（world_version → kWorldVersion 的数据迁移；详见类头注释 + migrations()）──

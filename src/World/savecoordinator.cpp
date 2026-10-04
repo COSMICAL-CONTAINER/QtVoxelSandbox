@@ -303,6 +303,17 @@ SaveReceipt SaveCoordinator::saveAll(const SaveRequest &req)
         r.error = Error{ kErrSaveStoreRejected, "downstream world part failed" };
         return r;
     }
+    // 步⑥b 实体段（t1133 ENTITY-01）：生物持久化表随统一保存链同事务落盘（world 段旁新部件写
+    //   ——步⑥ 调用点形保留【t1132 源钉原样幸存】，本部件与之共用 kConn 事务，任一失败回滚 =
+    //   零部分写）。写序与容器表同门 = **无条件 DELETE+INSERT**（空载荷 = 表清空——「死亡后
+    //   保存不复活」硬语义：全灭会话的空快照必须把上一档的旧生物清掉，禁按空跳过；协调层矩阵
+    //   腿的空载荷在无行表上 DELETE = no-op，既有腿零扰动）。
+    if (!m_store->writeEntitiesPart(req.entities)) {
+        m_store->rollbackAtomicSave();
+        m_store->setWorld(live);
+        r.error = Error{ kErrSaveStoreRejected, "downstream entities part failed" };
+        return r;
+    }
     // 步⑦ player 段（短路保留：world 段失败不至此；注入 = 回滚——【t1129】不再是「world 已落、
     //   player 未落」的混合写，而是零部分写）。
     if (playerNeeded) {

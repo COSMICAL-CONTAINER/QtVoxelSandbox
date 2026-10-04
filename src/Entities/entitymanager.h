@@ -6,6 +6,7 @@
 #include <QColor>
 #include <QVector3D>
 #include <QElapsedTimer>
+#include <QVariantList> // t1133 实体持久化导出/恢复边界（Q_INVOKABLE 返回/入参面；moc 安全先例）
 #include <QtQml/qqml.h>
 
 #include <vector>
@@ -977,11 +978,43 @@ public:
     //      恢复，本项目移除即不再回来[MC 视角 ≈ despawn 而非 unload]；且 MC 的 despawn 半径
     //      [128 块即时 despawn 等]是独立机制，本单不引入——P3 登记面「despawn 半径 vs 卸载
     //      顺序」收口为：卸载移除先于转移 ⑥，despawn 半径语义零接线]）。
+    //      【t1133 勘误】生物族已随统一保存链入档（entities 表，见下方 exportPersistedEntities
+    //      段注）——「重进恢复」面对存退链生效；但流式卸载沿（本函数）仍不写档，被驱逐生物不
+    //      入下一档快照 = 本段「移除即不再回来」局限在卸载域如实保留（fixed 世界无驱逐不受影响）。
     //   移除 = 中心格 floorDiv16 落在 (cx,cz) 的全部活体槽（mob/落体/箭/浮标全族——卸载语义
     //   不分型），走既有 releaseSlot 释放语义（t978 幂等守卫 + free list + QML Repeater 槽
     //   稳定契约逐位不动），收口一次 notifyEntitiesChanged（批量 N 移 1 通知，t320 同门）。
     //   非 Q_INVOKABLE（生命周期决策零 QML，r2010d 精神）。返回移除数（诊断面）。
     int despawnInChunk(int cx, int cz);
+    // ── t1133 实体持久化（ENTITY-01）：生物族存档导出 / 恢复（勘误面——上文「实体不入档」
+    //    登记自生物族起退役；掉落物 / 载具 / 投射物持久化仍维持原登记 = 候选池面）──────────
+    //   存档行字段清单（持久 vs 临时分界——交接单 ENTITY-01 口径）：
+    //     · 持久 = 种类（mobType）/ 位置（pos 全精度）/ 血量（maxHealth+health）/ 幼体与成长
+    //       （baby+growTimer）/ 驯服（wolfTamed、ocelotTamed）/ 归属（era 1.0 = Wolf NBT "Owner"
+    //       字符串；本工程单机无玩家身份面 → 驯服旗即归属面，如实登记简化）/ 坐下（wolfSitting、
+    //       ocelotSitting——era = Wolf NBT "Sitting" byte，**是 NBT 持久字段非 AI 态**，jar 反汇编
+    //       面）/ 猫毛色变体（ocelotVariant，era 1.0 无豹猫〔1.2.1 起〕——现代混入登记的随行持久
+    //       面）/ 羊毛色与剪毛（sheepWool/sheepWoolDyed/sheared，era = "Color"/"Shear" NBT）/
+    //       史莱姆尺寸档（slimeSize，era = "Size" NBT）/ 猪鞍（saddled，era = "Saddle" NBT）。
+    //     · 临时（不入档，恢复走缺省初值）= AI 态全集（wander/chase/panic/enrage/fuse/路径）/
+    //       受击红闪 / 死亡态 / 骑乘链（rideCart/rideBoat/rideMob——载具本身不持久化，跨档链接
+    //       无锚）/ 火烧与窒息计时 / 下蛋与喷水与求偶计时（随机初值错峰语义由 spawnMobCore 重掷）/
+    //       朝向 yawRad（交接单字段清单外，AI/驻留态口径登记）。
+    //   死亡不入档（dead 或 health<=0 的槽跳过——era 同：死亡实体不随档复活）。非 Mob kind
+    //   （FallingBlock/Arrow/Snowball/Fireball/Bobber/…）不入档（会话瞬态）。
+    //   恢复 = 逐行走 spawnMobCore 既有生成核心（碰撞盒 / hostile 按型派生 / AI 计时随机初值全由
+    //   其收口）→ 再覆写持久字段（含 pos 全精度覆写——spawnMobCore 的格中心落位只是初值）。
+    //   EntityId 双轨相容（R20.14 纪律）：mob 族无 EntityId（槽下标 + spawnSerial 会话快照）→
+    //   恢复体经 acquireSlot 自然获配新槽（LIFO 复用），无旧档 id 可失配；掉落物族（EntityStore
+    //   EntityId 单调永不复用）本单不持久化 → EntityId 游标零跨档引用面。
+    //   防御门（损坏条目）：kind 非 Mob / mobType 越界 [0,kMobTypeCount) / 坐标 NaN / health<=0 →
+    //   跳过该行（不崩不半恢复）；ocelotVariant 钳 [0,2]、slimeSize 钳 {1,2,4}（越界落缺省）。
+    //   Q_INVOKABLE（QML 编排：enterWorld 恢复注入 / runExitSave 导出载荷——同 chests/signs 裸
+    //   原语边界先例，WorldStore 不解析本层语义）。
+    // 导出：活体 Mob 槽 → QVariantList<QVariantMap>（键集 = 上表持久面；消费方 = WorldStore 写表体）。
+    Q_INVOKABLE QVariantList exportPersistedEntities() const;
+    // 恢复：逐行注入存档生物，返回成功恢复数（QML 据它 >0 决定跳过自然入口生成——era 去重口径）。
+    Q_INVOKABLE int restorePersistedEntities(const QVariantList &rows);
     // t284 Stalker 蓄力膨胀进度（0..1）：fuseTimer>0（正在蓄力）时返 clamp(fuseTimer/kFuseTime,0,1)，供 QML
     //   delegate 据 it 对 Model 做 scale（1+inflate·0.5）+ baseColor 蓄力发白（机制等价 MC 苦力怕近距蓄力膨胀
     //   发白）。非 Stalker / 未蓄力 / 越界 → 0（模型静态）。revision 在蓄力期每帧 bump（tick Mob 分支）让绑定刷新。

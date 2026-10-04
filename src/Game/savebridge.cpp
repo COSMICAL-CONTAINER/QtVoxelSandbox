@@ -48,7 +48,7 @@ bool SaveBridge::saveViaCoordinator(WorldStore *store, const QString &worldFile,
                                     const QVariantMap &bedSpawn, const QVariantMap &playerData,
                                     const QVariantMap &progress, const QVariantList &hoppers,
                                     const QVariantList &brewingStands, const QVariantList &signs,
-                                    const QVariantMap &mapDataset)
+                                    const QVariantMap &mapDataset, const QVariantList &entities)
 {
     if (!store || !store->isOpen() || worldFile.isEmpty()) {
         qWarning() << "SaveBridge::saveViaCoordinator: store not open / no world file - refusing";
@@ -76,6 +76,8 @@ bool SaveBridge::saveViaCoordinator(WorldStore *store, const QString &worldFile,
     req.signs = signs;                 // t1113 牌子文本透传（载荷字段序 = 签名形参序同构）
     req.mapDataset = mapDataset;       // t1132 地图数据集透传（MapStore::exportVariant 产物——
                                        //   探索面与地形同一存档点；缺省空 = 表清空[会话无数据集]）
+    req.entities = entities;           // t1133 生物持久化透传（EntityManager::exportPersistedEntities
+                                       //   产物——存活生物全档快照，死亡不入档；缺省空 = 表清空）
     req.worldTime = worldTime;
     req.bedSpawn = bedSpawn;
     req.playerData = playerData;

@@ -1113,6 +1113,17 @@ Window {
         entityManager.clearAll()
         xpOrbs.clearAll()   // t402 经验球同族实体，切世界必清
         carts.clearAll()    // t565 矿车同族实体（非体素不进存档），切世界必清（清骑乘态 + 空槽复用）
+        // t1133 实体持久化恢复（ENTITY-01）：紧随 clearAll 注入存档生物（仍驯仍坐 / 血量 / 幼体
+        //   与成长保持——恢复体经 EntityManager 生成核心获配新槽，AI 态走缺省初值）。恢复数 > 0
+        //   → 下方自然入口生成两路径（固定三只 + 群系散布 / 村庄村民桥）按 era 口径跳过：1.0 群体
+        //   随 chunk 首生一次，有档重进 = 实体数据回放而非重掷初生群（同 seed 重建不重复的门槛面；
+        //   持久实体不抑制黑夜自然刷怪 / 刷怪笼——那是运行期自然生成，与本入口初生域正交）。恢复
+        //   数 = 0（旧档无表 / 新世界 / 全灭后存档的空表）→ 自然路径照旧 = 既有行为逐位同。
+        const persistedEntityRows = worldStore.loadEntities()
+        const restoredEntityCount = entityManager.restorePersistedEntities(persistedEntityRows)
+        if (restoredEntityCount > 0)
+            console.info("[t1133] persisted entities restored: " + restoredEntityCount
+                         + "/" + persistedEntityRows.length)
         // t1013 矿井箱 → 箱子矿车转正 / 回生（进世界一次性，须在 chestStore.loadAll（存档键条目就位）与
         //   carts.clearAll（槽表清空）之后）：C++ 全图扫 worldgen 标记箱 → 静默摘块 + 登记内容键 + 邻轨落车；
         //   并据存档 "cart" 键条目回生未毁的矿车（实体不进存档；挖毁时键条目已清 → 不回生，内容物不丢）。
@@ -1131,15 +1142,25 @@ Window {
         //   一名 MobVillager 游荡（1.0 村庄人口≈房数的工程化裁定——refill 侧每小屋恰一请求）。请求
         //   已按井锚在场 + 小屋内格 air 门校验（拆井 / 被埋小屋不出请求）；Y 取请求原值。sparse 流式
         //   世界村庄豁免（结构族 c 同门）→ 桥面恒空 → 零 spawn（与「无村庄方块」自洽，如实分层）。
-        {
-            const vreqs = theWorld.takeVillageSpawnRequests()
-            for (let vi = 0; vi + 2 < vreqs.length; vi += 3)
-                entityManager.spawnMobTyped(vreqs[vi], vreqs[vi + 1], vreqs[vi + 2],
-                                            EntityManager.MobVillager, "#8a6a4a", 10)
-            if (vreqs.length > 0)
-                console.info("[t1108] village villagers spawned: " + (vreqs.length / 3)) // 进世界一次性核对（非每帧）
+        //   t1133：本块与 spawnInitialMobs 同收「存档无实体行才跑」门（restoredEntityCount == 0）
+        //   ——有档恢复替代自然初生，村民入档后重进不重掷（去重口径见上方 t1133 注）。
+        if (restoredEntityCount === 0) {
+            {
+                const vreqs = theWorld.takeVillageSpawnRequests()
+                for (let vi = 0; vi + 2 < vreqs.length; vi += 3)
+                    entityManager.spawnMobTyped(vreqs[vi], vreqs[vi + 1], vreqs[vi + 2],
+                                                EntityManager.MobVillager, "#8a6a4a", 10)
+                if (vreqs.length > 0)
+                    console.info("[t1108] village villagers spawned: " + (vreqs.length / 3)) // 进世界一次性核对（非每帧）
+            }
+            // t240 进世界生成猪 / 牛 / 羊各一只于玩家进世界点附近地表（ EntityManager 已注册 3 类 mobType 1/2/3；
+            //   生物蛋生成系统推迟到 t243，故本任务暂以固定 spawn 验证模型 + 贴图可见）。review #21 后坐标取
+            //   玩家进世界列（新世界=出生列 / 读档=存档点，见 spawnInitialMobs 头注释）附近三格、
+            //   Y = worldgen 地表 +1（落地上方一格 → 重力 tick 贴地表不摔伤）。§9 区隔：模型 / 贴图
+            //   原创方块化（不照搬 MC），机制对齐 MC 1.0 passive mob（猪 / 牛 / 羊三种）。spawnMobTyped 第五参
+            //   color 仅 mobType 0（测试生物）单色路径读，pig/cow/sheep 走 MobModel + 贴图 → 传占位串即可。
+            spawnInitialMobs()
         }
-        spawnInitialMobs()
         appState = "playing"
         player.grab()
         keyInput.forceActiveFocus()
@@ -1312,7 +1333,10 @@ Window {
                                              signStore.allSigns(),
                                              // t1132：地图数据集随统一保存链同事务落盘（第 10 参；
                                              //   map_dataset 表纯加表——探索面与地形同一存档点）。
-                                             mapStore.exportVariant())
+                                             // t1133：生物持久化随统一保存链同事务落盘（第 15 参；
+                                             //   entities 表纯加表——存活生物全档快照，死亡不入档；
+                                             //   尾双实参同行 = t1132 尾针 lawful 修订后的钉面形态）。
+                                             mapStore.exportVariant(), entityManager.exportPersistedEntities())
     }
     // t1064 退出存档失败退避重试（review0901 登记清偿，出处见 saveAndExitToWorldList 重试段注释）：
     //   「保存并退出」按钮与 onClosing 关窗两路径**共用唯一实现**（禁第二份退避逻辑散写；两处

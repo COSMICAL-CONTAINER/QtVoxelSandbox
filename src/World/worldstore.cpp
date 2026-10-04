@@ -256,6 +256,37 @@ bool WorldStore::initSchema()
         qCCritical(lcSave) << "create progress failed:" << q.lastError().text();
         return false;
     }
+    // t1133 生物持久化表（ENTITY-01）：每只存活生物一行（id = 行序主键，非 EntityId——mob 族无
+    //   EntityId，槽下标会话语义不入档）。持久字段列集 = EntityManager 头注字段清单（种类/位置/
+    //   血量/幼体与成长/驯服/归属[单机=驯服旗]/坐下/猫变体/羊毛/剪毛/史莱姆档/猪鞍）；AI 态零列
+    //   （临时面不入档）。纯加表 —— 旧库 IF NOT EXISTS 幂等补建，无迁移负担；schema 版本不 bump
+    //   （纯加表对老库向前兼容，同 sign_texts/map_dataset 门）。
+    if (!q.exec(QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS entities ("
+            "  id INTEGER PRIMARY KEY,"
+            "  kind INTEGER NOT NULL,"
+            "  type INTEGER NOT NULL,"
+            "  x REAL NOT NULL,"
+            "  y REAL NOT NULL,"
+            "  z REAL NOT NULL,"
+            "  color TEXT NOT NULL,"
+            "  mh INTEGER NOT NULL,"
+            "  hp INTEGER NOT NULL,"
+            "  baby INTEGER NOT NULL,"
+            "  grow REAL NOT NULL,"
+            "  wt INTEGER NOT NULL,"
+            "  ws INTEGER NOT NULL,"
+            "  ot INTEGER NOT NULL,"
+            "  os INTEGER NOT NULL,"
+            "  ov INTEGER NOT NULL,"
+            "  sw INTEGER NOT NULL,"
+            "  swd INTEGER NOT NULL,"
+            "  sh INTEGER NOT NULL,"
+            "  ss INTEGER NOT NULL,"
+            "  sd INTEGER NOT NULL)"))) {
+        qCCritical(lcSave) << "create entities table failed:" << q.lastError().text();
+        return false;
+    }
     // 写 user_version（新库 0→kSchemaVersion；旧库同版本幂等；无 harm）。
     q.exec(QStringLiteral("PRAGMA user_version = %1").arg(kSchemaVersion));
     return true;
@@ -1194,6 +1225,108 @@ QVariantMap WorldStore::loadMapDataset() const
     out.insert(QStringLiteral("depth"), q.value(1).toInt());
     out.insert(QStringLiteral("revision"), q.value(2).toInt());
     out.insert(QStringLiteral("pixels"), q.value(3).toByteArray());
+    return out;
+}
+
+// t1133 生物持久化表落盘：DELETE 全量 + INSERT 每行（裸列直存，无 JSON 包——行字段即存档面）。
+//   调用方（SaveCoordinator 步⑥b 部件写）已开事务，本方法不 BEGIN/COMMIT（与 world 段同事务
+//   原子——t1129 单事务域同门）。entities 形状 = EntityManager::exportPersistedEntities 产物。
+//   kind/type 键缺 / 坐标键缺 → 跳过该行（不写残条目，同 writeChests 缺坐标门）；其余列值语义
+//   门归 Entities 层恢复面（本类只存取）。
+bool WorldStore::writeEntitiesPart(const QVariantList &entities)
+{
+    QSqlDatabase db = QSqlDatabase::database(kConn);
+    QSqlQuery del(db);
+    if (!del.exec(QStringLiteral("DELETE FROM entities"))) {
+        qCCritical(lcSave) << "writeEntitiesPart: entities delete failed:" << del.lastError().text();
+        return false;
+    }
+    QSqlQuery iq(db);
+    iq.prepare(QStringLiteral(
+        "INSERT INTO entities (id, kind, type, x, y, z, color, mh, hp, baby, grow,"
+        " wt, ws, ot, os, ov, sw, swd, sh, ss, sd)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+    int ordinal = 0;
+    for (const QVariant &v : entities) {
+        const QVariantMap em = v.toMap();
+        bool okKind = false, okType = false, okX = false, okY = false, okZ = false;
+        const int kind = em.value(QStringLiteral("kind")).toInt(&okKind);
+        const int type = em.value(QStringLiteral("type")).toInt(&okType);
+        const double x = em.value(QStringLiteral("x")).toDouble(&okX);
+        const double y = em.value(QStringLiteral("y")).toDouble(&okY);
+        const double z = em.value(QStringLiteral("z")).toDouble(&okZ);
+        if (!okKind || !okType || !okX || !okY || !okZ)
+            continue; // 键缺 → 跳过（不写残条目）
+        iq.addBindValue(++ordinal); // 行序主键（id 连续重编 = 快照全量重写语义，非稳定 id）
+        iq.addBindValue(kind);
+        iq.addBindValue(type);
+        iq.addBindValue(x);
+        iq.addBindValue(y);
+        iq.addBindValue(z);
+        iq.addBindValue(em.value(QStringLiteral("color")).toString());
+        iq.addBindValue(em.value(QStringLiteral("mh")).toInt());
+        iq.addBindValue(em.value(QStringLiteral("hp")).toInt());
+        iq.addBindValue(em.value(QStringLiteral("baby")).toBool() ? 1 : 0);
+        iq.addBindValue(em.value(QStringLiteral("grow")).toFloat());
+        iq.addBindValue(em.value(QStringLiteral("wt")).toBool() ? 1 : 0);
+        iq.addBindValue(em.value(QStringLiteral("ws")).toBool() ? 1 : 0);
+        iq.addBindValue(em.value(QStringLiteral("ot")).toBool() ? 1 : 0);
+        iq.addBindValue(em.value(QStringLiteral("os")).toBool() ? 1 : 0);
+        iq.addBindValue(em.value(QStringLiteral("ov")).toInt());
+        iq.addBindValue(em.value(QStringLiteral("sw")).toInt());
+        iq.addBindValue(em.value(QStringLiteral("swd")).toBool() ? 1 : 0);
+        iq.addBindValue(em.value(QStringLiteral("sh")).toBool() ? 1 : 0);
+        iq.addBindValue(em.value(QStringLiteral("ss")).toInt());
+        iq.addBindValue(em.value(QStringLiteral("sd")).toBool() ? 1 : 0);
+        if (!iq.exec()) {
+            qCCritical(lcSave) << "writeEntitiesPart: entity insert failed at row" << ordinal
+                               << ":" << iq.lastError().text();
+            return false;
+        }
+    }
+    return true;
+}
+
+// t1133 读 entities 表为 QVariantList（形状同 writeEntitiesPart 入参 = exportPersistedEntities
+//   产物形）。未打开 → 空列表；SELECT 失败（旧档表缺席 = 首要形态 / 库病）→ qCWarning + 空列表
+//   （loadChests 同门——旧档无表读入不丢不崩硬门）。行语义门（kind/type 越界 / NaN / 死亡）归
+//   Entities 层 restorePersistedEntities。
+QVariantList WorldStore::loadEntities() const
+{
+    QVariantList out;
+    if (!m_open) return out;
+    QSqlQuery q(QSqlDatabase::database(kConn));
+    if (!q.exec(QStringLiteral(
+            "SELECT kind, type, x, y, z, color, mh, hp, baby, grow,"
+            " wt, ws, ot, os, ov, sw, swd, sh, ss, sd FROM entities"))) {
+        qCWarning(lcSave) << "loadEntities: select failed (legacy save without table?):"
+                          << q.lastError().text();
+        return out; // 旧档无表 → 空列表（恢复面零注入 = 自然入口生成照旧）
+    }
+    while (q.next()) {
+        QVariantMap em;
+        em.insert(QStringLiteral("kind"), q.value(0).toInt());
+        em.insert(QStringLiteral("type"), q.value(1).toInt());
+        em.insert(QStringLiteral("x"), q.value(2).toDouble());
+        em.insert(QStringLiteral("y"), q.value(3).toDouble());
+        em.insert(QStringLiteral("z"), q.value(4).toDouble());
+        em.insert(QStringLiteral("color"), q.value(5).toString());
+        em.insert(QStringLiteral("mh"), q.value(6).toInt());
+        em.insert(QStringLiteral("hp"), q.value(7).toInt());
+        em.insert(QStringLiteral("baby"), q.value(8).toInt() != 0);
+        em.insert(QStringLiteral("grow"), q.value(9).toFloat());
+        em.insert(QStringLiteral("wt"), q.value(10).toInt() != 0);
+        em.insert(QStringLiteral("ws"), q.value(11).toInt() != 0);
+        em.insert(QStringLiteral("ot"), q.value(12).toInt() != 0);
+        em.insert(QStringLiteral("os"), q.value(13).toInt() != 0);
+        em.insert(QStringLiteral("ov"), q.value(14).toInt());
+        em.insert(QStringLiteral("sw"), q.value(15).toInt());
+        em.insert(QStringLiteral("swd"), q.value(16).toInt() != 0);
+        em.insert(QStringLiteral("sh"), q.value(17).toInt() != 0);
+        em.insert(QStringLiteral("ss"), q.value(18).toInt());
+        em.insert(QStringLiteral("sd"), q.value(19).toInt() != 0);
+        out.append(em);
+    }
     return out;
 }
 

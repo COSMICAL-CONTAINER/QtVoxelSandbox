@@ -9502,3 +9502,104 @@ int EntityManager::despawnInChunk(int cx, int cz)
         notifyEntitiesChanged(); // 批量 N 移 1 通知收口（t320 批量收口纪律）
     return int(doomed.size());
 }
+
+// ── t1133 实体持久化（ENTITY-01）：生物族导出 / 恢复实现（契约、字段清单与 era 定谳见头文件
+//    同名段注——死亡不入档 / 非 Mob kind 不入档 / 防御门 / EntityId 双轨相容四裁决此处不赘）──
+QVariantList EntityManager::exportPersistedEntities() const
+{
+    QVariantList out;
+    for (size_t i = 0; i < m_entities.size(); ++i) {
+        const Entity &e = m_entities[i];
+        // 死亡不入档（era 同：死亡实体不随档复活）+ 非 Mob kind 不入档（FallingBlock / 投射物族
+        // 会话瞬态）。health<=0 与 dead 并列防御（死亡动画窗内实体同样不留档）。
+        if (!e.alive || e.kind != Mob || e.dead || e.health <= 0)
+            continue;
+        QVariantMap row;
+        row.insert(QStringLiteral("kind"), int(Mob));
+        row.insert(QStringLiteral("type"), e.mobType);
+        row.insert(QStringLiteral("x"), e.pos.x());
+        row.insert(QStringLiteral("y"), e.pos.y());
+        row.insert(QStringLiteral("z"), e.pos.z());
+        row.insert(QStringLiteral("color"), e.color);
+        row.insert(QStringLiteral("mh"), e.maxHealth);
+        row.insert(QStringLiteral("hp"), e.health);
+        row.insert(QStringLiteral("baby"), e.baby);
+        row.insert(QStringLiteral("grow"), e.growTimer);
+        row.insert(QStringLiteral("wt"), e.wolfTamed);
+        row.insert(QStringLiteral("ws"), e.wolfSitting);
+        row.insert(QStringLiteral("ot"), e.ocelotTamed);
+        row.insert(QStringLiteral("os"), e.ocelotSitting);
+        row.insert(QStringLiteral("ov"), e.ocelotVariant);
+        row.insert(QStringLiteral("sw"), e.sheepWool);
+        row.insert(QStringLiteral("swd"), e.sheepWoolDyed);
+        row.insert(QStringLiteral("sh"), e.sheared);
+        row.insert(QStringLiteral("ss"), e.slimeSize);
+        row.insert(QStringLiteral("sd"), e.saddled);
+        out.append(row);
+    }
+    return out;
+}
+
+int EntityManager::restorePersistedEntities(const QVariantList &rows)
+{
+    int restored = 0;
+    for (const QVariant &v : rows) {
+        const QVariantMap row = v.toMap();
+        // 防御门一：kind 键缺 / 非 Mob → 跳过（损坏条目不崩不半恢复——交接单 defensive 钉面）。
+        bool okKind = false;
+        const int kind = row.value(QStringLiteral("kind")).toInt(&okKind);
+        if (!okKind || kind != int(Mob))
+            continue;
+        // 防御门二：mobType 越界 [0, kMobTypeCount) → 跳过（枚举尾追加契约 = 存档兼容契约的同门
+        //   反向读面：越界 type 落 applyMobCollisionBox default 分支会静默产出错误盒，不如拒收）。
+        bool okType = false;
+        const int type = row.value(QStringLiteral("type")).toInt(&okType);
+        if (!okType || type < 0 || type >= kMobTypeCount)
+            continue;
+        // 防御门三：坐标键缺 / NaN / Inf → 跳过（std::isfinite 三轴全查——NaN 落物理会悬停 / 卡碰撞）。
+        bool okX = false, okY = false, okZ = false;
+        const float x = row.value(QStringLiteral("x")).toFloat(&okX);
+        const float y = row.value(QStringLiteral("y")).toFloat(&okY);
+        const float z = row.value(QStringLiteral("z")).toFloat(&okZ);
+        if (!okX || !okY || !okZ || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z))
+            continue;
+        // 防御门四：health<=0 → 跳过（死亡不入档的读面镜像——损坏/残档条目不留半死体）。
+        const int hp = row.value(QStringLiteral("hp")).toInt();
+        if (hp <= 0)
+            continue;
+        const QString color = row.value(QStringLiteral("color")).toString();
+        const int mh = row.value(QStringLiteral("mh")).toInt();
+        // 生成核心复用（spawnMobCore：碰撞盒按型 / hostile 按型派生 / AI 计时随机初值错峰全由其
+        //   收口——AI 态不入档语义由缺省初值承载）。达 kCap → 中止（工程容量现实：满槽即停，剩余
+        //   行不恢复，调用方据返回值可判读；era 1.0 无槽位上限面，如实登记简化）。
+        const int slot = spawnMobCore(int(std::floor(x)), int(std::floor(y)), int(std::floor(z)),
+                                      type, color, mh > 0 ? mh : kDefaultMaxHealth);
+        if (slot < 0)
+            break;
+        Entity &e = m_entities[size_t(slot)];
+        e.pos = QVector3D(x, y, z); // 全精度位置覆写（spawnMobCore 的格中心只是落位初值）
+        e.maxHealth = mh > 0 ? mh : e.maxHealth;
+        e.health = hp;
+        e.baby = row.value(QStringLiteral("baby")).toBool();
+        e.growTimer = qMax(0.0f, row.value(QStringLiteral("grow")).toFloat());
+        e.wolfTamed = row.value(QStringLiteral("wt")).toBool();
+        e.wolfSitting = row.value(QStringLiteral("ws")).toBool();
+        e.ocelotTamed = row.value(QStringLiteral("ot")).toBool();
+        e.ocelotSitting = row.value(QStringLiteral("os")).toBool();
+        e.ocelotVariant = std::clamp(row.value(QStringLiteral("ov")).toInt(), 0, 2);
+        e.sheepWool = std::clamp(row.value(QStringLiteral("sw")).toInt(), 0, 15);
+        e.sheepWoolDyed = row.value(QStringLiteral("swd")).toBool();
+        e.sheared = row.value(QStringLiteral("sh")).toBool();
+        e.saddled = row.value(QStringLiteral("sd")).toBool();
+        // 史莱姆尺寸档恢复（越界落缺省中档 + 盒按档精化——applySlimeSizeBox 单一权威复用）。
+        if (type == MobSlime) {
+            const int ss = row.value(QStringLiteral("ss")).toInt();
+            e.slimeSize = (ss == 1 || ss == 2 || ss == 4) ? ss : kSlimeDefaultSpawnSize;
+            applySlimeSizeBox(e);
+        }
+        ++restored;
+    }
+    if (restored > 0)
+        notifyEntitiesChanged(); // 批量 N 进 1 通知收口（t320 批量收口纪律——整批恢复恰一次 emit）
+    return restored;
+}
