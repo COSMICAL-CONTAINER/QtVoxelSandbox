@@ -1340,6 +1340,10 @@ add_executable(redstone_matrix_test
     #   + QML 玩法路径门复钉；NEG-2 = 摘 Main.qml 恢复注入行]。
     #   行为腿 EntityManager 直驱 + 真临时库 + 繁殖缝 rig，rig 世界零接触）。
     tools/matrix/section96_entity_persist_t1133.cpp
+    # t1134 活塞族评估单探针段（零代码评估单=a 案；r2104 a era 证据在盘柱 / b 缺口确认柱 /
+    #   c 零行为面 rig 柱 / d 结构钉族柱[NEG-1 = 摘本段注册行恰红 r2104d；NEG-2 = mv jar fixture
+    #   abr.class 出位面恰红 r2104a]。行为腿 fresh 小世界红石 rig，rig 世界零接触）。
+    tools/matrix/section97_piston_eval_t1134.cpp
     # t1129 杀进程探针（CLI 模式 TU：--killprobe inject|inject-old|child|child-old|parent|
     #   parent-old——父 spawn 自身子进程 + 标记文件锚定保存窗 + QProcess::kill 真实终止 + 重开
     #   库四面读回。inject-old/child-old/parent-old = 旧协议提交序原语级重放（复现实验面——

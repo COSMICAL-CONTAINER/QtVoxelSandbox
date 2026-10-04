@@ -885,4 +885,11 @@ private:
                               //   感面）+ 词元零命中 + QML 玩法路径门复钉]。行为腿 Entity-
                               //   Manager 直驱 + 真临时库 + 繁殖缝 rig，rig 世界零接触，接
                               //   section95）
+    void section97_piston_eval_t1134(); // t1134 活塞族评估单探针段（零代码评估单=a 案；r2104 a
+                              //   era 证据在盘柱[jar fixture 串锚 + 家族四类 + 工件三件，NEG-2
+                              //   abr.class 敏感面] / b 缺口确认柱[kMc 幂扫零家族行 + 源树零活
+                              //   塞词元] / c 零行为面 rig 柱[供电正控两面 + 30 pass 域快照恒
+                              //   等] / d 结构钉族柱[CMake/runAll/声明行 + 词元 + QML 门复钉，
+                              //   NEG-1 CMake 行敏感面]。行为腿 fresh 小世界红石 rig，rig 世界
+                              //   零接触，接 section96）
 };

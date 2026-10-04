@@ -302,6 +302,10 @@ void MatrixRun::runAll()
                               //   往返柱[NEG-1 敏感] / d 旧档兼容+隔离+死亡不复活柱 / e 接
                               //   线钉+结构钉族柱[NEG-2 敏感]，行为腿 EntityManager 直驱 +
                               //   真临时库 + 繁殖缝 rig，rig 世界零接触，接 section95）
+    section97_piston_eval_t1134(); // t1134 活塞族评估单探针段（零代码评估单=a 案；r2104 a era
+                              //   证据在盘柱 / b 缺口确认柱[kMc 幂扫+源树零词元] / c 零行为面
+                              //   rig 柱[供电正控+域快照恒等] / d 结构钉族柱[NEG-1 敏感]，
+                              //   行为腿 fresh 小世界红石 rig，rig 世界零接触，接 section96）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";
