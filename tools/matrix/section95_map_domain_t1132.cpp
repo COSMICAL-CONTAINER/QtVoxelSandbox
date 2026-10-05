@@ -455,8 +455,9 @@ void MatrixRun::section95_map_domain_t1132()
         const QString srcDir = srcRootForMapDomainPins();
         const QStringList missQml = pinSet(srcDir + QStringLiteral("/ui/Main.qml"), {
             SrcPin("entry load row", "mapStore.loadVariant(worldStore.loadMapDataset())", 1),
-            SrcPin("exit save row", // lawful 修订 t1133：尾针迁至第 15 参追加后的调用尾（本段头注留痕）
-                   "mapStore.exportVariant(), entityManager.exportPersistedEntities())", 1),
+            SrcPin("exit save row", // lawful 修订 t1137：第 16 参（活塞动画）追加后调用尾随迁——本行
+                                    //   仍承第 10 参导出变体面；t1133 曾迁第 15 参追加后的调用尾（头注留痕）
+                   "mapStore.exportVariant(), entityManager.exportPersistedEntities(),", 1),
             SrcPin("dot offset x row",
                    "mapImage.width * ((player.feetPosition.x + mapStore.mapMargin) / Math.max(1, mapStore.mapWidth)) - 3.5", 1),
             SrcPin("dot offset z row",

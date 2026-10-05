@@ -599,7 +599,9 @@ void MatrixRun::section96_entity_persist_t1133()
             SrcPin("entry restore row",
                    "entityManager.restorePersistedEntities(persistedEntityRows)", 1),
             SrcPin("entry natural gate row", "if (restoredEntityCount === 0) {", 1),
-            SrcPin("exit save row", "entityManager.exportPersistedEntities())", 1)});
+            SrcPin("exit save row", // lawful 修订 t1137：第 16 参（活塞动画）追加后调用尾随迁——本行
+                                    //   仍承第 15 参快照透传面（t1133 立行时的尾形 `...())` 随尾针律前移）
+                   "entityManager.exportPersistedEntities(),", 1)});
         ok = ok && missQml.isEmpty();
         if (!missQml.isEmpty())
             diag += QStringLiteral("[qml %1]").arg(missQml.join(QLatin1Char(',')));

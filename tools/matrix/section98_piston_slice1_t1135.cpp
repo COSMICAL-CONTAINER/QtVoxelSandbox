@@ -77,8 +77,8 @@ void MatrixRun::section98_piston_slice1_t1135()
     // ── r2105a:推动柱（基本推动 + 12 上限 + 拒推四员 + 扫描失败零部分推动）────────────────
     //   NEG-2 敏感腿（上限判定行摘除 → 13 实心恰败子断言翻红）。
     runLeg("r2105a push machine column (a piston facing plus x shifts a three stone line"
-        " one cell forward leaving the head block in the first cell and the terminator"
-        " cell loaded while"
+        " one cell forward writing the two beat moving placeholder window and then settling"
+        " the head block in the first cell and the terminator cell loaded while"
         " the machine leaves the extended bit to the receiver, a twelve stone line with air"
         " beyond succeeds and a thirteen stone line fails with the region bit identical so"
         " the push limit twelve abandons the whole attempt with zero partial push, and the"
@@ -103,8 +103,9 @@ void MatrixRun::section98_piston_slice1_t1135()
                         ids.append(int(w.blockAt(x, y, z)));
             return ids;
         };
-        // (1) 基本推动：活塞 (20,41,24) 朝 +X（facing 5）；线 21..23 石。推动后 21 头块 / 22..24 石
-        //     （t1136 lawful 行为修订：头块落首格取代 Air 腾空——头块=切片二交付面，钉随交付面前移）。
+        // (1) 基本推动：活塞 (20,41,24) 朝 +X（facing 5）；线 21..23 石。推动当拍 = 两拍占位窗
+        //     （t1137 lawful 行为修订：切片三排定动画——机器当拍落 PistonMoving(164) 占位 + 侧表，
+        //     两拍后 settle 实体化；t1136 曾当拍头块，钉随交付面前移）。
         w.setBlock(20, y0 + 1, 24, BR::Piston, 5);
         w.setBlock(21, y0 + 1, 24, BR::Stone, 0);
         w.setBlock(22, y0 + 1, 24, BR::Stone, 0);
@@ -112,27 +113,38 @@ void MatrixRun::section98_piston_slice1_t1135()
         const bool pushOk = w.tryPistonExtend(20, y0 + 1, 24);
         ok = ok && pushOk;
         if (!pushOk) diag += QStringLiteral("[basic ret]");
+        World::PistonAnimEntry probe;
+        const bool winHead = w.blockAt(21, y0 + 1, 24) == BR::PistonMoving
+            && w.pistonAnimProbeAt(21, y0 + 1, 24, probe)
+            && probe.storedId == BR::PistonHead && probe.extending && probe.beats == 2;
+        ok = ok && winHead;
+        if (!winHead) diag += QStringLiteral("[win head]");
+        w.tickPistonAnimations();
+        w.tickPistonAnimations();
         const bool basicMoved = w.blockAt(21, y0 + 1, 24) == BR::PistonHead
             && w.blockAt(22, y0 + 1, 24) == BR::Stone
             && w.blockAt(23, y0 + 1, 24) == BR::Stone
-            && w.blockAt(24, y0 + 1, 24) == BR::Stone;
+            && w.blockAt(24, y0 + 1, 24) == BR::Stone
+            && w.pistonAnimCount() == 0;
         ok = ok && basicMoved;
         if (!basicMoved) diag += QStringLiteral("[basic moved]");
         const quint8 headState = w.stateAt(21, y0 + 1, 24);
         const bool headFacing = (headState & BR::PistonStateFacingMask) == 5
             && (headState & BR::PistonStateExtendedFlag) == 0;
-        ok = ok && headFacing; // 头块 state = 本体朝向镜像 + bit3 恒 0（t1136 头块承载位）
+        ok = ok && headFacing; // 头块 state = 本体朝向镜像 + bit3 恒 0（t1136 头块承载位，settle 面实核）
         if (!headFacing) diag += QStringLiteral("[head state=%1]").arg(headState);
         const quint8 bitState = w.stateAt(20, y0 + 1, 24);
         const bool bitUntouched = (bitState & BR::PistonStateExtendedFlag) == 0;
         ok = ok && bitUntouched; // 机器只搬块，extended 位归接收器（红石灯同门口径）
         if (!bitUntouched) diag += QStringLiteral("[bit set=%1]").arg(bitState);
-        // (2) 12 上限：线 21..32 恰 12 石 + 33 空气 → 成功（21 落头块）；线 21..33 恰 13 石 → 败 +
-        //     域快照恒等（头块零写——整次放弃零部分推动不变量含头块承载位）。
+        // (2) 12 上限：线 21..32 恰 12 石 + 33 空气 → 成功（21 落头占位 → 两拍后 settle 实体化）；
+        //     线 21..33 恰 13 石 → 败 + 域快照恒等（占位零写——整次放弃零部分推动不变量含占位承载位）。
         w.setBlock(20, y0 + 1, 26, BR::Piston, 5);
         for (int x = 21; x <= 32; ++x)
             w.setBlock(x, y0 + 1, 26, BR::Stone, 0);
         const bool capOk = w.tryPistonExtend(20, y0 + 1, 26);
+        w.tickPistonAnimations();
+        w.tickPistonAnimations();
         const bool capMoved = capOk && w.blockAt(21, y0 + 1, 26) == BR::PistonHead
             && w.blockAt(32, y0 + 1, 26) == BR::Stone && w.blockAt(33, y0 + 1, 26) == BR::Stone;
         ok = ok && capMoved;
@@ -169,11 +181,14 @@ void MatrixRun::section98_piston_slice1_t1135()
                 diag += QStringLiteral("[%1 rej=%2 frozen=%3]").arg(QLatin1String(c.tag))
                             .arg(rejected).arg(frozen);
         }
-        // (4) 缩回态活塞在线内可推（era 同）。
+        // (4) 缩回态活塞在线内可推（era 同；t1137：占位窗 + 两拍 settle 后实核）。
         w.setBlock(20, y0 + 1, 38, BR::Piston, 5);
         w.setBlock(21, y0 + 1, 38, BR::Stone, 0);
         w.setBlock(22, y0 + 1, 38, BR::Piston, 5); // 缩回态活塞（facing 5 未伸）
-        const bool retractedPushable = w.tryPistonExtend(20, y0 + 1, 38)
+        const bool pushed4 = w.tryPistonExtend(20, y0 + 1, 38);
+        w.tickPistonAnimations();
+        w.tickPistonAnimations();
+        const bool retractedPushable = pushed4
             && w.blockAt(21, y0 + 1, 38) == BR::PistonHead
             && w.blockAt(22, y0 + 1, 38) == BR::Stone
             && w.blockAt(23, y0 + 1, 38) == BR::Piston;
@@ -183,7 +198,8 @@ void MatrixRun::section98_piston_slice1_t1135()
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
             << "| r2105a push machine column (a piston facing plus x shifts a three stone"
-               " line one cell forward leaving the head block in the first cell and the terminator"
+               " line one cell forward writing the two beat moving placeholder window and then"
+               " settling the head block in the first cell and the terminator"
                " cell loaded while the machine leaves the extended bit to the receiver, a twelve"
                " stone line with air beyond succeeds and a thirteen stone line fails with"
                " the region bit identical so the push limit twelve abandons the whole"
@@ -219,13 +235,15 @@ void MatrixRun::section98_piston_slice1_t1135()
         QObject::connect(&w, &World::blockDroppedAsItem, [&dropCount](int, int, int, int) {
             ++dropCount;
         });
-        // (1) 水界：活塞 + 2 石 + 水（state 0）→ 推动成功、水毁零掉落、线收进界格 + 头块落首格
-        //     （t1136 lawful 行为修订：头块=切片二交付面，钉随交付面前移）。
+        // (1) 水界：活塞 + 2 石 + 水（state 0）→ 推动成功、水毁零掉落、线收进界格 + 头占位落首格
+        //     （t1137 lawful 行为修订：占位窗 + 两拍 settle 实核；t1136 曾当拍头块钉）。
         w.setBlock(20, y0 + 1, 24, BR::Piston, 5);
         w.setBlock(21, y0 + 1, 24, BR::Stone, 0);
         w.setBlock(22, y0 + 1, 24, BR::Stone, 0);
         w.setBlock(23, y0 + 1, 24, BR::Water, 0);
         const bool waterOk = w.tryPistonExtend(20, y0 + 1, 24);
+        w.tickPistonAnimations();
+        w.tickPistonAnimations();
         const bool waterFace = waterOk && w.blockAt(21, y0 + 1, 24) == BR::PistonHead
             && w.blockAt(22, y0 + 1, 24) == BR::Stone
             && w.blockAt(23, y0 + 1, 24) == BR::Stone;
@@ -237,24 +255,32 @@ void MatrixRun::section98_piston_slice1_t1135()
         w.setBlock(22, y0 + 1, 26, BR::Stone, 0);
         w.setBlock(23, y0 + 1, 26, BR::Lava, 0);
         const bool lavaOk = w.tryPistonExtend(20, y0 + 1, 26);
+        w.tickPistonAnimations();
+        w.tickPistonAnimations();
         const bool lavaFace = lavaOk && w.blockAt(21, y0 + 1, 26) == BR::PistonHead
             && w.blockAt(23, y0 + 1, 26) == BR::Stone;
         ok = ok && lavaFace;
         if (!lavaFace) diag += QStringLiteral("[lava ok=%1]").arg(lavaOk);
-        // (3) 贴脸流体（零实心线）：水直接在活塞面前 → 毁格落头块、零掉落（t1136：头块取代 Air 腾空）。
+        // (3) 贴脸流体（零实心线）：水直接在活塞面前 → 毁格落头占位、零掉落（t1137：占位窗 +
+        //     settle 实核；t1136 曾当拍头块）。
         w.setBlock(20, y0 + 1, 28, BR::Piston, 5);
         w.setBlock(21, y0 + 1, 28, BR::Water, 0);
-        const bool faceFluid = w.tryPistonExtend(20, y0 + 1, 28)
-            && w.blockAt(21, y0 + 1, 28) == BR::PistonHead;
+        const bool pushed3 = w.tryPistonExtend(20, y0 + 1, 28);
+        w.tickPistonAnimations();
+        w.tickPistonAnimations();
+        const bool faceFluid = pushed3 && w.blockAt(21, y0 + 1, 28) == BR::PistonHead;
         ok = ok && faceFluid;
         if (!faceFluid) diag += QStringLiteral("[facefluid]");
         // (4) 12 实心 + 流体第 13 格：流体是界非第 13 实心（上限不误拒）→ 成功 + 界格收线尾块 +
-        //     首格落头块。
+        //     首格落头占位 → 两拍 settle。
         w.setBlock(20, y0 + 1, 30, BR::Piston, 5);
         for (int x = 21; x <= 32; ++x)
             w.setBlock(x, y0 + 1, 30, BR::Stone, 0);
         w.setBlock(33, y0 + 1, 30, BR::Water, 0);
-        const bool fluidBound = w.tryPistonExtend(20, y0 + 1, 30)
+        const bool pushed4 = w.tryPistonExtend(20, y0 + 1, 30);
+        w.tickPistonAnimations();
+        w.tickPistonAnimations();
+        const bool fluidBound = pushed4
             && w.blockAt(21, y0 + 1, 30) == BR::PistonHead
             && w.blockAt(33, y0 + 1, 30) == BR::Stone;
         ok = ok && fluidBound;
@@ -274,12 +300,14 @@ void MatrixRun::section98_piston_slice1_t1135()
             << (ok ? QString() : diag);
     });
 
-    // ── r2105c:激励柱（受电伸 / 失电缩 + 方向化查询同门 + 瞬时简化行为钉）──────────────────
-    //   NEG-1 敏感腿（激励调用行摘除 → 活塞恒不伸）。瞬时简化 = 单 pass 当拍完成位移（era 两拍
-    //   排定 = 切片三替换，简化差如实登记——本柱行为级钉单 pass 完成面）。
+    // ── r2105c:激励柱（受电伸 / 失电缩 + 方向化查询同门 + 两拍排定动画行为钉）────────────────
+    //   NEG-1 敏感腿（激励调用行摘除 → 活塞恒不伸）。t1137 lawful 行为修订：瞬时简化收口 = era
+    //   两拍排定动画交付面（一个红石 tick 写占位 + 置位，两拍动画 tick 后 settle 实体化——
+    //   build/t1137_jar_piston_anim.txt 定谳二时序台账）。
     runLeg("r2105c excitation column (one redstone tick with a lit lever extends the piston"
-        " sets the extended bit and completes the whole displacement in that single pass as"
-        " the registered instant simplification leaving the head block in the first cell,"
+        " sets the extended bit and writes the moving placeholder window in that single pass"
+        " as the era scheduled animation that settles the head block into the first cell"
+        " after two animation ticks,"
         " unpowering the lever clears the bit destroys the head block and keeps the line"
         " settled in place, repowering extends again over the settled line, and a"
         " powered repeater feeds the piston only through the directional gate so the output"
@@ -295,8 +323,8 @@ void MatrixRun::section98_piston_slice1_t1135()
         for (int x = 16; x <= 40; ++x)
             for (int z = 16; z <= 40; ++z)
                 w.setBlock(x, y0, z, BR::Stone, 0);
-        // (1) 受电伸（恰 1 pass = 瞬时简化行为钉）：拉杆（state bit0=1）贴活塞西侧。头块落 25
-        //     （t1136 lawful 行为修订：头块=切片二交付面）。
+        // (1) 受电伸（t1137 era 排定动画行为钉）：拉杆（state bit0=1）贴活塞西侧。一个红石 tick =
+        //     占位窗写入 + 位置位；两拍动画 tick 后 settle 实体化头块于 25。
         w.setBlock(24, y0 + 1, 24, BR::Piston, 5);
         w.setBlock(25, y0 + 1, 24, BR::Stone, 0);
         w.setBlock(26, y0 + 1, 24, BR::Stone, 0);
@@ -304,12 +332,20 @@ void MatrixRun::section98_piston_slice1_t1135()
         w.tickRedstone();
         const quint8 extState = w.stateAt(24, y0 + 1, 24);
         const bool extended = (extState & BR::PistonStateExtendedFlag) != 0;
-        const bool onePassMoved = extended && w.blockAt(25, y0 + 1, 24) == BR::PistonHead
+        const bool winWritten = extended
+            && w.blockAt(25, y0 + 1, 24) == BR::PistonMoving
+            && w.blockAt(26, y0 + 1, 24) == BR::PistonMoving;
+        ok = ok && winWritten;
+        if (!winWritten)
+            diag += QStringLiteral("[ext state=%1]").arg(extState);
+        w.tickPistonAnimations();
+        w.tickPistonAnimations();
+        const bool onePassMoved = w.blockAt(25, y0 + 1, 24) == BR::PistonHead
             && w.blockAt(26, y0 + 1, 24) == BR::Stone
             && w.blockAt(27, y0 + 1, 24) == BR::Stone;
         ok = ok && onePassMoved;
         if (!onePassMoved)
-            diag += QStringLiteral("[ext state=%1]").arg(extState);
+            diag += QStringLiteral("[settle]");
         // (2) 失电缩：位清 + 头块消失（25 头格清空）+ 线不回搬（era 非粘性缩回头格当拍清空——
         //     era 缩回无动程；粘性拉回 = 切片二同单交付）。
         w.setBlock(23, y0 + 1, 24, BR::Lever, 0x00);
@@ -350,8 +386,9 @@ void MatrixRun::section98_piston_slice1_t1135()
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
             << "| r2105c excitation column (one redstone tick with a lit lever extends the"
-               " piston sets the extended bit and completes the whole displacement in that"
-               " single pass as the registered instant simplification leaving the head block in the first cell,"
+               " piston sets the extended bit and writes the moving placeholder window in that"
+               " single pass as the era scheduled animation that settles the head block into"
+               " the first cell after two animation ticks,"
                " unpowering the lever clears the bit destroys the head block and keeps the line"
                " settled in place, repowering extends again over"
                " the settled line, and a powered repeater feeds the piston only through the"

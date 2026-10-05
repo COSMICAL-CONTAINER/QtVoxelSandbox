@@ -1353,6 +1353,14 @@ add_executable(redstone_matrix_test
     #   推动机/红石 tick，rig 世界零接触）。
     tools/matrix/section98_piston_slice1_t1135.cpp
     tools/matrix/section99_piston_slice2_t1136.cpp
+    # t1137 活塞切片三探针段（交付单；r2107 a 伸程动画柱[占位窗字段实核/两拍 settle/二循环恒等，
+    #   NEG-1 敏感] / b 拉回动画柱[拉回占位+腾空当拍+settle/零线/不可拉零登记，NEG-1 敏感] /
+    #   c 中窗语义柱[短 OFF 被吞/占位自愈/mesher 快照替换面] / d 持久化柱[真协调层存档窗重载
+    #   续完，NEG-1/NEG-2 敏感] / e 结构钉族柱[NEG-1 = 摘 world.cpp settle 实体化行恰红九腿
+    #   r2107a+b+d+e ∪ r2105a+b+c+r2106a+b（后者 = t1137 lawful 修订面的 settle 承重断言同源红，
+    #   未修订腿全绿对照）；NEG-2 = 摘 savecoordinator.cpp ⑥c 段恰红 r2107d+r2107e]。行为腿 fresh
+    #   小世界红石 rig + 逻辑时间驱动动画 tick，rig 世界零接触）。
+    tools/matrix/section100_piston_slice3_t1137.cpp
     # t1129 杀进程探针（CLI 模式 TU：--killprobe inject|inject-old|child|child-old|parent|
     #   parent-old——父 spawn 自身子进程 + 标记文件锚定保存窗 + QProcess::kill 真实终止 + 重开
     #   库四面读回。inject-old/child-old/parent-old = 旧协议提交序原语级重放（复现实验面——

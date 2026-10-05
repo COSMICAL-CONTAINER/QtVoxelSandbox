@@ -81,12 +81,14 @@ inline void clearPistonSlice2Box(World &w, int y0)
 
 void MatrixRun::section99_piston_slice2_t1136()
 {
-    // ── r2106a:粘性拉回柱（真 rig 伸→失电→头格搬回 + 零线清头 + 不可拉清头 + 信号沿计数）────
-    //   NEG-1 敏感腿（源格腾空行摘除 → 拉回退化为复制，源格腾空子断言翻红）。
+    // ── r2106a:粘性拉回柱（真 rig 伸→失电→拉回两拍动画 + 零线清头 + 不可拉清头 + 信号沿计数）──
+    //   NEG-1 敏感腿（源格腾空行摘除 → 拉回退化为复制，源格腾空子断言翻红）。t1137 lawful 行为
+    //   修订：伸程与拉回均改两拍排定动画（窗口面 + settle 面两级实核——t1136 曾当拍搬回钉）。
     runLeg("r2106a sticky pull column (a sticky piston with a lit lever extends shifting the"
-        " stone line and loading the head block into the first cell, unpowering pulls the"
-        " first pushed stone back into the head cell clearing the source cell so the block"
-        " moves rather than copies, the extend retract cycle answers identically on the"
+        " stone line through the two beat placeholder window and loading the head block"
+        " into the first cell, unpowering schedules the two beat pull animation of the"
+        " first pushed stone back into the head cell clearing the source cell at once so"
+        " the block moves rather than copies, the extend retract cycle answers identically on the"
         " second pass, a sticky extension into pure air retracts by clearing the head"
         " block alone with zero phantom writes, an obsidian source placed after the push"
         " is not pullable so the retract only clears the head cell and leaves the"
@@ -107,8 +109,8 @@ void MatrixRun::section99_piston_slice2_t1136()
                          [&extSig, &retSig](int, int, int, bool extending) {
                              if (extending) ++extSig; else ++retSig;
                          });
-        // (1) 受电伸：粘性活塞 (20,41,24) 朝 +X（facing 5）+ 石 21..22 + 拉杆 19 点燃。伸后 21 头块
-        //     / 22..23 石（t1135 切片一推动机行为面 + 伸程沿信号）。
+        // (1) 受电伸：粘性活塞 (20,41,24) 朝 +X（facing 5）+ 石 21..22 + 拉杆 19 点燃。占位窗实核
+        //     （线格+头格 = 164 + 侧表 storedId）→ 两拍 settle：21 头块 / 22..23 石。
         w.setBlock(20, y0 + 1, 24, BR::StickyPiston, 5);
         w.setBlock(21, y0 + 1, 24, BR::Stone, 0);
         w.setBlock(22, y0 + 1, 24, BR::Stone, 0);
@@ -116,61 +118,92 @@ void MatrixRun::section99_piston_slice2_t1136()
         w.tickRedstone();
         const quint8 extState = w.stateAt(20, y0 + 1, 24);
         const bool extended = (extState & BR::PistonStateExtendedFlag) != 0;
-        const bool extFace = extended && w.blockAt(21, y0 + 1, 24) == BR::PistonHead
+        World::PistonAnimEntry probe1;
+        const bool extWin = extended && w.blockAt(21, y0 + 1, 24) == BR::PistonMoving
+            && w.blockAt(22, y0 + 1, 24) == BR::PistonMoving
+            && w.blockAt(23, y0 + 1, 24) == BR::PistonMoving
+            && w.pistonAnimProbeAt(21, y0 + 1, 24, probe1)
+            && probe1.storedId == BR::PistonHead && probe1.extending && probe1.beats == 2;
+        ok = ok && extWin;
+        if (!extWin) diag += QStringLiteral("[ext win state=%1]").arg(extState);
+        w.tickPistonAnimations();
+        w.tickPistonAnimations();
+        const bool extFace = w.blockAt(21, y0 + 1, 24) == BR::PistonHead
             && w.blockAt(22, y0 + 1, 24) == BR::Stone
             && w.blockAt(23, y0 + 1, 24) == BR::Stone;
         ok = ok && extFace;
-        if (!extFace) diag += QStringLiteral("[ext state=%1]").arg(extState);
-        // (2) 失电拉回：被推首块（本体+2Δ = 22 格）搬回头格 21、源格 22 腾空——「搬回」非「复制」
-        //     （era 拉回分支同构；瞬时段 = 本切片交付，era 两拍动画 = 切片三）。
+        if (!extFace) diag += QStringLiteral("[ext settle]");
+        // (2) 失电拉回：头格 21 落拉回动画占位（164 + storedId=石 extending=false）+ 源格 22 当拍
+        //     腾空——「搬回」非「复制」（era 拉回分支字节同构；腾空当拍面 = t1136 NEG 承重面维持），
+        //     两拍 settle 后 21 实体化石块。
         w.setBlock(19, y0 + 1, 24, BR::Lever, 0x00);
         w.tickRedstone();
         const quint8 retState = w.stateAt(20, y0 + 1, 24);
-        const bool pulled = (retState & BR::PistonStateExtendedFlag) == 0
-            && w.blockAt(21, y0 + 1, 24) == BR::Stone
+        World::PistonAnimEntry probe2;
+        const bool pullWin = (retState & BR::PistonStateExtendedFlag) == 0
+            && w.blockAt(21, y0 + 1, 24) == BR::PistonMoving
             && w.blockAt(22, y0 + 1, 24) == BR::Air
-            && w.blockAt(23, y0 + 1, 24) == BR::Stone;
+            && w.pistonAnimProbeAt(21, y0 + 1, 24, probe2)
+            && probe2.storedId == BR::Stone && !probe2.extending && probe2.beats == 2;
+        ok = ok && pullWin;
+        if (!pullWin) diag += QStringLiteral("[pull win state=%1]").arg(retState);
+        w.tickPistonAnimations();
+        w.tickPistonAnimations();
+        const bool pulled = w.blockAt(21, y0 + 1, 24) == BR::Stone
+            && w.blockAt(22, y0 + 1, 24) == BR::Air
+            && w.blockAt(23, y0 + 1, 24) == BR::Stone
+            && w.pistonAnimCount() == 0;
         ok = ok && pulled;
-        if (!pulled) diag += QStringLiteral("[pull state=%1]").arg(retState);
-        // (3) 伸缩循环第二遍恒等（拉回幂等面：settled 线上再伸 → 头块复落 → 失电再拉回）。
+        if (!pulled) diag += QStringLiteral("[pull settle]");
+        // (3) 伸缩循环第二遍恒等（拉回幂等面：settled 线上再伸 → 头占位复落 → settle → 失电再拉回）。
         w.setBlock(19, y0 + 1, 24, BR::Lever, 0x01);
         w.tickRedstone();
         const bool reext = (w.stateAt(20, y0 + 1, 24) & BR::PistonStateExtendedFlag) != 0
-            && w.blockAt(21, y0 + 1, 24) == BR::PistonHead
-            && w.blockAt(22, y0 + 1, 24) == BR::Stone;
+            && w.blockAt(21, y0 + 1, 24) == BR::PistonMoving;
         ok = ok && reext;
         if (!reext) diag += QStringLiteral("[reext]");
+        w.tickPistonAnimations();
+        w.tickPistonAnimations();
         w.setBlock(19, y0 + 1, 24, BR::Lever, 0x00);
         w.tickRedstone();
+        w.tickPistonAnimations();
+        w.tickPistonAnimations();
         const bool repull = w.blockAt(21, y0 + 1, 24) == BR::Stone
             && w.blockAt(22, y0 + 1, 24) == BR::Air;
         ok = ok && repull;
         if (!repull) diag += QStringLiteral("[repull]");
-        // (4) 零线粘性：伸入纯空气 → 头块落贴脸格；失电 → 仅清头块零幻写（无源格拉回）。
+        // (4) 零线粘性：伸入纯空气 → 头占位落贴脸格 → settle 实体化；失电 → 仅清头块零幻写
+        //     （无源格拉回零登记）。
         w.setBlock(20, y0 + 1, 26, BR::StickyPiston, 5);
         w.setBlock(19, y0 + 1, 26, BR::Lever, 0x01);
         w.tickRedstone();
+        w.tickPistonAnimations();
+        w.tickPistonAnimations();
         const bool zeroExt = w.blockAt(21, y0 + 1, 26) == BR::PistonHead;
         ok = ok && zeroExt;
         if (!zeroExt) diag += QStringLiteral("[zeroext]");
         w.setBlock(19, y0 + 1, 26, BR::Lever, 0x00);
         w.tickRedstone();
         const bool zeroRet = w.blockAt(21, y0 + 1, 26) == BR::Air
-            && w.blockAt(22, y0 + 1, 26) == BR::Air;
+            && w.blockAt(22, y0 + 1, 26) == BR::Air
+            && w.pistonAnimCount() == 0;
         ok = ok && zeroRet;
         if (!zeroRet) diag += QStringLiteral("[zeroret]");
         // (5) 不可拉源：伸后把源格置换为黑曜石（模拟推后放置）→ 失电拉回判定拒 → 仅清头格，
-        //     黑曜石原样（era canPush destroyMode=false 黑曜石显式拒同构）。
+        //     黑曜石原样零登记（era canPush destroyMode=false 黑曜石显式拒同构）。
         w.setBlock(20, y0 + 1, 28, BR::StickyPiston, 5);
         w.setBlock(21, y0 + 1, 28, BR::Stone, 0);
         w.setBlock(22, y0 + 1, 28, BR::Stone, 0);
         w.setBlock(19, y0 + 1, 28, BR::Lever, 0x01);
         w.tickRedstone();
+        w.tickPistonAnimations();
+        w.tickPistonAnimations();
         w.setBlock(22, y0 + 1, 28, BR::Obsidian, 0);
         w.setBlock(19, y0 + 1, 28, BR::Lever, 0x00);
         w.tickRedstone();
         const bool nopull = w.blockAt(21, y0 + 1, 28) == BR::Air
-            && w.blockAt(22, y0 + 1, 28) == BR::Obsidian;
+            && w.blockAt(22, y0 + 1, 28) == BR::Obsidian
+            && w.pistonAnimCount() == 0;
         ok = ok && nopull;
         if (!nopull) diag += QStringLiteral("[nopull]");
         // (6) 信号沿计数：伸程沿 / 缩程沿各恰一次每动作（四次伸 + 四次缩：腿内 (1)(3)×2(4)(5)）。
@@ -181,9 +214,10 @@ void MatrixRun::section99_piston_slice2_t1136()
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
             << "| r2106a sticky pull column (a sticky piston with a lit lever extends shifting the"
-               " stone line and loading the head block into the first cell, unpowering pulls the"
-               " first pushed stone back into the head cell clearing the source cell so the block"
-               " moves rather than copies, the extend retract cycle answers identically on the"
+               " stone line through the two beat placeholder window and loading the head block"
+               " into the first cell, unpowering schedules the two beat pull animation of the"
+               " first pushed stone back into the head cell clearing the source cell at once so"
+               " the block moves rather than copies, the extend retract cycle answers identically on the"
                " second pass, a sticky extension into pure air retracts by clearing the head"
                " block alone with zero phantom writes, an obsidian source placed after the push"
                " is not pullable so the retract only clears the head cell and leaves the"
@@ -211,13 +245,23 @@ void MatrixRun::section99_piston_slice2_t1136()
             for (int z = 16; z <= 40; ++z)
                 w.setBlock(x, y0, z, BR::Stone, 0);
         // (1) 伸出态头块位 + 朝向镜像：**非粘性**活塞 (20,41,32) 朝 +Z（facing 3）+ 石 33 + 拉杆 31
-        //     点燃（非粘性承载 = 头块消失面与本腿 (2) 同门——粘性拉回搬回头格归 r2106a）。伸后头块落
-        //     33 且 state = 朝向位（3）+ bit3 恒 0（era settled 头 meta 携粘性位——引擎粘性=本体 id
-        //     属性，头位冗余不取，登记简化行为钉）。
+        //     点燃（非粘性承载 = 头块消失面与本腿 (2) 同门——粘性拉回搬回头格归 r2106a）。占位窗
+        //     实核（t1137：头格 = 164 + storedId=163）→ 两拍 settle：头块落 33 且 state = 朝向位（3）
+        //     + bit3 恒 0（era settled 头 meta 携粘性位——引擎粘性=本体 id 属性，头位冗余不取，
+        //     登记简化行为钉）。
         w.setBlock(20, y0 + 1, 32, BR::Piston, 3);
         w.setBlock(20, y0 + 1, 33, BR::Stone, 0);
         w.setBlock(20, y0 + 1, 31, BR::Lever, 0x01);
         w.tickRedstone();
+        World::PistonAnimEntry probeH;
+        const bool headWin = w.blockAt(20, y0 + 1, 33) == BR::PistonMoving
+            && w.pistonAnimProbeAt(20, y0 + 1, 33, probeH)
+            && probeH.storedId == BR::PistonHead
+            && (probeH.storedState & BR::PistonStateFacingMask) == 3;
+        ok = ok && headWin;
+        if (!headWin) diag += QStringLiteral("[headwin]");
+        w.tickPistonAnimations();
+        w.tickPistonAnimations();
         const quint8 headSt = w.stateAt(20, y0 + 1, 33);
         const bool headMir = w.blockAt(20, y0 + 1, 33) == BR::PistonHead
             && (headSt & BR::PistonStateFacingMask) == 3
