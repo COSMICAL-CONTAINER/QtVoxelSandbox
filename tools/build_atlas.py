@@ -461,6 +461,8 @@ TILES = [
                                      #    mesher tileFor 据 state bit[2:0] 朝向选面——era 活塞朝向面同位）
     "default_piston_side",           # 211 piston_side（t1135 活塞侧/底面：石质匣体 + 顶木带 + 螺栓点阵；
                                      #    伸/缩态贴图差=切片二评估，本切片两瓦恒定）
+    "default_piston_extended",       # 212 piston_extended（t1136 活塞伸出态朝向面：推板带杆孔内面——
+                                     #    t1135 简化③收口瓦；伸出态本体朝向面被头块前推遮蔽、破头后可见）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

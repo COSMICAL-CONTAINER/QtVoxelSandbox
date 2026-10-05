@@ -188,13 +188,35 @@ static int tileFor(quint8 block, int face, quint8 state)
     //   承担，与贴图切换解耦（同 t494 熔炉 / t569 红石矿的「贴图 + 光照各自读同一 state bit」模式）。
     if (block == BlockRegistry::RedstoneLamp)
         return (state & BlockRegistry::RedstoneLampStateOnFlag) != 0 ? 153 : 152;
-    // t1135 活塞朝向面（同发射器 / 熔炉 per-face 模式，6 向版）：朝向面（推板，state bit[2:0] 六向）
-    //   = piston_face(210)（frontTile 字段承载）/ 其余五面 = piston_side(211)。era 活塞朝向面贴图
-    //   同位同语义；伸/缩态贴图差 = 切片二评估（本切片 extended 位不换贴图——两瓦恒定）。朝向→面
-    //   映射：引擎朝向 0=-Y 1=+Y 2=-Z 3=+Z 4=-X 5=+X（era ot.b/c/d 同构）→ 本函数面号
+    // t1135/t1136 活塞族朝向面（同发射器 / 熔炉 per-face 模式，6 向版）：本体（Piston ∪ StickyPiston，
+    //   isPiston 族谓词单一权威）朝向面（推板，state bit[2:0] 六向）缩回态 = piston_face(210)
+    //   （frontTile 字段承载）/ **伸出态 = piston_extended(212)**（t1135 简化③收口——伸出态本体朝向
+    //   面被头块前推遮蔽、破头后可见：推板带杆孔内面语义）；其余五面 = piston_side(211)。era 活塞
+    //   朝向面贴图同位同语义；era 1.0 伸/缩本体同贴图（era 头块遮蔽面恒不可见）——引擎 212 瓦 =
+    //   破头可见面增强，登记近似度：era 真值 = 伸缩同瓦（era 无内面瓦），本瓦为「伸/缩态贴图差」
+    //   交付面（t1135 简化③任务面），era 形态差异如实留痕。头块（PistonHead）：朝向面 =
+    //   piston_face(210)（era 头块 face 贴图族同位）+ 其余五面 = piston_side(211)（era 头块专用
+    //   renderType 17 + 台面盒 = 整立方近似登记，见 kDefs piston_head 行注）。朝向→面映射：引擎朝向
+    //   0=-Y 1=+Y 2=-Z 3=+Z 4=-X 5=+X（era ot.b/c/d 同构）→ 本函数面号
     //   0=+X 1=-X 2=+Y 3=-Y 4=+Z 5=-Z（Face 枚举）。tileFor 与推动机/放置端三方同源
     //   pistonFacingDelta 解码（单一权威，禁第二份朝向表）。
-    if (block == BlockRegistry::Piston) {
+    if (BlockRegistry::isPiston(block)) {
+        const BlockRegistry::BlockDef &d = BlockRegistry::def(block);
+        int pdx = 0, pdy = 0, pdz = 0;
+        BlockRegistry::pistonFacingDelta(state, pdx, pdy, pdz);
+        const int facingFace = (pdy < 0) ? int(BlockRegistry::Bottom)
+                             : (pdy > 0) ? int(BlockRegistry::Top)
+                             : (pdx > 0) ? int(BlockRegistry::PosX)
+                             : (pdx < 0) ? int(BlockRegistry::NegX)
+                             : (pdz > 0) ? int(BlockRegistry::PosZ)
+                                         : int(BlockRegistry::NegZ);
+        if (face == facingFace)
+            return (state & BlockRegistry::PistonStateExtendedFlag) != 0 ? 212 : d.frontTile;
+        return d.sideTile;
+    }
+    // t1136 活塞头块朝向面（本体分支同门——头块 state bit[2:0] = 本体朝向镜像；朝向面 = piston_face
+    //   210 / 其余五面 = piston_side 211，era 头块 face 贴图族同位；bit3 恒 0 不读 extended）。
+    if (block == BlockRegistry::PistonHead) {
         const BlockRegistry::BlockDef &d = BlockRegistry::def(block);
         int pdx = 0, pdy = 0, pdz = 0;
         BlockRegistry::pistonFacingDelta(state, pdx, pdy, pdz);

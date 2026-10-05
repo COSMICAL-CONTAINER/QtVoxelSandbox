@@ -924,6 +924,8 @@ qt_add_resources(voxelsandbox "voxel_sounds"
         sounds/splash_break.wav                    # t1101 喷溅瓶碎裂音（build_sounds.py gen_splash_break 程序合成 §9 原创；splashBottleBreak → playSplashBreak）
         sounds/mob_idle_slime.wav                  # t1110 史莱姆 squish 音（build_sounds.py gen_slime_squish 程序合成 §9 原创；mobBounced 着地沿 → playMobBounced，受击/idle 同族别名）
         sounds/mob_idle_villager.wav               # t1110 村民 hrmm 音（build_sounds.py gen_villager_hrmm 程序合成 §9 原创；mobAmbient/mobAttacked 的 MobVillager 别名同族）
+        sounds/piston_extend.wav                   # t1136 活塞伸出音（build_sounds.py gen_piston_extend 程序合成 §9 原创；pistonActuated 伸程沿 → playPistonExtend，era 音量/音高带同口径）
+        sounds/piston_retract.wav                  # t1136 活塞缩回音（build_sounds.py gen_piston_retract 程序合成 §9 原创；pistonActuated 缩程沿 → playPistonRetract）
 )
 
 # miniaudio 是 vendored 第三方单头库（src/Audio/miniaudio.h）。

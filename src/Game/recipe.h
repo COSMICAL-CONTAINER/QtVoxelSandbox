@@ -607,18 +607,17 @@ public:
     //   存档安全铁律）：
     //   **史莱姆球**（SlimeBallId=0x28C）：机制等价 MC 1.0 slimeball（同名通用词，§9 合法）。生存唯一
     //   获取源 = 杀**小史莱姆**掉 0-2（MC 1.0 口径：仅最小档掉落；中/大档死亡分裂不掉物）。用途面实读
-    //   留痕：1.0 工程内**无合成消费行**——粘液球 1.0 下游 = 黏活塞（Beta 1.7 在册，本工程无活塞面）+
-    //   岩浆膏（1.0.0 酿造入版，本工程酿造表无火抗药水对应的岩浆膏行——火抗已由「火抗药水」直酿承载，
-    //   t1101 延长族行在案）→ 两下游面均缺席，本单登记候选池（黏活塞 / 岩浆膏合成行留待相应方块/酿造
-    //   面开题时接），当下=纯掉落收藏 + 创造调色板兜底获取面。可堆叠 64（材料段默认零特判）；无 pack
-    //   映射（越表界 → -1 → 引擎自绘 MaterialIcon，同南瓜种子先例）。
+    //   留痕（t1136 更新）：**粘性活塞合成行在册消费**——era jar 定谳（工件 build/t1136_jar_crafting_
+    //   piston.txt 留痕：sl 构造尾段 "S"/"P" 样板 + S=acy.aL slimeball / P=yy.Z 活塞）→ t1107 候选池
+    //   登记（黏活塞下游缺席）就此清偿；岩浆膏下游仍缺席（酿造表无对应行，登记维持）。可堆叠 64
+    //   （材料段默认零特判）；无 pack 映射（越表界 → -1 → 引擎自绘 MaterialIcon，同南瓜种子先例）。
     //   **生物蛋（史莱姆）**（SpawnEggSlimeId=0x28D）：机制等价 MC 1.0 slime spawn egg（蛋本身为 Beta 1.2
     //   创造面，史莱姆蛋为工程扩展——夜行者/燃烬者/狼/豹猫蛋同门先例：全员生物配蛋）。右键地面 →
     //   mobTypeForSpawnEgg 单一权威表 → MobSlime（**固定中档 kSlimeDefaultSpawnSize=2**——蛋刷确定性，
     //   自然刷怪才掷三档骰）；右键刷怪笼 → 改 slime 笼（t787 交互，spawnerMobTypeForState 白名单在案）。
     //   **生物蛋（村民）**（SpawnEggVillagerId=0x28E）：机制等价 MC 1.0 villager spawn egg（工程扩展同门）。
     //   右键地面 → MobVillager；右键刷怪笼 → 改村民笼（被动闸门组）。图标：MaterialIcon 自绘（§9 原创）。
-    static constexpr int SlimeBallId        = 0x28C; // 史莱姆球：小史莱姆掉 0-2；1.0 无合成消费（候选池登记）
+    static constexpr int SlimeBallId        = 0x28C; // 史莱姆球：小史莱姆掉 0-2；t1136 粘性活塞合成行消费（era jar 定谳工件 build/t1136_jar_crafting_piston.txt；t1107 候选池登记就此清偿）
     static constexpr int SpawnEggSlimeId    = 0x28D; // 生物蛋（史莱姆）：右键 → 生成中档史莱姆（MobSlime）
     static constexpr int SpawnEggVillagerId = 0x28E; // 生物蛋（村民）：右键 → 生成村民（MobVillager）
     // t1112 牛奶桶（材料段 0x28F，村民蛋 0x28E 之上**段尾追加**不插中间 = 存档安全铁律）。机制等价

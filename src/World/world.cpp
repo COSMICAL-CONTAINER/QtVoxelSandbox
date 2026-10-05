@@ -6679,10 +6679,12 @@ bool World::pistonCellWritable(int x, int y, int z) const
     return m_chunks.chunkContentPresent(floorDiv(x, Chunk::kSize), floorDiv(z, Chunk::kSize));
 }
 
-// t1135 活塞接收器动作（声明注释见 world.h）：受电且未伸 → 推动机成功才置 extended 位（era
-//   tryExtend false → 保持缩回同口径）；失电且已伸 → 只清 extended 位（era 非粘性缩回不搬回方块；
-//   粘性拉回 = 切片二）。位写走 m_chunks.setBlock 静默写（同粉 / 轨 / 门模式：标脏 + tickRedstone
-//   末尾 1 次 worldChanged 收口，不逐次 emit）。
+// t1135/t1136 活塞接收器动作（声明注释见 world.h）：受电且未伸 → 推动机成功才置 extended 位（era
+//   tryExtend false → 保持缩回同口径）；失电且已伸 → 缩回机（头格清空 + 粘性拉回）+ 清位（era
+//   非粘性缩回头格当拍清空——era 缩回无动程；粘性拉回瞬时段 = t1136 切片二交付，era 拉回块两拍动画
+//   = 切片三）。位写走 m_chunks.setBlock 静默写（同粉 / 轨 / 门模式：标脏 + tickRedstone
+//   末尾 1 次 worldChanged 收口，不逐次 emit）。伸缩沿信号 = era 两声名同位（era 6 参入口 phase0
+//   伸成功 / phase1 缩各响一声——引擎原创声名，World 只发语义事件不直接出声）。
 bool World::pistonReceiverAt(int x, int y, int z, quint8 b, quint8 st, bool powered)
 {
     const bool ext = (st & BlockRegistry::PistonStateExtendedFlag) != 0;
@@ -6691,12 +6693,110 @@ bool World::pistonReceiverAt(int x, int y, int z, quint8 b, quint8 st, bool powe
         if (tryPistonExtend(x, y, z)) {
             m_chunks.setBlock(x, y, z, b, quint8(st | BlockRegistry::PistonStateExtendedFlag));
             any = true;
+            emit pistonActuated(x, y, z, true); // era phase0 伸程沿（era 伸程成功才响——tryExtend 败 = 零声）
         }
     } else if (!powered && ext) {
+        // 缩回机先行（头格清空 + 粘性拉回），位清随写（era：清 bit8 先行 + phase1——引擎顺序等价，
+        //   位在本体格、缩回机写头格/拉回格，零格重叠零顺序依赖）。**接收器缩回调用行**（结构钉
+        //   面——单行完整语句）。
+        tryPistonRetract(x, y, z, b == BlockRegistry::StickyPiston);
         m_chunks.setBlock(x, y, z, b, quint8(st & quint8(~BlockRegistry::PistonStateExtendedFlag)));
         any = true;
+        emit pistonActuated(x, y, z, false); // era phase1 缩程沿
     }
     return any;
+}
+
+// t1136 粘性缩回机（声明注释见 world.h；era 工件 build/t1134_jar_piston_{base,tile}.txt + t1136
+//   合成/头块定谳工件 build/t1136_jar_crafting_piston.txt / t1136_jar_head_moving.txt）──
+//   era 缩回 = 头格当拍清空（无动程）+ 粘性拉回块走两拍动画（切片三）；本切片拉回瞬时段交付。
+bool World::tryPistonRetract(int x, int y, int z, bool sticky)
+{
+    const quint8 pst = m_chunks.stateAt(x, y, z);
+    int dx = 0, dy = 0, dz = 0;
+    BlockRegistry::pistonFacingDelta(pst, dx, dy, dz);
+    const int hx = x + dx, hy = y + dy, hz = z + dz;   // 头格 = 本体+朝向
+    const int px = x + 2 * dx, py = y + 2 * dy, pz = z + 2 * dz; // 拉回源格 = 本体+2Δ（被推首块位）
+    // ① 域门（不可半做——头格不可写 = 全单放弃零写）：era 无此域问题（y 域守卫在伸程扫描相，
+    //    头格必在域内；引擎两模式显式界门同 t1135 界侧半边纪律）。
+    if (!pistonCellWritable(hx, hy, hz))
+        return false;
+    // ② 粘性拉回源读（era phase1 粘性分支前格 id/meta 读出同构）。可拉集 = era canPush destroyMode=
+    //    false 镜像：空气 / 流体（迁移位1）/ 黑曜石 / 侧存储族 / 硬度 -1 / 已伸活塞 = 不可拉。
+    quint8 pulledId = BlockRegistry::Air;
+    quint8 pulledState = 0;
+    bool pullOk = false;
+    if (sticky) {
+        const quint8 pid = m_chunks.blockAt(px, py, pz);
+        bool pullable = pid != BlockRegistry::Air
+            && pid != BlockRegistry::Water && pid != BlockRegistry::Lava
+            && pid != BlockRegistry::Obsidian
+            && !BlockRegistry::isStoreBlock(pid)
+            && BlockRegistry::hardness(pid) >= 0.0f
+            && !(BlockRegistry::isPiston(pid)
+                 && (m_chunks.stateAt(px, py, pz) & BlockRegistry::PistonStateExtendedFlag) != 0);
+        if (pullable && pistonCellWritable(px, py, pz))
+            pullOk = true;
+        if (pullOk) { pulledId = pid; pulledState = m_chunks.stateAt(px, py, pz); }
+    }
+    // ③ 执行相（t1135 推动机批量收口同门——全部静默直写 + 逐格 O(1) note 钩子 + 单次刷新收口）。
+    struct PistonChange { int x, y, z; quint8 oldId, newId, newState; };
+    std::vector<PistonChange> changes;
+    const auto push = [&](int wx, int wy, int wz, quint8 oldId, quint8 newId, quint8 newState) {
+        m_chunks.setBlock(wx, wy, wz, newId, newState);
+        changes.push_back({wx, wy, wz, oldId, newId, newState});
+    };
+    if (pullOk) {
+        // 粘性拉回搬回写对（era 拉回分支：头格置拉回块 + 前格清空——头格承接被拉块 (id,state)
+        //   原样，源格腾空）。
+        push(hx, hy, hz, m_chunks.blockAt(hx, hy, hz), pulledId, pulledState);
+        // 粘性拉回源格腾空行（**NEG-1 摘行面**——单行完整语句：摘除编译绿 [pulledId/state 仍被
+        //   上行头格收口读用，零未用告警]；摘除面 = 拉回退化「搬回」为「复制」——源格块不腾空 =
+        //   方块凭空复制，era 搬回语义破；恰红 = {拉回柱源格腾空子断言 + 结构钉族源格腾空行钉}）。
+        push(px, py, pz, pulledId, BlockRegistry::Air, 0);
+    } else {
+        // 头格清空（era phase1 非粘性分支 world.g(head,0) 同构——**无条件清**：era 不验头格现内容，
+        //   玩家置换头格块时缩回照清 = era 真值，头格内容随缩回丢失 = era 同口径）。
+        push(hx, hy, hz, m_chunks.blockAt(hx, hy, hz), BlockRegistry::Air, 0);
+    }
+    // ④ 批量 note 钩子 + 流体活动盒（五族索引全族，t1135 同口径——缩回腾空格邻接流体平衡被扰保守置位）。
+    for (const PistonChange &c : changes) {
+        noteIceWrite(c.x, c.y, c.z, c.oldId, c.newId);
+        noteFireWrite(c.x, c.y, c.z, c.oldId, c.newId);
+        noteFluidWrite(c.x, c.y, c.z, c.oldId, c.newId);
+        noteGrowthWrite(c.x, c.y, c.z, c.oldId, c.newId);
+        notePowerWrite(c.x, c.y, c.z, c.oldId, c.newId);
+        fluidActExpand(c.x, c.y, c.z);
+    }
+    m_waterDirty = true;
+    m_lavaDirty = true;
+    // 失撑面：缩回腾空格 = 头格（非粘性/不可拉）或拉回源格（粘性拉回）——附着物失撑掉落 + 沙柱坍落
+    //   复检（t1135 推动机腾空格单入口同门；被搬回块仍持实心，无需复检）。
+    const PistonChange &vacated = changes.back();
+    recheckAttachmentsAfterClear(vacated.x, vacated.y, vacated.z, vacated.oldId);
+    checkGravityBlockOnEdit(vacated.x, vacated.y, vacated.z, vacated.oldId, BlockRegistry::Air);
+    // 光照批量收口：活塞 ∪ 头格 ∪ 拉回格 外接盒一次 refloodBox（t1135 同款单次刷新；sparse x/z 不钳、
+    //   y 钳有限高，t1090 盒域两模式分流同门）。
+    {
+        int minX = x, maxX = x, minY = y, maxY = y, minZ = z, maxZ = z;
+        for (const PistonChange &c : changes) {
+            minX = std::min(minX, c.x); maxX = std::max(maxX, c.x);
+            minY = std::min(minY, c.y); maxY = std::max(maxY, c.y);
+            minZ = std::min(minZ, c.z); maxZ = std::max(maxZ, c.z);
+        }
+        minX = std::min(minX, x); minY = std::min(minY, y); minZ = std::min(minZ, z);
+        maxX = std::max(maxX, x); maxY = std::max(maxY, y); maxZ = std::max(maxZ, z);
+        int bx0 = minX - 1, bx1 = maxX + 1, bz0 = minZ - 1, bz1 = maxZ + 1;
+        if (m_chunks.mode() == WorldMode::Fixed) {
+            bx0 = std::max(0, bx0); bz0 = std::max(0, bz0);
+            bx1 = std::min(m_width - 1, bx1); bz1 = std::min(m_depth - 1, bz1);
+        }
+        const int by0 = std::max(0, minY - 1);
+        const int by1 = std::min(m_height - 1, maxY + 1);
+        refloodBox(bx0, by0, bz0, bx1, by1, bz1, /*doSky=*/true);
+    }
+    qInfo("vo.edit: piston retracted = %d cells (%d,%d,%d)", int(changes.size()), x, y, z);
+    return true;
 }
 
 bool World::tryPistonExtend(int x, int y, int z)
@@ -6779,14 +6879,19 @@ bool World::tryPistonExtend(int x, int y, int z)
         const quint8 oldId = (i + 1 < int(line.size())) ? line[size_t(i) + 1].id : termOldId;
         push(dst.x, dst.y, dst.z, oldId, line[size_t(i)].id, line[size_t(i)].state);
     }
+    // ── 头块写入位（era 头块承载位同构——t1136 切片二交付：era 伸程两拍动画 settle 后实体化头块 34
+    //    于本体正前；本切片瞬时伸 → 当拍写入头块 PistonHead(163)，state = 朝向位（era settled 头
+    //    meta = dir 同构；era settled 头 meta 另携粘性构造位 bit8——引擎粘性 = 本体 id 属性，头位
+    //    冗余不取，登记简化）。**本切片伸程零 Air 过渡**：线块前移 + 头块落首格（原首格块随线搬走）
+    //    / 界格流体毁格落头块 / 界格空气落头块——era 同面（伸程无清格，头块承载支撑面）。
     if (line.empty()) {
-        // 零实心线：界即活塞贴脸格。界 = 流体 → 毁格腾空（era 执行相毁分支——头块位清出）；界 =
-        //   空气 → 零格写（era 伸入纯空气只置伸出态，本切片 extended 位由调用方写）。
-        if (termIsFluid)
-            push(cx, cy, cz, termOldId, BlockRegistry::Air, 0);
+        // 零实心线：界即活塞贴脸格。界 = 流体 → 毁格落头块（era 执行相毁分支 + 头块置入）；界 =
+        //   空气 → 头块置入（era 伸入纯空气 = 头块前推占位——t1135 曾 Air 腾空，切片二头块收口）。
+        push(cx, cy, cz, termOldId, BlockRegistry::PistonHead, quint8(pst & BlockRegistry::PistonStateFacingMask));
     } else {
-        // 首格腾空（era 头块写入位——本切片无头块 → Air 腾空，头块 = 切片二，呈现简化登记）。
-        push(line.front().x, line.front().y, line.front().z, line.front().id, BlockRegistry::Air, 0);
+        // 首格落头块（era 头块写入位——原首格块已随线搬入下一格，头块承其位）。
+        push(line.front().x, line.front().y, line.front().z, line.front().id,
+             BlockRegistry::PistonHead, quint8(pst & BlockRegistry::PistonStateFacingMask));
     }
 
     // 批量 note 钩子 + 流体活动盒（同 destroySphereSilent 逐格 O(1) 口径；爆炸先例 五族索引全族）。
@@ -6798,15 +6903,10 @@ bool World::tryPistonExtend(int x, int y, int z)
         notePowerWrite(c.x, c.y, c.z, c.oldId, c.newId); // 被搬红石族（粉/源/轨/火把）电域重扫挂点
         fluidActExpand(c.x, c.y, c.z);
     }
-    m_waterDirty = true;  // 腾空格 / 毁流体格邻接流体平衡被扰（t380 同门，保守置位——活塞低频）
+    m_waterDirty = true;  // 头块置入格 / 毁流体格邻接流体平衡被扰（t380 同门，保守置位——活塞低频）
     m_lavaDirty = true;
-    // 失撑面：仅腾空格（首格 / 零线毁流体格）——附着物失撑掉落 + 沙柱坍落复检（t799/review24 #3
-    //   单一入口同门；被搬格均仍持实心/原样方块，无需复检）。
-    if (!changes.empty()) {
-        const PistonChange &vacated = changes.back(); // 回写序末条 = 首格腾空 / 零线毁流体
-        recheckAttachmentsAfterClear(vacated.x, vacated.y, vacated.z, vacated.oldId);
-        checkGravityBlockOnEdit(vacated.x, vacated.y, vacated.z, vacated.oldId, BlockRegistry::Air);
-    }
+    // 失撑面：伸程零腾空格（头块承载支撑面——头块落位后首格仍持实心，附着/重力复检无对象；era 同面：
+    //   伸程头块置入不清格）。缩回面（腾空格附着/沙柱复检）归 tryPistonRetract 同门收口。
     // 光照批量收口：活塞 ∪ 线 ∪ 界 外接盒一次 refloodBox（搬移改遮光列，doSky=true 两通道——
     //   TNT 先例同款单次刷新；sparse x/z 不钳、y 钳有限高，t1090 盒域两模式分流同门）。
     if (!changes.empty()) {

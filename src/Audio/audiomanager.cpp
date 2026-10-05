@@ -220,6 +220,11 @@ struct AudioManager::Data
     //   同族复用单 clip（敌对复用 idle clip 先例同门，单一合成族，登记简化）。
     Clip mobIdleSlimeClip{":/sounds/mob_idle_slime.wav"};
     Clip mobIdleVillagerClip{":/sounds/mob_idle_villager.wav"};
+    // t1136 活塞伸缩两单件 clip（重机关伸缩声：低频缸体推动 + 金属衬垫摩擦；短 SFX 默认 2s maxFrames
+    //   远大于其长度、安全）。触发源：World::pistonActuated（伸/缩沿）→ Main.qml 路由。随机音高带 =
+    //   播放时 set_pitch 掷带（era 音高带同口径，NO_PITCH 优化未开故直接生效，同 burp 面）。
+    Clip pistonExtendClip{":/sounds/piston_extend.wav"};
+    Clip pistonRetractClip{":/sounds/piston_retract.wav"};
 
     static constexpr ma_uint32 kChannels = 1;     // mono（合成时即 mono，省一半带宽）
     // t328：合成升到 44100 Hz（更多高频细节 / 更短瞬态分辨 → 音色清晰，详见 build_sounds.py）。
@@ -420,6 +425,9 @@ AudioManager::AudioManager(QObject *parent)
     // t1110 mob 音效两族单件（短 SFX 默认 maxFrames 安全）。
     d->loadClip(d->mobIdleSlimeClip);
     d->loadClip(d->mobIdleVillagerClip);
+    // t1136 活塞伸缩两单件（qrc 载入；engine/clip 失败静默降级 §2-E 不崩）。
+    d->loadClip(d->pistonExtendClip);
+    d->loadClip(d->pistonRetractClip);
     // t1028 音符盒 25 档音高 clip 池（0.85s 短 SFX，默认 2s maxFrames 安全；路径 makeNotePath 长寿命化）。
     for (int n = 0; n < Data::kNotePitchCount; ++n) {
         d->noteClips[size_t(n)].qrcPath = d->makeNotePath(n);
@@ -1022,6 +1030,33 @@ void AudioManager::playBurp()
 void AudioManager::playSplashBreak()
 {
     d->replay(d->splashBreakClip, m_volume * 0.9f);
+}
+
+// ── t1136 活塞伸缩两声（契约面见 audiomanager.h playPistonExtend / playPistonRetract 声明处注释）──
+// 音量带 0.5 倍 + 随机音高带掷取（era 同带口径：伸 0.60+rand×0.25 / 缩 0.60+rand×0.15）；seek 重发
+// 截断不堆叠（单件模式）。
+void AudioManager::playPistonExtend()
+{
+    const float pitch = float(QRandomGenerator::global()->generateDouble()) * 0.25f + 0.60f;
+    auto &c = d->pistonExtendClip;
+    if (!d->engineOk || !c.ok) return;
+    ma_sound_stop(&c.sound);
+    ma_sound_seek_to_pcm_frame(&c.sound, 0);
+    ma_sound_set_pitch(&c.sound, pitch);
+    ma_sound_set_volume(&c.sound, m_volume * 0.5f);
+    ma_sound_start(&c.sound);
+}
+
+void AudioManager::playPistonRetract()
+{
+    const float pitch = float(QRandomGenerator::global()->generateDouble()) * 0.15f + 0.60f;
+    auto &c = d->pistonRetractClip;
+    if (!d->engineOk || !c.ok) return;
+    ma_sound_stop(&c.sound);
+    ma_sound_seek_to_pcm_frame(&c.sound, 0);
+    ma_sound_set_pitch(&c.sound, pitch);
+    ma_sound_set_volume(&c.sound, m_volume * 0.5f);
+    ma_sound_start(&c.sound);
 }
 
 void AudioManager::setVolume(float v)

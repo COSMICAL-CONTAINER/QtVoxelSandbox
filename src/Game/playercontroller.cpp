@@ -6093,9 +6093,10 @@ void PlayerController::placeBlock()
         //   信号从玩家侧（输入端）向前续传）。低 2 位 chestFrontFace 同源编码（0=+X 1=-X 2=+Z 3=-Z）；
         //   延迟档默认 1（bit[3:2]=0）；输出位 / 挂起计数恒 0（World 电力层首算写入）。
         placeState = quint8(horizontalFacing() & 3);
-    } else if (m_selectedBlock == BlockRegistry::Piston) {
-        // t1135 活塞朝向（6 向 state bit[2:0]，era meta 同构 0=-Y 1=+Y 2=-Z 3=+Z 4=-X 5=+X——
-        //   era ot.b/c/d 方向表同序，abr.f 逐向探针定谳）：推动方向 = 玩家所视方向（推离玩家，MC
+    } else if (BlockRegistry::isPiston(m_selectedBlock)) {
+        // t1135/t1136 活塞族朝向（6 向 state bit[2:0]，era meta 同构 0=-Y 1=+Y 2=-Z 3=+Z 4=-X 5=+X——
+        //   era ot.b/c/d 方向表同序，abr.f 逐向探针定谳；t1136 起族谓词承载粘性活塞同分支——两件
+        //   state 编码完全同构）：推动方向 = 玩家所视方向（推离玩家，MC
         //   口径——与中继器「输出沿玩家面向」同侧；区别箱子/熔炉的「面朝玩家」反向编码）；俯仰
         //   ≥45° 上推 / ≤-45° 下推（v1 阈值简化——era 放置朝向规则未在本单 jar 反汇编定谳，登记
         //   待考；水平段 horizontalFacing 与中继器/门/楼梯同源）。extended 位恒 0 出生（World 电力

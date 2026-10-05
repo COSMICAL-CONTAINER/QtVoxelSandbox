@@ -842,11 +842,29 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     // ── t1135 活塞（Piston=162；属性注释见 blockregistry.h Id 枚举 Piston 行）：红石驱动推动机关方块
     //   （机制语义在 World::tickRedstone 活塞接收器分支 + tryPistonExtend 推动机）。整立方 opaque
     //   （solid=true / ShapeFull，同音符盒 / 漏斗机关匣家族体量）；hardness=0.5（era abr 构造 c(0.5f)
-    //   字节码定谳）/ NoTool（空手可采且掉落）；dropId=自身（破坏掉活塞物品）。贴图 per-state 朝向：
-    //   朝向面=piston_face(210 木质推板面) / 其余五面=piston_side(211 石质匣体)（mesher tileFor 据
-    //   state bit[2:0] 朝向选面——era 活塞顶·侧·底三贴图的「朝向面」简化登记；伸/缩态贴图差=切片二
-    //   评估）。音色 GroupStone（石质机关匣体）。进创造调色板（红石 tab——机关件组）。
+    //   字节码定谳）/ NoTool（空手可采且掉落）；dropId=自身（破坏掉活塞物品）。贴图 per-state 朝向+伸
+    //   缩态：朝向面缩回态=piston_face(210 木质推板面) / 伸出态=piston_extended(212 杆孔内面，t1135
+    //   简化③收口) / 其余五面=piston_side(211 石质匣体)（mesher tileFor 据 state bit[2:0] 朝向 + bit3
+    //   伸出位选面——era 活塞顶·侧·底三贴图的「朝向面」简化登记）。音色 GroupStone（石质机关匣体）。
+    //   进创造调色板（红石 tab——机关件组）；配方 = t1136 两行（recipe.cpp era 定谳工件在案）。
     /* piston               */ {int(BlockRegistry::Piston),             211,211,211,210, true,  BlockRegistry::ShapeFull,     0.5f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::Piston),            1, 64, "piston",         "活塞"},
+    // ── t1136 活塞切片二三员（表尾追加；属性注释见 blockregistry.h Id 枚举三行行注）。
+    //   头块：整立方 opaque（solid=true / ShapeFull——era acu 非整立方碰撞 4..12/16 台面盒 + renderType 17
+    //   专用渲染 = 引擎无既有 shape 族（t1134 评估最大成本驱动）→ **整立方近似登记**，era 形态近似度
+    //   留痕：碰撞/剔面按满立方承载，era 台面盒 / 专用渲染=切片候选池）；hardness=0.5（era acu ctor
+    //   c(0.5f) 定谳）；NoTool 空手可采但 **dropId=0 零掉落**（era a(Random)=0 头块破坏零掉落）。
+    //   贴图：朝向面=piston_face(210)（era 头块 face 贴图族同位）/ 其余五面=piston_side(211)。音色
+    //   GroupStone（era 材料 p.D 同本体）。不进创造调色板（era 无物品形态获取面——头块非玩家可获件）。
+    /* piston_head          */ {int(BlockRegistry::PistonHead),         211,211,211,210, true,  BlockRegistry::ShapeFull,     0.5f, int(BlockRegistry::NoTool),  0, false, 0,                                     1, 64, "piston_head",    "活塞头块"},
+    //   移动占位：整立方 opaque（solid=true / ShapeFull——era qz 碰撞 = 存储块 AABB 随动画走，无侧表
+    //   承载 → 满立方近似登记；era 两拍动画中途块——本切片零放置（瞬时简化登记），行仅承注册面 /
+    //   拒推族 / kMc 对齐）；hardness=-1 不可破（era qz ctor c(-1.0f)）；dropId=0 零掉落；贴图六面=
+    //   piston_side(211)（era 渲染存储块贴图——无侧表承载，登记简化）。音色 GroupStone。不进创造调色板。
+    /* piston_moving        */ {int(BlockRegistry::PistonMoving),       211,211,211,211, true,  BlockRegistry::ShapeFull,    -1.0f, int(BlockRegistry::NoTool),  0, false, 0,                                     1, 64, "piston_moving",  "活塞移动占位"},
+    //   粘性活塞：与本体全字段同构（solid / ShapeFull / hardness 0.5 / NoTool / dropId=自身 / 贴图
+    //   210/211 家族 / GroupStone / 红石 tab 调色板）；差异仅机制面：失电缩回时把正前第二格（被推首
+    //   块）拉回本格（era abr 粘性构造布尔 true——引擎独立 id 承载，kMc 29）。
+    /* sticky_piston        */ {int(BlockRegistry::StickyPiston),       211,211,211,210, true,  BlockRegistry::ShapeFull,     0.5f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::StickyPiston),      1, 64, "sticky_piston",  "粘性活塞"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -1096,11 +1114,22 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     /* standing_sign           */ 63,
     /* wall_sign               */ 68,
     // t1135 活塞 → MC 1.0 **存在** id 33（piston base，Beta 1.7 入版 = 1.0 基线内；受电伸推 / 失电缩 /
-    //   推动上限 12 / 拒推集合机制等价实现——era 33 活塞本体；34 头块 / 36 移动占位 = 切片二段位，
-    //   29 粘性 = 切片二，kMc 行届时另补。**id 选型**：era 33 与引擎 BedOrange=33 冲突 → 引擎段尾
-    //   162 承载（enum 尾部追加契约，Piston 枚举行注 + static_assert 钉），本行仅迁移文档对齐）。
+    //   推动上限 12 / 拒推集合机制等价实现——era 33 活塞本体；**t1136 切片二收口**：29 粘性 / 34 头块 /
+    //   36 移动占位三行届满，家族四行全映射）。**id 选型**：era 29/33/34/36 与引擎 BedOrange=33 /
+    //   BedYellow=34 冲突 → 引擎段尾 162..165 承载（enum 尾部追加契约，枚举行注 + static_assert 钉），
+    //   本表行仅迁移文档对齐。
     //   本行追加后全表行数与 Count 163 一致（t691 教训：一行一条目 + 行内注释，防聚合初始化零填充回归）。
     /* piston                  */ 33,
+    // t1136 活塞切片二三行（表尾追加，**表按引擎 id 索引序** 163/164/165；机制等价 MC 1.0 对齐口径）：
+    //   头块 → **34**（era acu——伸出态前推的 6 面块；硬度 0.5 / 破坏零掉落 era 定谳）/ 移动占位 →
+    //   **36**（era qz extends ba 容器派生族成员——拒推族引擎等价面 = isStoreBlock 族；硬度 -1 不可破）/
+    //   粘性活塞 → **29**（era 粘性注册名——era 资产词形不落源，字节定谳见工件 t1136_jar_crafting_
+    //   piston.txt 交叉段；Beta 1.7 入版 = 1.0 基线内真实 id；构造布尔粘性 = era abr
+    //   同类）。本行追加后全表行数与 Count 166 一致（t691 教训：一行一条目 + 行内注释，防聚合初始化
+    //   零填充回归）。
+    /* piston_head             */ 34,
+    /* piston_moving           */ 36,
+    /* sticky_piston           */ 29,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -1208,6 +1237,9 @@ bool BlockRegistry::isStoreBlock(quint8 blockId)
     case StandingSign: case WallSign: // 牌子族（SignStore；era ba 派生族成员）
     case Jukebox:             // 唱片机（era ba 派生族成员）
     case Cauldron:            // 炼药锅（era ba 派生族成员）
+    case PistonMoving:        // t1136 移动占位（era qz extends ba 容器派生族成员——拒推集合成员
+                              //   自动生效面；引擎容器等价面 = 携方块附挂数据 era TilePiston storedId/
+                              //   state 对应面，推之丢载荷故拒；本切片零放置，谓词仅作拒推/结构面）
         return true;
     default:
         return false;
@@ -3245,6 +3277,8 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case Repeater: // t1095 红石中继器 → 石质音色（石质底板，同压力板石族 / 机关件；机制等价 MC repeater stone SoundType）
     case Cauldron: // t1105 炼药锅 → 石质音色（铸铁锅体金属质，同 iron bars 族；机制等价 MC cauldron stone SoundType）
     case Piston: // t1135 活塞 → 石质音色（石质机关匣体，同漏斗/发射器机关盒家族；era abr 构造 step sound wu.f 石质族同口径）
+    case PistonHead: case PistonMoving: // t1136 头块/移动占位 → 石质音色（era acu/qz 材料 p.D 同本体石质族）
+    case StickyPiston: // t1136 粘性活塞 → 石质音色（era abr 同类构造，音色同本体）
         return GroupStone;
     case Ice: // t395 冰 → 石质音色（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）
     case Glass: // t405 玻璃 → 石质音色（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）

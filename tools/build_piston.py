@@ -14,6 +14,7 @@ t1135 活塞（Piston；机制等价 MC 1.0 piston——红石驱动推动机关
 输出（覆盖写入 textures/）：
   default_piston_face.png  （tile 210，朝向面）
   default_piston_side.png  （tile 211，侧/底面）
+  default_piston_extended.png（tile 212，伸出态朝向面：推板带杆孔内面）
 
 依赖：仅 PIL/numpy，无外部贴图。与 build_note_block.py 系同风格（程序生成原创像素图）。
 """
@@ -92,6 +93,38 @@ def main():
     out_face = os.path.join(SRC, "default_piston_face.png")
     Image.fromarray(face.astype(np.uint8), "RGBA").save(out_face)
     print(f"wrote {out_face} ({TS}x{TS})")
+
+    # ── piston_extended（212，t1136）：伸出态朝向面——推板带杆孔内面（t1135 简化③收口瓦）──────
+    #   视觉意图：与缩回态推板（210）同板面基，但中央 4×4 深孔（活塞杆穿过位）+ 孔缘金属衬圈 +
+    #   孔内近黑（内腔纵深）——「推板已随头块前推、本体此处是杆孔内面」一眼语义。era 1.0 本体
+    #   伸/缩同贴图（era 头块遮蔽此面）——引擎本瓦为「破头后可见面」增强交付，era 形态近似度
+    #   如实登记（kDefs Piston 行注 / meshbuilder tileFor 注同源）。
+    ext = np.zeros((TS, TS, 4), dtype=np.float64)
+    for y in range(TS):
+        for x in range(TS):
+            px(ext, x, y, WOOD)
+    for g in (0, 5, 10, 15):               # 板缝（同 210 板拼语义）
+        for i in range(TS):
+            px(ext, g, i, WOOD_DK)
+            px(ext, i, g, WOOD_DK)
+    for i in range(TS):                    # 受光上/左棱线
+        px(ext, i, 0, WOOD_HI)
+        px(ext, 0, i, WOOD_HI)
+    for y in range(5, 11):                 # 中央 6×6 金属衬圈（环绕杆孔）
+        for x in range(5, 11):
+            px(ext, x, y, STONE_HI)
+    for y in range(6, 10):                 # 杆孔 4×4 近黑内腔
+        for x in range(6, 10):
+            px(ext, x, y, BOLT)
+    for i in range(5, 11):                 # 衬圈内缘暗线（立体感）
+        px(ext, i, 5, STONE_DK)
+        px(ext, 5, i, STONE_DK)
+    for cx, cy in ((1, 1), (14, 1), (1, 14), (14, 14)):  # 四角螺栓暗点（同 210）
+        px(ext, cx, cy, BOLT)
+    ext[:, :, 3] = 255
+    out_ext = os.path.join(SRC, "default_piston_extended.png")
+    Image.fromarray(ext.astype(np.uint8), "RGBA").save(out_ext)
+    print(f"wrote {out_ext} ({TS}x{TS})")
 
 
 if __name__ == "__main__":

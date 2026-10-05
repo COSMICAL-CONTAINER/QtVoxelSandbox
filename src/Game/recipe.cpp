@@ -1484,6 +1484,32 @@ constexpr RecipeRegistry::Recipe kRecipes[] = {
         int(BlockRegistry::Planks), int(BlockRegistry::Planks), int(BlockRegistry::Planks),
         0,                           kStickId,                   0 },
       int(BlockRegistry::StandingSign), 1, 1, "standing_sign" },
+    // ── t1136 活塞切片二两行（表尾追加不插中间；era 定谳工件 build/t1136_jar_crafting_piston.txt
+    //   留痕——era sl=CraftingManager 构造尾段逐字节誊录：活塞行 offset 3450 / 粘性行 offset 3546）──
+    //   ① 活塞：3 木板（顶行）+ 中行「圆石+铁锭+圆石」+ 底行「圆石+红石粉+圆石」→ 1（有序 3×3 仅工作
+    //   台；era 样板 "TTT"/"#X#"/"#R#" + T=yy.x[wood id5] / #=yy.w[cobble id4, era 注册名 stonebrick
+    //   旧名] / X=acy.n[ingotIron] / R=acy.aB[redstone]，产量 1 字节定谳）。经板材族等价回退云杉板同
+    //   合（板材族既定通配口径）。多重集 {Planks:3, Cobble:4, Iron:1, Redstone:1} 全表唯一（t802 全表
+    //   自匹配回归自动覆盖——环+行族异料逐格比对不冲突）。
+    //     [0]=板 [1]=板 [2]=板
+    //     [3]=圆石 [4]=铁锭 [5]=圆石
+    //     [6]=圆石 [7]=红石 [8]=圆石
+    { int(RecipeRegistry::Table3x3), false,
+      { int(BlockRegistry::Planks),     int(BlockRegistry::Planks), int(BlockRegistry::Planks),
+        int(BlockRegistry::Cobble),     RecipeRegistry::IronIngotId, int(BlockRegistry::Cobble),
+        int(BlockRegistry::Cobble),     RecipeRegistry::RedstoneId,  int(BlockRegistry::Cobble) },
+      int(BlockRegistry::Piston), 1, 1, "piston" },
+    //   ② 粘性活塞：1 粘液球（上）+ 1 活塞（下）1×2 竖列 → 1（有序 2×2 可容、工作台亦可——era 样板
+    //   "S"/"P" 1 宽 2 高 + S=acy.aL[slimeball item] / P=yy.Z[活塞 33]，产量 1 字节定谳）。引擎
+    //   shaped 匹配 = 最小包围盒 1×2 逐格（slimeball 上 / piston 下）——任意列竖放全命中，与木棒行
+    //   （1×2 板-板）包围盒同形异料零遮蔽。多重集 {SlimeBall:1, Piston:1} 全表唯一。
+    //     [0]=粘液球 [1]=空 [2]=空
+    //     [3]=活塞   [4]=空 [5]=空
+    { int(RecipeRegistry::Inventory2x2), false,
+      { RecipeRegistry::SlimeBallId, 0, 0,
+        int(BlockRegistry::Piston),   0, 0,
+        0,                            0, 0 },
+      int(BlockRegistry::StickyPiston), 1, 1, "sticky_piston" },
 };
 
 // 编译期断言：木棒 id 与 Hotbar 材料段基址（kMaterialIdBase=0x200）一致；改一处须同步另一处。
@@ -1595,6 +1621,13 @@ static_assert(int(BlockRegistry::Cake)            == 159, "Cake 方块 id 须为
 //   撤销，沿革见配方表 t1113 注重写段）。
 static_assert(int(BlockRegistry::StandingSign)    == 160, "StandingSign 方块 id 须为 160（牌子放置链 canonical id 锚；段尾追加，t1113）");
 static_assert(int(BlockRegistry::WallSign)        == 161, "WallSign 方块 id 须为 161（挂墙牌放置形态分流锚；段尾追加，t1113）");
+// t1136 活塞切片二合成行产物锚（段尾追加不插中间；活塞行/粘性行产物 + era 29/34/36 段位——合成行
+//   与注册行两端同源，重排忘了同步 → 编译失败）。
+static_assert(int(BlockRegistry::Piston)        == 162, "Piston 方块 id 须为 162（活塞合成行产物锚；段尾追加，t1135）");
+static_assert(int(BlockRegistry::PistonHead)    == 163, "PistonHead 方块 id 须为 163（头块段尾追加锚——非产物，id 段位钉；t1136）");
+static_assert(int(BlockRegistry::PistonMoving)  == 164, "PistonMoving 方块 id 须为 164（移动占位段尾追加锚——非产物，id 段位钉；t1136）");
+static_assert(int(BlockRegistry::StickyPiston)  == 165, "StickyPiston 方块 id 须为 165（粘性活塞合成行产物锚；段尾追加，t1136）");
+static_assert(RecipeRegistry::SlimeBallId       == 0x28C, "SlimeBallId 须为材料段 0x28C（粘性活塞合成行原料锚；t1107 段位，t1136 消费）");
 static_assert(RecipeRegistry::MilkBucketId        == 0x28F, "MilkBucketId 物品 id 须为 0x28F（蛋糕合成行原料锚；材料段尾追加，t1112）");
 // 编译期互钉：金锭 0x21F ↔ 金粒 0x288 双向合成（t1103 双向行）+ 瓜块方块段 Melon=149 行在。
 static_assert(RecipeRegistry::GoldIngotId == 0x21F, "GoldIngotId 须为 0x21F（金粒双向行两端的锚）");

@@ -1405,15 +1405,39 @@ public:
         //   / BedYellow=34）→ 按引擎「新方块永远尾部追加」契约取段尾 162（id 是存档格式的一部分，
         //   插中间破坏既有存档世界数据）；kMc 行取 33（迁移文档对齐）。下方 static_assert 钉死。
         Piston           = 162, // 活塞：红石驱动推动机关（受电伸推 ≤12 实心 + 线端流体毁格；失电缩；kMc 33）
-        Count           = 163, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
-                                 //   t1135 lawful 前移：162→163（Piston=162 尾部追加；t1113 曾 160→162、
-                                 //   t1112 曾 157→160、t1111 曾 154→157、t1105 曾 151→154、t1103 曾 149→151、
-                                 //   t1097 曾 148→149——追加不插中间存档契约，钉值随追加前移）。
+        // ── t1136 活塞切片二三员（段尾追加；属性注释见下方三行行注）：
+        //   头块 PistonHead=163（伸出态前推的 6 面块——kMc 34）；移动占位 PistonMoving=164（era 两拍
+        //   动画承载块——kMc 36，本切片零放置=登记简化，切片三起两拍动画写入）；粘性活塞 StickyPiston=165
+        //   （kMc 29，构造布尔粘性 = 引擎独立 id 承载）。**段位序 = t1135 交付报告预留序**（头块 163 /
+        //   移动占位 164 段位预留评估在案）+ 粘性紧随段尾。era 29/34/36 与引擎既存床段冲突 → 尾部追加
+        //   纪律照旧（见 Piston=162 行注 id 选型段）。
+        PistonHead       = 163, // 活塞头块：伸出态置于本体正前（era acu id 34；6 面块 face 贴图族；
+                                //   硬度 0.5 era acu 构造 c(0.5f) 定谳工件 t1136_jar_head_moving.txt；
+                                //   头块本体破坏零掉落 era a(Random)=0；缩回即清（era 缩回无动程）；
+                                //   state bit[2:0] = 朝向（=本体朝向镜像，PistonStateFacingMask 同码），
+                                //   bit3 恒 0（era settled 头 meta 携粘性构造位——引擎粘性=本体 id 属性，
+                                //   头位冗余不取，登记简化））
+        PistonMoving     = 164, // 活塞移动占位：era qz id 36（ba 派生族成员 → 拒推族第 12 员=isStoreBlock
+                                //   引擎容器等价面）；硬度 -1 不可破（era ctor c(-1.0f)）；零掉落。era 两拍
+                                //   动画中途块（settle 即实体化）——本切片零放置（瞬时简化，登记面见
+                                //   tryPistonExtend 头注），切片三起两拍动画写入
+        StickyPiston     = 165, // 粘性活塞：era 29（abr 构造布尔 true 同类；kMc 29）——失电缩时把正前
+                                //   第二格（被推首块）拉回本格（era 拉回分支定谳，拉回瞬时段=本切片交付，
+                                //   era 拉回块两拍动画=切片三）。state 编码与 Piston 完全同构
+        Count           = 166, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+                                 //   t1136 lawful 前移：163→166（PistonHead=163 / PistonMoving=164 /
+                                 //   StickyPiston=165 段尾追加；t1135 曾 162→163、t1113 曾 160→162、
+                                 //   t1112 曾 157→160、t1111 曾 154→157、t1105 曾 151→154、t1103 曾
+                                 //   149→151、t1097 曾 148→149——追加不插中间存档契约，钉值随追加前移）。
     };
 
-    // t1135 活塞 id 选型钉（enum 段尾追加契约：162 = 段尾位；era 33/34/36 与引擎既存床段冲突——见
-    //   Piston 枚举行注）。改段位 / 插中间即编译失败（存档格式契约编译期看门）。
+    // t1135/t1136 活塞族 id 选型钉（enum 段尾追加契约：162/163/164/165 = 连续段尾位；era 29/33/34/36
+    //   与引擎既存床段冲突——见 Piston=162 行注 id 选型段）。改段位 / 插中间即编译失败（存档格式契约
+    //   编译期看门）。
     static_assert(int(Piston) == 162, "Piston must stay at id 162 (tail-append contract; saves store numeric ids)");
+    static_assert(int(PistonHead) == 163, "PistonHead must stay at id 163 (tail-append contract; saves store numeric ids)");
+    static_assert(int(PistonMoving) == 164, "PistonMoving must stay at id 164 (tail-append contract; saves store numeric ids)");
+    static_assert(int(StickyPiston) == 165, "StickyPiston must stay at id 165 (tail-append contract; saves store numeric ids)");
 
     // t1135 活塞 state 编码（era meta bit[2:0]+bit3 同构，见 Piston 枚举行注）：
     static constexpr quint8 PistonStateFacingMask   = 0x07; // bit[2:0] = 朝向 0..5（0=-Y 1=+Y 2=-Z 3=+Z 4=-X 5=+X）
@@ -1473,16 +1497,20 @@ public:
     //   （World::checkSignSupportOnEdit）+ 音色/谓词路由统一读本谓词，避免各处硬编码双 id。
     static bool isSign(quint8 blockId);
 
-    // t1135 活塞族统一谓词（单 id，同 isFenceGate 单 id 模式）：红石接收器族入族判定
-    //   （World::isPowerFamilyBlock）/ tickRedstone 接收器分支 / 拒推已伸活塞员统一读本谓词。
-    static bool isPiston(quint8 blockId) { return blockId == Piston; }
+    // t1135/t1136 活塞族统一谓词（活塞本体 ∪ 粘性活塞双 id 并判，isSign 双 id 模式）：红石接收器族
+    //   入族判定（World::isPowerFamilyBlock）/ tickRedstone 接收器分支 / 拒推已伸活塞员 / 放置朝向
+    //   分支 / mesher 朝向面分支统一读本谓词（单一权威，禁第二份族表）。
+    static bool isPiston(quint8 blockId) { return blockId == Piston || blockId == StickyPiston; }
 
-    // t1135 侧存储方块族统一谓词（era BlockContainer 派生族对应面——t1134 评估 + t1135 前置件
+    // t1135/t1136 侧存储方块族统一谓词（era BlockContainer 派生族对应面——t1134 评估 + t1135 前置件
     //   复核定谳：era jar 内 ba 派生恰 11 类 = 箱/炉/发射器/音符盒/刷怪笼/牌子/唱片机/酿造台/
     //   附魔台/炼药锅/移动占位，工件 build/t1135_jar_material.txt 第三节交叉区；引擎同语义族 =
     //   「破块须清侧存储条目 / 右键开侧存储面」的方块）。活塞拒推员之一（推之丢内容 = era 拒推零
-    //   掉落零破坏口径）。Hopper 引擎有侧存储（HopperStore）而 era 1.0 无此方块——按机制语义并入
-    //   （登记面见交付报告）。
+    //   损失口径）。Hopper 引擎有侧存储（HopperStore）而 era 1.0 无此方块——按机制语义并入
+    //   （登记面见交付报告）。**t1136 移动占位入族**：era qz（移动占位 id 36）extends ba——容器派生
+    //   族成员（拒推集合成员自动生效面）；引擎容器等价面 = 移动占位携方块附挂数据（era TilePiston
+    //   storedId/state 对应面——切片三动画承载），推之丢载荷 → isStoreBlock 引擎族成员（谓词体行）。
+    //   本切片零放置 → 谓词仅作拒推 / 结构面。
     static bool isStoreBlock(quint8 blockId);
 
 
@@ -2290,9 +2318,12 @@ public:
     //   209=sign_board 牌板面（橡木板底 + 暗边框 + 四行淡文本带；StandingSign/WallSign 板面同瓦——挂墙
     //   变体仅几何摆位异，贴图同源）。tools/build_sign.py 程序生成原创像素图 §9a。
     //   210=piston_face 活塞朝向面（木质推板 + 居中浅木方芯 + 四角螺栓；mesher 据 state bit[2:0] 朝向
-    //   选面）/ 211=piston_side 活塞侧底面（石质匣体 + 顶木带 + 螺栓点阵）。伸/缩态贴图差=切片二评估
-    //   （本切片两瓦恒定）。tools/build_piston.py 程序生成原创像素图 §9a。**追加不插中间**（同上）。
-    static constexpr int AtlasTileCount = 212; // t1135 起 210→212（活塞 face/side 两瓦尾部追加；t1113 起
+    //   选面）/ 211=piston_side 活塞侧底面（石质匣体 + 顶木带 + 螺栓点阵）。
+    //   212=piston_extended 伸出态朝向面（缩回态朝向面 210 = 推板贴本体；伸出态本体朝向面被头块前推
+    //   遮蔽、仅玩家破头后可见——推板带杆孔内面语义；t1135 简化③伸/缩态贴图差由本瓦收口）。
+    //   tools/build_piston.py 程序生成原创像素图 §9a。**追加不插中间**（同上）。
+    static constexpr int AtlasTileCount = 213; // t1136 起 212→213（活塞伸出态朝向面瓦追加；t1135 起
+                                               //   210→212（活塞 face/side 两瓦尾部追加）；t1113 起
                                                //   201→207（南瓜族 tile 201..205 + 炼药锅 206 尾部
                                                //   追加：南瓜茎 4 阶段/南瓜灯点亮刻脸/炼药锅壁，不插中间
                                                //   存档契约；t1103 曾 195→201——钉值随追加 lawful 前移）

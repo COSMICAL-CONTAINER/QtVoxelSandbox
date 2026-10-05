@@ -1345,7 +1345,8 @@ public:
     //    build/t1134_jar_piston_{base,push,tile}.txt + t1135 前置件 build/t1135_jar_material.txt）──
     // 激励面（tickRedstone 接收器分支，红石灯同门）：受电即伸 / 失电即缩（**瞬时推动简化**——era 伸程
     //   两 game tick + 排定事件不可撤销语义 = 切片三替换，本切片当拍完成位移，简化差如实登记）。
-    //   失电缩 = 只清 extended 位（era 非粘性缩回不搬回方块——本切片无粘性无拉回，切片二承接）。
+    //   失电缩 = 缩回机 tryPistonRetract（头格清空 + 粘性拉回瞬时段——t1136 切片二交付）+ 清位
+    //   （era 非粘性缩回不搬回方块、头格当拍清空；era 拉回块两拍动画 = 切片三承接）。
     //
     // 推动机 tryPistonExtend（扫描与执行同界——**不可推一半**，era 扫描失败 = 世界零改写）：
     //   ① 扫描相（era abr.g 正扫同构）：沿朝向正扫 ≤12 格；空气 = 界（界格须可写——Fixed 域界 /
@@ -1358,8 +1359,9 @@ public:
     //      哨兵，故流体成员判定置于硬度员之前）；第 13 实心 = 败（era count==12 即败，上限 12）。
     //      扫描游标 y 越界（≤0 / ≥高-1）= 败（era tryExtend 域守卫同构）。
     //   ② 执行相（era abr.h 反向回走同构）：线尾向活塞回写——line[i] → line[i+1]（界格收线尾块）、
-    //      首格腾空（era 头块写入位——**本切片无头块 → Air 腾空**，头块=切片二，呈现简化登记）；
-    //      搬移保持 (id,state) 原样（era meta 搬移同构）。
+    //      首格落头块（era 头块写入位——**t1136 切片二收口**：PistonHead(163) 落首格，state=朝向位；
+    //      t1135 曾 Air 腾空，本切片伸程零 Air 过渡——头块承载支撑面）；搬移保持 (id,state) 原样
+    //      （era meta 搬移同构）。
     //   ③ 批量收口（TNT detonateTntSphere 先例——**禁散布多次刷新**）：全部 m_chunks.setBlock 静默
     //      直写（跨 chunk 路由 + 物化门拒未物化写），逐格 O(1) note 钩子（ice/fire/fluid/growth/power
     //      五族索引维护，同 destroySphereSilent 爆炸批量口径）+ 逐格 fluidActExpand；失撑面 = 腾空格
@@ -1372,13 +1374,29 @@ public:
     //   非 Q_INVOKABLE（仅 tickRedstone 接收器分支 / 矩阵探针 C++ 调，同 setBlockFromEntity 模式）。
     bool tryPistonExtend(int x, int y, int z);
     // t1135 活塞接收器动作（tickRedstone 活塞分支**单行调用面**——结构钉 / NEG 摘行靶行）：受电且
-    //   未伸 → 推动机成功才置 extended 位；失电且已伸 → 只清位（era 非粘性缩回不搬回方块；粘性
-    //   拉回 = 切片二）。返「本 pass 是否有写」（recomputePowerLocal any 收口位）。**瞬时推动简化**
+    //   未伸 → 推动机成功才置 extended 位；失电且已伸 → 缩回机（头格清空 + 粘性拉回）+ 清位（era
+    //   非粘性缩回头格当拍清空——era 缩回无动程；粘性拉回瞬时段 = t1136 切片二，era 拉回块两拍动画
+    //   = 切片三）。返「本 pass 是否有写」（recomputePowerLocal any 收口位）。**瞬时推动简化**
     //   登记面见 tryPistonExtend 头注（era 两拍排定不可撤销 = 切片三替换）。非 Q_INVOKABLE。
     bool pistonReceiverAt(int x, int y, int z, quint8 b, quint8 st, bool powered);
     // t1135 写格域门（推动机私有谓词；声明置公有供矩阵探针断言界格可写性）：Fixed 域界 / sparse
     //   物化门——同 ChunkManager::setBlock 写门谓词（不可推一半不变量的界侧半边：界格不可写 = 扫描败）。
     bool pistonCellWritable(int x, int y, int z) const;
+    // t1136 粘性缩回机（pistonReceiverAt 失电分支调用；era abr 6 参入口 phase1 缩分支同构——era 缩回
+    //   无动程：头格当拍清空，粘性拉回块才走两拍动画[切片三]，本切片拉回瞬时段交付）。语义：
+    //   ① 头格（本体+朝向格）**无条件清空**（era phase1 非粘性分支 world.g(head,0) 同构——era 不验头格
+    //      现内容，玩家置换头格块时缩回照清 = era 真值）；头格不可写（域界 / sparse 未物化）→ 全单放弃
+    //      零写（不可半做不变量）。
+    //   ② 粘性拉回：正前第二格（本体+2Δ = 被推首块位）id 可拉（era canPush destroyMode=false 镜像：
+    //      空气 / 流体[迁移位1] / 黑曜石 / 侧存储族 / 硬度 -1 / 已伸活塞 = 不可拉）→ 该块 (id,state)
+    //      原样搬回头格、原格清空（era 拉回分支：头格置拉回块 extending tile + 前格清空——era 两拍
+    //      动画 = 切片三，本切片当拍完成搬回，简化如实登记）；不可拉 / 界格不可写 → 仅头格清空（era
+    //      不可拉分支同口径）。
+    //   ③ 批量收口（t1135 推动机同门）：逐格 O(1) note 钩子五族 + fluidActExpand + 水/岩浆脏位 +
+    //      腾空格 recheckAttachmentsAfterClear / checkGravityBlockOnEdit + 活塞∪头格∪拉回格外接盒
+    //      **一次** refloodBox(doSky)；extended 位清写归接收器（机器零触达）。
+    //   非 Q_INVOKABLE（仅接收器失电分支 / 矩阵探针 C++ 调，同 tryPistonExtend 模式）。
+    bool tryPistonRetract(int x, int y, int z, bool sticky);
 
     // R20.10 Chunk lifecycle（refactor-plan §29.3）：C++ 面转移 forwarder（态表/选型/六态图见
     //   chunkmanager.h + chunklifecycle.h）。**非 Q_INVOKABLE 且永不入 QML 面**——生命周期决策
@@ -1567,6 +1585,14 @@ signals:
     //   NoteTimbreFamily（下方方块材质定族，0=piano / 1=bass / 2=kick / 3=snare）。攻击触发不走本信号
     //   （Game 层 PlayerController::noteBlockAttackPlayed 自发——非电力路径）。
     void noteBlockPlayed(int x, int y, int z, int pitch, int family);
+    // t1136 活塞伸缩沿信号（era 伸缩两声名同位——era 6 参入口 phase0 伸成功沿 / phase1 缩沿各响
+    //   一声，era 两声名原文为 era 资产词形不落源（字节照录见 t1134_jar_piston_push.txt 工件 2/3
+    //   ldc 段）；引擎原创声名 = AudioManager 两单件 §9a）。World 层只发语义
+    //   事件（坐标 + 伸/缩方向），绝不直接出声（refactor-plan §29.4「音频走 Event」；noteBlockPlayed
+    //   同款单向事件流）——呈现层 Main.qml 路由 AudioManager.playPistonExtend / playPistonRetract。
+    //   extending=true 伸程沿（推动机成功后）/ false 缩程沿（接收器失电缩分支）。矩阵探针 C++ 面
+    //   同源（信号计数腿读）。
+    void pistonActuated(int x, int y, int z, bool extending);
 
 private:
     void generate();          // 重建纯地形采样器 + ChunkManager + 填充地形（静默，不 emit）

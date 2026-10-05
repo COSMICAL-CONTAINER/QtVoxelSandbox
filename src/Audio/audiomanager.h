@@ -227,6 +227,18 @@ public:
     //   其余 mob 着地静默（MC 无着地音语义，单件 clip 池不扩）。单件 clip；seek 重发截断不堆叠
     //   （同其他单件模式——连跳着地不堆暴）；engine / clip 失败静默早退（§2-E，不崩）。
     Q_INVOKABLE void playMobBounced(int mobType);
+    // t1136 活塞伸缩两声（era 两声名同位——era 6 参入口 phase0 伸 / phase1 缩各响一声，era 伸程
+    //   声名 / 缩程声名（原文为 era 资产词形不落源——定谳工件 t1134_jar_piston_push.txt 工件 2/3
+    //   ldc 照录），音量 0.5 音高 0.6+rand×0.25 [伸] / 0.6+rand×0.15 [缩] 字节定谳；引擎
+    //   原创声名 §9a：piston_extend / piston_retract，build_sounds.py gen_piston_* 程序合成）。
+    //   触发源（Main.qml 单一通道路由）：World::pistonActuated(x,y,z,extending) → onPistonActuated
+    //   分流到本组方法（noteBlockPlayed 同款单向事件流——World 只发语义事件不出声）。音量带 0.5 倍
+    //   （era 同带）；**随机音高带** = 每次播放 set_pitch 掷带（伸 0.60..0.85 / 缩 0.60..0.75，era
+    //   同带口径——低音高「重机关」质感，ma_sound_set_pitch 直接生效，NO_PITCH 优化未开）。
+    //   单件 clip；seek 重发截断不堆叠（同其他单件模式——连动不堆暴）；engine / clip 失败静默早退
+    //   （§2-E，不崩）。
+    Q_INVOKABLE void playPistonExtend();
+    Q_INVOKABLE void playPistonRetract();
 
     float volume() const { return m_volume; }
     void setVolume(float v);

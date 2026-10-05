@@ -13139,6 +13139,13 @@ Window {
         //   （pitch = 调音段 0..24 半音 / family = 下方方块音色族，World 层算好随信号下传——音频层只消费，
         //   World 绝不直接出声，refactor-plan §29.4「音频走 Event」+ powerTntTriggered 同款单向事件流）。
         function onNoteBlockPlayed(x, y, z, pitch, family) { audio.playNote(pitch, family) }
+        // t1136 活塞伸缩沿（World::pistonActuated —— era 伸缩两声名同位）→ 路由 audio.playPistonExtend
+        //   / playPistonRetract（音量 0.5 带 + era 同带随机音高，AudioManager 内掷带；World 只发语义事件
+        //   不出声——noteBlockPlayed 同款单向事件流，refactor-plan §29.4「音频走 Event」）。
+        function onPistonActuated(x, y, z, extending) {
+            if (extending) audio.playPistonExtend()
+            else audio.playPistonRetract()
+        }
         // t527 积雪层整柱失撑坍落 → 转 entityManager.spawnFallingBlockState 生成携带层数 metadata 的下落实体。
         //   World 低层（checkSnowLayerOnEdit）发语义事件（柱底坐标 + 总层数 1..8），呈现层只消费（PLAN §2 分层：
         //   World 不反向依赖 Entities）。layers 1..8 → state=layers-1（0..7）保留层数；blockId=44=SnowLayer（与

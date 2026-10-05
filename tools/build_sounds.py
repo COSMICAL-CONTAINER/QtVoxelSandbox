@@ -1282,6 +1282,92 @@ def gen_slime_squish():
     return finalize(out, target_peak=0.85)
 
 
+def gen_piston_extend():
+    """活塞伸出音（t1136；机制等价 MC 1.0 活塞伸程声名，era 声名两件之一——引擎原创声名 §9a）。
+
+    合成参数留痕：~0.22s「重机关推出」——低频缸体推冲 = 正弦扫频 120→70Hz（0.10s 指数滑频，
+    重活塞下压降调体）× 谐波列 k=1..3（幅 1/0.45/0.22，金属缸体感）+ 金属衬垫摩擦床（白噪 →
+    带通 ~1.6kHz Q≈2，0.14s 衰减 τ=45ms，推杆摩擦流）+ 末端「咔」到位锁定瞬态（0.05s 高频 2.2kHz
+    衰减 τ=12ms，推板到位锁定感）。mono s16 44.1k，峰值归一 0.8。播放端
+    AudioManager::playPistonExtend（World::pistonActuated 伸程沿驱动；音量 0.5 带 + 随机音高
+    0.60+rand×0.25 = era 音高带同口径，AudioManager 面掷带）。
+    """
+    dur = 0.22
+    n_s = int(SR * dur)
+    out = [0.0] * n_s
+    phase = 0.0
+    for i in range(n_s):
+        t = i / SR
+        f0 = 70.0 + (120.0 - 70.0) * math.exp(-t / 0.040)   # 120→70Hz 指数滑频（τ=40ms）
+        phase += 2 * math.pi * f0 / SR
+        body = math.sin(phase) + 0.45 * math.sin(2.0 * phase) + 0.22 * math.sin(3.0 * phase)
+        env = math.exp(-t / 0.11) * min(1.0, t / 0.004)     # 4ms 攻 + 0.11s 衰减
+        out[i] += body * env * 0.9
+    # 金属衬垫摩擦床：白噪 → 单极带通近似（一阶低通减一阶高通，~1.6kHz 中心）。
+    lp = 0.0
+    hp_prev = 0.0
+    n_f = int(SR * 0.14)
+    for i in range(n_f):
+        t = i / SR
+        x = (random.random() * 2.0 - 1.0)
+        lp += 0.22 * (x - lp)
+        hp = hp_prev + 0.30 * ((x - lp) - hp_prev)
+        hp_prev = hp
+        out[i] += (x - lp - hp) * math.exp(-t / 0.045) * 0.5
+    # 末端「咔」到位锁定瞬态（0.05s 高频衰减）。
+    n_c = int(SR * 0.05)
+    for i in range(n_c):
+        t = i / SR
+        click = math.sin(2 * math.pi * 2200.0 * t) * math.exp(-t / 0.012)
+        out[n_s - n_c + i] += click * 0.4
+    # 末尾 10ms 线性收口防爆音
+    fade = int(SR * 0.010)
+    for j in range(fade):
+        out[n_s - 1 - j] *= j / fade
+    return finalize(out, target_peak=0.8)
+
+
+def gen_piston_retract():
+    """活塞缩回音（t1136；机制等价 MC 1.0 活塞缩程声名，era 声名两件之一——引擎原创声名 §9a）。
+
+    合成参数留痕：~0.20s「重机关回收」——与伸出同族反向：低频缸体回收 = 正弦扫频 70→115Hz
+    （0.10s 指数升频，弹簧回提升调体）× 同谐波列 + 同带通摩擦床（τ=38ms 略短促）+ 起始「噗」
+    释放瞬态（0.04s 低频 90Hz 衰减 τ=10ms，锁定释放感）。mono s16 44.1k，峰值归一 0.8。播放端
+    AudioManager::playPistonRetract（World::pistonActuated 缩程沿驱动；音量 0.5 带 + 随机音高
+    0.60+rand×0.15 = era 音高带同口径）。
+    """
+    dur = 0.20
+    n_s = int(SR * dur)
+    out = [0.0] * n_s
+    # 起始「噗」锁定释放瞬态。
+    n_p = int(SR * 0.04)
+    for i in range(n_p):
+        t = i / SR
+        out[i] += math.sin(2 * math.pi * 90.0 * t) * math.exp(-t / 0.010) * 0.5
+    phase = 0.0
+    for i in range(n_s):
+        t = i / SR
+        f0 = 70.0 + (115.0 - 70.0) * (1.0 - math.exp(-t / 0.040))  # 70→115Hz 指数升频
+        phase += 2 * math.pi * f0 / SR
+        body = math.sin(phase) + 0.45 * math.sin(2.0 * phase) + 0.22 * math.sin(3.0 * phase)
+        env = math.exp(-t / 0.10) * min(1.0, t / 0.004)
+        out[i] += body * env * 0.85
+    lp = 0.0
+    hp_prev = 0.0
+    n_f = int(SR * 0.13)
+    for i in range(n_f):
+        t = i / SR
+        x = (random.random() * 2.0 - 1.0)
+        lp += 0.22 * (x - lp)
+        hp = hp_prev + 0.30 * ((x - lp) - hp_prev)
+        hp_prev = hp
+        out[i] += (x - lp - hp) * math.exp(-t / 0.038) * 0.45
+    fade = int(SR * 0.010)
+    for j in range(fade):
+        out[n_s - 1 - j] *= j / fade
+    return finalize(out, target_peak=0.8)
+
+
 def gen_villager_hrmm():
     """村民 hrmm 哼声音（t1110；idle 哼声 / 受击共用同族，机制等价 MC 1.0 villager 哼声，
     §9 原创程序合成）。
@@ -1382,6 +1468,10 @@ def main():
     #   gen_villager_hrmm 参数留痕见函数头注）。
     clips.append(("mob_idle_slime", gen_slime_squish))
     clips.append(("mob_idle_villager", gen_villager_hrmm))
+    # t1136 活塞伸缩两单件（重机关伸缩声：低频缸体 + 金属衬垫摩擦；gen_piston_extend /
+    #   gen_piston_retract 参数留痕见函数头注）。era 伸缩两声名同位——引擎原创声名 §9a。
+    clips.append(("piston_extend", gen_piston_extend))
+    clips.append(("piston_retract", gen_piston_retract))
     # t1083 唱片机曲目（disc_track_00..02.wav，两位编号同 makeDiscPath %02d 口径）：--only 支持
     #   "disc" 全组 / 单轨名。
     for i in range(3):
