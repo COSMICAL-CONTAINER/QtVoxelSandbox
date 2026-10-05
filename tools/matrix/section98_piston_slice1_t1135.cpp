@@ -347,7 +347,8 @@ void MatrixRun::section98_piston_slice1_t1135()
         if (!onePassMoved)
             diag += QStringLiteral("[settle]");
         // (2) 失电缩：位清 + 头块消失（25 头格清空）+ 线不回搬（era 非粘性缩回头格当拍清空——
-        //     era 缩回无动程；粘性拉回 = 切片二同单交付）。
+        //     era 缩回头格零动程；粘性拉回 = 切片二同单交付）。[t1138 lawful 修订：缩回当拍本体格
+        //     落杆占位（164）→ retState 读占位 state（=dir 无 bit8）——位清隐式面，断言不变式幸存。]
         w.setBlock(23, y0 + 1, 24, BR::Lever, 0x00);
         w.tickRedstone();
         w.tickRedstone();
@@ -358,7 +359,27 @@ void MatrixRun::section98_piston_slice1_t1135()
             && w.blockAt(27, y0 + 1, 24) == BR::Stone;
         ok = ok && retracted;
         if (!retracted) diag += QStringLiteral("[ret state=%1]").arg(retState);
-        // (3) 复伸：线上 settled 界（25 空）→ 再伸置位零搬移。
+        // (2b) [t1138 lawful 修订·承重面] 杆占位窗实核（era 定谳三①收口——build/t1138_jar_retract_rod_acu.txt
+        //     定谳一：缩回无条件本体格 36/164 杆占位两拍，storedId=本体 id、extending=false、storedMeta=dir
+        //     无 bit8 = extended 位隐式清除）→ 两拍动画 tick 排干（逻辑时间驱动 r2107 同门）→ 本体复位
+        //     （id 回本体 + state=dir）。t1138 NEG-1 敏感子面（摘本体占位写行 → 杆占位断言翻红）。
+        World::PistonAnimEntry rodProbe;
+        const bool rodWin = w.blockAt(24, y0 + 1, 24) == BR::PistonMoving
+            && w.pistonAnimProbeAt(24, y0 + 1, 24, rodProbe)
+            && rodProbe.storedId == BR::Piston && !rodProbe.extending && rodProbe.beats == 2;
+        w.tickPistonAnimations();
+        w.tickPistonAnimations();
+        const quint8 rodSetState = w.stateAt(24, y0 + 1, 24);
+        const bool rodSettled = w.blockAt(24, y0 + 1, 24) == BR::Piston
+            && (rodSetState & BR::PistonStateFacingMask) == 5
+            && (rodSetState & BR::PistonStateExtendedFlag) == 0
+            && w.pistonAnimCount() == 0;
+        ok = ok && rodWin && rodSettled;
+        if (!rodWin || !rodSettled)
+            diag += QStringLiteral("[rod win=%1 set=%2 st=%3]").arg(rodWin).arg(rodSettled).arg(rodSetState);
+        // (3) 复伸：[t1138 lawful 修订] 杆占位窗排干后（本体复位 state=dir 无位）→ 再受电伸置位。
+        //     era 同构：杆占位窗内本体格 = 36 非接收器族 → 受电零再伸（era qz 格零接收同面），
+        //     settle 复位后下一红石 pass 才伸。
         w.setBlock(23, y0 + 1, 24, BR::Lever, 0x01);
         w.tickRedstone();
         const bool reext = (w.stateAt(24, y0 + 1, 24) & BR::PistonStateExtendedFlag) != 0;

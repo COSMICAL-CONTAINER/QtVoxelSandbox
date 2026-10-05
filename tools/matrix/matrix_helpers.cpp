@@ -326,6 +326,10 @@ void MatrixRun::runAll()
                               //   [真协调层存档窗重载续完，NEG-1/NEG-2 敏感] / e 结构钉族柱
                               //   [NEG-1/NEG-2 摘面行本腿持有]。行为腿 fresh 小世界红石 rig +
                               //   逻辑时间驱动动画 tick，rig 世界零接触，接 section99）
+    section101_piston_slice4_t1138(); // t1138 活塞切片四（收官片）探针段（交付单；r2108 a swept
+                              //   位移柱 / b 杆占位+脉冲柱 / c 玩家侵入+孤儿头柱 / d 放置朝向柱 /
+                              //   e 结构钉族柱——NEG 双摘面行本腿持有。行为腿 fresh 小世界红石
+                              //   rig + 真链 pc rig + 逻辑时间驱动，rig 世界零接触，接 section100）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";

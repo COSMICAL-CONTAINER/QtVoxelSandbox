@@ -173,7 +173,8 @@ void MatrixRun::section99_piston_slice2_t1136()
         ok = ok && repull;
         if (!repull) diag += QStringLiteral("[repull]");
         // (4) 零线粘性：伸入纯空气 → 头占位落贴脸格 → settle 实体化；失电 → 仅清头块零幻写
-        //     （无源格拉回零登记）。
+        //     （无源格拉回零登记）。[t1138 lawful 修订：失电缩当拍本体格落杆占位（era 定谳三①
+        //     无条件收口——本体 164 杆占位两拍 + 位清隐式），窗实核 + 两拍排干后零在册清账。]
         w.setBlock(20, y0 + 1, 26, BR::StickyPiston, 5);
         w.setBlock(19, y0 + 1, 26, BR::Lever, 0x01);
         w.tickRedstone();
@@ -184,13 +185,22 @@ void MatrixRun::section99_piston_slice2_t1136()
         if (!zeroExt) diag += QStringLiteral("[zeroext]");
         w.setBlock(19, y0 + 1, 26, BR::Lever, 0x00);
         w.tickRedstone();
-        const bool zeroRet = w.blockAt(21, y0 + 1, 26) == BR::Air
+        World::PistonAnimEntry zeroRod;
+        const bool zeroRodWin = w.blockAt(20, y0 + 1, 26) == BR::PistonMoving
+            && w.pistonAnimProbeAt(20, y0 + 1, 26, zeroRod)
+            && zeroRod.storedId == BR::StickyPiston && !zeroRod.extending && zeroRod.beats == 2;
+        w.tickPistonAnimations();
+        w.tickPistonAnimations();
+        const bool zeroRet = zeroRodWin
+            && w.blockAt(20, y0 + 1, 26) == BR::StickyPiston // 杆占位 settle 回写本体复位
+            && w.blockAt(21, y0 + 1, 26) == BR::Air
             && w.blockAt(22, y0 + 1, 26) == BR::Air
             && w.pistonAnimCount() == 0;
         ok = ok && zeroRet;
         if (!zeroRet) diag += QStringLiteral("[zeroret]");
         // (5) 不可拉源：伸后把源格置换为黑曜石（模拟推后放置）→ 失电拉回判定拒 → 仅清头格，
         //     黑曜石原样零登记（era canPush destroyMode=false 黑曜石显式拒同构）。
+        //     [t1138 lawful 修订：同 (4) 杆占位窗实核 + 排干——不可拉面登记仍零（杆占位项除外）。]
         w.setBlock(20, y0 + 1, 28, BR::StickyPiston, 5);
         w.setBlock(21, y0 + 1, 28, BR::Stone, 0);
         w.setBlock(22, y0 + 1, 28, BR::Stone, 0);
@@ -201,7 +211,15 @@ void MatrixRun::section99_piston_slice2_t1136()
         w.setBlock(22, y0 + 1, 28, BR::Obsidian, 0);
         w.setBlock(19, y0 + 1, 28, BR::Lever, 0x00);
         w.tickRedstone();
-        const bool nopull = w.blockAt(21, y0 + 1, 28) == BR::Air
+        World::PistonAnimEntry nopullRod;
+        const bool nopullRodWin = w.blockAt(20, y0 + 1, 28) == BR::PistonMoving
+            && w.pistonAnimProbeAt(20, y0 + 1, 28, nopullRod)
+            && nopullRod.storedId == BR::StickyPiston && !nopullRod.extending;
+        w.tickPistonAnimations();
+        w.tickPistonAnimations();
+        const bool nopull = nopullRodWin
+            && w.blockAt(20, y0 + 1, 28) == BR::StickyPiston
+            && w.blockAt(21, y0 + 1, 28) == BR::Air
             && w.blockAt(22, y0 + 1, 28) == BR::Obsidian
             && w.pistonAnimCount() == 0;
         ok = ok && nopull;

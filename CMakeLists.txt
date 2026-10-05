@@ -1361,6 +1361,17 @@ add_executable(redstone_matrix_test
     #   未修订腿全绿对照）；NEG-2 = 摘 savecoordinator.cpp ⑥c 段恰红 r2107d+r2107e]。行为腿 fresh
     #   小世界红石 rig + 逻辑时间驱动动画 tick，rig 世界零接触）。
     tools/matrix/section100_piston_slice3_t1137.cpp
+    # t1138 活塞切片四（收官片）探针段（置尾先例沿用，接 section100；filter 词 r2108；矩阵
+    #   976→981，+5 腿 r2108a-e。交付面 = ①swept AABB 实体位移（era agb a(float,float) 全字节
+    #   ——拍推 0.5625×2 + settle 末推 0.25，全实体含玩家零拒推）②era 缩回本体杆占位两拍（t1137
+    #   翻案面收口：本体 164 杆占位 + g() 位清先行全序 + settle 回写隐式位清——接收器自身位清写
+    #   摘除）③重复脉冲/失败恢复硬化（杆占位窗 deaf + 排干后落伸 + 域门拒下拍重试）④推动入玩家
+    #   格侵入面（玩家同面被推）⑤era acu.d 孤儿头恢复（破头拆整活塞 + 本体毁头自清）⑥era 放置
+    #   朝向规则（近距垂直双门 + yaw 象限朝玩家——t1135 简化④ v1 双翻案 lawful 替换）。NEG-1 = 摘
+    #   world.cpp 杆占位写行恰红五腿 r2108b+r2108e ∪ r2105c+r2106a+r2107b（t1138 lawful 修订面杆
+    #   占位承重断言同源红）；NEG-2 = 摘 tickPistonAnimations 拍推发射行恰红 r2108a+c+e]。行为腿
+    #   fresh 小世界红石 rig + 真链 pc rig + 逻辑时间驱动，rig 世界零接触）。
+    tools/matrix/section101_piston_slice4_t1138.cpp
     # t1129 杀进程探针（CLI 模式 TU：--killprobe inject|inject-old|child|child-old|parent|
     #   parent-old——父 spawn 自身子进程 + 标记文件锚定保存窗 + QProcess::kill 真实终止 + 重开
     #   库四面读回。inject-old/child-old/parent-old = 旧协议提交序原语级重放（复现实验面——
