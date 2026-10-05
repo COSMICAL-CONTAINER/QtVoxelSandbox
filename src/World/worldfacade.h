@@ -55,6 +55,12 @@ public:
     // 不完整方块 state（朝向/开合；越界返 0）。
     quint8 stateAt(BlockPos p) const { return m_world->stateAt(p.x, p.y, p.z); }
     quint8 stateAt(int x, int y, int z) const { return m_world->stateAt(x, y, z); }
+    // t1137 活塞动画占位格渲染读（mesher 快照采集单点消费——PistonMoving(164) 格 → 侧表
+    //   (storedId,storedState) 原样替换；World::pistonStoredBlockAt 逐行转发不复制）。
+    void pistonStoredAt(int x, int y, int z, quint8 &id, quint8 &st) const
+    {
+        m_world->pistonStoredBlockAt(x, y, z, id, st);
+    }
     // 「非 air 实存」谓词（raycast 选体 / mesher 邻居剔除口径；碰撞语义用 isCollidableAt）。
     bool isSolidAt(BlockPos p) const { return m_world->isSolid(p.x, p.y, p.z); }
     // 规则统一查询：碰撞谓词（BlockRegistry::isCollidable(blockAt, stateAt) 单一权威）。

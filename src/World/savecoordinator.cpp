@@ -314,6 +314,17 @@ SaveReceipt SaveCoordinator::saveAll(const SaveRequest &req)
         r.error = Error{ kErrSaveStoreRejected, "downstream entities part failed" };
         return r;
     }
+    // 步⑥c 活塞动画段（t1137 PISTON-ANIM）：两拍动画侧表随统一保存链同事务落盘（world/entities
+    //   段旁新部件写——步⑥ 调用点形保留【t1132 源钉原样幸存】，本部件与之共用 kConn 事务，任一
+    //   失败回滚 = 零部分写）。写序与容器表同门 = **无条件 DELETE+INSERT**（空载荷 = 表清空——
+    //   无在册动画会话的空快照必须把上一档的旧动画项清掉，禁按空跳过；协调层矩阵腿的空载荷在
+    //   无行表上 DELETE = no-op，既有腿零扰动）。
+    if (!m_store->writePistonAnimsPart(req.pistonAnims)) {
+        m_store->rollbackAtomicSave();
+        m_store->setWorld(live);
+        r.error = Error{ kErrSaveStoreRejected, "downstream piston anims part failed" };
+        return r;
+    }
     // 步⑦ player 段（短路保留：world 段失败不至此；注入 = 回滚——【t1129】不再是「world 已落、
     //   player 未落」的混合写，而是零部分写）。
     if (playerNeeded) {

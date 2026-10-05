@@ -210,6 +210,9 @@ struct SaveRequest
     QVariantMap mapDataset;      // t1132 地图数据集（缺省空 = 不写行即表清空[会话无数据集]，旧构造 caller 向前兼容）
     QVariantList entities;       // t1133 生物持久化载荷（缺省空 = entities 表清空[全灭快照语义]，
                                  //   旧构造 caller 在无行表上零扰动；生产链恒传全量活体快照）
+    QVariantList pistonAnims;    // t1137 活塞两拍动画侧表载荷（缺省空 = piston_anims 表清空——
+                                 //   无在册动画快照语义，旧构造 caller 在无行表上零扰动；生产链恒传
+                                 //   World::exportPistonAnims 全量快照）
     QVariantMap worldTime;
     QVariantMap bedSpawn;
     QVariantMap playerData;

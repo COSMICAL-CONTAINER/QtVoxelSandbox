@@ -862,6 +862,8 @@ void World::beginLoad(int seed)
     m_burningCells.clear();  // t843：网格重置 → 燃烧侧表作废（燃烧态不进存档 → 读档自然熄灭，dev-spec 明示可接受）
     m_torchBurnout.clear();  // review26 #6：网格重置 → burnout 计数侧表作废（运行期瞬态不进存档，读档自然复位）
     m_powerDirty.clear();    // t656：网格重置 → 红石电力脏集作废（finishLoad 末全量重建红石族脏集）
+    m_pistonAnims.clear();   // t1137：网格重置 → 活塞动画侧表作废（旧世界占位坐标不指向新栅格；
+                             //   finishLoad 侧不重建——侧表走 piston_anim 表恢复面 restorePistonAnims）
     // 审查修 B5（t724-t729 复盘）：清要塞传送门坐标 —— 旧版只在世界生成（placeStronghold）记录，读档后
     //   残留上一世界坐标会让暗渊之眼（t729）朝错误方向飞；finishLoad 末 rebindStrongholdPortalFromVoxels
     //   从存档体素反推回写（若本世界确有要塞）。
@@ -6747,9 +6749,21 @@ bool World::tryPistonRetract(int x, int y, int z, bool sticky)
         changes.push_back({wx, wy, wz, oldId, newId, newState});
     };
     if (pullOk) {
-        // 粘性拉回搬回写对（era 拉回分支：头格置拉回块 + 前格清空——头格承接被拉块 (id,state)
-        //   原样，源格腾空）。
-        push(hx, hy, hz, m_chunks.blockAt(hx, hy, hz), pulledId, pulledState);
+        // 同格旧项先销（era 头格 tile j() 即刻实体化同构——abr.txt:134-152：缩回先 finalize 头格
+        //   既有 tile 再置新 tile，一格一 tile；引擎中途缩回面 = 旧伸程项销账防双项同格 settle 竞写）。
+        for (size_t ai = 0; ai < m_pistonAnims.size(); ++ai) {
+            if (m_pistonAnims[ai].x == hx && m_pistonAnims[ai].y == hy && m_pistonAnims[ai].z == hz) {
+                m_pistonAnims.erase(m_pistonAnims.begin() + long(ai));
+                break;
+            }
+        }
+        // 粘性拉回动画写对（era 拉回分支字节同构——t1137 全字节定谳 abr.txt:407-492：头格置 36 占位
+        //   tile(storedId=pulledId, extending=false) + cb 抑制窗内源格 world.g 清空；t1136 曾当拍
+        //   搬回，t1137 切片三占位化收口——两拍后 settle 实体化拉回块 tickPistonAnimations）。
+        push(hx, hy, hz, m_chunks.blockAt(hx, hy, hz), BlockRegistry::PistonMoving,
+             quint8(pst & BlockRegistry::PistonStateFacingMask));
+        m_pistonAnims.push_back({hx, hy, hz, pulledId, pulledState,
+                                 quint8(pst & BlockRegistry::PistonStateFacingMask), false, 2});
         // 粘性拉回源格腾空行（**NEG-1 摘行面**——单行完整语句：摘除编译绿 [pulledId/state 仍被
         //   上行头格收口读用，零未用告警]；摘除面 = 拉回退化「搬回」为「复制」——源格块不腾空 =
         //   方块凭空复制，era 搬回语义破；恰红 = {拉回柱源格腾空子断言 + 结构钉族源格腾空行钉}）。
@@ -6863,35 +6877,49 @@ bool World::tryPistonExtend(int x, int y, int z)
     //   全部 m_chunks.setBlock 静默直写（跨 chunk 路由 + 物化门拒未物化写）；逐格 O(1) note 钩子
     //   （五族索引维护，同 destroySphereSilent 爆炸批量口径）；末尾外接盒一次 refloodBox；
     //   worldChanged / clearAllDirty 由 tickRedstone 收口（N 写 1 emit）。
+    //   **t1137 切片三**：执行相写入位全部改落 PistonMoving(164) 占位 + 侧表 (storedId,storedState)
+    //   原样随存（era h() 回走 setBlock(36,prevMeta)+setBlockTileEntity(qz.a(prevId,prevMeta,dir,
+    //   extending=true,headFlag=false)) 字节同构——build/t1137_jar_piston_anim.txt 定谳二）；两拍后
+    //   tickPistonAnimations 实体化（era agb b() 终相：占位格仍 36 → setBlock storedId 同构）。
     struct PistonChange { int x, y, z; quint8 oldId, newId, newState; };
     std::vector<PistonChange> changes;
     const auto push = [&](int wx, int wy, int wz, quint8 oldId, quint8 newId, quint8 newState) {
         m_chunks.setBlock(wx, wy, wz, newId, newState);
         changes.push_back({wx, wy, wz, oldId, newId, newState});
     };
+    // 侧表登记（era qz.a 五参工厂的引擎面：storedId/storedState/facing/extending=true/beats=2）。
+    const quint8 animFacing = quint8(pst & BlockRegistry::PistonStateFacingMask);
+    const auto animEntry = [&](int wx, int wy, int wz, quint8 sid, quint8 sst) {
+        m_pistonAnims.push_back({wx, wy, wz, sid, sst, animFacing, true, 2});
+    };
     // 线尾向活塞回写：line[i] → line[i+1]（line[N] = 界格——收线尾块；界流体在此被线尾块覆写，
-    //   oldId=流体 id 保 note 钩子见毁流体事实）。
+    //   oldId=流体 id 保 note 钩子见毁流体事实）。**占位写入**：每格落 164 + 侧表存被搬入块原样
+    //   （storedId/state = 该 settle 时实体化的目标形态，era 同构）。
     for (int i = int(line.size()) - 1; i >= 0; --i) {
         const PistonLineCell &dst = (i + 1 < int(line.size()))
                                         ? PistonLineCell{line[size_t(i) + 1].x, line[size_t(i) + 1].y,
                                                          line[size_t(i) + 1].z, 0, 0}
                                         : PistonLineCell{cx, cy, cz, 0, 0};
         const quint8 oldId = (i + 1 < int(line.size())) ? line[size_t(i) + 1].id : termOldId;
-        push(dst.x, dst.y, dst.z, oldId, line[size_t(i)].id, line[size_t(i)].state);
+        push(dst.x, dst.y, dst.z, oldId, BlockRegistry::PistonMoving, animFacing);
+        animEntry(dst.x, dst.y, dst.z, line[size_t(i)].id, line[size_t(i)].state);
     }
-    // ── 头块写入位（era 头块承载位同构——t1136 切片二交付：era 伸程两拍动画 settle 后实体化头块 34
-    //    于本体正前；本切片瞬时伸 → 当拍写入头块 PistonHead(163)，state = 朝向位（era settled 头
-    //    meta = dir 同构；era settled 头 meta 另携粘性构造位 bit8——引擎粘性 = 本体 id 属性，头位
-    //    冗余不取，登记简化）。**本切片伸程零 Air 过渡**：线块前移 + 头块落首格（原首格块随线搬走）
-    //    / 界格流体毁格落头块 / 界格空气落头块——era 同面（伸程无清格，头块承载支撑面）。
+    // ── 头块占位位（era 头块承载位同构——t1136 切片二交付瞬时写入；**t1137 切片三占位化**：era
+    //    伸程头格 = 36 占位 tile(storedId=34 头块, dir|sticky?8, dir, extending=true) 字节同构，
+    //    settle 两拍后实体化 PistonHead(163)；era settled 头 meta 携粘性构造位 bit8——引擎粘性 =
+    //    本体 id 属性，头位冗余不取，登记简化维持。**伸程零 Air 过渡维持**：线块占位前移 + 头格
+    //    占位落首格（原首格块随线搬走）/ 界格流体毁格落头占位 / 界格空气落头占位——era 同面）。
     if (line.empty()) {
-        // 零实心线：界即活塞贴脸格。界 = 流体 → 毁格落头块（era 执行相毁分支 + 头块置入）；界 =
-        //   空气 → 头块置入（era 伸入纯空气 = 头块前推占位——t1135 曾 Air 腾空，切片二头块收口）。
-        push(cx, cy, cz, termOldId, BlockRegistry::PistonHead, quint8(pst & BlockRegistry::PistonStateFacingMask));
+        // 零实心线：界即活塞贴脸格。界 = 流体 → 毁格落头占位（era 执行相毁分支 + 头占位置入）；界 =
+        //   空气 → 头占位置入（era 伸入纯空气 = 头块前推占位——t1136 曾瞬时头块，切片三占位化收口）。
+        push(cx, cy, cz, termOldId, BlockRegistry::PistonMoving, animFacing);
+        animEntry(cx, cy, cz, BlockRegistry::PistonHead, quint8(pst & BlockRegistry::PistonStateFacingMask));
     } else {
-        // 首格落头块（era 头块写入位——原首格块已随线搬入下一格，头块承其位）。
+        // 首格落头占位（era 头块写入位——原首格块已随线搬入下一格，头占位承其位）。
         push(line.front().x, line.front().y, line.front().z, line.front().id,
-             BlockRegistry::PistonHead, quint8(pst & BlockRegistry::PistonStateFacingMask));
+             BlockRegistry::PistonMoving, animFacing);
+        animEntry(line.front().x, line.front().y, line.front().z,
+                  BlockRegistry::PistonHead, quint8(pst & BlockRegistry::PistonStateFacingMask));
     }
 
     // 批量 note 钩子 + 流体活动盒（同 destroySphereSilent 逐格 O(1) 口径；爆炸先例 五族索引全族）。
@@ -6927,6 +6955,153 @@ bool World::tryPistonExtend(int x, int y, int z)
     }
     qInfo("vo.edit: piston extended = %d cells (%d,%d,%d)", int(changes.size()), x, y, z);
     return true;
+}
+
+// ── t1137 活塞两拍排定动画机（声明注释见 world.h；era 定谳工件 build/t1137_jar_piston_anim.txt）──
+//   era 时序（agb b() 全字节）：占位落位 progress=0 → 两拍各 +0.5 → 第 3 tick n>=1 settle =
+//   实体化（占位格仍 36 才写——外力覆写面防御）；引擎映射：beats 2→1→settle（两 engine pass =
+//   era 两拍推进；settle 落点差 ≤1 era game tick，逻辑时序同构，近似度登记面见 world.h 注）。
+
+// t1137 占位格渲染读（mesher 快照采集经 WorldFacade 单点查询；声明注释见 world.h）。
+void World::pistonStoredBlockAt(int x, int y, int z, quint8 &id, quint8 &st) const
+{
+    id = BlockRegistry::Air;
+    st = 0;
+    for (const PistonAnimEntry &e : m_pistonAnims) {
+        if (e.x == x && e.y == y && e.z == z) {
+            id = e.storedId;
+            st = e.storedState;
+            return;
+        }
+    }
+}
+
+// t1137 矩阵探针读（行为腿断言动画窗状态；声明注释见 world.h）。
+bool World::pistonAnimProbeAt(int x, int y, int z, PistonAnimEntry &out) const
+{
+    for (const PistonAnimEntry &e : m_pistonAnims) {
+        if (e.x == x && e.y == y && e.z == z) {
+            out = e;
+            return true;
+        }
+    }
+    return false;
+}
+
+// t1137 动画 tick（声明注释见 world.h；桥接序 = tickRedstone 之前——事件拍新登记项首拍即被本
+//   tick 消费会缩窗一拍，故置前格保证「事件拍登记 → 下拍起倒计时」两拍满窗）。
+void World::tickPistonAnimations()
+{
+    if (m_pistonAnims.empty())
+        return; // 稳态零开销（lessons perf-fluid-scan 同门：无动画零扫描）
+    struct PistonSettle { int x, y, z; quint8 oldId, newId, newState; };
+    std::vector<PistonSettle> settles;
+    std::vector<PistonAnimEntry> keep;
+    keep.reserve(m_pistonAnims.size());
+    for (const PistonAnimEntry &e : m_pistonAnims) {
+        // 占位格自愈（era j() 即刻实体化同构防御半边——era 中途缩回/外力把头格占位覆写时 tile 被
+        //   j() 直落终相；引擎侧 = 占位格 id 已非 164 → 项作废销账，不再实体化防陈旧项顶掉别块）。
+        if (m_chunks.blockAt(e.x, e.y, e.z) != BlockRegistry::PistonMoving)
+            continue;
+        if (e.beats > 1) {
+            PistonAnimEntry n = e;
+            --n.beats; // 未到界：排定保持递减（era m += 0.5 拍推进同构；**输入回落不撤销**——era 排定
+            keep.push_back(n); // 事件不可撤销，t1130 中继器同门：短 OFF 被吞 = era 正确行为）
+            continue;
+        }
+        // settle 域门（sparse 未物化：项保留原 beats 下拍重试——不可半做半边，同推动机界侧纪律）。
+        if (!pistonCellWritable(e.x, e.y, e.z)) {
+            keep.push_back(e);
+            continue;
+        }
+        // settle（era agb b() 终相同构：占位格仍 36/164 → setBlock storedId/state 一写两效——实体化
+        //   + 占位清除原子完成，TileEntity 随 setBlock 销毁 = 引擎侧表项销账同构）。
+        const quint8 oldId = m_chunks.blockAt(e.x, e.y, e.z);
+        m_chunks.setBlock(e.x, e.y, e.z, e.storedId, e.storedState); // t1137 settle 实体化行（**t1137 NEG-1 摘行靶**）
+        settles.push_back({e.x, e.y, e.z, oldId, e.storedId, e.storedState});
+    }
+    m_pistonAnims.swap(keep);
+    if (settles.empty())
+        return;
+    // 批量收口（t1135 推动机同门）：settle 写逐格 O(1) note 钩子五族 + fluidActExpand + 水/岩浆脏位
+    //   + settle 格外接盒一次 refloodBox + worldChanged / clearAllDirty 单次收口（本 tick 独立驱动，
+    //   不假手 tickRedstone——两机事件拍写已由 tickRedstone 收口，settle 拍写归本机收口）。
+    for (const PistonSettle &s : settles) {
+        noteIceWrite(s.x, s.y, s.z, s.oldId, s.newId);
+        noteFireWrite(s.x, s.y, s.z, s.oldId, s.newId);
+        noteFluidWrite(s.x, s.y, s.z, s.oldId, s.newId);
+        noteGrowthWrite(s.x, s.y, s.z, s.oldId, s.newId);
+        notePowerWrite(s.x, s.y, s.z, s.oldId, s.newId); // 被搬红石族 settle 复入电域索引（事件拍占位写曾暂离）
+        fluidActExpand(s.x, s.y, s.z);
+    }
+    m_waterDirty = true;  // 实体化格邻接流体平衡被扰（t380 同门，保守置位——活塞低频）
+    m_lavaDirty = true;
+    {
+        int minX = settles.front().x, maxX = minX, minY = settles.front().y, maxY = minY;
+        int minZ = settles.front().z, maxZ = minZ;
+        for (const PistonSettle &s : settles) {
+            minX = std::min(minX, s.x); maxX = std::max(maxX, s.x);
+            minY = std::min(minY, s.y); maxY = std::max(maxY, s.y);
+            minZ = std::min(minZ, s.z); maxZ = std::max(maxZ, s.z);
+        }
+        int bx0 = minX - 1, bx1 = maxX + 1, bz0 = minZ - 1, bz1 = maxZ + 1;
+        if (m_chunks.mode() == WorldMode::Fixed) {
+            bx0 = std::max(0, bx0); bz0 = std::max(0, bz0);
+            bx1 = std::min(m_width - 1, bx1); bz1 = std::min(m_depth - 1, bz1);
+        }
+        const int by0 = std::max(0, minY - 1);
+        const int by1 = std::min(m_height - 1, maxY + 1);
+        refloodBox(bx0, by0, bz0, bx1, by1, bz1, /*doSky=*/true);
+    }
+    emit worldChanged();      // settle 写驱动 mesh 重建（占位 164 渲染 → storedId 实体形态切换）
+    m_chunks.clearAllDirty(); // 两段重建完统一清脏（同 tickRedstone 收口）
+    qInfo("vo.edit: piston anim settled = %d cells", int(settles.size()));
+}
+
+// t1137 持久化导出（声明注释见 world.h；行形状 = restorePistonAnims 入参 = SaveRequest.pistonAnims
+//   载荷 = piston_anim 表行）。
+QVariantList World::exportPistonAnims() const
+{
+    QVariantList out;
+    out.reserve(int(m_pistonAnims.size()));
+    for (const PistonAnimEntry &e : m_pistonAnims) {
+        QVariantMap m;
+        m.insert(QStringLiteral("x"), e.x);
+        m.insert(QStringLiteral("y"), e.y);
+        m.insert(QStringLiteral("z"), e.z);
+        m.insert(QStringLiteral("id"), int(e.storedId));
+        m.insert(QStringLiteral("st"), int(e.storedState));
+        m.insert(QStringLiteral("fc"), int(e.facing));
+        m.insert(QStringLiteral("ex"), e.extending);
+        m.insert(QStringLiteral("beats"), e.beats);
+        out.append(m);
+    }
+    return out;
+}
+
+// t1137 持久化恢复（声明注释见 world.h；坏行跳过——坐标缺 / 字段缺省 0 防 garbage 注入）。
+int World::restorePistonAnims(const QVariantList &rows)
+{
+    m_pistonAnims.clear(); // 整体替换（同 chestStore.loadAll 清旧世界残留门）
+    int restored = 0;
+    for (const QVariant &v : rows) {
+        const QVariantMap m = v.toMap();
+        bool okx = false, oky = false, okz = false;
+        PistonAnimEntry e;
+        e.x = m.value(QStringLiteral("x")).toInt(&okx);
+        e.y = m.value(QStringLiteral("y")).toInt(&oky);
+        e.z = m.value(QStringLiteral("z")).toInt(&okz);
+        if (!okx || !oky || !okz)
+            continue; // 缺坐标 → 跳过（不注残项，同 writeChests 缺坐标跳过门）
+        e.storedId = quint8(m.value(QStringLiteral("id")).toInt());
+        e.storedState = quint8(m.value(QStringLiteral("st")).toInt());
+        e.facing = quint8(m.value(QStringLiteral("fc")).toInt());
+        e.extending = m.value(QStringLiteral("ex")).toBool();
+        e.beats = m.value(QStringLiteral("beats")).toInt();
+        m_pistonAnims.push_back(e);
+        ++restored;
+    }
+    return restored;
 }
 
 // t305 树苗生长 tick（见 world.h 头注释）。机制等价 MC 1.0 树苗生长（random-tick 式散布概率）。
@@ -7465,6 +7640,8 @@ void World::generate()
                              //   beginLoad/rebuildFireCells → 漏清则旧世界燃烧坐标污染新世界：isBurningAt 假阳性点燃无辜可燃块 +
                              //   tickFire 倒计时继续烧毁替换（无掉落不可逆）+ 该格打火石被守卫拦成 no-op）
     m_powerDirty.clear();    // t656：全新世界 → 清红石电力脏集（worldgen 无红石电路 → 稳态空集零开销）
+    m_pistonAnims.clear();   // t1137：全新世界 → 清活塞动画侧表（防旧世界占位坐标串入新栅格 = 跨世界
+                             //   泄漏教训同门；动画中途换世界 = 侧表随栅格作废同取舍）
     fluidActReset();         // t488：全新世界 → 活动盒作废（generate 末置 dirty → 首次全量扫描兜底）
     gravLightReset();        // t933：全新世界 → 重力级联光照联合盒 / 批标志防御清（同 beginLoad 口径）
     resetWeather(); // t385 全新世界 → 天气从 Clear 重起（构造 / regenerate / 改尺寸均经 generate）

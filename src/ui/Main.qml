@@ -1124,6 +1124,15 @@ Window {
         if (restoredEntityCount > 0)
             console.info("[t1133] persisted entities restored: " + restoredEntityCount
                          + "/" + persistedEntityRows.length)
+        // t1137 活塞动画恢复（PISTON-ANIM）：紧随实体恢复注入存档侧表（存档窗落动画中途 → 重载
+        //   后 beats 续倒计时 → 两拍内 settle 实体化 = era TileEntity NBT 随 chunk 档续完真值；
+        //   旧档无表 → 空列表零注入 = 旧档零迁移面）。占位格 164 id/state 已随 chunk blob 回填，
+        //   侧表补 storedId/storedState/beats 后动画续完。
+        const persistedPistonRows = worldStore.loadPistonAnims()
+        const restoredPistonCount = theWorld.restorePistonAnims(persistedPistonRows)
+        if (restoredPistonCount > 0)
+            console.info("[t1137] piston anims restored: " + restoredPistonCount
+                         + "/" + persistedPistonRows.length)
         // t1013 矿井箱 → 箱子矿车转正 / 回生（进世界一次性，须在 chestStore.loadAll（存档键条目就位）与
         //   carts.clearAll（槽表清空）之后）：C++ 全图扫 worldgen 标记箱 → 静默摘块 + 登记内容键 + 邻轨落车；
         //   并据存档 "cart" 键条目回生未毁的矿车（实体不进存档；挖毁时键条目已清 → 不回生，内容物不丢）。
@@ -1336,7 +1345,11 @@ Window {
                                              // t1133：生物持久化随统一保存链同事务落盘（第 15 参；
                                              //   entities 表纯加表——存活生物全档快照，死亡不入档；
                                              //   尾双实参同行 = t1132 尾针 lawful 修订后的钉面形态）。
-                                             mapStore.exportVariant(), entityManager.exportPersistedEntities())
+                                             mapStore.exportVariant(), entityManager.exportPersistedEntities(),
+                                             // t1137：活塞两拍动画侧表随统一保存链同事务落盘（第 16 参；
+                                             //   piston_anims 表纯加表——在册占位格全档快照，存档窗落
+                                             //   动画中途 = 续完语义，era TileEntity NBT 真值）。
+                                             theWorld.exportPistonAnims())
     }
     // t1064 退出存档失败退避重试（review0901 登记清偿，出处见 saveAndExitToWorldList 重试段注释）：
     //   「保存并退出」按钮与 onClosing 关窗两路径**共用唯一实现**（禁第二份退避逻辑散写；两处
@@ -16657,6 +16670,11 @@ Window {
             //   仅普通冰 Ice，浮冰 / 蓝冰永不融）。纯 QML 桥接（同 tickIceFreeze 模式，PLAN §2 分层不破）。
             //   稳态（无冰 / 无高亮邻 / 本窗散布落空）静默 → 无开销。
             theWorld.tickIceMelt()
+            // t1137 活塞两拍动画 tick：WorldClock 每 100ms tick → 驱动 World.tickPistonAnimations
+            //   （game-tick 倒计时 pending——事件拍登记的占位项下拍起倒计时，两拍满窗 settle 实体化；
+            //   稳态无在册动画零开销早退）。桥接序 = tickRedstone **之前**（事件拍新项首拍不被本
+            //   tick 消费 → 两拍满窗不缩窗）。纯 QML 桥接（同 tickRedstone 模式，PLAN §2 分层不破）。
+            theWorld.tickPistonAnimations()
             // t656 红石电力 tick：WorldClock 每 100ms tick → 驱动 World.tickRedstone（事件驱动局部重算：编辑
             //   脏集空 → 零开销早退；非空 → 从脏锚点 BFS 粉连通域重算电力级 / 连接位 + 接收器通电位，一次
             //   worldChanged 收口）。传播跨多 tick 定点迭代稳定（一格 100ms，恰同 MC redstone tick 量级）。

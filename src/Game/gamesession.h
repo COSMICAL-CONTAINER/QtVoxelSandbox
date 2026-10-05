@@ -699,6 +699,7 @@ inline void GameSession::runOneTick()
     m_world.tickSweetBerryBushGrowth();
     m_world.tickIceFreeze();
     m_world.tickIceMelt();
+    m_world.tickPistonAnimations(); // t1137：活塞两拍动画（Main.qml onTicked 桥接序镜像——tickRedstone 前一格）
     m_world.tickRedstone();
     m_world.tickLeafDecay();
     m_world.tickWeather(Tick::kClockTickSecs); // 秒制口径 = WorldClock::ticked 携带值（0.1）

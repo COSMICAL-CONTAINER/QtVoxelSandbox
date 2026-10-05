@@ -169,6 +169,12 @@ public:
     //   转交 entityManager.restorePersistedEntities 注入；行语义门（kind/type 越界 / NaN / 死亡）
     //   归 Entities 层（本类只存取裸列，不解析生物语义——同 chests 的 slots JSON 不解析先例）。
     Q_INVOKABLE QVariantList loadEntities() const;
+    // t1137 读当前库的 piston_anims 表为 QVariantList（形状同 writePistonAnimsPart 入参 = World::
+    //   exportPistonAnims 产物形，每项 {x,y,z,id,st,fc,ex,beats}）。未打开 → 空列表；**表缺席
+    //   （旧档）→ 空列表不崩**（SELECT 失败 qCWarning 降级 = loadEntities 同门）。caller
+    //   （Main.qml.enterWorld）转交 theWorld.restorePistonAnims 注入（行语义门归 World 层，本类
+    //   只存取裸列——同 entities 的裸列不解析先例）。
+    Q_INVOKABLE QVariantList loadPistonAnims() const;
     // progress 新系统 写玩家进度（统计 + 成就）单行表 key='main'。progress = PlayerProgress::toVariant() 产物。
     //   独立 upsert（INSERT OR REPLACE）。未打开 → false。caller（Main.qml.saveAndExitToWorldList）调。
     Q_INVOKABLE bool saveProgress(const QVariantMap &progress);
@@ -233,6 +239,10 @@ public:
     //   type,x,y,z,color,mh,hp,baby,grow,wt,ws,ot,os,ov,sw,swd,sh,ss,sd}）。kind/type 键缺 / 坐标
     //   键缺 → 跳过该行（不写残条目，同 writeChests 缺坐标门）。
     bool writeEntitiesPart(const QVariantList &entities);
+    // t1137 活塞动画段写体（步⑥c 旁部件——与 world/entities 段共用 kConn 事务，任一失败回滚 =
+    //   零部分写；写序同容器表门 = 无条件 DELETE+INSERT，空载荷 = 表清空）。调用方已开事务，
+    //   本方法不 BEGIN/COMMIT 不计数。
+    bool writePistonAnimsPart(const QVariantList &anims);
 
 
 signals:

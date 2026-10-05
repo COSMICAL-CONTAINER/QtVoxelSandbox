@@ -278,8 +278,18 @@ ChunkMeshSnapshot captureChunkMeshSnapshot(const WorldFacade &world, int cx, int
             for (int lx = -ChunkMeshSnapshot::kPad; lx < ChunkMeshSnapshot::kChunk + ChunkMeshSnapshot::kPad; ++lx) {
                 const int wx = s.originX + lx, wz = s.originZ + lz;
                 const size_t i = ChunkMeshSnapshot::cellIndex(lx, ly, lz);
-                s.blocks[i] = world.blockAt(wx, ly, wz);
-                s.states[i] = world.stateAt(wx, ly, wz);
+                const quint8 bid = world.blockAt(wx, ly, wz);
+                if (bid == BlockRegistry::PistonMoving) {
+                    // t1137 活塞动画占位：快照格替换为侧表存储块原样（era 渲染=存储块随动的静态
+                    //   近似——终格静态无滑动插值，近似度登记；侧表缺项孤儿 → Air 渲染）。
+                    quint8 sid = 0, sst = 0;
+                    world.pistonStoredAt(wx, ly, wz, sid, sst);
+                    s.blocks[i] = sid;
+                    s.states[i] = sst;
+                } else {
+                    s.blocks[i] = bid;
+                    s.states[i] = world.stateAt(wx, ly, wz);
+                }
                 s.skyLight[i] = world.skyLightAt(wx, ly, wz);
                 s.blockLight[i] = world.blockLightAt(wx, ly, wz);
             }

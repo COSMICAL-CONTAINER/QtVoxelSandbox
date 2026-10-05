@@ -1342,11 +1342,14 @@ public:
     bool isPowerSource(int x, int y, int z) const;
 
     // ── t1135 活塞（Piston=162）——推动机 + 红石接收器接入（机制等价 MC 1.0 piston；era 定谳工件
-    //    build/t1134_jar_piston_{base,push,tile}.txt + t1135 前置件 build/t1135_jar_material.txt）──
-    // 激励面（tickRedstone 接收器分支，红石灯同门）：受电即伸 / 失电即缩（**瞬时推动简化**——era 伸程
-    //   两 game tick + 排定事件不可撤销语义 = 切片三替换，本切片当拍完成位移，简化差如实登记）。
-    //   失电缩 = 缩回机 tryPistonRetract（头格清空 + 粘性拉回瞬时段——t1136 切片二交付）+ 清位
-    //   （era 非粘性缩回不搬回方块、头格当拍清空；era 拉回块两拍动画 = 切片三承接）。
+    //    build/t1134_jar_piston_{base,push,tile}.txt + t1135 前置件 build/t1135_jar_material.txt +
+    //    t1137 两拍动画全字节件 build/t1137_jar_piston_anim.txt）──
+    // 激励面（tickRedstone 接收器分支，红石灯同门）：受电即伸 / 失电即缩。**t1137 切片三**：伸程与
+    //   粘性拉回改为 era 两拍排定动画（t1135 简化①「瞬时推动」与 t1136 拉回瞬时段两项登记简化就此
+    //   收口）——事件拍 = 占位写入（线格+头格落 PistonMoving(164)，侧表存 (storedId,storedState)）+
+    //   extended 位（era 字节定谳：动画起点即置位）+ 伸缩沿声；settle（两拍后）= 占位实体化 storedId
+    //   （tickPistonAnimations）。排定**不可撤销**（era 原生：动画中途缩回 = 头格占位被 j() 即刻
+    //   实体化，无撤销逻辑——era abr.txt:134-152 字节定谳，引擎占位格自愈同构）。
     //
     // 推动机 tryPistonExtend（扫描与执行同界——**不可推一半**，era 扫描失败 = 世界零改写）：
     //   ① 扫描相（era abr.g 正扫同构）：沿朝向正扫 ≤12 格；空气 = 界（界格须可写——Fixed 域界 /
@@ -1359,9 +1362,11 @@ public:
     //      哨兵，故流体成员判定置于硬度员之前）；第 13 实心 = 败（era count==12 即败，上限 12）。
     //      扫描游标 y 越界（≤0 / ≥高-1）= 败（era tryExtend 域守卫同构）。
     //   ② 执行相（era abr.h 反向回走同构）：线尾向活塞回写——line[i] → line[i+1]（界格收线尾块）、
-    //      首格落头块（era 头块写入位——**t1136 切片二收口**：PistonHead(163) 落首格，state=朝向位；
-    //      t1135 曾 Air 腾空，本切片伸程零 Air 过渡——头块承载支撑面）；搬移保持 (id,state) 原样
-    //      （era meta 搬移同构）。
+    //      首格落头块（era 头块写入位——t1136 切片二收口；**t1137 切片三**：全部写入位改落
+    //      PistonMoving(164) 占位 + 侧表 (storedId,storedState) 原样随存，era h() 回走 setBlock(36)+
+    //      setBlockTileEntity(qz.a(prevId,prevMeta,...)) 字节同构；settle 两拍后实体化
+    //      tickPistonAnimations）；占位格 state = 推程朝向位（era 线占位 meta=prevMeta 为 1.0 渲染
+    //      伴生quirk，引擎占位 state 自描述朝向——近似度登记）；搬移 (id,state) 原样保持于侧表。
     //   ③ 批量收口（TNT detonateTntSphere 先例——**禁散布多次刷新**）：全部 m_chunks.setBlock 静默
     //      直写（跨 chunk 路由 + 物化门拒未物化写），逐格 O(1) note 钩子（ice/fire/fluid/growth/power
     //      五族索引维护，同 destroySphereSilent 爆炸批量口径）+ 逐格 fluidActExpand；失撑面 = 腾空格
@@ -1375,28 +1380,73 @@ public:
     bool tryPistonExtend(int x, int y, int z);
     // t1135 活塞接收器动作（tickRedstone 活塞分支**单行调用面**——结构钉 / NEG 摘行靶行）：受电且
     //   未伸 → 推动机成功才置 extended 位；失电且已伸 → 缩回机（头格清空 + 粘性拉回）+ 清位（era
-    //   非粘性缩回头格当拍清空——era 缩回无动程；粘性拉回瞬时段 = t1136 切片二，era 拉回块两拍动画
-    //   = 切片三）。返「本 pass 是否有写」（recomputePowerLocal any 收口位）。**瞬时推动简化**
-    //   登记面见 tryPistonExtend 头注（era 两拍排定不可撤销 = 切片三替换）。非 Q_INVOKABLE。
+    //   非粘性缩回头格当拍清空——era 缩回头格零动程；粘性拉回两拍动画 = t1137 切片三交付）。返
+    //   「本 pass 是否有写」（recomputePowerLocal any 收口位）。era 相位真值（t1137 jar 定谳）：
+    //   phase0 伸程沿 = 动画起点发声（推动机成功才发）→ Main.qml 路由伸程声；phase1 缩程沿 =
+    //   缩回发声。非 Q_INVOKABLE。
     bool pistonReceiverAt(int x, int y, int z, quint8 b, quint8 st, bool powered);
     // t1135 写格域门（推动机私有谓词；声明置公有供矩阵探针断言界格可写性）：Fixed 域界 / sparse
     //   物化门——同 ChunkManager::setBlock 写门谓词（不可推一半不变量的界侧半边：界格不可写 = 扫描败）。
     bool pistonCellWritable(int x, int y, int z) const;
-    // t1136 粘性缩回机（pistonReceiverAt 失电分支调用；era abr 6 参入口 phase1 缩分支同构——era 缩回
-    //   无动程：头格当拍清空，粘性拉回块才走两拍动画[切片三]，本切片拉回瞬时段交付）。语义：
+    // t1136 粘性缩回机（pistonReceiverAt 失电分支调用；era abr 6 参入口 phase1 缩分支同构——t1137
+    //   全字节定谳 build/t1137_jar_piston_anim.txt：头格当拍清空零动程确证维持，粘性拉回改两拍动画
+    //   占位交付）。语义：
     //   ① 头格（本体+朝向格）**无条件清空**（era phase1 非粘性分支 world.g(head,0) 同构——era 不验头格
     //      现内容，玩家置换头格块时缩回照清 = era 真值）；头格不可写（域界 / sparse 未物化）→ 全单放弃
     //      零写（不可半做不变量）。
     //   ② 粘性拉回：正前第二格（本体+2Δ = 被推首块位）id 可拉（era canPush destroyMode=false 镜像：
-    //      空气 / 流体[迁移位1] / 黑曜石 / 侧存储族 / 硬度 -1 / 已伸活塞 = 不可拉）→ 该块 (id,state)
-    //      原样搬回头格、原格清空（era 拉回分支：头格置拉回块 extending tile + 前格清空——era 两拍
-    //      动画 = 切片三，本切片当拍完成搬回，简化如实登记）；不可拉 / 界格不可写 → 仅头格清空（era
-    //      不可拉分支同口径）。
+    //      空气 / 流体[迁移位1] / 黑曜石 / 侧存储族 / 硬度 -1 / 已伸活塞 = 不可拉）→ 头格置
+    //      PistonMoving(164) 拉回动画占位 + 侧表 (storedId=pulledId, storedState, extending=false)，
+    //      源格当拍腾空（era 拉回分支：头格置拉回块 extending tile + cb 抑制窗内前格 world.g 清空
+    //      字节同构——两拍后 settle 实体化拉回块）；不可拉 / 界格不可写 → 仅头格清空（era
+    //      不可拉分支同口径）。era 拉回源格本身为伸程占位时的 j() 先实体化再读存储块面（era 字节
+    //      307-345）= 引擎拒推族同判（164=isStoreBlock → 不可拉）+ 占位自愈，近似度登记。
     //   ③ 批量收口（t1135 推动机同门）：逐格 O(1) note 钩子五族 + fluidActExpand + 水/岩浆脏位 +
     //      腾空格 recheckAttachmentsAfterClear / checkGravityBlockOnEdit + 活塞∪头格∪拉回格外接盒
     //      **一次** refloodBox(doSky)；extended 位清写归接收器（机器零触达）。
     //   非 Q_INVOKABLE（仅接收器失电分支 / 矩阵探针 C++ 调，同 tryPistonExtend 模式）。
     bool tryPistonRetract(int x, int y, int z, bool sticky);
+
+    // ── t1137 活塞两拍排定动画机（era TilePiston 承接——agb b()/j() 时序 + abr 六参入口全字节
+    //    定谳 build/t1137_jar_piston_anim.txt）──────────────────────────────────────────────
+    // 侧表项（era TilePiston 五字段引擎对应面）：占位格坐标 + 存储块 (id,state) + 朝向 + 伸/缩程位
+    //   + 剩余拍数。era NBT 五键（blockId/blockData/facing/progress/extending）持久化真值 = 引擎
+    //   piston_anim 表（纯追加，t1129 原子保存原语域 + t1133 entities 表先例）；era 渲染插值半拍
+    //   （progress 0.5）与 headFlag（era 杆占位渲染专用位）不入引擎侧表（近似度登记：era 杆缩回
+    //   本体占位面 t1137 全字节翻案在案，引擎切片三不实现本体杆占位=接收器「位清随写」结构承重，
+    //   切片四候选池）。
+    struct PistonAnimEntry
+    {
+        int x = 0, y = 0, z = 0;
+        quint8 storedId = 0;    // era NBT blockId（settle 实体化目标；头格伸程占位 = PistonHead）
+        quint8 storedState = 0; // era NBT blockData
+        quint8 facing = 0;      // era NBT facing（0..5 同 PistonStateFacingMask 编码）
+        bool extending = true;  // era NBT extending（true=伸程 / false=缩程拉回）
+        int beats = 2;          // 距 settle 剩余拍数（era progress 两拍推进的整数拍语义；engine tick 计数）
+    };
+    // 动画 tick（**game-tick 倒计时 pending**——承 t1130 中继器两段 pending 机先例，非 wall-clock；
+    //   Main.qml onTicked / GameSession::runOneTick 桥接序 = tickRedstone 之前一格）。逐项：
+    //   占位格 id 已非 164（动画中途被缩回/外力覆写）→ 项作废自愈（era j() 即刻实体化同构的防御
+    //   半边）；beats>1 递减续排；beats 界 = settle 实体化（占位格仍 164 → setBlock storedId/state
+    //   原子写 = era world.d 一写两效同构）+ 侧表项销账。批量收口（t1135 机器同门）：settle 写逐格
+    //   note 钩子五族 + fluidActExpand + 外接盒一次 refloodBox + worldChanged/clearAllDirty 单次收口
+    //   （有无 settle 皆零开销早退——稳态无动画零扫描）。Q_INVOKABLE（Main.qml / GameSession 双桥
+    //   接 + 矩阵探针逻辑时间驱动面）。
+    Q_INVOKABLE void tickPistonAnimations();
+    // 占位格渲染读（mesher 快照采集经 WorldFacade 单点查询——capture 在持世界线程，零锁）：164 格
+    //   → 侧表 (storedId,storedState) 原样替换（era 渲染=存储块原样随动的静态近似：era 滑动插值
+    //   简化为终格静态，近似度登记）；侧表缺项（孤儿 164）→ 返 Air（era qz blockActivated 孤儿自清
+    //   同口径的渲染半边）。只读。
+    void pistonStoredBlockAt(int x, int y, int z, quint8 &id, quint8 &st) const;
+    // 矩阵探针读（行为腿断言动画窗状态）：返占位格侧表项在场 + 五字段回填。只读，非 Q_INVOKABLE。
+    bool pistonAnimProbeAt(int x, int y, int z, PistonAnimEntry &out) const;
+    // 在册动画项数（矩阵探针 / 诊断）。只读。
+    int pistonAnimCount() const { return int(m_pistonAnims.size()); }
+    // t1137 持久化导出（piston_anim 表载荷——SaveRequest.pistonAnims；形状 = restorePistonAnims
+    //   入参，同 EntityManager::exportPersistedEntities 门）。era NBT 五键对应 + beats 整数化。
+    Q_INVOKABLE QVariantList exportPistonAnims() const;
+    // t1137 持久化恢复（进世界一次：清旧 + 注入存档行；返恢复行数）。坏行（缺字段/越界）跳过。
+    Q_INVOKABLE int restorePistonAnims(const QVariantList &rows);
 
     // R20.10 Chunk lifecycle（refactor-plan §29.3）：C++ 面转移 forwarder（态表/选型/六态图见
     //   chunkmanager.h + chunklifecycle.h）。**非 Q_INVOKABLE 且永不入 QML 面**——生命周期决策
@@ -2397,6 +2447,12 @@ private:
         quint16 cooldownTicks = 0;// 熔断冷却剩余红石 tick（>0 = 锁定熄灭，不评估不翻转）
     };
     std::unordered_map<quint64, TorchBurnout> m_torchBurnout;
+    // t1137 活塞两拍动画侧表（era TilePiston 承接——见 tickPistonAnimations 头注）：在册占位格
+    //   （≤每次推动 13 格 + 拉回 1 格，总量微）。写入路径 = 活塞两机（伸/缩）+ restorePistonAnims；
+    //   消费 = tickPistonAnimations（settle 销账）/ pistonStoredBlockAt（mesher 快照读）/ export。
+    //   generate / beginLoad 清空（网格重置坐标作废——cross-world 泄漏教训同门）；**进存档**
+    //   （piston_anim 表，era TileEntity NBT 随 chunk 档真值——t1137 定谳工件 2/2）。
+    std::vector<PistonAnimEntry> m_pistonAnims;
     // perf：流体方格位置索引（Water / Lava 各一集）—— 流体 tick 遍历此集（O(流体格数)）替代全图扫描
     //   （O(W×D×H)=3.28M）。写入路径经 noteFluidWrite 增量维护；generate/beginLoad 清空、finishLoad
     //   全图重建（存档 blob / worldgen 直写不经写入路径）。键编码复用 packGrowthCell。稳态（无流体写入）

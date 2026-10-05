@@ -99,7 +99,8 @@ public:
                                         const QVariantList &brewingStands = {}, // t1113 补正：酿造内容透传（t1097 曾只加下游参未跟桥链 → 第 12 参被旧 11 参签名静默丢弃）
                                         const QVariantList &signs = {}, // t1113 牌子文本（缺省空 = 旧 caller 零改动兼容）
                                         const QVariantMap &mapDataset = {}, // t1132 地图数据集透传（缺省空 = 旧 caller 零改动兼容；MapStore::exportVariant 产物）
-                                        const QVariantList &entities = {}); // t1133 生物持久化透传（第 15 参；EntityManager::exportPersistedEntities 产物；缺省空 = 表清空[全灭快照]，旧 caller 零改动兼容）
+                                        const QVariantList &entities = {}, // t1133 生物持久化透传（第 15 参；EntityManager::exportPersistedEntities 产物；缺省空 = 表清空[全灭快照]，旧 caller 零改动兼容）
+                                        const QVariantList &pistonAnims = {}); // t1137 活塞两拍动画透传（第 16 参；World::exportPistonAnims 产物；缺省空 = 表清空[无在册动画快照]，旧 caller 零改动兼容）
     // 恢复状态读面（台账只读；库缺席 = fresh；读不了 = open-error——#5② 可区分态，不谎报）。
     Q_INVOKABLE QString recoveryState(const QString &worldFile) const;
     // t1064 探锁退避（QML 消费面第三件；退出存档首试失败后调，选型立证见实现头注）：

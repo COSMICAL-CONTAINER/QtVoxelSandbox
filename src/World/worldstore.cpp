@@ -287,6 +287,26 @@ bool WorldStore::initSchema()
         qCCritical(lcSave) << "create entities table failed:" << q.lastError().text();
         return false;
     }
+    // t1137 活塞两拍动画侧表（PISTON-ANIM）：每个在册占位格一行（坐标主键——动画项全档快照语义，
+    //   载荷 = World::exportPistonAnims 产物形）。持久字段 = era TilePiston NBT 五键的整数拍映射
+    //   （storedId/storedState/facing/extending + beats=两拍剩余；era progress float 渲染半拍与
+    //   headFlag 渲染位不入档——近似度登记，t1137_jar_piston_persist_bud.txt 定谳六）。纯加表 ——
+    //   旧库 IF NOT EXISTS 幂等补建，无迁移负担；schema 版本不 bump（纯加表对老库向前兼容，
+    //   同 entities/sign_texts 门）。
+    if (!q.exec(QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS piston_anims ("
+            "  x INTEGER NOT NULL,"
+            "  y INTEGER NOT NULL,"
+            "  z INTEGER NOT NULL,"
+            "  id INTEGER NOT NULL,"
+            "  st INTEGER NOT NULL,"
+            "  fc INTEGER NOT NULL,"
+            "  ex INTEGER NOT NULL,"
+            "  beats INTEGER NOT NULL,"
+            "  PRIMARY KEY (x, y, z))"))) {
+        qCCritical(lcSave) << "create piston_anims table failed:" << q.lastError().text();
+        return false;
+    }
     // 写 user_version（新库 0→kSchemaVersion；旧库同版本幂等；无 harm）。
     q.exec(QStringLiteral("PRAGMA user_version = %1").arg(kSchemaVersion));
     return true;
@@ -1325,6 +1345,75 @@ QVariantList WorldStore::loadEntities() const
         em.insert(QStringLiteral("sh"), q.value(17).toInt() != 0);
         em.insert(QStringLiteral("ss"), q.value(18).toInt());
         em.insert(QStringLiteral("sd"), q.value(19).toInt() != 0);
+        out.append(em);
+    }
+    return out;
+}
+
+// t1137 活塞动画段落盘：DELETE 全量 + INSERT 每个在册占位格（坐标列 + 五字段整数拍列）。调用方
+//   （协调层步⑥c）已开事务，本方法不 BEGIN/COMMIT（同事务原子）。anims 形状 = World::
+//   exportPistonAnims() 产物：每项 {x,y,z,id,st,fc,ex,beats}。坐标缺 / 非法 → 跳过该行（不写残条目）。
+bool WorldStore::writePistonAnimsPart(const QVariantList &anims)
+{
+    QSqlDatabase db = QSqlDatabase::database(kConn);
+    QSqlQuery del(db);
+    if (!del.exec(QStringLiteral("DELETE FROM piston_anims"))) {
+        qCCritical(lcSave) << "writePistonAnimsPart: piston_anims delete failed:" << del.lastError().text();
+        return false;
+    }
+    QSqlQuery iq(db);
+    iq.prepare(QStringLiteral(
+        "INSERT INTO piston_anims (x, y, z, id, st, fc, ex, beats)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)"));
+    for (const QVariant &v : anims) {
+        const QVariantMap em = v.toMap();
+        bool okx = false, oky = false, okz = false;
+        const int x = em.value(QStringLiteral("x")).toInt(&okx);
+        const int y = em.value(QStringLiteral("y")).toInt(&oky);
+        const int z = em.value(QStringLiteral("z")).toInt(&okz);
+        if (!okx || !oky || !okz)
+            continue; // 缺坐标 → 跳过（不写残条目）
+        iq.addBindValue(x);
+        iq.addBindValue(y);
+        iq.addBindValue(z);
+        iq.addBindValue(em.value(QStringLiteral("id")).toInt());
+        iq.addBindValue(em.value(QStringLiteral("st")).toInt());
+        iq.addBindValue(em.value(QStringLiteral("fc")).toInt());
+        iq.addBindValue(em.value(QStringLiteral("ex")).toBool() ? 1 : 0);
+        iq.addBindValue(em.value(QStringLiteral("beats")).toInt());
+        if (!iq.exec()) {
+            qCCritical(lcSave) << "writePistonAnimsPart: anim insert failed at" << x << y << z
+                               << ":" << iq.lastError().text();
+            return false;
+        }
+    }
+    return true;
+}
+
+// t1137 读 piston_anims 表为 QVariantList（形状同 writePistonAnimsPart 入参 = World::
+//   exportPistonAnims 产物形）。未打开 → 空列表；SELECT 失败（旧档表缺席 = 首要形态 / 库病）→
+//   qCWarning + 空列表（loadEntities 同门——旧档无表读入不丢不崩硬门；旧档 t1136 及以前零 164
+//   放置面 → 空表即正确恢复面）。行语义门（坐标域 / id 域）归 World 层 restorePistonAnims。
+QVariantList WorldStore::loadPistonAnims() const
+{
+    QVariantList out;
+    if (!m_open) return out;
+    QSqlQuery q(QSqlDatabase::database(kConn));
+    if (!q.exec(QStringLiteral("SELECT x, y, z, id, st, fc, ex, beats FROM piston_anims"))) {
+        qCWarning(lcSave) << "loadPistonAnims: select failed (legacy save without table?):"
+                          << q.lastError().text();
+        return out; // 旧档无表 → 空列表（恢复面零注入）
+    }
+    while (q.next()) {
+        QVariantMap em;
+        em.insert(QStringLiteral("x"), q.value(0).toInt());
+        em.insert(QStringLiteral("y"), q.value(1).toInt());
+        em.insert(QStringLiteral("z"), q.value(2).toInt());
+        em.insert(QStringLiteral("id"), q.value(3).toInt());
+        em.insert(QStringLiteral("st"), q.value(4).toInt());
+        em.insert(QStringLiteral("fc"), q.value(5).toInt());
+        em.insert(QStringLiteral("ex"), q.value(6).toInt() != 0);
+        em.insert(QStringLiteral("beats"), q.value(7).toInt());
         out.append(em);
     }
     return out;
