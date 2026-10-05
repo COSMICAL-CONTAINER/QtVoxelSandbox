@@ -184,45 +184,56 @@ void MatrixRun::section97_piston_eval_t1134()
             << (ok ? QString() : diag);
     });
 
-    // ── r2104b:交付面行钉柱（t1135 lawful 翻案——切片一交付收口缺口，本柱改钉交付面）──────
-    //   沿革：原「缺口确认柱」（kMc 映射全幂扫零家族行 + 源树零活塞词元）在 t1135 交付活塞
-    //   本体后前提失真 → lawful 翻案改钉交付面（t1088/t1113 前移先例同门，翻案注立此存照）：
-    //   注册表层 = kMc 恰一引擎 id（= Piston 162）映射 33、家族另三 id（29 粘性 / 34 头 /
-    //   36 移动 = 切片二段位）仍零映射；词法层 = src 全树零 era 家族标识词元（混淆类名
-    //   abr/acu/qz/agb、era 注册名 pistonBase/pistonStickyBase、era 声名 tile.piston）——
-    //   机制交付但零 era 资产/专名词形（PLAN §9）。
+    // ── r2104b:交付面行钉柱（t1136 lawful 翻案——切片二交付收口缺口，本柱再翻钉全家族映射面）──────
+    //   沿革：原「缺口确认柱」在 t1135 交付活塞本体后第一次翻案改钉「恰一映射 33」（t1088/t1113
+    //   前移先例同门）；t1136 切片二交付粘性/头块/移动占位后 29/34/36 三 id 入映射 → 二次 lawful
+    //   翻案改钉全家族映射面（翻案注立此存照）：注册表层 = kMc 恰一引擎 id 映射 33（= Piston 162）、
+    //   恰一映射 29（= StickyPiston 165）、恰一映射 34（= PistonHead 163）、恰一映射 36（=
+    //   PistonMoving 164）；词法层 = src 全树零 era 家族标识词元（混淆类名 abr/acu/qz/agb、era
+    //   注册名 pistonBase/pistonStickyBase、era 声名 tile.piston）——机制交付但零 era 资产/专名词形
+    //   （PLAN §9）。
     runLeg("r2104b delivery face column (the t1135 slice one delivery lawfully closed the"
-        " registry gap so the engine to one point zero block mapping answers exactly one"
-        " engine id for the piston base numeric id thirty three and that engine id is the"
-        " piston block itself while the sticky and head and moving numeric ids twenty nine"
-        " thirty four and thirty six stay unmapped for the later slices, and the whole"
+        " registry gap and the t1136 slice two delivery closes the family so the engine to"
+        " one point zero block mapping answers exactly one engine id for each of the family"
+        " numeric ids thirty three twenty nine thirty four and thirty six and those engine"
+        " ids are the piston and the sticky piston and the head block and the moving"
+        " placeholder respectively, and the whole"
         " source tree carries zero era family identifier tokens from the jar fixture"
         " obfuscation set and zero era registration and sound name tokens, so the ledger"
-        " row is anchored at the registry layer with the single delivered id and the"
+        " row is anchored at the registry layer with the full delivered family and the"
         " lexical layer stays era free)",
         [&]() {
         bool ok = true;
         QString diag;
-        // (1) kMc 映射幂扫（交付面）：33 恰一引擎 id 且 = Piston；29/34/36 仍零映射（切片二段位钉）。
+        // (1) kMc 映射幂扫（交付面）：29/33/34/36 各恰一引擎 id 且 = 活塞族对应 id（t1136 全家族钉）。
         {
-            int hits33 = 0;
-            int hitsOthers = 0;
-            int pistonMapped = 0;
+            int hits33 = 0, hits29 = 0, hits34 = 0, hits36 = 0;
+            int pistonMapped = 0, stickyMapped = 0, headMapped = 0, movingMapped = 0;
             for (int id = 0; id < int(BR::Count); ++id) {
                 const int mc = BR::mcBlockId(quint8(id));
                 if (mc == 33) {
                     ++hits33;
-                    if (id == int(BR::Piston))
-                        ++pistonMapped;
-                } else if (mc == 29 || mc == 34 || mc == 36) {
-                    ++hitsOthers;
+                    if (id == int(BR::Piston)) ++pistonMapped;
+                } else if (mc == 29) {
+                    ++hits29;
+                    if (id == int(BR::StickyPiston)) ++stickyMapped;
+                } else if (mc == 34) {
+                    ++hits34;
+                    if (id == int(BR::PistonHead)) ++headMapped;
+                } else if (mc == 36) {
+                    ++hits36;
+                    if (id == int(BR::PistonMoving)) ++movingMapped;
                 }
             }
-            const bool sweep = hits33 == 1 && pistonMapped == 1 && hitsOthers == 0;
+            const bool sweep = hits33 == 1 && pistonMapped == 1
+                && hits29 == 1 && stickyMapped == 1
+                && hits34 == 1 && headMapped == 1
+                && hits36 == 1 && movingMapped == 1;
             ok = ok && sweep;
             if (!sweep)
-                diag += QStringLiteral("[kMc h33=%1 mapped=%2 others=%3]")
-                            .arg(hits33).arg(pistonMapped).arg(hitsOthers);
+                diag += QStringLiteral("[kMc h33=%1 m33=%2 h29=%3 m29=%4 h34=%5 m34=%6 h36=%7 m36=%8]")
+                            .arg(hits33).arg(pistonMapped).arg(hits29).arg(stickyMapped)
+                            .arg(hits34).arg(headMapped).arg(hits36).arg(movingMapped);
         }
         // (2) 源树 era 词元零命中（混淆类名 + era 注册名 + era 声名；工程自名 Piston/piston* 不在列）。
         {
@@ -251,14 +262,14 @@ void MatrixRun::section97_piston_eval_t1134()
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
             << "| r2104b delivery face column (the t1135 slice one delivery lawfully closed"
-               " the registry gap so the engine to one point zero block mapping answers"
-               " exactly one engine id for the piston base numeric id thirty three and that"
-               " engine id is the piston block itself while the sticky and head and moving"
-               " numeric ids twenty nine thirty four and thirty six stay unmapped for the"
-               " later slices, and the whole source tree carries zero era family identifier"
+               " the registry gap and the t1136 slice two delivery closes the family so the engine to"
+               " one point zero block mapping answers exactly one engine id for each of the family"
+               " numeric ids thirty three twenty nine thirty four and thirty six and those engine"
+               " ids are the piston and the sticky piston and the head block and the moving"
+               " placeholder respectively, and the whole source tree carries zero era family identifier"
                " tokens from the jar fixture obfuscation set and zero era registration and"
                " sound name tokens, so the ledger row is anchored at the registry layer with"
-               " the single delivered id and the lexical layer stays era free)"
+               " the full delivered family and the lexical layer stays era free)"
             << (ok ? QString() : diag);
     });
 

@@ -429,9 +429,9 @@ void MatrixRun::section77_roster_map_t1114()
             const bool enumOk = int(RecipeRegistry::EmptyMapId) == 0x290
                 && int(RecipeRegistry::FilledMapId) == 0x291
                 && int(RecipeRegistry::MilkBucketId) == 0x28F
-                && int(BR::AtlasTileCount) == 212                        // 物品面零新瓦(t1113 尾钉原值)；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
+                && int(BR::AtlasTileCount) == 213                        // 物品面零新瓦(t1113 尾钉原值)；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）；t1136 前移：Atlas 212→213（活塞伸出态瓦追加——钉值随追加前移）
                 && int(BR::StandingSign) == 160 && int(BR::WallSign) == 161
-                && int(BR::Count) == 163 // t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
+                && int(BR::Count) == 166 // t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）；t1136 前移：Count 163→166（头块/占位/粘性三 id 段尾追加——钉值随追加前移）
                 && BR::mcBlockId(int(BR::StandingSign)) == 63
                 && BR::mcBlockId(int(BR::FenceGate)) == 107
                 && BR::mcBlockId(int(BR::Cake)) == 92

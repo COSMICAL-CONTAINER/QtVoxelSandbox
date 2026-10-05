@@ -1352,6 +1352,7 @@ add_executable(redstone_matrix_test
     #   r2105c+r2105d；NEG-2 = 摘推动上限判定行恰红 r2105a+r2105d]。行为腿 fresh 小世界直驱
     #   推动机/红石 tick，rig 世界零接触）。
     tools/matrix/section98_piston_slice1_t1135.cpp
+    tools/matrix/section99_piston_slice2_t1136.cpp
     # t1129 杀进程探针（CLI 模式 TU：--killprobe inject|inject-old|child|child-old|parent|
     #   parent-old——父 spawn 自身子进程 + 标记文件锚定保存窗 + QProcess::kill 真实终止 + 重开
     #   库四面读回。inject-old/child-old/parent-old = 旧协议提交序原语级重放（复现实验面——

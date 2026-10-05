@@ -289,7 +289,7 @@ void MatrixRun::section75_roster_mid_t1112()
                 && barsSel.size() == 2
                 && std::fabs(barsSel[0].minX - 0.4375f) < 1e-4f
                 && gd.id == int(BR::Glass) && gd.shape == BR::ShapeFull
-                && int(BR::IronBars) == 142 && int(BR::Count) == 163; // t1112 lawful 前移:157→160；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
+                && int(BR::IronBars) == 142 && int(BR::Count) == 166; // t1112 lawful 前移:157→160；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）；t1136 前移：Count 163→166（头块/占位/粘性三 id 段尾追加——钉值随追加前移）
             ok = ok && placeOk;
             if (!placeOk) diag += QStringLiteral("[place]");
         }
@@ -623,9 +623,9 @@ void MatrixRun::section75_roster_mid_t1112()
             const QString srcDir = srcRootForRosterMidPins();
             // 值面:id/段位/kMc/相邻族零污染。
             const bool enumOk = int(BR::FenceGate) == 157 && int(BR::GlassPane) == 158
-                && int(BR::Cake) == 159 && int(BR::Count) == 163 // t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
+                && int(BR::Cake) == 159 && int(BR::Count) == 166 // t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）；t1136 前移：Count 163→166（头块/占位/粘性三 id 段尾追加——钉值随追加前移）
                 && int(BR::SandstoneSlab) == 156 && int(BR::Cauldron) == 153
-                && int(BR::AtlasTileCount) == 212 // t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
+                && int(BR::AtlasTileCount) == 213 // t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）；t1136 前移：Atlas 212→213（活塞伸出态瓦追加——钉值随追加前移）
                 && BR::mcBlockId(int(BR::FenceGate)) == 107
                 && BR::mcBlockId(int(BR::GlassPane)) == 102
                 && BR::mcBlockId(int(BR::Cake)) == 92
@@ -638,8 +638,8 @@ void MatrixRun::section75_roster_mid_t1112()
                 SrcPin("gate id decl", "FenceGate        = 157,", 1),
                 SrcPin("pane id decl", "GlassPane        = 158,", 1),
                 SrcPin("cake id decl", "Cake             = 159,", 1),
-                SrcPin("count sentinel row", "Count           = 163,", 1), // t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
-                SrcPin("atlas count", "AtlasTileCount = 212", 1), // t1113 lawful 前移：209→210（牌板 tile 追加）,；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
+                SrcPin("count sentinel row", "Count           = 166,", 1), // t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）；t1136 前移：Count 163→166（头块/占位/粘性三 id 段尾追加——钉文随源行前移）
+                SrcPin("atlas count", "AtlasTileCount = 213", 1), // t1113 lawful 前移：209→210（牌板 tile 追加）,；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）；t1136 前移：Atlas 212→213（活塞伸出态瓦追加——钉文随源行前移）
                 SrcPin("gate state flags", "FenceGateStateOpenFlag  = 0x1;", 1),
                 SrcPin("cake bites mask", "CakeStateBitesMask = 0x7;", 1),
                 SrcPin("gate shape decl", "ShapeFenceGate = 14,", 1),

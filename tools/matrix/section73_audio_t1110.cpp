@@ -474,7 +474,7 @@ void MatrixRun::section73_audio_t1110()
             && int(EntityManager::MobVillager) == 22
             && RecipeRegistry::SlimeBallId == 0x28C
             && RecipeRegistry::SpawnEggVillagerId == 0x28E
-            && int(BR::Count) == 163; // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1112 曾 157→160（栅栏门/玻璃板/蛋糕尾部追加）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
+            && int(BR::Count) == 166; // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1112 曾 157→160（栅栏门/玻璃板/蛋糕尾部追加）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）；t1136 前移：Count 163→166（头块/占位/粘性三 id 段尾追加——钉值随追加前移）
         ok = ok && enumOk;
         if (!enumOk) diag += QStringLiteral("[enum]");
         const QStringList missNb = pinSet(

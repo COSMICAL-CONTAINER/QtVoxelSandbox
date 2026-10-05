@@ -471,7 +471,7 @@ void MatrixRun::section56_paper_book_bookshelf()
         const QString bSrc = bf.open(QIODevice::ReadOnly)
             ? QString::fromUtf8(bf.readAll()) : QString();
         const bool d2 = BR::mcBlockId(BR::Bookshelf) == 47
-            && BR::AtlasTileCount == 212 && d.frontTile < BR::AtlasTileCount // t1112 lawful 前移：207→209（蛋糕族 tile 207..208 追加）；t1105 lawful 前移：201→207（南瓜族 + 炼药锅 tile 追加；t1103 曾 195→201、t1097 曾 193→195）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
+            && BR::AtlasTileCount == 213 && d.frontTile < BR::AtlasTileCount // t1112 lawful 前移：207→209（蛋糕族 tile 207..208 追加）；t1105 lawful 前移：201→207（南瓜族 + 炼药锅 tile 追加；t1103 曾 195→201、t1097 曾 193→195）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）；t1136 前移：Atlas 212→213（活塞伸出态瓦追加——钉值随追加前移）
             && bSrc.count(QStringLiteral("/* bookshelf               */ 47")) == 1;
         ok = ok && d2;
         if (!d2) diag += QStringLiteral("[d2 mc=%1 atlas=%2 row=%3]")

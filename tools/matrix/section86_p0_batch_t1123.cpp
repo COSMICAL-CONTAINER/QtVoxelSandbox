@@ -260,7 +260,7 @@ void MatrixRun::section86_p0_batch_t1123()
         {
             Hotbar hb;
             const QVariantList pal = hb.creativeBlocks();
-            if (pal.size() != 148) { // t1135 lawful 前移：147→148（活塞调色板行追加——creativeBlocks 段尾 +1，钉值随追加前移）
+            if (pal.size() != 149) { // t1135 lawful 前移：147→148（活塞调色板行追加——creativeBlocks 段尾 +1，钉值随追加前移）；t1136 前移：148→149（粘性活塞调色板行追加，头块/占位非玩家可获不入板）
                 ok = false;
                 diag += QStringLiteral("[pal size=%1]").arg(pal.size());
             }

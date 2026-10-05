@@ -312,6 +312,13 @@ void MatrixRun::runAll()
                               //   同门，NEG-1 敏感] / d 结构钉族柱[NEG-1/NEG-2 摘面行本腿持有]，
                               //   行为腿 fresh 小世界直驱推动机/红石 tick，rig 世界零接触，接
                               //   section97）
+    section99_piston_slice2_t1136(); // t1136 活塞切片二探针段（交付单；r2106 a 粘性拉回柱
+                              //   [真 rig 伸→失电→头格搬回 / 零线清头 / 不可拉清头 / 非粘性头
+                              //   消失，NEG-1 敏感] / b 头块柱[伸出态头块位+朝向镜像 / 缩回消失 /
+                              //   占位拒推成员 / 头块零掉落] / c 合成柱[两行命中+负例+板材回退，
+                              //   NEG-2 敏感] / d 贴图音名钉柱[伸/缩瓦分支+两声三面注册+工件在盘] /
+                              //   e 结构钉族柱[NEG-1/NEG-2 摘面行本腿持有]。行为腿 fresh 小世界
+                              //   红石 rig，rig 世界零接触，接 section98）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";

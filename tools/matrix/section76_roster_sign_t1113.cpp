@@ -168,7 +168,7 @@ void MatrixRun::section76_roster_sign_t1113()
             && BR::lightOpacity(quint8(BR::StandingSign), 0) == 0
             && BR::materialGroup(quint8(BR::StandingSign)) == BR::GroupWood
             && BR::mcBlockId(int(BR::StandingSign)) == 63
-            && int(BR::Count) == 163;                            // t1113 lawful 前移:160→162；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
+            && int(BR::Count) == 166;                            // t1113 lawful 前移:160→162；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）；t1136 前移：Count 163→166（头块/占位/粘性三 id 段尾追加——钉值随追加前移）
         ok = ok && routeOk;
         if (!routeOk) diag += QStringLiteral("[route]");
         // (4) 放置真链(站牌落格 state = horizontalFacing^1 + signPlaced 恰一次)。
@@ -545,8 +545,8 @@ void MatrixRun::section76_roster_sign_t1113()
         // (D1) 值面:id/段位/图集/kMc/相邻族零污染。
         {
             const bool enumOk = int(BR::StandingSign) == 160 && int(BR::WallSign) == 161
-                && int(BR::Count) == 163 // t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
-                && int(BR::AtlasTileCount) == 212 // t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
+                && int(BR::Count) == 166 // t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）；t1136 前移：Count 163→166（头块/占位/粘性三 id 段尾追加——钉值随追加前移）
+                && int(BR::AtlasTileCount) == 213 // t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）；t1136 前移：Atlas 212→213（活塞伸出态瓦追加——钉值随追加前移）
                 && BR::mcBlockId(int(BR::StandingSign)) == 63
                 && BR::mcBlockId(int(BR::WallSign)) == 68
                 && int(BR::FenceGate) == 157 && int(BR::GlassPane) == 158 && int(BR::Cake) == 159
@@ -563,8 +563,8 @@ void MatrixRun::section76_roster_sign_t1113()
             const QStringList missHdr = pinSet(srcDir + QStringLiteral("/Core/blockregistry.h"), {
                 SrcPin("standing id decl", "StandingSign     = 160,", 1),
                 SrcPin("wall id decl", "WallSign         = 161,", 1),
-                SrcPin("count sentinel row", "Count           = 163,", 1), // t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
-                SrcPin("atlas count", "AtlasTileCount = 212", 1), // t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
+                SrcPin("count sentinel row", "Count           = 166,", 1), // t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）；t1136 前移：Count 163→166（头块/占位/粘性三 id 段尾追加——钉文随源行前移）
+                SrcPin("atlas count", "AtlasTileCount = 213", 1), // t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）；t1136 前移：Atlas 212→213（活塞伸出态瓦追加——钉文随源行前移）
                 SrcPin("sign facing mask", "SignStateFacingMask  = 0x3;", 1),
                 SrcPin("isSign decl", "static bool isSign(quint8 blockId);", 1)});
             ok = ok && missHdr.isEmpty();

@@ -390,7 +390,7 @@ void MatrixRun::section79_small_gaps_t1116()
         bool ok = true;
         QString diag;
         // (D1) 值面:方块段/图集/苹果双 id/roll 次数原值(无 r2086 新方块 id 即此锁)。
-        const bool enumOk = int(BR::Count) == 163 && int(BR::AtlasTileCount) == 212 // t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
+        const bool enumOk = int(BR::Count) == 166 && int(BR::AtlasTileCount) == 213 // t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）；t1136 前移：Atlas 212→213（活塞伸出态瓦追加——钉值随追加前移）
             && int(BR::IronBars) == 142 && int(BR::Cake) == 159
             && int(BR::StandingSign) == 160 && int(BR::WallSign) == 161
             && int(BR::ShapeCake) == 16

@@ -434,8 +434,8 @@ void MatrixRun::section78_golden_apple_t1115()
                 && int(RecipeRegistry::GoldenAppleId) == 0x293
                 && int(RecipeRegistry::FilledMapId) == 0x291             // 段尾追加序(填充地图原位)
                 && int(RecipeRegistry::MilkBucketId) == 0x28F
-                && int(BR::AtlasTileCount) == 212                        // 物品面零新瓦(t1113 尾钉原值)；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
-                && int(BR::Count) == 163 // t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
+                && int(BR::AtlasTileCount) == 213                        // 物品面零新瓦(t1113 尾钉原值)；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）；t1136 前移：Atlas 212→213（活塞伸出态瓦追加）
+                && int(BR::Count) == 166 // t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）；t1136 前移：Count 163→166（头块/占位/粘性三 id 段尾追加）
                 && int(BR::StandingSign) == 160 && int(BR::WallSign) == 161
                 && RecipeRegistry::mcMaterialId(int(RecipeRegistry::AppleId)) == -1
                 && RecipeRegistry::mcMaterialId(int(RecipeRegistry::GoldenAppleId)) == -1
