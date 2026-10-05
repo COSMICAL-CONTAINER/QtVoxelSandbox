@@ -457,6 +457,10 @@ TILES = [
     #   tools/build_sign.py 程序生成原创像素图（§9 override (a)）。站牌/挂墙牌两 id 同瓦（挂墙变体仅
     #   几何摆位异）。文本不在瓦面（文本是 SignStore 方块附挂数据；瓦面 = 未写字的空行刻线板）。
     "default_sign_board",            # 209 sign_board（橡木板底 + 暗框 + 对角高光 + 四行淡文本带；牌子两 id 板面同瓦）
+    "default_piston_face",           # 210 piston_face（t1135 活塞朝向面：木推板 + 居中浅木方芯 + 四角螺栓；
+                                     #    mesher tileFor 据 state bit[2:0] 朝向选面——era 活塞朝向面同位）
+    "default_piston_side",           # 211 piston_side（t1135 活塞侧/底面：石质匣体 + 顶木带 + 螺栓点阵；
+                                     #    伸/缩态贴图差=切片二评估，本切片两瓦恒定）
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "..", "textures")

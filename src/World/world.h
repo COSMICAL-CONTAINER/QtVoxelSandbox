@@ -1341,6 +1341,45 @@ public:
     //   （state bit4）。只读。
     bool isPowerSource(int x, int y, int z) const;
 
+    // ── t1135 活塞（Piston=162）——推动机 + 红石接收器接入（机制等价 MC 1.0 piston；era 定谳工件
+    //    build/t1134_jar_piston_{base,push,tile}.txt + t1135 前置件 build/t1135_jar_material.txt）──
+    // 激励面（tickRedstone 接收器分支，红石灯同门）：受电即伸 / 失电即缩（**瞬时推动简化**——era 伸程
+    //   两 game tick + 排定事件不可撤销语义 = 切片三替换，本切片当拍完成位移，简化差如实登记）。
+    //   失电缩 = 只清 extended 位（era 非粘性缩回不搬回方块——本切片无粘性无拉回，切片二承接）。
+    //
+    // 推动机 tryPistonExtend（扫描与执行同界——**不可推一半**，era 扫描失败 = 世界零改写）：
+    //   ① 扫描相（era abr.g 正扫同构）：沿朝向正扫 ≤12 格；空气 = 界（界格须可写——Fixed 域界 /
+    //      sparse 物化门，同 setBlockSilent 写门谓词）；流体（Water/Lava——**附着断裂成员**，前置件
+    //      定谳 era 迁移位 1 材料恰四方块 id 8/9/10/11 → 引擎 Water=21/Lava=31 全族）= 界（执行相
+    //      毁格清空、**零掉落**——era dropBlockAsItemWithChance 流体无物品形态掉落量恒 0）；拒推四员
+    //      全单失败：黑曜石显式 / 已伸活塞（extended 位，era f(meta)=meta&8 同判）/ 侧存储族
+    //      （isStoreBlock——era BlockContainer 派生族对应面，推之丢内容故拒）/ 硬度 -1（基岩族；流体
+    //      已先判——era 流体硬度 100F 材料 J=1 双通道正交，引擎 Water/Lava hardness=-1 是不可挖掘
+    //      哨兵，故流体成员判定置于硬度员之前）；第 13 实心 = 败（era count==12 即败，上限 12）。
+    //      扫描游标 y 越界（≤0 / ≥高-1）= 败（era tryExtend 域守卫同构）。
+    //   ② 执行相（era abr.h 反向回走同构）：线尾向活塞回写——line[i] → line[i+1]（界格收线尾块）、
+    //      首格腾空（era 头块写入位——**本切片无头块 → Air 腾空**，头块=切片二，呈现简化登记）；
+    //      搬移保持 (id,state) 原样（era meta 搬移同构）。
+    //   ③ 批量收口（TNT detonateTntSphere 先例——**禁散布多次刷新**）：全部 m_chunks.setBlock 静默
+    //      直写（跨 chunk 路由 + 物化门拒未物化写），逐格 O(1) note 钩子（ice/fire/fluid/growth/power
+    //      五族索引维护，同 destroySphereSilent 爆炸批量口径）+ 逐格 fluidActExpand；失撑面 = 腾空格
+    //      recheckAttachmentsAfterClear + checkGravityBlockOnEdit（附着物 / 沙柱坍落，t799 同门）；
+    //      末尾对「活塞 ∪ 线 ∪ 界」外接盒 **一次** refloodBox(doSky)（搬移改遮光列），worldChanged /
+    //      clearAllDirty 由 tickRedstone 收口（N 写 1 emit）。**写入经本机集中一处**（EditBuffer 批量
+    //      纪律：同 tick 批量静默写 + 单次刷新），非逐格 setBlockSilent。
+    //   返 false = 扫描失败（拒推 / 上限 / 界不可写 / y 域）——世界零改写、extended 位不置（era
+    //      tryExtend false → 活塞保持缩回同口径）。
+    //   非 Q_INVOKABLE（仅 tickRedstone 接收器分支 / 矩阵探针 C++ 调，同 setBlockFromEntity 模式）。
+    bool tryPistonExtend(int x, int y, int z);
+    // t1135 活塞接收器动作（tickRedstone 活塞分支**单行调用面**——结构钉 / NEG 摘行靶行）：受电且
+    //   未伸 → 推动机成功才置 extended 位；失电且已伸 → 只清位（era 非粘性缩回不搬回方块；粘性
+    //   拉回 = 切片二）。返「本 pass 是否有写」（recomputePowerLocal any 收口位）。**瞬时推动简化**
+    //   登记面见 tryPistonExtend 头注（era 两拍排定不可撤销 = 切片三替换）。非 Q_INVOKABLE。
+    bool pistonReceiverAt(int x, int y, int z, quint8 b, quint8 st, bool powered);
+    // t1135 写格域门（推动机私有谓词；声明置公有供矩阵探针断言界格可写性）：Fixed 域界 / sparse
+    //   物化门——同 ChunkManager::setBlock 写门谓词（不可推一半不变量的界侧半边：界格不可写 = 扫描败）。
+    bool pistonCellWritable(int x, int y, int z) const;
+
     // R20.10 Chunk lifecycle（refactor-plan §29.3）：C++ 面转移 forwarder（态表/选型/六态图见
     //   chunkmanager.h + chunklifecycle.h）。**非 Q_INVOKABLE 且永不入 QML 面**——生命周期决策
     //   只在 World 层（plan 验收第四条「QML 不再决定 Chunk 的真实生命周期」以「QML 根本无生命

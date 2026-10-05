@@ -5615,6 +5615,8 @@ bool World::isPowerFamilyBlock(quint8 id)
         || id == BR::NoteBlock                           // 接收器：音符盒（t1028，通电上升沿发声；bit5 记忆位）
         || id == BR::Repeater                            // t1095 中继器（受控电源：定向输入 + 延迟档翻转输出；
                                                          //   入族保编辑可达性，同漏斗全族入族先例）
+        || BR::isPiston(id)                              // t1135 活塞（受电伸 / 失电缩推动机关——入族保
+                                                         //   编辑可达性，同漏斗全族入族先例）
         || BR::isLever(id) || BR::isWoodButton(id) || BR::isStoneButton(id) // 源：拉杆 / 按钮（state bit0）
         || BR::isPressurePlate(id)                       // 源：压力板（state bit0）
         || id == BR::DetectorRail;                       // 源：探测轨有车标记（state bit4）
@@ -6201,8 +6203,10 @@ bool World::recomputePowerLocal()
             || b == BlockRegistry::NoteBlock           // t1028 音符盒（通电上升沿发声；bit5 通电记忆位做真沿）
             || b == BlockRegistry::Rail                // t812 普通轨转辙器（T 交叉升沿切弯；非转辙器
                                                        //   形态分支内 no-op）
-            || b == BlockRegistry::Repeater)           // t1095 中继器（定向输入 + 延迟档翻转输出——
+            || b == BlockRegistry::Repeater            // t1095 中继器（定向输入 + 延迟档翻转输出——
                                                        //   分支内走 repeaterInputOn，不读全向 powered）
+            || BlockRegistry::isPiston(b))             // t1135 活塞（受电伸 / 失电缩推动机关；分支内读
+                                                       //   全向 powered——era 受电查询 = 本体邻域逐向）
             receivers.insert(packGrowthCell(x, y, z));
     };
     for (const quint64 k : region) {
@@ -6468,6 +6472,11 @@ bool World::recomputePowerLocal()
                     any = true;
                 }
             }
+        } else if (BlockRegistry::isPiston(b)) {
+            // t1135 活塞：受电伸 / 失电缩接收器动作收口单行（机制在 pistonReceiverAt——红石灯同门
+            //   全向 powered 读。**激励调用点单行承载**：结构钉 / NEG 摘行面——单行摘除编译绿、
+            //   活塞退化为无动作接收器，恰红归因干净）。
+            any = pistonReceiverAt(x, y, z, b, st, powered) || any;
         } else if (BlockRegistry::isTnt(b)) {
             // t658 TNT：通电**上升沿**触发一次（点燃后清 Air 由信号消费端做——同一链路防双触发）。
             if (powered) {
@@ -6653,6 +6662,171 @@ void World::tickRedstone()
         emit worldChanged();        // 驱动 mesh 重建（粉通断 / 灯亮灭 / 轨通电贴图切换）
         m_chunks.clearAllDirty();   // 两段重建完统一清脏（同 setBlock 末尾）
     }
+}
+
+// ── t1135 活塞推动机（声明注释见 world.h；era 定谳工件 build/t1134_jar_piston_*.txt +
+//    t1135 前置件 build/t1135_jar_material.txt）──
+
+// t1135 写格域门（声明注释见 world.h）：Fixed 域界 / sparse 物化门，同 ChunkManager::setBlock 写门
+//   谓词（不可推一半不变量的界侧半边：界格不可写 = 扫描败，执行相零写）。
+bool World::pistonCellWritable(int x, int y, int z) const
+{
+    if (m_chunks.mode() == WorldMode::Fixed) {
+        return x >= 0 && y >= 0 && z >= 0 && x < m_width && y < m_height && z < m_depth;
+    }
+    if (y < 0 || y >= m_height)
+        return false; // §29.5-W1 同门：y 域两模式同构（有限高）
+    return m_chunks.chunkContentPresent(floorDiv(x, Chunk::kSize), floorDiv(z, Chunk::kSize));
+}
+
+// t1135 活塞接收器动作（声明注释见 world.h）：受电且未伸 → 推动机成功才置 extended 位（era
+//   tryExtend false → 保持缩回同口径）；失电且已伸 → 只清 extended 位（era 非粘性缩回不搬回方块；
+//   粘性拉回 = 切片二）。位写走 m_chunks.setBlock 静默写（同粉 / 轨 / 门模式：标脏 + tickRedstone
+//   末尾 1 次 worldChanged 收口，不逐次 emit）。
+bool World::pistonReceiverAt(int x, int y, int z, quint8 b, quint8 st, bool powered)
+{
+    const bool ext = (st & BlockRegistry::PistonStateExtendedFlag) != 0;
+    bool any = false;
+    if (powered && !ext) {
+        if (tryPistonExtend(x, y, z)) {
+            m_chunks.setBlock(x, y, z, b, quint8(st | BlockRegistry::PistonStateExtendedFlag));
+            any = true;
+        }
+    } else if (!powered && ext) {
+        m_chunks.setBlock(x, y, z, b, quint8(st & quint8(~BlockRegistry::PistonStateExtendedFlag)));
+        any = true;
+    }
+    return any;
+}
+
+bool World::tryPistonExtend(int x, int y, int z)
+{
+    const quint8 pst = m_chunks.stateAt(x, y, z);
+    int dx = 0, dy = 0, dz = 0;
+    BlockRegistry::pistonFacingDelta(pst, dx, dy, dz);
+
+    // ── ① 扫描相（era abr.g 正扫同构；扫描与执行同界——不可推一半）────────────────────
+    //   线 = 活塞正前方连续可推实心（≤12）；界 = 首个空气 / 流体格。拒推四员任一命中 → 全单失败
+    //   （era 整次放弃零部分推动——世界零改写）。
+    struct PistonLineCell { int x, y, z; quint8 id, state; };
+    std::vector<PistonLineCell> line;
+    int cx = x, cy = y, cz = z;
+    bool broke = false;        // 正扫以界（空气 / 流体）break 收尾（era goto-160 汇合同构）
+    bool boundWritable = false; // 界格可写（不可推一半不变量界侧半边）
+    quint8 termOldId = BlockRegistry::Air;
+    bool termIsFluid = false;
+    for (int i = 0; i <= BlockRegistry::PistonPushLimit; ++i) {
+        cx += dx; cy += dy; cz += dz;
+        // era tryExtend 域守卫同构：游标 y ∈ (0, 高-1) 开区间——越界即败（era ifle/if_icmplt 字节码；
+        //   y=0 是基岩底层、y=高-1 顶界，双向皆不可侵入）。
+        if (cy <= 0 || cy >= m_height - 1)
+            return false;
+        const quint8 id = m_chunks.blockAt(cx, cy, cz);
+        if (id == BlockRegistry::Air) {
+            // 界 = 空气：界格须可写（不可推一半不变量界侧半边——Fixed 域界 / sparse 物化门拒未物化）。
+            broke = true;
+            boundWritable = pistonCellWritable(cx, cy, cz);
+            termOldId = BlockRegistry::Air;
+            break;
+        }
+        // 附着断裂成员界（前置件定谳：era 迁移位 1 材料恰四方块 id 8/9/10/11 = 水/岩浆流动+静止 →
+        //   引擎 Water/Lava 全族；era 材料 J=1 通道）。**置于硬度员之前**——era 流体 blockHardness
+        //   100F + J=1 双通道正交，引擎流体 hardness=-1 是不可挖掘哨兵（t148/t343），先判哨兵会把
+        //   era 该毁的流体误判成拒推全单失败。
+        if (id == BlockRegistry::Water || id == BlockRegistry::Lava) {
+            broke = true;
+            boundWritable = pistonCellWritable(cx, cy, cz);
+            termOldId = id;
+            termIsFluid = true;
+            break;
+        }
+        // 拒推四员（era canPushBlock abr.a 同构；前置件工件第三节负发现交叉区）：
+        if (id == BlockRegistry::Obsidian)
+            return false; // ① 黑曜石显式拒（era yy.ap 显式同构）
+        if (BlockRegistry::isPiston(id)
+            && (m_chunks.stateAt(cx, cy, cz) & BlockRegistry::PistonStateExtendedFlag) != 0)
+            return false; // ④ 已伸活塞（era f(meta)=meta&8 同判；缩回态活塞可推——era 同）
+        if (BlockRegistry::isStoreBlock(id))
+            return false; // ③ 侧存储族（era BlockContainer 派生族对应面——推之丢内容故拒；
+                          //   交接单问②定谳：拒推零掉落零破坏，活塞不伸出）
+        if (BlockRegistry::hardness(id) < 0.0f)
+            return false; // ② 硬度 -1（基岩族；era yy.n()==-1F 同构）
+        if (i == BlockRegistry::PistonPushLimit) { return false; } // 上限：第 13 实心 = 败（era count==12 即败；bipush 13 循环界定谳；单行完整语句——NEG-2 摘行面）
+        line.push_back({cx, cy, cz, id, m_chunks.stateAt(cx, cy, cz)});
+    }
+    if (broke && !boundWritable)
+        return false; // 界格不可写（Fixed 域界 / sparse 物化门拒）——整次放弃零部分推动
+    // 循环自然耗尽（!broke）：era abr.g:160 goto 汇合 = success 同构——**限位行在位时不可达**
+    //   （第 13 实心必经限位行返回）；NEG-2 摘行 → 13 实心整线可推 = 行为恰红面（推动柱 cap13）。
+
+    // ── ② 执行相（era abr.h 反向回走同构）+ ③ 批量收口（TNT detonateTntSphere 先例）────────
+    //   全部 m_chunks.setBlock 静默直写（跨 chunk 路由 + 物化门拒未物化写）；逐格 O(1) note 钩子
+    //   （五族索引维护，同 destroySphereSilent 爆炸批量口径）；末尾外接盒一次 refloodBox；
+    //   worldChanged / clearAllDirty 由 tickRedstone 收口（N 写 1 emit）。
+    struct PistonChange { int x, y, z; quint8 oldId, newId, newState; };
+    std::vector<PistonChange> changes;
+    const auto push = [&](int wx, int wy, int wz, quint8 oldId, quint8 newId, quint8 newState) {
+        m_chunks.setBlock(wx, wy, wz, newId, newState);
+        changes.push_back({wx, wy, wz, oldId, newId, newState});
+    };
+    // 线尾向活塞回写：line[i] → line[i+1]（line[N] = 界格——收线尾块；界流体在此被线尾块覆写，
+    //   oldId=流体 id 保 note 钩子见毁流体事实）。
+    for (int i = int(line.size()) - 1; i >= 0; --i) {
+        const PistonLineCell &dst = (i + 1 < int(line.size()))
+                                        ? PistonLineCell{line[size_t(i) + 1].x, line[size_t(i) + 1].y,
+                                                         line[size_t(i) + 1].z, 0, 0}
+                                        : PistonLineCell{cx, cy, cz, 0, 0};
+        const quint8 oldId = (i + 1 < int(line.size())) ? line[size_t(i) + 1].id : termOldId;
+        push(dst.x, dst.y, dst.z, oldId, line[size_t(i)].id, line[size_t(i)].state);
+    }
+    if (line.empty()) {
+        // 零实心线：界即活塞贴脸格。界 = 流体 → 毁格腾空（era 执行相毁分支——头块位清出）；界 =
+        //   空气 → 零格写（era 伸入纯空气只置伸出态，本切片 extended 位由调用方写）。
+        if (termIsFluid)
+            push(cx, cy, cz, termOldId, BlockRegistry::Air, 0);
+    } else {
+        // 首格腾空（era 头块写入位——本切片无头块 → Air 腾空，头块 = 切片二，呈现简化登记）。
+        push(line.front().x, line.front().y, line.front().z, line.front().id, BlockRegistry::Air, 0);
+    }
+
+    // 批量 note 钩子 + 流体活动盒（同 destroySphereSilent 逐格 O(1) 口径；爆炸先例 五族索引全族）。
+    for (const PistonChange &c : changes) {
+        noteIceWrite(c.x, c.y, c.z, c.oldId, c.newId);
+        noteFireWrite(c.x, c.y, c.z, c.oldId, c.newId);
+        noteFluidWrite(c.x, c.y, c.z, c.oldId, c.newId);
+        noteGrowthWrite(c.x, c.y, c.z, c.oldId, c.newId);
+        notePowerWrite(c.x, c.y, c.z, c.oldId, c.newId); // 被搬红石族（粉/源/轨/火把）电域重扫挂点
+        fluidActExpand(c.x, c.y, c.z);
+    }
+    m_waterDirty = true;  // 腾空格 / 毁流体格邻接流体平衡被扰（t380 同门，保守置位——活塞低频）
+    m_lavaDirty = true;
+    // 失撑面：仅腾空格（首格 / 零线毁流体格）——附着物失撑掉落 + 沙柱坍落复检（t799/review24 #3
+    //   单一入口同门；被搬格均仍持实心/原样方块，无需复检）。
+    if (!changes.empty()) {
+        const PistonChange &vacated = changes.back(); // 回写序末条 = 首格腾空 / 零线毁流体
+        recheckAttachmentsAfterClear(vacated.x, vacated.y, vacated.z, vacated.oldId);
+        checkGravityBlockOnEdit(vacated.x, vacated.y, vacated.z, vacated.oldId, BlockRegistry::Air);
+    }
+    // 光照批量收口：活塞 ∪ 线 ∪ 界 外接盒一次 refloodBox（搬移改遮光列，doSky=true 两通道——
+    //   TNT 先例同款单次刷新；sparse x/z 不钳、y 钳有限高，t1090 盒域两模式分流同门）。
+    if (!changes.empty()) {
+        int minX = x, maxX = x, minY = y, maxY = y, minZ = z, maxZ = z;
+        for (const PistonChange &c : changes) {
+            minX = std::min(minX, c.x); maxX = std::max(maxX, c.x);
+            minY = std::min(minY, c.y); maxY = std::max(maxY, c.y);
+            minZ = std::min(minZ, c.z); maxZ = std::max(maxZ, c.z);
+        }
+        int bx0 = minX - 1, bx1 = maxX + 1, bz0 = minZ - 1, bz1 = maxZ + 1;
+        if (m_chunks.mode() == WorldMode::Fixed) {
+            bx0 = std::max(0, bx0); bz0 = std::max(0, bz0);
+            bx1 = std::min(m_width - 1, bx1); bz1 = std::min(m_depth - 1, bz1);
+        }
+        const int by0 = std::max(0, minY - 1);
+        const int by1 = std::min(m_height - 1, maxY + 1);
+        refloodBox(bx0, by0, bz0, bx1, by1, bz1, /*doSky=*/true);
+    }
+    qInfo("vo.edit: piston extended = %d cells (%d,%d,%d)", int(changes.size()), x, y, z);
+    return true;
 }
 
 // t305 树苗生长 tick（见 world.h 头注释）。机制等价 MC 1.0 树苗生长（random-tick 式散布概率）。

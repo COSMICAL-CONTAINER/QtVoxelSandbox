@@ -1387,11 +1387,44 @@ public:
         //   同门）；挂墙牌须命中格完整立方墙面（木梯/机关同门）。**失撑掉落**：支撑被破 → 牌子当场脱落
         //   成物品（World::checkSignSupportOnEdit 写入钩子族，checkPaintingSupportOnEdit 同门）。
         WallSign         = 161, // 挂墙牌子：贴墙附着（命中格完整立方墙面）；板面盒贴墙；kMc 68
-        Count           = 162, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
-                                 //   t1113 lawful 前移：160→162（StandingSign=160/WallSign=161 尾部追加；
+        // ── t1135 活塞（Piston；机制等价 MC 1.0 piston id 33，Beta 1.7 入版 = 1.0 基线内）：红石驱动
+        //   推动机关方块——受电伸（正前方 ≤12 格可推实心整线前移一格 + 线端流体毁格清空）/ 失电缩
+        //   （本切片=瞬时版：当拍完成位移，era 两拍动画=切片三如实登记）。整立方 opaque（solid=true /
+        //   ShapeFull，同音符盒 / 漏斗机关匣家族体量）；hardness=0.5（era abr 构造 c(0.5f) 字节码定谳，
+        //   工件 build/t1134_jar_piston_base.txt）/ NoTool（空手可采且掉落，MC 口径）；音色 GroupStone。
+        //   掉自身（破坏掉活塞物品，era 无特殊掉落面——工件同上留痕）。各面贴图：朝向面=piston_face(210)
+        //   （木质推板面）/ 其余五面=piston_side(211)（石质匣体；era 活塞顶·侧·底三贴图的「朝向面」
+        //   简化——伸/缩态贴图差=切片二评估，登记面见 kDefs Piston 行）。**state 编码**（复用 chunk
+        //   m_states，存档 round-trip 保真；era meta bit[2:0]+bit3 同构——t1134 工件定谳 e(meta)=meta&7 /
+        //   f(meta)=meta&8）：
+        //     bit[2:0]（PistonStateFacingMask）= 朝向 0=-Y 1=+Y 2=-Z 3=+Z 4=-X 5=+X（era 六向序同构，
+        //       abr.f 逐向探针字节码定谳：0→y-1 / 1→y+1 / 2→z-1 / 3→z+1 / 5→x+1 / 4→x-1）。
+        //     bit3   （PistonStateExtendedFlag）= 伸出位（=1 已伸；era f(meta)=meta&8 同位同义）。
+        //   **id 选型**（本单评估留痕）：era 33 / 94 亮态（33 活塞本体 / 34 头块 / 36 移动占位——
+        //   头块与占位=切片二交付，段位预留 163/164 评估见交付报告）与引擎既有 id 段冲突（BedOrange=33
+        //   / BedYellow=34）→ 按引擎「新方块永远尾部追加」契约取段尾 162（id 是存档格式的一部分，
+        //   插中间破坏既有存档世界数据）；kMc 行取 33（迁移文档对齐）。下方 static_assert 钉死。
+        Piston           = 162, // 活塞：红石驱动推动机关（受电伸推 ≤12 实心 + 线端流体毁格；失电缩；kMc 33）
+        Count           = 163, // 哨兵：已定义方块数（含 air），也是合法 id 的上界（id < Count）。
+                                 //   t1135 lawful 前移：162→163（Piston=162 尾部追加；t1113 曾 160→162、
                                  //   t1112 曾 157→160、t1111 曾 154→157、t1105 曾 151→154、t1103 曾 149→151、
                                  //   t1097 曾 148→149——追加不插中间存档契约，钉值随追加前移）。
     };
+
+    // t1135 活塞 id 选型钉（enum 段尾追加契约：162 = 段尾位；era 33/34/36 与引擎既存床段冲突——见
+    //   Piston 枚举行注）。改段位 / 插中间即编译失败（存档格式契约编译期看门）。
+    static_assert(int(Piston) == 162, "Piston must stay at id 162 (tail-append contract; saves store numeric ids)");
+
+    // t1135 活塞 state 编码（era meta bit[2:0]+bit3 同构，见 Piston 枚举行注）：
+    static constexpr quint8 PistonStateFacingMask   = 0x07; // bit[2:0] = 朝向 0..5（0=-Y 1=+Y 2=-Z 3=+Z 4=-X 5=+X）
+    static constexpr quint8 PistonStateExtendedFlag = 0x08; // bit3 = 伸出位（era f(meta)=meta&8 同位）
+    static constexpr int    PistonPushLimit         = 12;   // 推动上限 12（era tryExtend count==12 即败；t1134 工件 bipush 13 循环界定谳）
+
+    // t1135 活塞朝向解码（单一权威）：state → 朝向单位向量写 (dx,dy,dz)。era ot.b/c/d 方向表同构
+    //   （0=(0,-1,0) / 1=(0,1,0) / 2=(0,0,-1) / 3=(0,0,1) / 4=(-1,0,0) / 5=(1,0,0)）；越界朝向（>5，
+    //   era meta==7 非法即弃同门）兜底 +Y。消费面：推动机扫描方向 / mesher tileFor 朝向面选择 / 探针。
+    static void pistonFacingDelta(quint8 state, int &dx, int &dy, int &dz);
+
 
     // t1105 炼药锅 state 编码（复用 chunk m_states，存档 round-trip 保真——水位是方块持久态）：
     //   bit[1:0] = 水位 0..3（0=空锅[玩家放置默认] / 1..3=逐级水量）。瓶取水 -1 / 桶灌满置 3。
@@ -1439,6 +1472,19 @@ public:
     //   placeBlock 放置形态分流（ny=0 侧面 → 挂墙 / 否则站牌）+ 支撑预检 + 失撑掉落钩子
     //   （World::checkSignSupportOnEdit）+ 音色/谓词路由统一读本谓词，避免各处硬编码双 id。
     static bool isSign(quint8 blockId);
+
+    // t1135 活塞族统一谓词（单 id，同 isFenceGate 单 id 模式）：红石接收器族入族判定
+    //   （World::isPowerFamilyBlock）/ tickRedstone 接收器分支 / 拒推已伸活塞员统一读本谓词。
+    static bool isPiston(quint8 blockId) { return blockId == Piston; }
+
+    // t1135 侧存储方块族统一谓词（era BlockContainer 派生族对应面——t1134 评估 + t1135 前置件
+    //   复核定谳：era jar 内 ba 派生恰 11 类 = 箱/炉/发射器/音符盒/刷怪笼/牌子/唱片机/酿造台/
+    //   附魔台/炼药锅/移动占位，工件 build/t1135_jar_material.txt 第三节交叉区；引擎同语义族 =
+    //   「破块须清侧存储条目 / 右键开侧存储面」的方块）。活塞拒推员之一（推之丢内容 = era 拒推零
+    //   掉落零破坏口径）。Hopper 引擎有侧存储（HopperStore）而 era 1.0 无此方块——按机制语义并入
+    //   （登记面见交付报告）。
+    static bool isStoreBlock(quint8 blockId);
+
 
     // t457 床低 3D 模型几何常量（cell-local [0,1]）—— PartialBlockGeometry 渲染 + shapeBoxes 碰撞共用同一组值，
     //   保证「碰撞盒顶 = 渲染床垫顶」（玩家立于床垫顶）。kBedMattressTop=床垫顶高（~0.31 = 5/16，低床，碰撞盒顶）；
@@ -2243,7 +2289,10 @@ public:
     //   build_jackolantern.py / build_cauldron.py 程序生成原创像素图 §9a）。**追加不插中间**（同上）。
     //   209=sign_board 牌板面（橡木板底 + 暗边框 + 四行淡文本带；StandingSign/WallSign 板面同瓦——挂墙
     //   变体仅几何摆位异，贴图同源）。tools/build_sign.py 程序生成原创像素图 §9a。
-    static constexpr int AtlasTileCount = 210; // t1113 起 209→210（牌子板面 tile 209 尾部追加；t1112 起
+    //   210=piston_face 活塞朝向面（木质推板 + 居中浅木方芯 + 四角螺栓；mesher 据 state bit[2:0] 朝向
+    //   选面）/ 211=piston_side 活塞侧底面（石质匣体 + 顶木带 + 螺栓点阵）。伸/缩态贴图差=切片二评估
+    //   （本切片两瓦恒定）。tools/build_piston.py 程序生成原创像素图 §9a。**追加不插中间**（同上）。
+    static constexpr int AtlasTileCount = 212; // t1135 起 210→212（活塞 face/side 两瓦尾部追加；t1113 起
                                                //   201→207（南瓜族 tile 201..205 + 炼药锅 206 尾部
                                                //   追加：南瓜茎 4 阶段/南瓜灯点亮刻脸/炼药锅壁，不插中间
                                                //   存档契约；t1103 曾 195→201——钉值随追加 lawful 前移）

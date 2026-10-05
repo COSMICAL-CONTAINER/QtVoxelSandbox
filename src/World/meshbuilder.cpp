@@ -188,6 +188,24 @@ static int tileFor(quint8 block, int face, quint8 state)
     //   承担，与贴图切换解耦（同 t494 熔炉 / t569 红石矿的「贴图 + 光照各自读同一 state bit」模式）。
     if (block == BlockRegistry::RedstoneLamp)
         return (state & BlockRegistry::RedstoneLampStateOnFlag) != 0 ? 153 : 152;
+    // t1135 活塞朝向面（同发射器 / 熔炉 per-face 模式，6 向版）：朝向面（推板，state bit[2:0] 六向）
+    //   = piston_face(210)（frontTile 字段承载）/ 其余五面 = piston_side(211)。era 活塞朝向面贴图
+    //   同位同语义；伸/缩态贴图差 = 切片二评估（本切片 extended 位不换贴图——两瓦恒定）。朝向→面
+    //   映射：引擎朝向 0=-Y 1=+Y 2=-Z 3=+Z 4=-X 5=+X（era ot.b/c/d 同构）→ 本函数面号
+    //   0=+X 1=-X 2=+Y 3=-Y 4=+Z 5=-Z（Face 枚举）。tileFor 与推动机/放置端三方同源
+    //   pistonFacingDelta 解码（单一权威，禁第二份朝向表）。
+    if (block == BlockRegistry::Piston) {
+        const BlockRegistry::BlockDef &d = BlockRegistry::def(block);
+        int pdx = 0, pdy = 0, pdz = 0;
+        BlockRegistry::pistonFacingDelta(state, pdx, pdy, pdz);
+        const int facingFace = (pdy < 0) ? int(BlockRegistry::Bottom)
+                             : (pdy > 0) ? int(BlockRegistry::Top)
+                             : (pdx > 0) ? int(BlockRegistry::PosX)
+                             : (pdx < 0) ? int(BlockRegistry::NegX)
+                             : (pdz > 0) ? int(BlockRegistry::PosZ)
+                                         : int(BlockRegistry::NegZ);
+        return face == facingFace ? d.frontTile : d.sideTile;
+    }
     return BlockRegistry::tileIndex(block, BlockRegistry::Face(face));
 }
 

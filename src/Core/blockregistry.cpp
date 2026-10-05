@@ -839,6 +839,14 @@ constexpr BlockRegistry::BlockDef kDefs[int(BlockRegistry::Count)] = {
     //   挂墙牌全字段同表行（仅 id/名异），MC 1.0 sign id 63 / wall sign id 68 双方块族惯例。
     /* standing_sign        */ {int(BlockRegistry::StandingSign),      209,209,209,209, false, BlockRegistry::ShapeNone,    1.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::StandingSign),    1, 64, "standing_sign",   "牌子"},
     /* wall_sign            */ {int(BlockRegistry::WallSign),          209,209,209,209, false, BlockRegistry::ShapeNone,    1.0f, int(BlockRegistry::Axe),     0, false, int(BlockRegistry::WallSign),        1, 64, "wall_sign",       "挂墙牌子"},
+    // ── t1135 活塞（Piston=162；属性注释见 blockregistry.h Id 枚举 Piston 行）：红石驱动推动机关方块
+    //   （机制语义在 World::tickRedstone 活塞接收器分支 + tryPistonExtend 推动机）。整立方 opaque
+    //   （solid=true / ShapeFull，同音符盒 / 漏斗机关匣家族体量）；hardness=0.5（era abr 构造 c(0.5f)
+    //   字节码定谳）/ NoTool（空手可采且掉落）；dropId=自身（破坏掉活塞物品）。贴图 per-state 朝向：
+    //   朝向面=piston_face(210 木质推板面) / 其余五面=piston_side(211 石质匣体)（mesher tileFor 据
+    //   state bit[2:0] 朝向选面——era 活塞顶·侧·底三贴图的「朝向面」简化登记；伸/缩态贴图差=切片二
+    //   评估）。音色 GroupStone（石质机关匣体）。进创造调色板（红石 tab——机关件组）。
+    /* piston               */ {int(BlockRegistry::Piston),             211,211,211,210, true,  BlockRegistry::ShapeFull,     0.5f, int(BlockRegistry::NoTool),  0, false, int(BlockRegistry::Piston),            1, 64, "piston",         "活塞"},
 };
 
 // 编译期表大小守卫：Count 变更后未同步本表 → 编译失败（防漏行 / 错位）。
@@ -1087,6 +1095,12 @@ constexpr int kMcBlockId[int(BlockRegistry::Count)] = {
     //   本行追加后全表行数与 Count 162 一致（t691 教训：一行一条目 + 行内注释，防聚合初始化零填充回归）。
     /* standing_sign           */ 63,
     /* wall_sign               */ 68,
+    // t1135 活塞 → MC 1.0 **存在** id 33（piston base，Beta 1.7 入版 = 1.0 基线内；受电伸推 / 失电缩 /
+    //   推动上限 12 / 拒推集合机制等价实现——era 33 活塞本体；34 头块 / 36 移动占位 = 切片二段位，
+    //   29 粘性 = 切片二，kMc 行届时另补。**id 选型**：era 33 与引擎 BedOrange=33 冲突 → 引擎段尾
+    //   162 承载（enum 尾部追加契约，Piston 枚举行注 + static_assert 钉），本行仅迁移文档对齐）。
+    //   本行追加后全表行数与 Count 163 一致（t691 教训：一行一条目 + 行内注释，防聚合初始化零填充回归）。
+    /* piston                  */ 33,
 };
 static_assert(sizeof(kMcBlockId) / sizeof(kMcBlockId[0]) == int(BlockRegistry::Count),
               "kMcBlockId 行数须与 BlockRegistry::Count 一致；新方块需补一行 MC 1.0 对齐值");
@@ -1175,6 +1189,46 @@ bool BlockRegistry::isFenceGate(quint8 blockId)      { return blockId == FenceGa
 // t1113 牌子族谓词（站牌 + 挂墙牌双 id 并判；声明见 .h isSign 注——放置形态分流 / 支撑预检 / 失撑
 //   掉落钩子 / 音色路由统一读本谓词）。
 bool BlockRegistry::isSign(quint8 blockId)           { return blockId == StandingSign || blockId == WallSign; }
+
+// t1135 侧存储方块族单一权威（声明注释见 blockregistry.h）：era BlockContainer（ba）派生族对应面。
+//   era jar 11 类清单 = 箱(54)/炉(61,62)/发射器(23)/音符盒(25)/刷怪笼(52)/牌子(63,68)/唱片机(84)/
+//   酿造台(117)/附魔台(116)/炼药锅(119)/移动占位(36)——引擎同语义族 + Hopper（era 1.0 无方块、
+//   引擎有 HopperStore 侧存储，按机制语义并入，登记面见交付报告）。活塞拒推员之一。
+bool BlockRegistry::isStoreBlock(quint8 blockId)
+{
+    switch (blockId) {
+    case Chest:               // 箱子（ChestStore）
+    case Furnace:             // 熔炉（FurnaceStore）
+    case Dispenser: case Dropper: // 发射器 / 投掷器（DispenserStore 共用）
+    case Hopper:              // 漏斗（HopperStore；era 1.0 无方块——机制语义并入，登记面见报告）
+    case BrewingStand:        // 酿造台（BrewingStore）
+    case EnchantingTable:     // 附魔台（era ba 派生族成员）
+    case NoteBlock:           // 音符盒（era ba 派生族成员）
+    case Spawner:             // 刷怪笼（era ba 派生族成员）
+    case StandingSign: case WallSign: // 牌子族（SignStore；era ba 派生族成员）
+    case Jukebox:             // 唱片机（era ba 派生族成员）
+    case Cauldron:            // 炼药锅（era ba 派生族成员）
+        return true;
+    default:
+        return false;
+    }
+}
+
+// t1135 活塞朝向解码（单一权威，声明注释见 blockregistry.h）：era ot.b/c/d 方向表同构
+//   0=(0,-1,0) / 1=(0,1,0) / 2=(0,0,-1) / 3=(0,0,1) / 4=(-1,0,0) / 5=(1,0,0)；越界兜底 +Y（era
+//   meta==7 非法即弃同门——置 1 朝上安全向）。只读 state，无副作用。
+void BlockRegistry::pistonFacingDelta(quint8 state, int &dx, int &dy, int &dz)
+{
+    switch (state & PistonStateFacingMask) {
+    case 0: dx = 0; dy = -1; dz = 0; break;
+    case 1: dx = 0; dy = 1; dz = 0; break;
+    case 2: dx = 0; dy = 0; dz = -1; break;
+    case 3: dx = 0; dy = 0; dz = 1; break;
+    case 4: dx = -1; dy = 0; dz = 0; break;
+    case 5: dx = 1; dy = 0; dz = 0; break;
+    default: dx = 0; dy = 1; dz = 0; break; // 6/7 非法朝向兜底（era meta==7 弃同门）
+    }
+}
 // t627 扩展：压力板族五件（wood/cobble/stone/iron/gold——后三件为 t627 家族扩展）。放置放宽 / 失撑掉落 /
 //   mesher plate case / 触发扫描统一读本谓词。
 bool BlockRegistry::isPressurePlate(quint8 blockId)
@@ -3190,6 +3244,7 @@ BlockRegistry::MaterialGroup BlockRegistry::materialGroup(quint8 blockId)
     case BoneBlock: // t1077 骨块 → 石质音色（石质整立方，同 stone_brick / 存储块装饰族）
     case Repeater: // t1095 红石中继器 → 石质音色（石质底板，同压力板石族 / 机关件；机制等价 MC repeater stone SoundType）
     case Cauldron: // t1105 炼药锅 → 石质音色（铸铁锅体金属质，同 iron bars 族；机制等价 MC cauldron stone SoundType）
+    case Piston: // t1135 活塞 → 石质音色（石质机关匣体，同漏斗/发射器机关盒家族；era abr 构造 step sound wu.f 石质族同口径）
         return GroupStone;
     case Ice: // t395 冰 → 石质音色（玻璃质敲击，最接近 MC 1.0 冰 glass SoundType）
     case Glass: // t405 玻璃 → 石质音色（玻璃质敲击，最接近 MC 1.0 玻璃 glass SoundType，同 ice）

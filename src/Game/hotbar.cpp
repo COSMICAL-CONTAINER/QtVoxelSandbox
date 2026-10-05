@@ -277,6 +277,7 @@ bool isPackDerivedIconFamily(quint8 id)
     case BlockRegistry::IronBars:          // t998 入族（薄杆异形——atlasIconSpecForBlock IronBars 特型盒集（细柱+四向横板满连形态），图标贴放置观感）
     case BlockRegistry::NoteBlock:         // t1028 入族（Glass 同款语义外延——无 qrc 手绘图，程序图集重渲是唯一原生路径；ShapeFull 泛化立方投影）
     case BlockRegistry::Repeater:          // t1095 入族（NoteBlock 同门——无 qrc 手绘图，程序图集重渲是唯一原生路径；ShapeRepeater 特型薄板盒投影，见 atlasIconSpecForBlock）
+    case BlockRegistry::Piston:            // t1135 入族（NoteBlock 同门——无 qrc 手绘图，程序图集重渲是唯一原生路径；ShapeFull 泛化立方投影，朝向面随 def frontTile）
         return true;
     default:
         return false;
@@ -1048,6 +1049,11 @@ QVariantList Hotbar::creativeBlocks() const
              //   tickRedstone 中继器分支机制面）。红石机关件归红石 tab（Inventory.qml redstoneIds 含 147
              //   → 方块 tab 自动隐藏，与红石灯 / 音符盒同页）；创造取用（生存配方登记后续批）。
              int(BlockRegistry::Repeater),                                   // 红石中继器（延迟四档；右键调档；续距）
+             // t1135 活塞（机制等价 MC 1.0 piston——受电伸推 ≤12 实心 + 线端流体毁格，失电缩；
+             //   tickRedstone 活塞接收器分支 + tryPistonExtend 推动机机制面）。红石机关件归红石 tab
+             //   （Inventory.qml redstoneIds 含 162 → 方块 tab 自动隐藏，与中继器 / 音符盒同页）。
+             //   配方 = 切片二范畴评估（本切片获取面 = 创造调色板）。
+             int(BlockRegistry::Piston),                                     // 活塞（红石驱动推动机关；受电伸/失电缩）
              // t628 手动点火机关三件（t490 已建方块但漏进调色板——blockregistry.h 注释承诺「进创造调色板」未兑现；
              //   本任务补齐 + 接图标 + 配方）。右键激活：拉杆扳开沿/按钮按下沿 fire 邻接 TNT + 发射器/投掷器一次
              //   （按钮 ~1s 自动弹回；拉杆保持扳开直到再右键）。机关件紧随发射器 / 投掷器排列。
