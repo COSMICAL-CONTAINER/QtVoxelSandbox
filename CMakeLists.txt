@@ -1344,6 +1344,12 @@ add_executable(redstone_matrix_test
     #   c 零行为面 rig 柱 / d 结构钉族柱[NEG-1 = 摘本段注册行恰红 r2104d；NEG-2 = mv jar fixture
     #   abr.class 出位面恰红 r2104a]。行为腿 fresh 小世界红石 rig，rig 世界零接触）。
     tools/matrix/section97_piston_eval_t1134.cpp
+    # t1135 活塞切片一探针段（交付单；r2105 a 推动柱[基本推动/12 上限/拒推四员/零部分推动] /
+    #   b 附着断裂柱[水/岩浆界格毁格零掉落/贴脸流体/12 实心+流体界] / c 激励柱[单 pass 瞬时伸/
+    #   失电缩不回搬/复伸/方向化同门] / d 结构钉族柱[NEG-1 = 摘 world.cpp 激励调用行恰红
+    #   r2105c+r2105d；NEG-2 = 摘推动上限判定行恰红 r2105a+r2105d]。行为腿 fresh 小世界直驱
+    #   推动机/红石 tick，rig 世界零接触）。
+    tools/matrix/section98_piston_slice1_t1135.cpp
     # t1129 杀进程探针（CLI 模式 TU：--killprobe inject|inject-old|child|child-old|parent|
     #   parent-old——父 spawn 自身子进程 + 标记文件锚定保存窗 + QProcess::kill 真实终止 + 重开
     #   库四面读回。inject-old/child-old/parent-old = 旧协议提交序原语级重放（复现实验面——

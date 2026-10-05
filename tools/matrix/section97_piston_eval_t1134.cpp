@@ -2,6 +2,9 @@
 
 // t1134 活塞族评估单探针段（4 腿；filter 词 r2104；矩阵 958→962）。置尾先例沿用（接 section96，
 //   runAll 末执行，rig 世界零接触——行为腿自建 fresh 小世界，余纯源钉/工件钉腿）。
+//   **t1135 lawful 翻案注（r2104b）**：切片一交付活塞本体（引擎 id 162 段尾追加 + kMc 行 33）后，
+//   原「缺口确认柱」前提（kMc 零家族映射 + 源树零活塞词元）失真 → 翻案改钉交付面（恰一引擎 id
+//   映射 33 且 = Piston、家族另三 id 仍零映射、era 词元零命中），沿革全文见该腿注释。
 //
 // ── 单性裁定：**零代码评估单**（交接单 AUTO-01 两案取 a 案；评估先行先例 = t1086/t1087 纪元裁定单
 //    + t1125 件二零代码裁定收口 + t1120 件三件四裁定锚柱同门）。选型理由：①era 全景已由本单 jar
@@ -181,31 +184,50 @@ void MatrixRun::section97_piston_eval_t1134()
             << (ok ? QString() : diag);
     });
 
-    // ── r2104b:缺口确认行钉柱（kMc 映射全幂扫零活塞行 + 源树全树零活塞词元）────────────────
-    //   家族缺席 = 注册表层（kMcBlockId 无一引擎 id 映射 29/33/34/36）+ 词法层（src 全树零
-    //   "iston" 词元——大小写族并盖 Piston/piston）双层确认（台账:40 缺席行的代码侧实锚）。
-    runLeg("r2104b gap confirmation column (the engine to one point zero block mapping"
-        " answers no engine id for the piston family numeric ids twenty nine thirty three"
-        " thirty four and thirty six across the whole registry sweep, and the whole source"
-        " tree carries zero piston family tokens in any cpp header or qml file, so the"
-        " ledger absence row is anchored at both the registry layer and the lexical layer)",
+    // ── r2104b:交付面行钉柱（t1135 lawful 翻案——切片一交付收口缺口，本柱改钉交付面）──────
+    //   沿革：原「缺口确认柱」（kMc 映射全幂扫零家族行 + 源树零活塞词元）在 t1135 交付活塞
+    //   本体后前提失真 → lawful 翻案改钉交付面（t1088/t1113 前移先例同门，翻案注立此存照）：
+    //   注册表层 = kMc 恰一引擎 id（= Piston 162）映射 33、家族另三 id（29 粘性 / 34 头 /
+    //   36 移动 = 切片二段位）仍零映射；词法层 = src 全树零 era 家族标识词元（混淆类名
+    //   abr/acu/qz/agb、era 注册名 pistonBase/pistonStickyBase、era 声名 tile.piston）——
+    //   机制交付但零 era 资产/专名词形（PLAN §9）。
+    runLeg("r2104b delivery face column (the t1135 slice one delivery lawfully closed the"
+        " registry gap so the engine to one point zero block mapping answers exactly one"
+        " engine id for the piston base numeric id thirty three and that engine id is the"
+        " piston block itself while the sticky and head and moving numeric ids twenty nine"
+        " thirty four and thirty six stay unmapped for the later slices, and the whole"
+        " source tree carries zero era family identifier tokens from the jar fixture"
+        " obfuscation set and zero era registration and sound name tokens, so the ledger"
+        " row is anchored at the registry layer with the single delivered id and the"
+        " lexical layer stays era free)",
         [&]() {
         bool ok = true;
         QString diag;
-        // (1) kMc 映射幂扫：全引擎 id 域无一映射到家族四 id（29 粘性 / 33 活塞 / 34 头 / 36 移动）。
-        bool sweepClean = true;
-        int hits = 0;
-        for (int id = 0; id < int(BR::Count); ++id) {
-            const int mc = BR::mcBlockId(quint8(id));
-            if (mc == 29 || mc == 33 || mc == 34 || mc == 36) {
-                sweepClean = false;
-                ++hits;
-            }
-        }
-        ok = ok && sweepClean;
-        if (!sweepClean) diag += QStringLiteral("[kMc hits=%1]").arg(hits);
-        // (2) 源树词元零命中（"iston" 大小写并盖——Piston/piston 全族词形）。
+        // (1) kMc 映射幂扫（交付面）：33 恰一引擎 id 且 = Piston；29/34/36 仍零映射（切片二段位钉）。
         {
+            int hits33 = 0;
+            int hitsOthers = 0;
+            int pistonMapped = 0;
+            for (int id = 0; id < int(BR::Count); ++id) {
+                const int mc = BR::mcBlockId(quint8(id));
+                if (mc == 33) {
+                    ++hits33;
+                    if (id == int(BR::Piston))
+                        ++pistonMapped;
+                } else if (mc == 29 || mc == 34 || mc == 36) {
+                    ++hitsOthers;
+                }
+            }
+            const bool sweep = hits33 == 1 && pistonMapped == 1 && hitsOthers == 0;
+            ok = ok && sweep;
+            if (!sweep)
+                diag += QStringLiteral("[kMc h33=%1 mapped=%2 others=%3]")
+                            .arg(hits33).arg(pistonMapped).arg(hitsOthers);
+        }
+        // (2) 源树 era 词元零命中（混淆类名 + era 注册名 + era 声名；工程自名 Piston/piston* 不在列）。
+        {
+            static const char *kEraTokens[] = { "pistonBase", "pistonStickyBase",
+                                                "tile.piston", "pistonMoving" };
             bool leaked = false;
             int leakFiles = 0;
             QDirIterator it(srcRootForPistonEvalPins(),
@@ -213,9 +235,13 @@ void MatrixRun::section97_piston_eval_t1134()
                              QStringLiteral("*.qml")},
                             QDir::Files, QDirIterator::Subdirectories);
             while (it.hasNext()) {
-                if (rawContainsPistonEval(it.next(), QByteArray("iston"))) {
-                    leaked = true;
-                    ++leakFiles;
+                const QString p = it.next();
+                for (const char *tk : kEraTokens) {
+                    if (rawContainsPistonEval(p, QByteArray(tk))) {
+                        leaked = true;
+                        ++leakFiles;
+                        break;
+                    }
                 }
             }
             ok = ok && !leaked;
@@ -224,12 +250,15 @@ void MatrixRun::section97_piston_eval_t1134()
 
         if (!ok) ++totalFail;
         qInfo().noquote() << (ok ? "PASS" : "FAIL")
-            << "| r2104b gap confirmation column (the engine to one point zero block mapping"
-               " answers no engine id for the piston family numeric ids twenty nine thirty"
-               " three thirty four and thirty six across the whole registry sweep, and the"
-               " whole source tree carries zero piston family tokens in any cpp header or"
-               " qml file, so the ledger absence row is anchored at both the registry layer"
-               " and the lexical layer)"
+            << "| r2104b delivery face column (the t1135 slice one delivery lawfully closed"
+               " the registry gap so the engine to one point zero block mapping answers"
+               " exactly one engine id for the piston base numeric id thirty three and that"
+               " engine id is the piston block itself while the sticky and head and moving"
+               " numeric ids twenty nine thirty four and thirty six stay unmapped for the"
+               " later slices, and the whole source tree carries zero era family identifier"
+               " tokens from the jar fixture obfuscation set and zero era registration and"
+               " sound name tokens, so the ledger row is anchored at the registry layer with"
+               " the single delivered id and the lexical layer stays era free)"
             << (ok ? QString() : diag);
     });
 

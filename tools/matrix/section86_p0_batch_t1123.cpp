@@ -260,7 +260,7 @@ void MatrixRun::section86_p0_batch_t1123()
         {
             Hotbar hb;
             const QVariantList pal = hb.creativeBlocks();
-            if (pal.size() != 147) {
+            if (pal.size() != 148) { // t1135 lawful 前移：147→148（活塞调色板行追加——creativeBlocks 段尾 +1，钉值随追加前移）
                 ok = false;
                 diag += QStringLiteral("[pal size=%1]").arg(pal.size());
             }

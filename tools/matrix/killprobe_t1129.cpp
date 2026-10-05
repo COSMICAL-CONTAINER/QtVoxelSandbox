@@ -176,7 +176,11 @@ bool prepareBase(const QString &db) // 存 A（完整 Clean 1/1）——两序�
 void blockForever(const QString &marker)
 {
     QFile f(marker);
-    f.open(QIODevice::WriteOnly);
+    // t1135 全量零警告门顺手清（lessons 工具链节：nodiscard fallible 调用检查 + 可见诊断降级，
+    //   非 (void) 糊弄——marker 打不开时阻塞面退化为忙等自旋，父 kill 出口语义不变）。
+    if (!f.open(QIODevice::WriteOnly))
+        qWarning("killprobe: marker %s unopenable (block-forever degrades to spin)",
+                 qPrintable(marker));
     f.write("paused\n");
     f.close();
     fflush(stdout);

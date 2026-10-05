@@ -303,8 +303,8 @@ void MatrixRun::section51_bonemeal_flora_boneblock()
             //   t1097 四次同门修订：BrewingStand=148 尾部追加 → 148→149 / 193→195。
             //   t1103 五次同门修订：Melon=149/MelonStem=150 尾部追加 → 149→151 / 195→201。
             //   t1105 六次同门修订：南瓜族+炼药锅三件尾部追加 → 151→154 / 201→207。
-            SrcPin("Count sentinel", "Count           = 162", 1), // t1112 lawful 前移：钉文 157→160 随源行前移（栅栏门/玻璃板/蛋糕尾部追加）；沿革 t1111 lawful 前移：钉文 154→157 随源行前移（SandstoneStairs=154/StoneSlab=155/SandstoneSlab=156 尾部追加；t1105 曾 151→154）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
-            SrcPin("atlas tile count", "AtlasTileCount = 210", 1) // t1113 lawful 前移：209→210（牌板 tile 追加）
+            SrcPin("Count sentinel", "Count           = 163", 1), // t1112 lawful 前移：钉文 157→160 随源行前移（栅栏门/玻璃板/蛋糕尾部追加）；沿革 t1111 lawful 前移：钉文 154→157 随源行前移（SandstoneStairs=154/StoneSlab=155/SandstoneSlab=156 尾部追加；t1105 曾 151→154）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163（活塞 id 段尾追加——钉文随源行前移）
+            SrcPin("atlas tile count", "AtlasTileCount = 212", 1) // t1113 lawful 前移：209→210（牌板 tile 追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
         });
         ok = ok && missBrH.isEmpty();
         if (!missBrH.isEmpty()) diag += QStringLiteral("[br.h %1] ").arg(missBrH.join(QLatin1Char(',')));
@@ -326,6 +326,9 @@ void MatrixRun::section51_bonemeal_flora_boneblock()
         //   cake 92）→ 表尾现为「*/ 92,\n};」；石/砂岩台阶行（*/ 44,）存在性钉保持、不钉「最末」位。
         //   t1113 十次同门修订：蛋糕后尾部追加名册大件批首单两行（standing_sign 63 / wall_sign 68）→
         //   表尾现为「*/ 68,\n};」；蛋糕行（*/ 92,）存在性钉保持、不钉「最末」位。
+        //   t1135 eleven-th same-family revision: after wall sign the piston row (piston 33) is
+        //   appended; the tail pin moves to "*/ 33,\n};" and the wall sign row becomes an
+        //   existence pin (not tail).
         const bool brCppRows = brCppTxt.contains(QLatin1String("*/ 25,")) // note_block 行（音符盒 MC 1.0 id 25）
             && brCppTxt.contains(QLatin1String("*/ 0,"))
             && brCppTxt.contains(QLatin1String("*/ 84,"))
@@ -335,7 +338,8 @@ void MatrixRun::section51_bonemeal_flora_boneblock()
             && brCppTxt.contains(QLatin1String("*/ 118,")) // 炼药锅行（t1105；存在性钉，非表尾钉）
             && brCppTxt.contains(QLatin1String("*/ 44,")) // 石/砂岩台阶行（t1111；存在性钉，非表尾钉）
             && brCppTxt.contains(QLatin1String("*/ 92,")) // 蛋糕行（t1112；存在性钉，非表尾钉）
-            && brCppTxt.contains(QLatin1String("*/ 68,\n};")); // 挂墙牌行（表尾最后一条目，t1113；十次同门修订随段尾追加前移）
+            && brCppTxt.contains(QLatin1String("*/ 68,")) // t1113; existence pin, not tail pin
+            && brCppTxt.contains(QLatin1String("*/ 33,\n};")); // t1135; tail pin moved with the piston kMc 33 tail append
         ok = ok && brCppRows;
         if (!brCppRows) diag += QStringLiteral("[br.cpp rows] ");
         // 配方两行 / 调色板 / 图标 / pack 映射 / 派生链工具表。

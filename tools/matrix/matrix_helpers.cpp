@@ -306,6 +306,12 @@ void MatrixRun::runAll()
                               //   证据在盘柱 / b 缺口确认柱[kMc 幂扫+源树零词元] / c 零行为面
                               //   rig 柱[供电正控+域快照恒等] / d 结构钉族柱[NEG-1 敏感]，
                               //   行为腿 fresh 小世界红石 rig，rig 世界零接触，接 section96）
+    section98_piston_slice1_t1135(); // t1135 活塞切片一探针段（交付单；r2105 a 推动柱[基本
+                              //   推动/12 上限/拒推四员/零部分推动，NEG-2 敏感] / b 附着断裂柱
+                              //   [水/岩浆界格毁格零掉落] / c 激励柱[单 pass 瞬时伸/失电缩/方向化
+                              //   同门，NEG-1 敏感] / d 结构钉族柱[NEG-1/NEG-2 摘面行本腿持有]，
+                              //   行为腿 fresh 小世界直驱推动机/红石 tick，rig 世界零接触，接
+                              //   section97）
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";

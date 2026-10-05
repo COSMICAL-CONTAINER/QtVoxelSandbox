@@ -521,7 +521,7 @@ void MatrixRun::section67_brewing()
                          && RecipeRegistry::SugarId == 0x26A
                          && RecipeRegistry::GlimmerBottleId == 0x263
                          && int(BR::BrewingStand) == 148
-                         && int(BR::Count) == 162 // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1112 曾 157→160（栅栏门/玻璃板/蛋糕尾部追加）；t1105 曾 151→154；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
+                         && int(BR::Count) == 163 // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1112 曾 157→160（栅栏门/玻璃板/蛋糕尾部追加）；t1105 曾 151→154；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
                          && int(BR::ShapeBrewingStand) == 13
                          && BR::mcBlockId(int(BR::BrewingStand)) == 117;
         ok = ok && ids;
@@ -538,7 +538,7 @@ void MatrixRun::section67_brewing()
         ok = ok && geom;
         if (!geom) diag += QStringLiteral("[geom n=%1]").arg(nBoxes);
         // (3) 图集 + PlayerState 枚举尾追加 + 常量族。
-        const bool consts = int(BR::AtlasTileCount) == 210 // t1112 lawful 前移：207→209（蛋糕族 tile 207..208 追加）；t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加；t1103 曾 195→201、t1097 曾 193→195）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
+        const bool consts = int(BR::AtlasTileCount) == 212 // t1112 lawful 前移：207→209（蛋糕族 tile 207..208 追加）；t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加；t1103 曾 195→201、t1097 曾 193→195）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
                             && int(PlayerState::EffectSpeed) == int(PlayerState::EffectFire) + 1
                             && int(PlayerState::EffectStrength) == int(PlayerState::EffectFire) + 2
                             && PlayerController::kPotionDurationSec == 180.0f
@@ -615,13 +615,13 @@ void MatrixRun::section67_brewing()
             SrcPin("effect enum tail", "EffectNone = 0, EffectPoison, EffectSlowness, EffectFire, EffectSpeed, EffectStrength", 1)});
         const QStringList missBrH = pinSet(srcRoot + QStringLiteral("/Core/blockregistry.h"), {
             SrcPin("id row", "BrewingStand     = 148,", 1),
-            SrcPin("count row", "Count           = 162,", 1), // t1112 lawful 前移：钉文 157→160 随源行前移（栅栏门/玻璃板/蛋糕尾部追加）；沿革 t1111 lawful 前移：钉文 154→157 随源行前移；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
+            SrcPin("count row", "Count           = 163,", 1), // t1112 lawful 前移：钉文 157→160 随源行前移（栅栏门/玻璃板/蛋糕尾部追加）；沿革 t1111 lawful 前移：钉文 154→157 随源行前移；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
                 //   t1105 lawful 前移：151→154（PumpkinStem=151/JackOLantern=152/Cauldron=153 尾部追加；
                 //   t1103 曾 149→151、t1097 曾 148→149——追加不插中间存档契约，钉值随追加前移）。
             SrcPin("shape row", "ShapeBrewingStand = 13,", 1),
             SrcPin("boxes decl", "static int brewingStandShapeBoxes(quint8 state, BlockAABB *out, int cap);", 1),
             SrcPin("lit flag", "static constexpr quint8 BrewingStandStateLitFlag = 0x01;", 1),
-            SrcPin("atlas", "static constexpr int AtlasTileCount = 210;", 1) // t1113 lawful 前移：209→210（牌板 tile 追加）
+            SrcPin("atlas", "static constexpr int AtlasTileCount = 212;", 1) // t1113 lawful 前移：209→210（牌板 tile 追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
         });
                 //   t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加；t1103 曾 195→201、
                 //   t1097 曾 193→195）。
@@ -1045,7 +1045,7 @@ void MatrixRun::section67_brewing()
                          && RecipeRegistry::SugarId == 0x26A
                          && RecipeRegistry::GlimmerBottleId == 0x263
                          && int(BR::BrewingStand) == 148
-                         && int(BR::Count) == 162; // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1112 曾 157→160（栅栏门/玻璃板/蛋糕尾部追加）；t1105 曾 151→154；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
+                         && int(BR::Count) == 163; // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1112 曾 157→160（栅栏门/玻璃板/蛋糕尾部追加）；t1105 曾 151→154；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
         ok = ok && ids;
         if (!ids) diag += QStringLiteral("[ids]");
         // (2) 枚举尾追加序（t1097 序不变 + t1099 三连）。
@@ -1473,7 +1473,7 @@ void MatrixRun::section67_brewing()
                          && RecipeRegistry::SugarId == 0x26A
                          && RecipeRegistry::GlimmerBottleId == 0x263
                          && int(BR::BrewingStand) == 148
-                         && int(BR::Count) == 162; // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1112 曾 157→160（栅栏门/玻璃板/蛋糕尾部追加）；t1105 曾 151→154；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
+                         && int(BR::Count) == 163; // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1112 曾 157→160（栅栏门/玻璃板/蛋糕尾部追加）；t1105 曾 151→154；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
         ok = ok && ids;
         if (!ids) diag += QStringLiteral("[ids]");
         // (2) 延长常量族（六新 [四常量] + t1097/t1099 族不动）。
@@ -3097,8 +3097,8 @@ void MatrixRun::section67_brewing()
             && RecipeRegistry::MelonSliceId == 0x28A
             && RecipeRegistry::MundanePotionId == 0x287 // 邻族零污染（t1102 段尾原值）
             && int(BR::Melon) == 149 && int(BR::MelonStem) == 150
-            && int(BR::Count) == 162 // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1112 曾 157→160（栅栏门/玻璃板/蛋糕尾部追加）；t1105 曾 151→154；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
-            && int(BR::AtlasTileCount) == 210 // t1112 lawful 前移：207→209（蛋糕族 tile 207..208 追加）；t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加；t1103 曾 195→201）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
+            && int(BR::Count) == 163 // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1112 曾 157→160（栅栏门/玻璃板/蛋糕尾部追加）；t1105 曾 151→154；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
+            && int(BR::AtlasTileCount) == 212 // t1112 lawful 前移：207→209（蛋糕族 tile 207..208 追加）；t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加；t1103 曾 195→201）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
             && BR::mcBlockId(quint8(BR::Melon)) == 103
             && BR::mcBlockId(quint8(BR::MelonStem)) == 105
             && hbS.maxStackSize(RecipeRegistry::GoldNuggetsId) == 64
@@ -3171,8 +3171,8 @@ void MatrixRun::section67_brewing()
             SrcPin("icon 289", "case 0x289: drawMelonSeeds(); break", 1),
             SrcPin("icon 28A", "case 0x28A: drawMelonSlice(); break", 1)});
         const QStringList missBrH = pinSet(srcRootForPins() + QStringLiteral("/Core/blockregistry.h"), {
-            SrcPin("count sentinel", "Count           = 162", 1), // t1112 lawful 前移：钉文 157→160 随源行前移（栅栏门/玻璃板/蛋糕尾部追加）；沿革 t1111 lawful 前移：钉文 154→157 随源行前移；t1105 曾 151→154；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
-            SrcPin("atlas sentinel", "AtlasTileCount = 210", 1), // t1113 lawful 前移：209→210（牌板 tile 追加）, // t1112 lawful 前移：207→209（蛋糕族 tile 207..208 追加）；t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加）
+            SrcPin("count sentinel", "Count           = 163", 1), // t1112 lawful 前移：钉文 157→160 随源行前移（栅栏门/玻璃板/蛋糕尾部追加）；沿革 t1111 lawful 前移：钉文 154→157 随源行前移；t1105 曾 151→154；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163（活塞 id 段尾追加——钉文随源行前移）
+            SrcPin("atlas sentinel", "AtlasTileCount = 212", 1), // t1113 lawful 前移：209→210（牌板 tile 追加）, // t1112 lawful 前移：207→209（蛋糕族 tile 207..208 追加）；t1105 lawful 前移：201→207（南瓜族 tile 201..205 + 炼药锅 206 追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
             SrcPin("melon enum", "Melon            = 149", 1),
             SrcPin("stem enum", "MelonStem        = 150", 1)});
         const QStringList missBrC = pinSet(srcRootForPins() + QStringLiteral("/Core/blockregistry.cpp"), {
@@ -3694,8 +3694,8 @@ void MatrixRun::section67_brewing()
         }
         const bool idsOk = RecipeRegistry::PumpkinSeedsId == 0x28B
             && int(BR::PumpkinStem) == 151 && int(BR::JackOLantern) == 152
-            && int(BR::Cauldron) == 153 && int(BR::Count) == 162 // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1112 曾 157→160（栅栏门/玻璃板/蛋糕尾部追加）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
-            && int(BR::AtlasTileCount) == 210 // t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
+            && int(BR::Cauldron) == 153 && int(BR::Count) == 163 // t1111 lawful 前移：154→157（砂岩楼梯/石·砂岩台阶尾部追加）；t1112 曾 157→160（栅栏门/玻璃板/蛋糕尾部追加）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
+            && int(BR::AtlasTileCount) == 212 // t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
             && mc104Rows == 1 && mc91Rows == 1 && mc118Rows == 1
             && BR::mcBlockId(quint8(BR::PumpkinStem)) == 104
             && BR::mcBlockId(quint8(BR::JackOLantern)) == 91

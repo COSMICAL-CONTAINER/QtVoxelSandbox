@@ -168,7 +168,7 @@ void MatrixRun::section74_roster_low_t1111()
                                int(BR::Planks), int(BR::Planks), int(BR::Planks) };
         const RecipeRegistry::Recipe *rw = RecipeRegistry::match(gWood, 3);
         const bool neighOk = int(BR::WoodStairs) == 16 && int(BR::CobbleStairs) == 59
-            && int(BR::StoneBrickStairs) == 110 && int(BR::Count) == 162 // t1112 lawful 前移：157→160（栅栏门/玻璃板/蛋糕尾部追加）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
+            && int(BR::StoneBrickStairs) == 110 && int(BR::Count) == 163 // t1112 lawful 前移：157→160（栅栏门/玻璃板/蛋糕尾部追加）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
             && rw && rw->outputId == int(BR::WoodStairs) && rw->outputCount == 4;
         ok = ok && neighOk;
         if (!neighOk) diag += QStringLiteral("[neigh]");
@@ -289,7 +289,7 @@ void MatrixRun::section74_roster_low_t1111()
             && int(BR::CutSandstone) == 105 && int(BR::Sandstone) == 41
             && int(BR::WoodSlab) == 15 && int(BR::CobbleSlab) == 58
             && int(BR::SpruceSlab) == 87 && int(BR::StoneBrickSlab) == 109
-            && int(BR::Count) == 162; // t1112 lawful 前移：157→160（栅栏门/玻璃板/蛋糕尾部追加）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
+            && int(BR::Count) == 163; // t1112 lawful 前移：157→160（栅栏门/玻璃板/蛋糕尾部追加）；t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
         ok = ok && neighOk;
         if (!neighOk) diag += QStringLiteral("[neigh]");
 
@@ -432,12 +432,12 @@ void MatrixRun::section74_roster_low_t1111()
 
         // (D1) id/段位/kMc/相邻族零污染(值面)。
         const bool enumOk = int(BR::SandstoneStairs) == 154 && int(BR::StoneSlab) == 155
-            && int(BR::SandstoneSlab) == 156 && int(BR::Count) == 162 // t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
+            && int(BR::SandstoneSlab) == 156 && int(BR::Count) == 163 // t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
             && int(BR::Cauldron) == 153 && int(BR::JackOLantern) == 152
             && int(BR::PumpkinStem) == 151 && int(BR::Melon) == 149 && int(BR::MelonStem) == 150
             && int(BR::Sandstone) == 41 && int(BR::CutSandstone) == 105
             && int(BR::Stone) == 3 && int(BR::StoneBrick) == 108
-            && int(BR::AtlasTileCount) == 210 // t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
+            && int(BR::AtlasTileCount) == 212 // t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
             && BR::mcBlockId(int(BR::SandstoneStairs)) == -1
             && BR::mcBlockId(int(BR::StoneSlab)) == 44
             && BR::mcBlockId(int(BR::SandstoneSlab)) == 44
@@ -478,7 +478,7 @@ void MatrixRun::section74_roster_low_t1111()
             SrcPin("stairs id decl", "SandstoneStairs  = 154,", 1),
             SrcPin("stone slab id decl", "StoneSlab        = 155,", 1),
             SrcPin("sandstone slab id decl", "SandstoneSlab    = 156,", 1),
-            SrcPin("count sentinel row", "Count           = 162,", 1)}); // t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）
+            SrcPin("count sentinel row", "Count           = 163,", 1)}); // t1113 前移：Count 160→162 / Atlas 209→210（牌子双 id + 牌板 tile 段尾追加）；t1135 前移：Count 162→163 / Atlas 210→212（活塞 id + face/side 双 tile 段尾追加）
         ok = ok && missHdr.isEmpty();
         if (!missHdr.isEmpty())
             diag += QStringLiteral("[hdr %1]").arg(missHdr.join(QLatin1Char(',')));

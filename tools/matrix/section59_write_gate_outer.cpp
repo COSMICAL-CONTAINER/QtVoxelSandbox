@@ -483,7 +483,7 @@ void MatrixRun::section59_write_gate_outer()
         //     NEG-1 摘两员 → 5；NEG-2 摘一员 → 6。
         const int gateCnt = wSrc.count(QStringLiteral(
             "chunkContentPresent(floorDiv(x, Chunk::kSize), floorDiv(z, Chunk::kSize))"));
-        const bool g3 = gateCnt == 7;
+        const bool g3 = gateCnt == 8; // t1135 lawful 前移：7→8（活塞写格域门行 pistonCellWritable 追加——统一物化门谓词同串新员，写门家族行随追加前移）
         ok = ok && g3;
         if (!g3) diag += QStringLiteral("[g3 gate=%1]").arg(gateCnt);
         // (g4) 批头锚注族（降级员登记钉 + 留池登记钉）：五员全确认零降级 + 留池登记在场。
