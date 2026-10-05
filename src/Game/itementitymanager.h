@@ -152,6 +152,13 @@ public:
     //   metatype 处理）。world null / 无实体 → 早退。物理语义见 EntityStore::tick。
     void tick(qreal dt, World *world) { m_store.tick(dt, world); }
 
+    // t1138 swept AABB 实体位移（era agb a(float,float) 承接）：world 动画事件（pistonSweeps）
+    //   代次幂等门（m_pistonSweepGenSeen）内调 store 批量应用（模拟权威 = EntityStore，同 tick
+    //   「禁两份模拟逻辑」纪律）。由 PlayerController::tickImpl 在 item tick 前调（非 Q_INVOKABLE）。
+    void applyPistonSweeps(World *world);
+    // 代次幂等门状态（见上）。
+    quint32 m_pistonSweepGenSeen = 0;
+
     // R20.14：可见实体快照观察（验收③；EntityStore 在 notify 沿 / clearAll 重建——呈现面
     //   消费仍走上述逐槽读口零变化，本访问器供快照权威的测试 / 未来消费方）。
     const EntityStoreSnapshot &snapshot() const { return m_store.snapshot(); }

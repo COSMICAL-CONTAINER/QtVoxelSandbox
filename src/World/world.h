@@ -1238,6 +1238,19 @@ public:
     //   setWaterSilent（焚毁 / 蒸发 / 流体静默写路径）末尾各一次，checkSignSupportOnEdit 同位同序。
     void checkCakeSupportOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
 
+    // t1138 活塞头孤儿恢复复检（写入钩子族，checkCakeSupportOnEdit 同门模式；era acu.d/acu.a
+    //   全字节定谳 build/t1138_jar_retract_rod_acu.txt 定谳二/三）：双面 ——
+    //   ① 头格被移除（oldId==PistonHead）→ 6 邻扫**已伸**活塞本体（bit8 置——era acu.d 字节
+    //      101-106 位清才 return = 恢复条件为已伸，t1136 工件解码注「未伸孤儿态」系反读已勘正）
+    //      → 本体以物品形态掉落（blockDroppedAsItem 语义信号，era yy.b dropBlockAsItem 直译）+
+    //      本体格清空（era world.g(body,0) 直译）＝「破头即拆整活塞」；
+    //   ② 本体格被移除（oldId ∈ 活塞本体族）→ 6 邻扫头块在场 → 头格自清（零掉落）＝ era acu.a
+    //      「背格非活塞 → 头自清」直译（6 邻扫 = era 朝向解码的引擎承载——写后钩子无 oldState，
+    //      良构头/本体恰一邻接，邻扫答同一格，登记等价）。
+    //   活塞机自身写走 m_chunks.setBlock 静默族（零钩子）→ 伸缩链零误触发；写入钩子族挂 4/5 参数
+    //   setBlock / setBlockSilent 末尾各一次（cake 同位同序）。
+    void checkPistonHeadOnEdit(int x, int y, int z, quint8 oldId, quint8 id);
+
     // ── t656/t657/t658 红石电力系统 v1（机制等价 MC 1.0 redstone 的纵切简化；World 层局部重算）──
     //
     // 模型（事件驱动局部重算，非全图扫描 —— lessons perf-fluid-scan 反模式教训）：
@@ -1412,9 +1425,10 @@ public:
     // 侧表项（era TilePiston 五字段引擎对应面）：占位格坐标 + 存储块 (id,state) + 朝向 + 伸/缩程位
     //   + 剩余拍数。era NBT 五键（blockId/blockData/facing/progress/extending）持久化真值 = 引擎
     //   piston_anim 表（纯追加，t1129 原子保存原语域 + t1133 entities 表先例）；era 渲染插值半拍
-    //   （progress 0.5）与 headFlag（era 杆占位渲染专用位）不入引擎侧表（近似度登记：era 杆缩回
-    //   本体占位面 t1137 全字节翻案在案，引擎切片三不实现本体杆占位=接收器「位清随写」结构承重，
-    //   切片四候选池）。
+    //   （progress 0.5）不入引擎侧表（终格静态近似度登记维持）；headFlag 不入侧表——**可派生**：
+    //   extending=false 且 storedId ∈ 活塞本体族 = t1138 缩回本体杆占位项（era tile headFlag=true
+    //   唯一生产点，build/t1138_jar_retract_rod_acu.txt 定谳一），零新增持久化字段（piston_anim
+    //   表 schema 零扰动）。
     struct PistonAnimEntry
     {
         int x = 0, y = 0, z = 0;
@@ -1447,6 +1461,32 @@ public:
     Q_INVOKABLE QVariantList exportPistonAnims() const;
     // t1137 持久化恢复（进世界一次：清旧 + 注入存档行；返恢复行数）。坏行（缺字段/越界）跳过。
     Q_INVOKABLE int restorePistonAnims(const QVariantList &rows);
+
+    // ── t1138 swept AABB 实体位移事件面（era agb a(float,float) 全字节定谳
+    //    build/t1138_jar_entity_push_placement.txt 定谳一）────────────────────────────────
+    // 动画 tick 产出的实体位移事件（era qz.b 盒 + ia.b(DDD) 逐实体 move 同构）：dx/dy/dz = 位移
+    //   向量（朝向 delta × 拍增量 0.5625 / settle 末推 0.25——era m-n+0.0625 两拍 + a(1.0,0.25)
+    //   精确值，二进制浮点精确无累加误差）；(x,y,z) = 事件源占位格（era tile 坐标，诊断/测试面）；
+    //   final = settle 末推面（era a(1.0,0.25)——盒 = 占位格整格；false = 拍推进扫掠推，盒 =
+    //   [占位格-0.5dir, 占位格+1dir]（era 拍一拍二盒并集，定谳一①））。
+    struct PistonSweep
+    {
+        int x = 0, y = 0, z = 0;
+        float dx = 0.0f, dy = 0.0f, dz = 0.0f;
+        bool final = false;
+    };
+    // 事件扫掠盒（消费者共用单点——三层消费面 mob/掉落物/玩家禁各自复写盒几何）：final → 占位格
+    //   整格；拍推 → 沿朝向轴 [格-0.5s, 格+1]（s = 朝向 delta 符号），非朝向轴整格。返 false =
+    //   零向量事件（无盒，消费者跳过）。
+    static bool pistonSweepBox(const PistonSweep &e, float &minx, float &miny, float &minz,
+                               float &maxx, float &maxy, float &maxz);
+    // 本 tick 动画位移事件（tickPistonAnimations 产出；下一 tick 入口清空——缓冲生命周期恰一
+    //   世界 tick）。只读，Entities/Game 层消费面（EntityManager / EntityStore / PlayerController）。
+    const std::vector<PistonSweep> &pistonSweeps() const { return m_pistonSweeps; }
+    // 事件代次（tickPistonAnimations 产出非空事件时 +1）：消费者自持已见代次做幂等门——实体
+    //   tick 16ms × 世界 tick 100ms 的多次消费防重（每代恰应用一次，逻辑时序同构 era 每 game
+    //   tick 恰一推）。零事件 tick 不 bump（消费者零重扫）。
+    quint32 pistonSweepGeneration() const { return m_pistonSweepGeneration; }
 
     // R20.10 Chunk lifecycle（refactor-plan §29.3）：C++ 面转移 forwarder（态表/选型/六态图见
     //   chunkmanager.h + chunklifecycle.h）。**非 Q_INVOKABLE 且永不入 QML 面**——生命周期决策
@@ -2453,6 +2493,13 @@ private:
     //   generate / beginLoad 清空（网格重置坐标作废——cross-world 泄漏教训同门）；**进存档**
     //   （piston_anim 表，era TileEntity NBT 随 chunk 档真值——t1137 定谳工件 2/2）。
     std::vector<PistonAnimEntry> m_pistonAnims;
+    // t1138 swept 实体位移事件缓冲（era agb a(float,float) 承接——结构面见 pistonSweeps() 头注）：
+    //   tickPistonAnimations 入口清空、产出时回填 + 代次 bump；消费 = Entities/Game 三层读面
+    //   （EntityManager / EntityStore / PlayerController 各自代次幂等门——16ms 实体 tick × 100ms
+    //   世界 tick 的多次消费防重）。运行期瞬态不进存档（era 实体推是 per-tick 位移非状态）；
+    //   generate / beginLoad 清空（网格重置坐标作废，m_pistonAnims 同门）。
+    std::vector<PistonSweep> m_pistonSweeps;
+    quint32 m_pistonSweepGeneration = 0;
     // perf：流体方格位置索引（Water / Lava 各一集）—— 流体 tick 遍历此集（O(流体格数)）替代全图扫描
     //   （O(W×D×H)=3.28M）。写入路径经 noteFluidWrite 增量维护；generate/beginLoad 清空、finishLoad
     //   全图重建（存档 blob / worldgen 直写不经写入路径）。键编码复用 packGrowthCell。稳态（无流体写入）

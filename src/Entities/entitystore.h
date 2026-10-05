@@ -154,6 +154,14 @@ public:
     //   过期，等价墙钟真老化）。**生产路径零调用**（矩阵 r2014 despawn 腿专用）。
     void ageLifetimeClock(qint64 ms);
     void tick(qreal dt, World *world);
+    // t1138 swept AABB 实体位移（掉落物面——ItemEntityManager 逐事件调；原语参 = 头文件零
+    //   world.h 依赖，盒几何换算归 Adapter 层）：每个活体掉落物，AABB（pos ± kPistonPushHalf）
+    //   与事件扫掠盒相交 → 位移向量逐轴（X→Z→Y）试探应用（目标中心格 isCollidable 撤回该轴 =
+    //   era ia.b(DDD) moveEntity 碰撞让位的掉落物简化承载；掉落物无逐轴盒扫，登记近似）。
+    //   任一实体真位移 → notifyChanged 单点收口。world 只读。
+    void applyPistonDisplacement(World *world, float dx, float dy, float dz,
+                                 float minx, float miny, float minz,
+                                 float maxx, float maxy, float maxz);
 
     // ── 批量收口（t354；depth 可嵌套）──
     void beginBatch() { ++m_batchDepth; }

@@ -9,6 +9,10 @@
 
 namespace {
 Q_LOGGING_CATEGORY(lcItem, "vo.item") // 模块化日志（PLAN §2-F）；类目名沿用 vo.item（log 过滤面零变化）
+// t1138 swept 位移掉落物近似盒半宽（era 掉落物实体盒 ~0.25 尺寸的引擎承载；近似度登记——
+//   掉落物无独立碰撞盒字段，pos 中心 ± 本半宽的盒判 + 单点格撤回 = 简化承载，见
+//   applyPistonDisplacement 声明注释）。
+constexpr float kPistonPushHalf = 0.125f;
 }
 
 // R20.14 EntityStore 实现：模拟体自 src/Game/itementitymanager.cpp **逐行搬移**（非复制——
@@ -655,4 +659,50 @@ int EntityStore::despawnInChunk(int cx, int cz)
     if (!doomed.empty())
         notifyChanged(); // 单点收口（revision + 快照重建 + sink 上行）
     return int(doomed.size());
+}
+
+// t1138 swept AABB 实体位移（掉落物面——声明注释见 entitystore.h；ItemEntityManager 逐事件调）。
+void EntityStore::applyPistonDisplacement(World *world, float dx, float dy, float dz,
+                                          float minx, float miny, float minz,
+                                          float maxx, float maxy, float maxz)
+{
+    if (!world || (dx == 0.0f && dy == 0.0f && dz == 0.0f))
+        return;
+    bool dirty = false;
+    for (ItemEntity &e : m_entities) {
+        if (!e.alive)
+            continue;
+        // AABB 相交门（掉落物近似盒 pos ± kPistonPushHalf——era 掉落物实体盒 ~0.25 的引擎承载，
+        //   近似度登记；掉落物中心带 kRestOffset 浮空偏移，盒判同 face 语义）。
+        if (e.pos.x() - kPistonPushHalf >= maxx || e.pos.x() + kPistonPushHalf <= minx
+            || e.pos.y() - kPistonPushHalf >= maxy || e.pos.y() + kPistonPushHalf <= miny
+            || e.pos.z() - kPistonPushHalf >= maxz || e.pos.z() + kPistonPushHalf <= minz)
+            continue;
+        // 逐轴（X→Z→Y）试探应用：目标中心格可碰撞 → 撤回该轴（era moveEntity 碰撞让位的掉落物
+        //   简化承载——单点格判非逐轴盒扫，登记近似）。**嵌入豁免**：当前中心格已可碰撞（动画
+        //   占位写进掉落物所在格）→ 免目标检查直移（swept 推挤出嵌入实体；mob 面同门）。
+        const bool embedded = world->isCollidable(int(std::floor(e.pos.x())),
+                                                  int(std::floor(e.pos.y())),
+                                                  int(std::floor(e.pos.z())));
+        if (dx != 0.0f) {
+            const float nx = e.pos.x() + dx;
+            if (embedded || !world->isCollidable(int(std::floor(nx)), int(std::floor(e.pos.y())),
+                                                 int(std::floor(e.pos.z()))))
+                { e.pos.setX(nx); dirty = true; }
+        }
+        if (dz != 0.0f) {
+            const float nz = e.pos.z() + dz;
+            if (embedded || !world->isCollidable(int(std::floor(e.pos.x())), int(std::floor(e.pos.y())),
+                                                 int(std::floor(nz))))
+                { e.pos.setZ(nz); dirty = true; }
+        }
+        if (dy != 0.0f) {
+            const float ny = e.pos.y() + dy;
+            if (embedded || !world->isCollidable(int(std::floor(e.pos.x())), int(std::floor(ny)),
+                                                 int(std::floor(e.pos.z()))))
+                { e.pos.setY(ny); dirty = true; }
+        }
+    }
+    if (dirty)
+        notifyChanged();
 }

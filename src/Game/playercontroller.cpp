@@ -1262,6 +1262,63 @@ void PlayerController::tickImpl()
     //   高水位 slot-reuse（ItemEntityManager kCap=200 / EntityManager 64 / XpOrb 64）→ 即便活体少，
     //   vector::size() 停在高水位，每帧遍历所有槽跳空 —— 「段数无关 + 每帧固定」开销头号怀疑项。
     { FrameProfiler::Scope s("item");
+    // t1138 swept AABB 实体位移（玩家面——era world.b(null, 盒) 全实体含玩家直译
+    //   build/t1138_jar_entity_push_placement.txt 定谳一③「零实体拒推分支」：推动入玩家格 =
+    //   玩家被推走）：世界动画事件代次幂等门 + 玩家 AABB（m_pos 脚位 ± kHalfW / +m_height）与
+    //   事件扫掠盒（World::pistonSweepBox 单点）相交 → 位移向量逐轴（X→Z→Y）试探应用（目标
+    //   AABB 格域 isCollidable 撤回该轴 = era ia.b(DDD) moveEntity 碰撞让位同构）。掉落物 /
+    //   mob 面各走 m_itemEntities->applyPistonSweeps / EntityManager::tick 顶部（代次门各自内藏）。
+    if (m_world && m_world->pistonSweepGeneration() != m_pistonSweepGenSeen) {
+        m_pistonSweepGenSeen = m_world->pistonSweepGeneration();
+        for (const World::PistonSweep &sw : m_world->pistonSweeps()) {
+            float bminx, bminy, bminz, bmaxx, bmaxy, bmaxz;
+            if (!World::pistonSweepBox(sw, bminx, bminy, bminz, bmaxx, bmaxy, bmaxz))
+                continue;
+            const float pminx = m_pos.x() - kHalfW, pmaxx = m_pos.x() + kHalfW;
+            const float pminy = m_pos.y(),          pmaxy = m_pos.y() + m_height;
+            const float pminz = m_pos.z() - kHalfW, pmaxz = m_pos.z() + kHalfW;
+            if (pminx >= bmaxx || pmaxx <= bminx || pminy >= bmaxy || pmaxy <= bminy
+                || pminz >= bmaxz || pmaxz <= bminz)
+                continue; // 玩家 AABB 与事件扫掠盒不相交 → 跳过（era 盒查集合零成员同面）
+            // 逐轴试探：候选轴移后的玩家 AABB 覆盖格域任一可碰撞格 → 撤回该轴。**嵌入豁免**：
+            //   当前位已嵌实心（动画占位写进玩家所在格 = era 被推块挤入实体同面）→ 免目标检查
+            //   直移（swept 推挤出嵌入实体；mob / 掉落物面同门）。
+            const auto axisBlocked = [this](float nx, float ny, float nz) {
+                const int x0 = int(std::floor(nx - kHalfW)), x1 = int(std::ceil(nx + kHalfW)) - 1;
+                const int y0 = int(std::floor(ny)),          y1 = int(std::ceil(ny + m_height)) - 1;
+                const int z0 = int(std::floor(nz - kHalfW)), z1 = int(std::ceil(nz + kHalfW)) - 1;
+                for (int yy = y0; yy <= y1; ++yy)
+                    for (int zz = z0; zz <= z1; ++zz)
+                        for (int xx = x0; xx <= x1; ++xx)
+                            if (m_world->isCollidable(xx, yy, zz))
+                                return true;
+                return false;
+            };
+            const bool embedded = axisBlocked(m_pos.x(), m_pos.y(), m_pos.z());
+            QVector3D p = m_pos;
+            if (sw.dx != 0.0f) {
+                const float nx = p.x() + sw.dx;
+                if (embedded || !axisBlocked(nx, p.y(), p.z()))
+                    p.setX(nx);
+            }
+            if (sw.dz != 0.0f) {
+                const float nz = p.z() + sw.dz;
+                if (embedded || !axisBlocked(p.x(), p.y(), nz))
+                    p.setZ(nz);
+            }
+            if (sw.dy != 0.0f) {
+                const float ny = p.y() + sw.dy;
+                if (embedded || !axisBlocked(p.x(), ny, p.z()))
+                    p.setY(ny);
+            }
+            if (p != m_pos) {
+                m_pos = p;
+                emit positionChanged();
+            }
+        }
+    }
+    // t1138 掉落物面（代次幂等门内藏—— ItemEntityManager::applyPistonSweeps）。
+    if (m_itemEntities && m_world) m_itemEntities->applyPistonSweeps(m_world);
     // t60：掉落物重力（世界模拟，独立于玩家捕获态——菜单 / 暂停时实体仍落到地面）。
     // PlayerController 是唯一同时持 World* + ItemEntityManager* 的对象，故由此驱动；实体物理态
     // （vy / resting）与 pos 同住在 ItemEntityManager 内部数据里（分层：Entities→World 向下只读）。
@@ -6094,25 +6151,35 @@ void PlayerController::placeBlock()
         //   延迟档默认 1（bit[3:2]=0）；输出位 / 挂起计数恒 0（World 电力层首算写入）。
         placeState = quint8(horizontalFacing() & 3);
     } else if (BlockRegistry::isPiston(m_selectedBlock)) {
-        // t1135/t1136 活塞族朝向（6 向 state bit[2:0]，era meta 同构 0=-Y 1=+Y 2=-Z 3=+Z 4=-X 5=+X——
+        // t1135/t1136/t1138 活塞族朝向（6 向 state bit[2:0]，era meta 同构 0=-Y 1=+Y 2=-Z 3=+Z 4=-X 5=+X——
         //   era ot.b/c/d 方向表同序，abr.f 逐向探针定谳；t1136 起族谓词承载粘性活塞同分支——两件
-        //   state 编码完全同构）：推动方向 = 玩家所视方向（推离玩家，MC
-        //   口径——与中继器「输出沿玩家面向」同侧；区别箱子/熔炉的「面朝玩家」反向编码）；俯仰
-        //   ≥45° 上推 / ≤-45° 下推（v1 阈值简化——era 放置朝向规则未在本单 jar 反汇编定谳，登记
-        //   待考；水平段 horizontalFacing 与中继器/门/楼梯同源）。extended 位恒 0 出生（World 电力
-        //   层首算写入，同中继器输出位口径）。解码端 pistonFacingDelta 单一权威（tileFor/推动机/
-        //   探针三方同源，禁第二份朝向表）。
-        const float pit = pitch();
-        if (pit >= 45.0f)
-            placeState = 1; // +Y（上推）
-        else if (pit <= -45.0f)
-            placeState = 0; // -Y（下推）
-        else {
-            switch (horizontalFacing() & 3) { // 0=+X 1=-X 2=+Z 3=-Z → 5/4/3/2
-            case 0: placeState = 5; break;
-            case 1: placeState = 4; break;
-            case 2: placeState = 3; break;
-            default: placeState = 2; break;
+        //   state 编码完全同构）。**t1138 lawful 替换**（era 放置朝向规则全字节定谳
+        //   build/t1138_jar_entity_push_placement.txt 定谳二——abr.c(ry,IIILvi) 放置入口，t1135
+        //   简化④「俯仰 ±45° 阈值 v1」与 v1「推离玩家」水平段双双翻案收口）：
+        //   ① 近距垂直分支（era |posX-x|<2 && |posZ-z|<2 双门，x/z=放置格）：眼位级 d5 =
+        //      feetY+1.82（era nq yOffset 恒 0 直译）—— d5-cellY>2 → 上推(1)；cellY-d5>0 → 下推(0)；
+        //      两判皆负（放置格与玩家身体同层）→ **穿到水平段**（era 原生 fall-through）。
+        //   ② 水平段（era yaw 象限 floor(yaw*4/360+0.5)&3 → {q0:2(-Z) q1:5(+X) q2:3(+Z) q3:4(-X)}）：
+        //      era yaw0=+Z（nq 游泳推进字节正证）vs 引擎 yaw0=-Z（horizontalFacing 前向 -sin/-cos）→
+        //      引擎 hf {0:+X,1:-X,2:+Z,3:-Z} 换算 facing {4,5,2,3} = **推动方向朝玩家**（era 水平
+        //      放置与熔炉/箱子「面朝玩家」同象限映射——v1 推离玩家翻案）。extended 位恒 0 出生
+        //      （World 电力层首算写入，同中继器输出位口径）。解码端 pistonFacingDelta 单一权威
+        //      （tileFor/推动机/探针三方同源，禁第二份朝向表）。
+        const float cellFx = float(m_hitBx + m_hitNx), cellFy = float(m_hitBy + m_hitNy);
+        const float cellFz = float(m_hitBz + m_hitNz);
+        const float eyeY = m_pos.y() + 1.82f; // era d5 = posY + 1.82（定谳二 34-50，yOffset 恒 0）
+        const bool nearBoth = std::fabs(m_pos.x() - cellFx) < 2.0f
+            && std::fabs(m_pos.z() - cellFz) < 2.0f; // era 近距双门（各自独立判定）
+        if (nearBoth && eyeY - cellFy > 2.0f) {
+            placeState = 1; // +Y（上推——放置格在玩家脚位下 2 格开外）
+        } else if (nearBoth && cellFy - eyeY > 0.0f) {
+            placeState = 0; // -Y（下推——放置格在玩家头位上方）
+        } else {
+            switch (horizontalFacing() & 3) { // 0=+X 1=-X 2=+Z 3=-Z → 朝玩家反向 4/5/2/3（定谳二②）
+            case 0: placeState = 4; break;
+            case 1: placeState = 5; break;
+            case 2: placeState = 2; break;
+            default: placeState = 3; break;
             }
         }
     } else if (m_selectedBlock == BlockRegistry::Pumpkin

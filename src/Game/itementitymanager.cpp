@@ -1,6 +1,7 @@
 #include "itementitymanager.h"
 #include "toolregistry.h" // t1041 isTool3DDrop / isIconBillboardDrop 查 ToolRegistry::tool(type/tier)——Game 层同层纯表查询
 #include "recipe.h"       // t1041 isIconBillboardDrop 材料段界 RecipeRegistry::MaterialIdBase（Hotbar::isMaterial 同源常量）
+#include "world.h"        // t1138 swept 位移事件读（pistonSweeps/pistonSweepBox——Game→World 向下合规）
 
 // R20.14 EntityStore 过渡 Adapter 实现（plan §29.3 验收④）：模拟体（spawn 三入口 / 合并 /
 // LRU / 拾取 / despawn / 焚毁 / tick 物理 / 批量收口 / 槽位机件）已整体迁至
@@ -15,6 +16,22 @@ ItemEntityManager::ItemEntityManager(QObject *parent) : QObject(parent)
     // 通知缝：store 变更收口（非批 notify 沿 / endBatch 收口 / clearAll 无条件直发）上行
     //   为本类 entitiesChanged 信号——QML / instancing feeder 消费面零变化（本单承重墙）。
     m_store.setNotifySink([this]() { emit entitiesChanged(); });
+}
+
+// t1138 swept AABB 实体位移（掉落物面——声明注释见 itementitymanager.h）。代次幂等门 +
+//   逐事件盒换算（World::pistonSweepBox 单点）+ store 批量应用（模拟权威委托，同 tick 纪律）。
+void ItemEntityManager::applyPistonSweeps(World *world)
+{
+    if (!world || world->pistonSweepGeneration() == m_pistonSweepGenSeen)
+        return; // 无世界 / 本代已消费（幂等门——16ms×100ms 多次 tick 防重）
+    m_pistonSweepGenSeen = world->pistonSweepGeneration();
+    for (const World::PistonSweep &sw : world->pistonSweeps()) {
+        float minx, miny, minz, maxx, maxy, maxz;
+        if (!World::pistonSweepBox(sw, minx, miny, minz, maxx, maxy, maxz))
+            continue;
+        m_store.applyPistonDisplacement(world, sw.dx, sw.dy, sw.dz,
+                                        minx, miny, minz, maxx, maxy, maxz);
+    }
 }
 
 // ── t1027 掉落物渲染家族谓词（单一权威；族表体逐字保留——t925 源钉钉 case 字面量）──

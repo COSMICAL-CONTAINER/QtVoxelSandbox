@@ -1126,6 +1126,15 @@ public:
     //   t239：dead mob 跳过（尸体不被推）。
     void resolvePlayerPush(const QVector3D &playerFeet, float halfW, float height, World *world);
 
+    // t1138 swept AABB 实体位移（era agb a(float,float) 承接——World::pistonSweeps 事件消费面）：
+    //   每活体未死 Mob，AABB(pos±halfW/halfH) 与事件扫掠盒（World::pistonSweepBox 单点）相交 →
+    //   位移向量逐轴（X→Z→Y）试探应用（mobAabbHitsSolid 撤回 = era ia.b(DDD) moveEntity 碰撞让位
+    //   同构；世界界内 clamp，aiWander 同门）。任一实体真位移 → notifyEntitiesChanged 单点收口。
+    //   代次幂等门（m_pistonSweepGenSeen）：16ms 实体 tick × 100ms 世界 tick 的多次消费防重——每代
+    //   恰应用一次（逻辑时序同构 era 每 game tick 恰一推；wall-clock 零涉）。由 tick 顶部调（空槽
+    //   早退之前——零实体也更新代次，防陈旧代次跨窗误应用）。
+    void applyPistonSweeps(World *world);
+
     // 重力 + AI wander + 地面静止（C++ 直调；PlayerController::tick 每帧调，独立于捕获态——菜单/暂停时
     //   实体仍模拟）。机制同 ItemEntityManager::tick（向下只读 World::isSolid/blockAt）。world=null / 无实体
     //   → 早 return。Mob：AI 行走（aiWander / aiHostile / aiArcher）+ 重力；dead Mob：仅 deathTimer 倒计时
@@ -1986,6 +1995,9 @@ private:
     //   每 kAiTickInterval 帧一轮、每帧约 1/N 的 mob 跑重活 → 单帧负载均摊（无 GC spike）。
     //   机制等价 MC 1.0 mob AI 节流（mob 每 4-5 tick 才 think 一次而非每 tick），只是分布到不同 mob。
     quint32 m_tickPhase = 0;
+    // t1138 swept 实体位移消费代次（pistonSweepGeneration 幂等门——16ms 实体 tick × 100ms 世界 tick
+    //   的多次消费防重，每代恰应用一次；见 tick 内活塞扫掠段注释）。
+    quint32 m_pistonSweepGenSeen = 0;
     // 任务（弓箭 60s 必 despawn）：墙钟计时器（构造时 start()）。箭 spawn 记 m_clock.elapsed() 到 Entity
     //   .arrowSpawnMs；tick Arrow 分支用它算 age 做硬 60s despawn（机制等价 MC 箭 60s 消失；不依赖 dt 累加，
     //   低帧率 / dt=0 / 节流帧漂移时仍必然移除）。同 ItemEntityManager / XpOrbManager 的 m_clock 模式。

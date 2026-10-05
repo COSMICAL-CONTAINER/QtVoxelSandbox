@@ -1969,6 +1969,9 @@ private:
     bool m_bobberApproach = false; // t971 鱼粒子预告窗镜像（updateFishing 拉 bobberApproachAt 刷新）
     int m_bobberEntityIdx = -1;
     quint32 m_fishCastSerial = 0;
+    // t1138 swept 实体位移消费代次（World::pistonSweepGeneration 幂等门——16ms 玩家 tick ×
+    //   100ms 世界 tick 的多次消费防重，每代恰应用一次；玩家面 = era 全实体含玩家同面直译）。
+    quint32 m_pistonSweepGenSeen = 0;
 
     // 射线选体命中态（整数格坐标 + 整数法线分量；仅变化时 emit hitChanged，避免每帧抖动 QML）
     bool m_hasHit = false;

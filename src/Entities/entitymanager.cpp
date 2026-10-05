@@ -6651,10 +6651,73 @@ bool EntityManager::tickMobMounts(World *world, const QVector3D &playerPos, floa
 //   void-loss 兜底：Mob 跌出世界底部（pos.y<0，如被推出边界外无支撑）→ 标记移除（防永久下落）。
 //
 // 移除用索引收集 + 循环后逆序 erase（保索引有效）。
+// t1138 swept AABB 实体位移（声明注释见 entitymanager.h）。代次门 + 逐事件逐实体应用。
+void EntityManager::applyPistonSweeps(World *world)
+{
+    if (!world || world->pistonSweepGeneration() == m_pistonSweepGenSeen)
+        return; // 无世界 / 本代已消费（幂等门——16ms×100ms 多次 tick 防重）
+    m_pistonSweepGenSeen = world->pistonSweepGeneration();
+    const std::vector<World::PistonSweep> &sweeps = world->pistonSweeps();
+    if (sweeps.empty())
+        return; // 代次推进但零事件（稳态 tick 不误应用陈旧缓冲）
+    bool dirty = false;
+    for (const World::PistonSweep &sw : sweeps) {
+        float minx, miny, minz, maxx, maxy, maxz;
+        if (!World::pistonSweepBox(sw, minx, miny, minz, maxx, maxy, maxz))
+            continue;
+        for (size_t i = 0; i < m_entities.size(); ++i) {
+            Entity &e = m_entities[i];
+            if (!e.alive || e.kind != Mob || e.dead)
+                continue; // 空槽 / 非 Mob / 尸体不推（resolvePlayerPush 同口径）
+            // AABB 相交门（pos 中心 ± halfW/halfH vs 事件扫掠盒）。
+            if (e.pos.x() - e.halfW >= maxx || e.pos.x() + e.halfW <= minx
+                || e.pos.y() - e.halfH >= maxy || e.pos.y() + e.halfH <= miny
+                || e.pos.z() - e.halfW >= maxz || e.pos.z() + e.halfW <= minz)
+                continue;
+            // 逐轴（X→Z→Y）试探应用：任一轴移后触墙 → 撤回该轴（mobAabbHitsSolid 撤回 =
+            //   era ia.b(DDD) moveEntity 碰撞让位同构；世界界内 clamp，aiWander 同门）。
+            //   **嵌入豁免**：当前位已嵌实心（动画占位写进实体所在格 = era 被推块挤入实体同面）
+            //   → 免目标检查直移（swept 推把嵌入实体挤出 = era moveEntity 对已交叠实体不钉死的
+            //   承载；非嵌入态目标触墙照撤回）。
+            const float halfW = e.halfW, halfH = e.halfH;
+            const bool embedded = mobAabbHitsSolid(world, e.pos.x(), e.pos.y(), e.pos.z(), halfW, halfH);
+            const float wx0 = halfW, wx1 = world->width() - halfW;
+            const float wz0 = halfW, wz1 = world->depth() - halfW;
+            QVector3D p = e.pos;
+            // X 轴
+            if (sw.dx != 0.0f) {
+                float nx2 = qBound(wx0, p.x() + sw.dx, wx1);
+                if (embedded || !mobAabbHitsSolid(world, nx2, p.y(), p.z(), halfW, halfH))
+                    p.setX(nx2);
+            }
+            // Z 轴
+            if (sw.dz != 0.0f) {
+                float nz2 = qBound(wz0, p.z() + sw.dz, wz1);
+                if (embedded || !mobAabbHitsSolid(world, p.x(), p.y(), nz2, halfW, halfH))
+                    p.setZ(nz2);
+            }
+            // Y 轴
+            if (sw.dy != 0.0f) {
+                float ny2 = p.y() + sw.dy;
+                if (embedded || !mobAabbHitsSolid(world, p.x(), ny2, p.z(), halfW, halfH))
+                    p.setY(ny2);
+            }
+            if (p != e.pos) {
+                e.pos = p;
+                dirty = true;
+            }
+        }
+    }
+    if (dirty)
+        notifyEntitiesChanged();
+    qCDebug(lcEnt) << "piston sweeps applied =" << int(sweeps.size());
+}
+
 void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
                         float listenerHalfW, float listenerHeight, bool playerTargetable,
                         bool playerSpectator, float skyBrightness)
 {
+    applyPistonSweeps(world); // t1138：swept 位移先于实体循环（代次门内置——零实体也更新代次）
     if (!world || m_entities.empty()) return;
     FrameProfiler::Scope profLoop("mobLoop"); // t500 perf：mob 桶子分解（EntityManager::tick 整段）
     // t1073：AI 位置钳制域界（游荡 / 传送 / 寻偶跟随的 [ehw, dim-ehw]）——sparse = 无界大数（外环
