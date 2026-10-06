@@ -4728,13 +4728,19 @@ void PlayerController::placeBlock()
                              & quint8(BlockRegistry::CauldronStateLevelMask);
         if (heldItemId == RecipeRegistry::GlassBottleId) {
             if (level >= 1) { // 锅内有水 → 取 1 瓶扣 1 级
-                m_hotbar->takeStack(slot, 1);                              // 扣 1 空瓶
-                m_hotbar->addStack(int(RecipeRegistry::WaterBottleId), 1); // 予 1 水瓶（同 id 合并）
-                m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Cauldron, quint8(level - 1));
-                m_lastPlaceMs = now;
-                emit swingArm();
+                // [t1139 F07] 容量预检先于消耗（t1128 空地图激活守卫同门）：无处放水瓶 → 零消耗
+                //   （瓶不扣、水位不扣、零挥臂）——旧面 takeStack+addStack 余量弃读 = 满包丢瓶
+                //   （水瓶凭空消失，守恒破）。freesHand = 手持恰 1 瓶：消耗后腾出选中槽可容水瓶。
+                const bool freesHand = m_hotbar->countAt(slot) == 1;
+                if (m_hotbar->canFitStack(int(RecipeRegistry::WaterBottleId), 1, freesHand)) {
+                    m_hotbar->takeStack(slot, 1);                              // 扣 1 空瓶
+                    m_hotbar->addStack(int(RecipeRegistry::WaterBottleId), 1); // 予 1 水瓶（同 id 合并）
+                    m_world->setBlock(m_hitBx, m_hitBy, m_hitBz, BlockRegistry::Cauldron, quint8(level - 1));
+                    m_lastPlaceMs = now;
+                    emit swingArm();
+                }
             }
-            return; // 瓶 + 锅（取水成功 / 空锅无效应）均不再走放置路径
+            return; // 瓶 + 锅（取水成功 / 空锅无效应 / 满包拒）均不再走放置路径
         }
         // 装水桶 + 锅未满 → 灌满 3 级（已满视作「已满」不重复灌、不耗桶——倒流体「已是源不重复放」同门）。
         if (level < 3) {
@@ -4864,12 +4870,20 @@ void PlayerController::placeBlock()
     if (m_hotbar && m_world && heldItemId == RecipeRegistry::GlassBottleId) {
         const RayHit bHit = raycastVoxel(*m_world, position(), lookDirection(), kReach, RayFilter::HitWater);
         if (bHit.valid && m_world->blockAt(bHit.bx, bHit.by, bHit.bz) == BlockRegistry::Water) {
+            // [t1139 F07] 容量预检先于消耗（锅舀水面同门口径——t1128 空地图激活守卫同门）：
+            //   无处放水瓶 → 零消耗（瓶不扣、零挥臂）；水源格零触碰（瓶不带走水——t1097 机制面
+            //   原样）。freesHand = 手持恰 1 瓶：消耗后腾出选中槽可容水瓶（canFitStack 腾手
+            //   credit 仅在此计入——消耗不发生则槽不腾，预检口径与 addStack 落位充要）。
+            const bool freesHand = m_hotbar->countAt(m_hotbar->selectedSlot()) == 1;
+            if (!m_hotbar->canFitStack(int(RecipeRegistry::WaterBottleId), 1, freesHand))
+                return; // [t1139 F07] 容量预检先于消耗（t1128 空地图激活守卫同门）：无处放水瓶
+                        //   → 零消耗零挥臂（瓶不扣、水源格零触碰——禁水瓶凭空消失守恒破）。
             m_hotbar->takeStack(m_hotbar->selectedSlot(), 1); // 扣 1 空瓶
             m_hotbar->addStack(int(RecipeRegistry::WaterBottleId), 1); // 予 1 水瓶（同 id 合并 → 空槽）
             m_lastPlaceMs = now;
             emit swingArm();
         }
-        return; // 玻璃瓶（装水成功 / 未命中水）均不再走放置路径
+        return; // 玻璃瓶（装水成功 / 未命中水 / 满包拒）均不再走放置路径
     }
     // t656 红石粉导线放置（机制等价 MC 1.0 redstone dust：**红石粉物品本身就是导线** —— 右键放置成
     //   RedstoneDust 方块，不另立物品 id / 不设合成配方（MC 1.0 红石粉由采矿获得；本工程 RedstoneOre

@@ -73,10 +73,16 @@ public:
 
     // 未探索底色（ARGB）：暗灰蓝黑（MC 未绘区读感的工程原创色，§9a——非取自 MC 资产）。
     static constexpr quint32 kUnexploredColor = 0xFF15151a;
-    // 探索前沿带半宽（t1132 MAP-02）：数据集域 = 核心域四侧各扩此带（era 128 画布封顶的工程对应
-    //   面——**有界**扩展，禁无限位图）。64 列 ≈ 4 chunk 环，覆盖核心域外正常探索半径；带外列恒
-    //   不绘（MapStore 写读双门 + PlayerController 扫描域门，双保险）。
+    // 探索前沿带半宽（t1132 MAP-02）：数据集域 = 核心域四侧各扩此带（era 128 画布封顶的工程
+    //   对应面——**有界**扩展，禁无限位图）。64 列 ≈ 4 chunk 环，覆盖核心域外正常探索半径；
+    //   带外列恒不绘（MapStore 写读双门 + PlayerController 扫描域门，双保险）。
     static constexpr int kDomainMargin = 64;
+    // [t1139 R01] 数据集字节预算上界（有界拒绝单一权威）：initialize 的 `m_width * m_depth * 4`
+    //   int 算术在超大尺寸下溢出为负 → resize 负值 = UB；审查注入面（盘面元数据 w/d≈32768 →
+    //   像素字节数 2³² 溢 int）恒超线被拒。锚定：t276 可配 chunk 网格即使放到 256 chunk/边
+    //   （4096 方块边长）+ 四侧前沿带也仅 ~72MB → 128MB 预算留富余，真实预设永不触线。
+    //   预检一律经 datasetBytesFor（qsizetype 安全乘法）比对，禁回退 int 域算术。
+    static constexpr qsizetype kMaxDatasetBytes = qsizetype(128) * 1024 * 1024;
 
     bool hasMap() const { return m_width > 0 && m_depth > 0; }
     int mapWidth() const { return m_width; }   // 数据集宽（核心域 + 2×kDomainMargin）
@@ -119,6 +125,11 @@ signals:
 
 private:
     static MapStore *s_active; // 活跃实例（active() 拉取面；构造注册 / 析构注销）
+
+    // [t1139 R01] 数据集字节数（世界核心域 + 四侧前沿带，×4 字节/格；qsizetype 域安全乘法）。
+    //   loadVariant 预检与 initialize 上界守卫共用的单一权威算式——算术溢出面只许存在这一处，
+    //   且恒在 qsizetype 域。
+    static qsizetype datasetBytesFor(int worldWidth, int worldDepth);
 
     int m_worldWidth = 0; // 世界核心域宽（initialize 入参原样；导出 / 装载往返的尺寸语义域）
     int m_worldDepth = 0; // 世界核心域深（同上）

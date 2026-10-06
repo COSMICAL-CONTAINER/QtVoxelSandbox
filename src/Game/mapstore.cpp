@@ -16,10 +16,27 @@ MapStore::~MapStore()
         s_active = nullptr;
 }
 
+// [t1139 R01] 数据集字节数单一权威算式（qsizetype 域安全乘法；头注契约见 mapstore.h 同名段）。
+//   (核心域边长 + 2×前沿带)² × 4 字节/格——loadVariant 预检与 initialize 上界守卫共用，禁任何
+//   第二份 int 域同式算术（溢出面只许存在这一处）。
+qsizetype MapStore::datasetBytesFor(int worldWidth, int worldDepth)
+{
+    const qsizetype w = qsizetype(worldWidth) + 2 * kDomainMargin;
+    const qsizetype d = qsizetype(worldDepth) + 2 * kDomainMargin;
+    return w * d * 4;
+}
+
 void MapStore::initialize(int width, int depth)
 {
     if (width <= 0 || depth <= 0)
         return; // 非法定版 no-op（调用侧传 World 尺寸，恒正；防御负例）
+    // [t1139 R01] 域上界守卫（有界拒绝）：w/d 自盘面元数据路径可达本算术（loadVariant 入参
+    //   自存档行）——超预算 = 有界拒绝进 clearAll 降级面（与账不平同门口径），禁 int 溢出
+    //   分配。预检用 qsizetype 域安全算式，通过后才落 int 定版（此时必在 int 域内）。
+    if (datasetBytesFor(width, depth) > kMaxDatasetBytes) {
+        clearAll();
+        return;
+    }
     m_worldWidth = width;
     m_worldDepth = depth;
     // 数据集 = 世界核心域 + 四侧探索前沿带（t1132 MAP-02——era 128 画布封顶的有界对应面，禁无限
@@ -109,6 +126,10 @@ QVariantMap MapStore::exportVariant() const
 // t1132 MAP-03 装载（整体替换内存——signStore.loadAll 同门口径）：空 map（旧档无行 / 无表）→
 //   clearAll 降级（会话口径重探索面）；有行 → initialize 后像素 BLOB 回填 + revision 复原。
 //   尺寸账不平（pixels 字节数 ≠ 数据集字节数）= 存档病 → 诚实降级 clearAll（不载半截数据）。
+// [t1139 F06] 坏元数据键（尺寸 / 版本键缺失或非法）旧面 = 裸 return **不清前世界内容**——同
+//   实例先载 A 再载坏行 → A 像素滞留 + 下次保存把 A 探索写进 B（跨世界泄漏面，审查 A06）。
+//   新面 = 与账不平路径同门口径：clearAll 降级 + **先校验后 initialize 原子替换**（初始化前
+//   不发布半态）——尺寸 / 版本 / 上界三检全过后才建库，禁半初始化发布。
 void MapStore::loadVariant(const QVariantMap &data)
 {
     if (data.isEmpty() || !data.value(QStringLiteral("present")).toBool()) {
@@ -120,10 +141,12 @@ void MapStore::loadVariant(const QVariantMap &data)
     const int d = data.value(QStringLiteral("depth")).toInt(&okD);
     const int rev = data.value(QStringLiteral("revision")).toInt(&okR);
     const QByteArray pixels = data.value(QStringLiteral("pixels")).toByteArray();
-    if (!okW || !okD || !okR || w <= 0 || d <= 0)
-        return; // 尺寸/版本键病 → no-op（保守不重建）
-    initialize(w, d); // 全图未探索底色 + revision 自增 + 单信号（尺寸账随后校验）
-    const qsizetype want = qsizetype(m_width) * qsizetype(m_depth) * 4;
+    const qsizetype want = datasetBytesFor(w, d);
+    if (!okW || !okD || !okR || w <= 0 || d <= 0 || want > kMaxDatasetBytes) {
+        clearAll(); // [t1139 F06] 尺寸/版本键病 + R01 上界越界 → 同账不平门口径降级（禁保留前世界）
+        return;
+    }
+    initialize(w, d); // 校验全过后才建库（原子替换——全图未探索底色 + revision 自增 + 单信号）
     if (pixels.size() != want) {
         clearAll(); // 账不平 = 存档病（世界尺寸换代 / 截断）→ 诚实降级，不载半截
         return;

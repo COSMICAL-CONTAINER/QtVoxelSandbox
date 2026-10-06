@@ -121,8 +121,12 @@ QString WorldStore::sanitizeName(const QString &name)
 bool WorldStore::initSchema()
 {
     QSqlQuery q(QSqlDatabase::database(kConn));
-    // user_version 读（PRAGMA 返回单行单列）。
-    q.exec(QStringLiteral("PRAGMA user_version"));
+    // user_version 读（PRAGMA 返回单行单列）。[t1139 F02] exec 返回值补核：读失败按开库病拒绝
+    //   （旧面 = 失败被吞、version 恒 0 → 高版本库被当新库误写 schema 的降级面）。
+    if (!q.exec(QStringLiteral("PRAGMA user_version"))) {
+        qCCritical(lcSave) << "initSchema: user_version read failed:" << q.lastError().text();
+        return false;
+    }
     int version = 0;
     if (q.next()) version = q.value(0).toInt();
     if (version > kSchemaVersion) {
@@ -307,8 +311,12 @@ bool WorldStore::initSchema()
         qCCritical(lcSave) << "create piston_anims table failed:" << q.lastError().text();
         return false;
     }
-    // 写 user_version（新库 0→kSchemaVersion；旧库同版本幂等；无 harm）。
-    q.exec(QStringLiteral("PRAGMA user_version = %1").arg(kSchemaVersion));
+    // 写 user_version（新库 0→kSchemaVersion；旧库同版本幂等；无 harm）。[t1139 F02] 返回值补核
+    //   （审查点名：版本戳写失败若被吞 = 升级错误处理风险面）。
+    if (!q.exec(QStringLiteral("PRAGMA user_version = %1").arg(kSchemaVersion))) {
+        qCCritical(lcSave) << "initSchema: user_version write failed:" << q.lastError().text();
+        return false;
+    }
     return true;
 }
 
@@ -599,7 +607,15 @@ bool WorldStore::writeWorldPart(const QString &name, const QVariantList &chests,
     const ChunkManager &cm = m_world->chunks();
     QSqlDatabase db = QSqlDatabase::database(kConn);
     // 清空旧 chunks（upsert 全量重写最简；25 chunk 量级全删全插 < 1ms，无需增量）。
-    QSqlQuery(db).exec(QStringLiteral("DELETE FROM chunks"));
+    // [t1139 F02] 返回值检查补核：具名查询 + exec 失败 qCCritical + 短路 false —— 由调用域现有
+    //   rollbackAtomicSave 回滚兜底（SQLite ABORT 语义：语句级失败回滚本语句、事务保持活跃——
+    //   旧面 = 匿名临时查询丢弃返回值，空快照 / 键不重叠场景语句失败后事务继续提交 → 旧 chunks
+    //   静默残留）。此处失败绝不走「继续 INSERT」路径（与 chests/hoppers 等容器表 DELETE 同门）。
+    QSqlQuery del(db);
+    if (!del.exec(QStringLiteral("DELETE FROM chunks"))) {
+        qCCritical(lcSave) << "writeWorldPart: chunks delete failed:" << del.lastError().text();
+        return false;
+    }
 
     QSqlQuery iq(db);
     iq.prepare(QStringLiteral(
@@ -951,7 +967,12 @@ bool WorldStore::hasPlayerData() const
 {
     if (!m_open) return false;
     QSqlQuery q(QSqlDatabase::database(kConn));
-    q.exec(QStringLiteral("SELECT COUNT(*) FROM player_state WHERE id = 0"));
+    // [t1139 F02] 顺查补核：探针失败按「无数据」降级语义不变（返回 false 同旧），仅补 qCCritical
+    //   留痕（旧面 = 丢弃 exec 返回值静默走 false）。
+    if (!q.exec(QStringLiteral("SELECT COUNT(*) FROM player_state WHERE id = 0"))) {
+        qCCritical(lcSave) << "hasPlayerData: probe failed:" << q.lastError().text();
+        return false;
+    }
     return q.next() && q.value(0).toInt() > 0;
 }
 
@@ -959,7 +980,11 @@ bool WorldStore::hasChunks() const
 {
     if (!m_open) return false;
     QSqlQuery q(QSqlDatabase::database(kConn));
-    q.exec(QStringLiteral("SELECT COUNT(*) FROM chunks"));
+    // [t1139 F02] 同上（hasPlayerData 同门）。
+    if (!q.exec(QStringLiteral("SELECT COUNT(*) FROM chunks"))) {
+        qCCritical(lcSave) << "hasChunks: probe failed:" << q.lastError().text();
+        return false;
+    }
     return q.next() && q.value(0).toInt() > 0;
 }
 
