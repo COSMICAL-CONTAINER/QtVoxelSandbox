@@ -1372,6 +1372,13 @@ add_executable(redstone_matrix_test
     #   占位承重断言同源红）；NEG-2 = 摘 tickPistonAnimations 拍推发射行恰红 r2108a+c+e]。行为腿
     #   fresh 小世界红石 rig + 真链 pc rig + 逻辑时间驱动，rig 世界零接触）。
     tools/matrix/section101_piston_slice4_t1138.cpp
+    # t1139 第三轮外审快修批探针段（置尾先例沿用，接 section101；filter 词 r2109；矩阵 981→985）。
+    #   交付单三面（审查编号 A04/A06/A07 溯源交接单）：a DELETE 故障柱（真实临时库触发器注入
+    #   RAISE(ABORT)——空快照/键不重叠/键重叠三场景 receipt 失败 + 完成世代不前进 + 关库重开
+    #   全表恰 A + 解除故障重试 B 恰一次）/ b 地图五态柱（坏键不再裸 return——同实例逐级零残留
+    #   + R01 上界有界拒绝 + 存退重开隔离）/ c 装瓶矩阵柱（两面 × 数量 × 满包/合并——失败零
+    #   消耗零挥臂，成功一进一出）/ d 结构钉族柱（NEG 摘面行豁免不钉）。
+    tools/matrix/section102_review_quickfix_t1139.cpp
     # t1129 杀进程探针（CLI 模式 TU：--killprobe inject|inject-old|child|child-old|parent|
     #   parent-old——父 spawn 自身子进程 + 标记文件锚定保存窗 + QProcess::kill 真实终止 + 重开
     #   库四面读回。inject-old/child-old/parent-old = 旧协议提交序原语级重放（复现实验面——

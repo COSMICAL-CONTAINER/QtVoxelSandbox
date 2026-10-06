@@ -330,6 +330,12 @@ void MatrixRun::runAll()
                               //   位移柱 / b 杆占位+脉冲柱 / c 玩家侵入+孤儿头柱 / d 放置朝向柱 /
                               //   e 结构钉族柱——NEG 双摘面行本腿持有。行为腿 fresh 小世界红石
                               //   rig + 真链 pc rig + 逻辑时间驱动，rig 世界零接触，接 section100）
+    // t1139 第三轮外审快修批探针段（置尾先例沿用：r2109 a DELETE 故障柱 [真实临时库触发器注入
+    //   DELETE RAISE(ABORT) 三场景 + 解除重试恰一次] / b 地图五态柱 [F06 同实例跨世界零残留 +
+    //   R01 上界有界拒绝 + 存退重开隔离] / c 装瓶矩阵柱 [F07 锅舀水与水源两面容量预检] /
+    //   d 结构钉族柱 [worldstore 五处补核行 + mapstore 上界算式行 + 装瓶守卫行 + 哨兵钉不动]。
+    //   行为腿 fresh 小世界 + 真临时库 + 真链 pc rig，rig 世界零接触，接 section101）
+    section102_review_quickfix_t1139();
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";
