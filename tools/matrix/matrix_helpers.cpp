@@ -343,6 +343,13 @@ void MatrixRun::runAll()
     //   +工件钉+哨兵钉——NEG 双敏感]。行为腿 fresh 小世界直驱推动机/缩回机/动画 tick，rig 世界
     //   零接触，接 section102）
     section103_piston_material_t1140();
+    // 复核残面快修批探针段（置尾先例沿用：r2111 a 数据集溢出矩阵柱[除法形式预算检查——双轴
+    //   INT_MAX / 2³¹ 回绕带 / 单轴 / 32768 级 / 零 / 负 有界拒绝，NEG-1 敏感] / b 装载信号序柱
+    //   [先验账后建库——账不平零建库零半态信号，NEG-2 敏感] / c 真不重叠判别柱[摘 B 键行留非中
+    //   心旧行 + DELETE ABORT + 关库重开核全表十二面 + 重试恰一次] / d 结构钉族柱[NEG 双摘面豁免
+    //   不钉 + 波及钉逐字幸存复核]。行为腿 store 级直驱 + 真临时库，零墙钟依赖，rig 世界零接触，
+    //   接 section103）
+    section104_review_residual_t1141();
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";

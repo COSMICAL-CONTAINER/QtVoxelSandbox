@@ -1387,6 +1387,14 @@ add_executable(redstone_matrix_test
     #   不可拉+缩回态活塞族可拉+拒拉零掉落）/ d 全材料映射柱（逐员考定+零掉落族+J=0 非成员回归）/
     #   e 结构钉族柱（NEG 摘面行豁免不钉→本单双 NEG 靶行本腿持有）。
     tools/matrix/section103_piston_material_t1140.cpp
+    # 复核残面快修批探针段（置尾先例沿用，接 section103；filter 词 r2111；矩阵 990→994）。
+    #   交付单三面（复核报告残面 M1/M2/T1 三节收口）：a 数据集溢出矩阵柱（除法形式预算检查——
+    #   双轴 INT_MAX / 2³¹ 回绕带 / 单轴 INT_MAX / 32768 级 / 零 / 负 有界拒绝零建库 + 无效
+    #   QVariant / 短 BLOB 拒 + 正常大图可载）/ b 装载信号序柱（先验账后建库——账不平零建库
+    #   零半态信号，账平面语义零迁移）/ c 真不重叠判别柱（摘 B 键行留非中心旧行 + DELETE ABORT
+    #   + 关库重开核全表十二面 + 重试恰一次）/ d 结构钉族柱（NEG 双摘面豁免不钉 + 波及钉逐字
+    #   幸存复核 + 哨兵 166/213 不动）。
+    tools/matrix/section104_review_residual_t1141.cpp
     # t1129 杀进程探针（CLI 模式 TU：--killprobe inject|inject-old|child|child-old|parent|
     #   parent-old——父 spawn 自身子进程 + 标记文件锚定保存窗 + QProcess::kill 真实终止 + 重开
     #   库四面读回。inject-old/child-old/parent-old = 旧协议提交序原语级重放（复现实验面——
