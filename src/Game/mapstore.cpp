@@ -1,5 +1,7 @@
 #include "mapstore.h"
 
+#include <limits>
+
 // map 地图数据存储实现（t1114 初建；t1132 扩展域 + 持久化首片——设计裁定与存档口径见 mapstore.h
 // 头注，本文件只做像素簿记 + 数据集出入库）。
 MapStore *MapStore::s_active = nullptr;
@@ -16,14 +18,32 @@ MapStore::~MapStore()
         s_active = nullptr;
 }
 
-// [t1139 R01] 数据集字节数单一权威算式（qsizetype 域安全乘法；头注契约见 mapstore.h 同名段）。
-//   (核心域边长 + 2×前沿带)² × 4 字节/格——loadVariant 预检与 initialize 上界守卫共用，禁任何
-//   第二份 int 域同式算术（溢出面只许存在这一处）。
+// [t1139 R01 → 本单算式收口] 数据集字节数单一权威算式（除法形式预算检查；头注契约见
+//   mapstore.h 同名段）。(核心域边长 + 2×前沿带)² × 4 字节/格——loadVariant 预检与 initialize
+//   上界守卫共用，禁任何第二份 int 域同式算术（溢出面只许存在这一处）。旧形 = qsizetype 域
+//   先乘后比：双轴近 INT_MAX 时乘积数学值 ≈1.85e19 越过有符号 64 位上限，溢出（UB）发生在与
+//   预算线比较**之前**；且存在乘积回绕为负 / 零的入参带（数据集边长恰 2³¹：w·d = 2⁶²，×4 恰
+//   回绕 0）——回绕值会被误判「低于预算」放行，把溢出负值当安全字号直送 resize。新形收口：
+//   ① 非正域 = 有界拒绝哨兵（有效性语义并入返回值：返回值 ≤ kMaxDatasetBytes 即有界可建库
+//      ——「bool 有效性 + 字节数」的等价单返回值编码，禁零 / 负值混入预算比较域）；
+//   ② 除法判式逐步检查（禁先乘后比）：数据集边长须落 int 正域（initialize 的 m_width/m_depth
+//      面）且 w ≤ ⌊预算格数/d⌋ ⇔ w·d ≤ 预算格数（整除向下取整保真；d ≥ 257 恒非零除）——
+//      乘法只发生在下方已验证有界域（≤ 128MB/4 格 × 4 字节 = ≤ 预算线），任何 int 入参组合
+//      零溢出面，负值 / 回绕值在调用侧不可达。
 qsizetype MapStore::datasetBytesFor(int worldWidth, int worldDepth)
 {
+    if (worldWidth <= 0 || worldDepth <= 0)
+        return kMaxDatasetBytes + 1; // ① 非正域 = 有界拒绝哨兵（禁零/负混入预算比较）
     const qsizetype w = qsizetype(worldWidth) + 2 * kDomainMargin;
     const qsizetype d = qsizetype(worldDepth) + 2 * kDomainMargin;
-    return w * d * 4;
+    constexpr qsizetype kCellBudget = kMaxDatasetBytes / 4;
+    const bool bounded = w <= qsizetype(std::numeric_limits<int>::max())
+        && d <= qsizetype(std::numeric_limits<int>::max())
+        && w <= kCellBudget / d; // ② 除法判式（w·d ≤ 预算/4 格——禁先乘后比；d ≥ 257 恒非零除）
+    if (!bounded) {
+        return kMaxDatasetBytes + 1; // 非法/越界哨兵（恒真超线——调用侧比较形零改动）
+    }
+    return w * d * 4; // 有界乘法（≤ kMaxDatasetBytes——负值/回绕值在此不可达）
 }
 
 void MapStore::initialize(int width, int depth)
@@ -32,7 +52,7 @@ void MapStore::initialize(int width, int depth)
         return; // 非法定版 no-op（调用侧传 World 尺寸，恒正；防御负例）
     // [t1139 R01] 域上界守卫（有界拒绝）：w/d 自盘面元数据路径可达本算术（loadVariant 入参
     //   自存档行）——超预算 = 有界拒绝进 clearAll 降级面（与账不平同门口径），禁 int 溢出
-    //   分配。预检用 qsizetype 域安全算式，通过后才落 int 定版（此时必在 int 域内）。
+    //   分配。预检一律经 datasetBytesFor（除法形式预算检查）比对，禁回退 int 域算术。
     if (datasetBytesFor(width, depth) > kMaxDatasetBytes) {
         clearAll();
         return;
@@ -44,10 +64,13 @@ void MapStore::initialize(int width, int depth)
     //   后逐格覆写，初值无关紧要）。
     m_width = width + 2 * kDomainMargin;
     m_depth = depth + 2 * kDomainMargin;
-    m_pixels.resize(m_width * m_depth * 4);
+    // 字节数从已验证单一权威直推（预算线已过 → w·d ≤ 预算/4 格——int 域 m_width·m_depth·4
+    //   乘法退役）；格数从已验证缓冲尺寸直推 = 零二次同式算术（溢出面只许存在 datasetBytesFor
+    //   一处）。下界钳 0 = 异常返回值防御面（守卫已过的正常路径恒正有界，字面零行为差）。
+    m_pixels.resize(qBound<qsizetype>(0, datasetBytesFor(width, depth), kMaxDatasetBytes));
     auto *px = reinterpret_cast<quint32 *>(m_pixels.data());
-    const int cells = m_width * m_depth;
-    for (int i = 0; i < cells; ++i)
+    const qsizetype cells = m_pixels.size() / 4;
+    for (qsizetype i = 0; i < cells; ++i)
         px[i] = kUnexploredColor;
     ++m_revision;
     emit mapChanged();
@@ -146,11 +169,12 @@ void MapStore::loadVariant(const QVariantMap &data)
         clearAll(); // [t1139 F06] 尺寸/版本键病 + R01 上界越界 → 同账不平门口径降级（禁保留前世界）
         return;
     }
+    // 本单收口：账不平先拒（先验账后建库）——像素 BLOB 尺寸核对全过才 initialize。旧序 =
+    //   initialize 先发布 mapChanged（半初始化中间态已出）再验账、不平才 clearAll 补救——账不平
+    //   路径由「建库 + 两信号补救面」收口为「零建库零半态面」；账平路径与 initialize 本体的
+    //   mapChanged 语义零迁移。
+    if (pixels.size() != want) { clearAll(); return; } // 账不平 = 存档病（尺寸换代/截断）→ 诚实降级，不载半截
     initialize(w, d); // 校验全过后才建库（原子替换——全图未探索底色 + revision 自增 + 单信号）
-    if (pixels.size() != want) {
-        clearAll(); // 账不平 = 存档病（世界尺寸换代 / 截断）→ 诚实降级，不载半截
-        return;
-    }
     m_pixels = pixels;
     m_revision = rev; // 复原存档版本号（下次 commitColumns 自增仍单调）
     emit mapChanged();

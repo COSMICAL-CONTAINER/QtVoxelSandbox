@@ -77,11 +77,11 @@ public:
     //   对应面——**有界**扩展，禁无限位图）。64 列 ≈ 4 chunk 环，覆盖核心域外正常探索半径；
     //   带外列恒不绘（MapStore 写读双门 + PlayerController 扫描域门，双保险）。
     static constexpr int kDomainMargin = 64;
-    // [t1139 R01] 数据集字节预算上界（有界拒绝单一权威）：initialize 的 `m_width * m_depth * 4`
-    //   int 算术在超大尺寸下溢出为负 → resize 负值 = UB；审查注入面（盘面元数据 w/d≈32768 →
-    //   像素字节数 2³² 溢 int）恒超线被拒。锚定：t276 可配 chunk 网格即使放到 256 chunk/边
-    //   （4096 方块边长）+ 四侧前沿带也仅 ~72MB → 128MB 预算留富余，真实预设永不触线。
-    //   预检一律经 datasetBytesFor（qsizetype 安全乘法）比对，禁回退 int 域算术。
+    // [t1139 R01] 数据集字节预算上界（有界拒绝单一权威）：initialize 的字节数/格数算术一律从
+    //   datasetBytesFor 已验证有界值直推（int 域同式乘法退役）；审查注入面（盘面元数据
+    //   w/d≈32768 → 像素字节数 2³² 溢 int）恒超线被拒。锚定：t276 可配 chunk 网格即使放到
+    //   256 chunk/边（4096 方块边长）+ 四侧前沿带也仅 ~72MB → 128MB 预算留富余，真实预设
+    //   永不触线。预检一律经 datasetBytesFor（除法形式预算检查）比对，禁回退先乘后比算术。
     static constexpr qsizetype kMaxDatasetBytes = qsizetype(128) * 1024 * 1024;
 
     bool hasMap() const { return m_width > 0 && m_depth > 0; }
@@ -114,7 +114,8 @@ public:
     Q_INVOKABLE QVariantMap exportVariant() const;
     // 装载数据集（t1132 MAP-03：Main.qml enterWorld 整体替换内存——signStore.loadAll 同门位）。
     //   空 map / 缺 present 键（旧档无行 / 无表）→ clearAll 降级（会话口径，重探索再填充面）；
-    //   有行 → initialize(核心域尺寸) 后像素 BLOB 原样回填 + revision 复原（尺寸账不平 = 存档
+    //   有行 → 尺寸/版本/上界三检 + 像素 BLOB 账平核对全过后才 initialize(核心域尺寸)（先验账
+    //   后建库——禁半初始化中间态信号），后像素 BLOB 原样回填 + revision 复原（账不平 = 存档
     //   病 → 诚实降级 clearAll，不载半截数据）。
     Q_INVOKABLE void loadVariant(const QVariantMap &data);
 
@@ -126,9 +127,11 @@ signals:
 private:
     static MapStore *s_active; // 活跃实例（active() 拉取面；构造注册 / 析构注销）
 
-    // [t1139 R01] 数据集字节数（世界核心域 + 四侧前沿带，×4 字节/格；qsizetype 域安全乘法）。
-    //   loadVariant 预检与 initialize 上界守卫共用的单一权威算式——算术溢出面只许存在这一处，
-    //   且恒在 qsizetype 域。
+    // [t1139 R01 → 本单算式收口] 数据集字节数（世界核心域 + 四侧前沿带，×4 字节/格；除法形式
+    //   预算检查——禁先乘后比）。loadVariant 预检与 initialize 上界守卫共用的单一权威算式——
+    //   算术溢出面只许存在这一处：有效性语义并入返回值（≤ kMaxDatasetBytes = 有界可建库；
+    //   非正 / 超 int 定版域 / 预算越界 = 恒真超线哨兵），乘法只发生在已验证有界域，负值 /
+    //   64 位回绕值对调用侧不可达。
     static qsizetype datasetBytesFor(int worldWidth, int worldDepth);
 
     int m_worldWidth = 0; // 世界核心域宽（initialize 入参原样；导出 / 装载往返的尺寸语义域）
