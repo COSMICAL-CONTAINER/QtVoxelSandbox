@@ -1379,6 +1379,14 @@ add_executable(redstone_matrix_test
     #   + R01 上界有界拒绝 + 存退重开隔离）/ c 装瓶矩阵柱（两面 × 数量 × 满包/合并——失败零
     #   消耗零挥臂，成功一进一出）/ d 结构钉族柱（NEG 摘面行豁免不钉）。
     tools/matrix/section102_review_quickfix_t1139.cpp
+    # t1140 活塞推动响应完整化探针段（置尾先例沿用，接 section102；filter 词 r2110；矩阵 985→990）。
+    #   交付单五面（第三轮外审 A05=F03/F04 era 定谳翻案承接——全枚举工件 build/t1140_jar_material_map.txt
+    #   唯一权威 = J=1 恰 14 材料实例 / J=2 恰 A,D；canPush/拉回 J 三响应重建 + 头拒推拒拉 + r2105/r2106
+    #   lawful 修订 + 前序 NEG 八面保全）：a Destroy 推动柱（掉落恰一次+J 先于上限+首员终止+状态索引
+    #   同步）/ b J=2 拒推柱（头/门体/暗渊门面+双活塞相向正交六方向+零部分推动）/ c 拉回镜像柱（J≠0
+    #   不可拉+缩回态活塞族可拉+拒拉零掉落）/ d 全材料映射柱（逐员考定+零掉落族+J=0 非成员回归）/
+    #   e 结构钉族柱（NEG 摘面行豁免不钉→本单双 NEG 靶行本腿持有）。
+    tools/matrix/section103_piston_material_t1140.cpp
     # t1129 杀进程探针（CLI 模式 TU：--killprobe inject|inject-old|child|child-old|parent|
     #   parent-old——父 spawn 自身子进程 + 标记文件锚定保存窗 + QProcess::kill 真实终止 + 重开
     #   库四面读回。inject-old/child-old/parent-old = 旧协议提交序原语级重放（复现实验面——

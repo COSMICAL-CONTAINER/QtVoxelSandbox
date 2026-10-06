@@ -84,6 +84,10 @@ void MatrixRun::section99_piston_slice2_t1136()
     // ── r2106a:粘性拉回柱（真 rig 伸→失电→拉回两拍动画 + 零线清头 + 不可拉清头 + 信号沿计数）──
     //   NEG-1 敏感腿（源格腾空行摘除 → 拉回退化为复制，源格腾空子断言翻红）。t1137 lawful 行为
     //   修订：伸程与拉回均改两拍排定动画（窗口面 + settle 面两级实核——t1136 曾当拍搬回钉）。
+    //   [t1140 lawful 修订·沿革注] 拉回可拉谓词 era 镜像重建（交接单 F03/F04 + audit #29 F-1——
+    //   build/t1140_jar_material_map.txt 第四节：era 可拉 = canPush(id,false) && (i()==0 || 活塞本体
+    //   族)，era 拉回拒绝 J=1、头 J=2 拒拉）：本柱黑曜石不可拉子面幸存不变；J≠0 全族不可拉新面 +
+    //   缩回态活塞可拉面 = r2110c 行为柱新钉（本柱零触碰 J 族成员源格）。
     runLeg("r2106a sticky pull column (a sticky piston with a lit lever extends shifting the"
         " stone line through the two beat placeholder window and loading the head block"
         " into the first cell, unpowering schedules the two beat pull animation of the"

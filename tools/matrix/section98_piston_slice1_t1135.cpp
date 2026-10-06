@@ -212,7 +212,12 @@ void MatrixRun::section98_piston_slice1_t1135()
 
     // ── r2105b:附着断裂柱（前置件清单逐成员：水/岩浆界格毁格零掉落 + 界格收线尾块）──────────
     //   era 定谳（build/t1135_jar_material.txt）：迁移位 1 成员 = 水/岩浆全族——界格毁格清空 +
-    //   零掉落（era 流体无物品形态）；12 实心 + 流体第 13 格 = 流体是界非第 13 实心（成功）。
+    //   零掉落（era 流体无物品形态）。
+    //   [t1140 lawful 修订·沿革注] 本柱流体成员面扩员为 Destroy 全族（era 全枚举 14 材料实例——
+    //   build/t1140_jar_material_map.txt + audit #29 F-1 勘正 + 交接单 F03/F04 翻案：前置件「迁移位 1
+    //   恰四方块 id 8/9/10/11」失实，流体只是 J=1 全族的水/岩浆两实例；本柱断言面在扩员后全数幸存
+    //   ——毁格/零掉落信号/线收进界格/第 13 格流体成功四子面逐位不变，掉落信号恒零 = era 掉落路径
+    //   照走、材质掉落量恒 0 的引擎 dropId 门编码）。
     runLeg("r2105b attachment break column (a water terminator is destroyed with zero item"
         " drops while the stone line loads into the freed cell behind the head block and the"
         " drop signal counter"
@@ -527,6 +532,9 @@ void MatrixRun::section98_piston_slice1_t1135()
         ok = ok && qmlPalette;
         if (!qmlPalette) diag += QStringLiteral("[qmlPalette]");
         // (R6) era 前置件工件钉（本单 jar 复核件在盘非空携锚：J 旗标字段 + 二材料实例构造位）。
+        //   [t1140 lawful 修订·沿革注] 前置件两处定谳已被 jar 全字节推翻（audit #29 F-1 + 交接单
+        //   F03/F04）：本钉保留其在盘事实面（字段锚在盘非空），全族清单权威移主 t1140 工件
+        //   （(R6b) 扩员钉）。
         const QString bdir = QCoreApplication::applicationDirPath();
         const QString matArt = bdir + QStringLiteral("/t1135_jar_material.txt");
         const bool artOk = fileExistsNonEmptyPistonSlice1(matArt)
@@ -535,6 +543,15 @@ void MatrixRun::section98_piston_slice1_t1135()
             && rawContainsPistonSlice1(matArt, QByteArray("Field h:Lp"));
         ok = ok && artOk;
         if (!artOk) diag += QStringLiteral("[artifact]");
+        // (R6b) [t1140 扩员钉·沿革注同上] t1140 全枚举工件在盘非空携 Destroy 全族锚（14 实例清单
+        //   权威 + p.p/p.D 两翻案主面链锚）。
+        const QString fullArt = bdir + QStringLiteral("/t1140_jar_material_map.txt");
+        const bool fullArtOk = fileExistsNonEmptyPistonSlice1(fullArt)
+            && rawContainsPistonSlice1(fullArt, QByteArray("g,h,i,j,k,n,p,s,u,w,y,z,B,C"))
+            && rawContainsPistonSlice1(fullArt, QByteArray("new mw(aav.b).m()"))
+            && rawContainsPistonSlice1(fullArt, QByteArray("new p(aav.m).n()"));
+        ok = ok && fullArtOk;
+        if (!fullArtOk) diag += QStringLiteral("[t1140artifact]");
         // (R7) 源树 filter 词元零命中（filter 词只落矩阵域）。
         {
             bool leaked = false;

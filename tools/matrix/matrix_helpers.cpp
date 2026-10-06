@@ -336,6 +336,13 @@ void MatrixRun::runAll()
     //   d 结构钉族柱 [worldstore 五处补核行 + mapstore 上界算式行 + 装瓶守卫行 + 哨兵钉不动]。
     //   行为腿 fresh 小世界 + 真临时库 + 真链 pc rig，rig 世界零接触，接 section101）
     section102_review_quickfix_t1139();
+    // t1140 活塞推动响应完整化探针段（置尾先例沿用：r2110 a Destroy 推动柱[掉落恰一次+J 先于上限
+    //   +首员终止+状态索引同步，NEG-1 敏感] / b J=2 拒推柱[头/门体/暗渊门面+双活塞相向正交六方向
+    //   +零部分推动，NEG-2 敏感] / c 拉回镜像柱[J≠0 不可拉+缩回态活塞族可拉+拒拉零掉落] / d 全材料
+    //   映射柱[逐员考定+零掉落族+J=0 非成员回归，NEG-1 敏感] / e 结构钉族柱[前序 NEG 八面保全复钉
+    //   +工件钉+哨兵钉——NEG 双敏感]。行为腿 fresh 小世界直驱推动机/缩回机/动画 tick，rig 世界
+    //   零接触，接 section102）
+    section103_piston_material_t1140();
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";
