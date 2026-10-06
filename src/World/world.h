@@ -1366,14 +1366,18 @@ public:
     //
     // 推动机 tryPistonExtend（扫描与执行同界——**不可推一半**，era 扫描失败 = 世界零改写）：
     //   ① 扫描相（era abr.g 正扫同构）：沿朝向正扫 ≤12 格；空气 = 界（界格须可写——Fixed 域界 /
-    //      sparse 物化门，同 setBlockSilent 写门谓词）；流体（Water/Lava——**附着断裂成员**，前置件
-    //      定谳 era 迁移位 1 材料恰四方块 id 8/9/10/11 → 引擎 Water=21/Lava=31 全族）= 界（执行相
-    //      毁格清空、**零掉落**——era dropBlockAsItemWithChance 流体无物品形态掉落量恒 0）；拒推四员
-    //      全单失败：黑曜石显式 / 已伸活塞（extended 位，era f(meta)=meta&8 同判）/ 侧存储族
-    //      （isStoreBlock——era BlockContainer 派生族对应面，推之丢内容故拒）/ 硬度 -1（基岩族；流体
-    //      已先判——era 流体硬度 100F 材料 J=1 双通道正交，引擎 Water/Lava hardness=-1 是不可挖掘
-    //      哨兵，故流体成员判定置于硬度员之前）；第 13 实心 = 败（era count==12 即败，上限 12）。
-    //      扫描游标 y 越界（≤0 / ≥高-1）= 败（era tryExtend 域守卫同构）。
+    //      sparse 物化门，同 setBlockSilent 写门谓词）；**Destroy 终止界**（era abr.g i()==1 成功界 +
+    //      abr.h yy.k[b].b dropBlockAsItem 真实掉落路径恰一次 + world.g 清空 → 线收进其格——
+    //      **t1140 全枚举重建**：build/t1140_jar_material_map.txt 定谳 J=1 恰 14 材料实例，引擎成员
+    //      全表见 BlockRegistry::materialPushResponse 行注；流体四 id 同通道——era 材质掉落量恒 0 →
+    //      引擎 dropId 门零信号，切片一附着断裂柱零掉落面维持）；拒推族全单失败：黑曜石显式 / 已伸活塞
+    //      （extended 位，era f(meta)=meta&8 同判）/ **J=2 Block 响应全族**（era yy.k[id].i()==2 →
+    //      false——头块 acu/门体 sc/移动占位 qz；F04 翻案主面）/ 侧存储族（isStoreBlock——era
+    //      BlockContainer 派生族对应面，推之丢内容故拒）/ 硬度 -1（基岩族）；Destroy 成员判定置于
+    //      硬度员之前——era 流体硬度 100F 材料 J=1 双通道正交，引擎 Water/Lava hardness=-1 是不可
+    //      挖掘哨兵，先判哨兵会把 era 该毁的流体误判成拒推（t1135 口径沿用）；第 13 实心 = 败
+    //      （era count==12 即败，上限 12——**era J 判在 count 判之前**：第 13 格 Destroy = 终止成功
+    //      非上限败，引擎同序）；扫描游标 y 越界（≤0 / ≥高-1）= 败（era tryExtend 域守卫同构）。
     //   ② 执行相（era abr.h 反向回走同构）：线尾向活塞回写——line[i] → line[i+1]（界格收线尾块）、
     //      首格落头块（era 头块写入位——t1136 切片二收口；**t1137 切片三**：全部写入位改落
     //      PistonMoving(164) 占位 + 侧表 (storedId,storedState) 原样随存，era h() 回走 setBlock(36)+
@@ -1407,13 +1411,15 @@ public:
     //   ① 头格（本体+朝向格）**无条件清空**（era phase1 非粘性分支 world.g(head,0) 同构——era 不验头格
     //      现内容，玩家置换头格块时缩回照清 = era 真值）；头格不可写（域界 / sparse 未物化）→ 全单放弃
     //      零写（不可半做不变量）。
-    //   ② 粘性拉回：正前第二格（本体+2Δ = 被推首块位）id 可拉（era canPush destroyMode=false 镜像：
-    //      空气 / 流体[迁移位1] / 黑曜石 / 侧存储族 / 硬度 -1 / 已伸活塞 = 不可拉）→ 头格置
-    //      PistonMoving(164) 拉回动画占位 + 侧表 (storedId=pulledId, storedState, extending=false)，
-    //      源格当拍腾空（era 拉回分支：头格置拉回块 extending tile + cb 抑制窗内前格 world.g 清空
-    //      字节同构——两拍后 settle 实体化拉回块）；不可拉 / 界格不可写 → 仅头格清空（era
-    //      不可拉分支同口径）。era 拉回源格本身为伸程占位时的 j() 先实体化再读存储块面（era 字节
-    //      307-345）= 引擎拒推族同判（164=isStoreBlock → 不可拉）+ 占位自愈，近似度登记。
+    //   ② 粘性拉回：正前第二格（本体+2Δ = 被推首块位）id 可拉（era canPush destroyMode=false 镜像
+    //      ——**t1140 J 语义重建**：可拉 = canPush(id,false) && (i()==0 || 活塞本体族)，era 拉回拒绝
+    //      J=1、头 J=2 拒拉——J≠0 全族 / 黑曜石 / 侧存储族 / 硬度 -1 / 已伸活塞 = 不可拉；缩回态
+    //      活塞本体族可拉）→ 头格置 PistonMoving(164) 拉回动画占位 + 侧表 (storedId=pulledId,
+    //      storedState, extending=false)，源格当拍腾空（era 拉回分支：头格置拉回块 extending tile +
+    //      cb 抑制窗内前格 world.g 清空字节同构——两拍后 settle 实体化拉回块）；不可拉 / 界格不可写
+    //      → 仅头格清空（era 不可拉分支同口径）。era 拉回源格本身为伸程占位时的 j() 先实体化再读
+    //      存储块面（era 字节 307-345）= 引擎拒推族同判（164=isStoreBlock → 不可拉）+ 占位自愈，
+    //      近似度登记。
     //   ③ 批量收口（t1135 推动机同门）：逐格 O(1) note 钩子五族 + fluidActExpand + 水/岩浆脏位 +
     //      腾空格 recheckAttachmentsAfterClear / checkGravityBlockOnEdit + 活塞∪头格∪拉回格外接盒
     //      **一次** refloodBox(doSky)；extended 位清写归接收器（机器零触达）。

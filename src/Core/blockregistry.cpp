@@ -1246,6 +1246,82 @@ bool BlockRegistry::isStoreBlock(quint8 blockId)
     }
 }
 
+// t1140 材料推动响应 J 三值单一权威（声明注释见 blockregistry.h；全枚举工件
+//   build/t1140_jar_material_map.txt 逐链字节定谳——era p.txt static{} 全块 30 链 + 消费方块类
+//   ctor 链 owner 复核；翻案注引 audit #29 F-1 + docs/code-review-handoff-2026-10-05.md F03/F04）。
+//   分组即工件第五节引擎成员面；表外缺省 0（J=0 可推——含活塞本体族 era 活塞分支旁路面）。
+int BlockRegistry::materialPushResponse(quint8 blockId)
+{
+    switch (blockId) {
+    // ── p.g/p.h 流体四 id（era ahx/add 8/9/10/11，era 掉落路径照走、材质掉落量恒 0 → 引擎
+    //    dropId 门零信号；**置于硬度员之前**由调用方保序——引擎流体 hardness=-1 不可挖掘哨兵，
+    //    先判哨兵会把 era 该毁的流体误判拒推，t1135 既有口径沿用）：
+    case Water:
+    case Lava:
+    // ── p.i 树叶族（era qo 18）：
+    case Leaves:
+    case SpruceLeaves: // 树叶族机制面（kMc -1——era 18 同材质继承面）
+    // ── p.j 植物族（era wg 37/38 + 继承链 aet/kv/js/aha/pu/jl/qi/md）：
+    case FlowerRed:
+    case FlowerYellow:
+    case FlowerBlue: // 花族机制面（kMc -1——era 37/38 同材质继承面）
+    case FlowerWhite: // 同上
+    case Sapling:
+    case TallGrass:
+    case WheatCrop:
+    case CarrotCrop: // 作物族机制面（era 141/142 = 1.4+ 越纪元 → era 59 作物同材质面）
+    case PotatoCrop: // 同上
+    case Sugarcane:
+    case DeadBush:
+    case PumpkinStem:
+    case MelonStem:
+    case Mushroom: // 蘑菇族机制面（era 39/40 js 小蘑菇方块，kMc -1 登记与 era 事实相悖——工件勘正注）
+    case BrownMushroom: // 同上
+    case LilyPad: // era 111 waterlily（qi extends wg p.j；kMc 行 -1 与 era 事实相悖——工件勘正注）
+    case SweetBerryBush: // 灌木植物族机制面（kMc -1）
+    // ── p.n 火（era wj 51）：
+    case Fire:
+    // ── p.p 电路/附着脆弱族（era bg 50/kw 55/aaa 69/mz 93/afr 27,66/ags 28/afu 65/ahv 77/ku 76）：
+    case Torch:
+    case RedstoneDust:
+    case Lever:
+    case Repeater:
+    case RedstoneTorch: // era ku extends bg——红石火把经 bg ctor 链取 p.p（字节定谳）
+    case Rail:
+    case GoldenRail:
+    case DetectorRail: // era ags extends afr——探测轨经 afr 链取 p.p
+    case Ladder:
+    case StoneButton:
+    case WoodButton: // 按钮族机制面（era 143 = 1.5+ 越纪元 → era 77 按钮同材质面）
+    // ── p.u 积雪层（era aif 78——t505 起引擎为薄层形态，era 机制面 = 78 积雪层非 80 雪块，
+    //    工件勘正注：kMc 行 80 为 t395 整立方旧选）：
+    case SnowLayer:
+    // ── p.w 仙人掌（era ow 81）：
+    case Cactus:
+    // ── p.y 南瓜/西瓜族（era nf 86/91/of 103）：
+    case Pumpkin:
+    case JackOLantern:
+    case Melon:
+    // ── p.B 蛋糕（era aem 92）：
+    case Cake:
+    // ── p.C 蛛网（era kc 30，tx 蛛网材料子类）：
+    case Cobweb:
+        return 1; // Destroy：终止推进 + 真实掉落路径恰一次；拉回拒绝（era i()==1）
+    // ── J=2 Block 拒推族（era p.D acu 头块 34 / qz 移动占位 36 + p.A sc 门方块体 90 +
+    //    era 119 aid 容器派生面）：
+    case PistonHead: // F04 翻案主面：era acu 材料 p.D 链尾 .n()=J=2（t1135 曾定谳死常量）——
+                     //   第二活塞推/拉已伸或缩回态头块 = 拒推拒拉
+    case PistonMoving: // era qz p.D=J=2（兼容器/硬度 -1 双通道，三通道同拒）
+    case EmberGate: // era 90 sc p.A=bk.n()=J=2（门方块体拒推——t1135 前置件未提及面）
+    case AbyssGateSurface: // era 119 aid extends ba 容器派生面 → 引擎拒推面编码于 J 通道
+                           //   （工件勘正注：t1135 isStoreBlock 注把 era 119 标作炼药锅为命名 slip——
+                           //   era 118 ic 炼药锅 extends yy 非容器可推、era 119 aid 暗渊门面 = ba 成员）
+        return 2; // Block：全单拒推零部分推动；拒拉（era i()==2）
+    default:
+        return 0; // Normal：搬移 (id,state) 原样——含活塞本体族（era 活塞分支旁路 J 检查的表编码面）
+    }
+}
+
 // t1135 活塞朝向解码（单一权威，声明注释见 blockregistry.h）：era ot.b/c/d 方向表同构
 //   0=(0,-1,0) / 1=(0,1,0) / 2=(0,0,-1) / 3=(0,0,1) / 4=(-1,0,0) / 5=(1,0,0)；越界兜底 +Y（era
 //   meta==7 非法即弃同门——置 1 朝上安全向）。只读 state，无副作用。

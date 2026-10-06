@@ -6800,19 +6800,22 @@ bool World::tryPistonRetract(int x, int y, int z, bool sticky)
     if (!pistonCellWritable(hx, hy, hz))
         return false;
     // ② 粘性拉回源读（era phase1 粘性分支前格 id/meta 读出同构）。可拉集 = era canPush destroyMode=
-    //    false 镜像：空气 / 流体（迁移位1）/ 黑曜石 / 侧存储族 / 硬度 -1 / 已伸活塞 = 不可拉。
+    //    false 镜像（**t1140 J 语义重建**——build/t1140_jar_material_map.txt 第四节：era 拉回可拉判定
+    //    = canPush(id,false) && (i()==0 || 活塞本体族)，era 拉回拒绝 J=1、头 J=2 拒拉）：空气 / J≠0
+    //    全族（Destroy+Block 两响应成员）/ 黑曜石 / 侧存储族 / 硬度 -1 / 已伸活塞 = 不可拉；缩回态
+    //    活塞本体族可拉（era 活塞分支旁路 = J 表缺省 0 编码面）。
     quint8 pulledId = BlockRegistry::Air;
     quint8 pulledState = 0;
     bool pullOk = false;
     if (sticky) {
         const quint8 pid = m_chunks.blockAt(px, py, pz);
         bool pullable = pid != BlockRegistry::Air
-            && pid != BlockRegistry::Water && pid != BlockRegistry::Lava
             && pid != BlockRegistry::Obsidian
             && !BlockRegistry::isStoreBlock(pid)
             && BlockRegistry::hardness(pid) >= 0.0f
             && !(BlockRegistry::isPiston(pid)
-                 && (m_chunks.stateAt(px, py, pz) & BlockRegistry::PistonStateExtendedFlag) != 0);
+                 && (m_chunks.stateAt(px, py, pz) & BlockRegistry::PistonStateExtendedFlag) != 0)
+            && BlockRegistry::materialPushResponse(pid) == 0; // era 拉回 i()==0 或活塞本体族条款（单行完整语句——t1140 NEG 面豁免不摘行：本行摘除 = J 族可拉翻红由行为腿持有）
         if (pullable && pistonCellWritable(px, py, pz))
             pullOk = true;
         if (pullOk) { pulledId = pid; pulledState = m_chunks.stateAt(px, py, pz); }
@@ -6911,15 +6914,16 @@ bool World::tryPistonExtend(int x, int y, int z)
     BlockRegistry::pistonFacingDelta(pst, dx, dy, dz);
 
     // ── ① 扫描相（era abr.g 正扫同构；扫描与执行同界——不可推一半）────────────────────
-    //   线 = 活塞正前方连续可推实心（≤12）；界 = 首个空气 / 流体格。拒推四员任一命中 → 全单失败
-    //   （era 整次放弃零部分推动——世界零改写）。
+    //   线 = 活塞正前方连续可推实心（≤12）；界 = 首个空气 / J=1 Destroy 终止格（t1140 J 语义重建
+    //   ——era i()==1 成功界同构，流体四 id 为该族成员）。拒推族任一命中 → 全单失败（era 整次放弃
+    //   零部分推动——世界零改写）。
     struct PistonLineCell { int x, y, z; quint8 id, state; };
     std::vector<PistonLineCell> line;
     int cx = x, cy = y, cz = z;
-    bool broke = false;        // 正扫以界（空气 / 流体）break 收尾（era goto-160 汇合同构）
+    bool broke = false;        // 正扫以界（空气 / Destroy 终止格）break 收尾（era goto-160 汇合同构）
     bool boundWritable = false; // 界格可写（不可推一半不变量界侧半边）
     quint8 termOldId = BlockRegistry::Air;
-    bool termIsFluid = false;
+    bool termDestroy = false;  // 界 = J=1 Destroy 终止格（era abr.g i()==1 成功界 + abr.h 毁格掉落路径）
     for (int i = 0; i <= BlockRegistry::PistonPushLimit; ++i) {
         cx += dx; cy += dy; cz += dz;
         // era tryExtend 域守卫同构：游标 y ∈ (0, 高-1) 开区间——越界即败（era ifle/if_icmplt 字节码；
@@ -6934,23 +6938,30 @@ bool World::tryPistonExtend(int x, int y, int z)
             termOldId = BlockRegistry::Air;
             break;
         }
-        // 附着断裂成员界（前置件定谳：era 迁移位 1 材料恰四方块 id 8/9/10/11 = 水/岩浆流动+静止 →
-        //   引擎 Water/Lava 全族；era 材料 J=1 通道）。**置于硬度员之前**——era 流体 blockHardness
-        //   100F + J=1 双通道正交，引擎流体 hardness=-1 是不可挖掘哨兵（t148/t343），先判哨兵会把
-        //   era 该毁的流体误判成拒推全单失败。
-        if (id == BlockRegistry::Water || id == BlockRegistry::Lava) {
-            broke = true;
-            boundWritable = pistonCellWritable(cx, cy, cz);
-            termOldId = id;
-            termIsFluid = true;
-            break;
-        }
-        // 拒推四员（era canPushBlock abr.a 同构；前置件工件第三节负发现交叉区）：
+        // 拒推员（era canPushBlock abr.a 判定序同构——t1140 全枚举重建：
+        //   build/t1140_jar_material_map.txt 第四节三响应语义定谳 + 交接单 F03/F04 翻案注 +
+        //   audit #29 F-1 勘正[前置件「恰四方块流体 / p.p 无 m() / p.n() 死常量」三处失实，
+        //   J=1 恰 14 材料实例 / J=2 恰 A,D 两实例]）：
         if (id == BlockRegistry::Obsidian)
             return false; // ① 黑曜石显式拒（era yy.ap 显式同构）
         if (BlockRegistry::isPiston(id)
             && (m_chunks.stateAt(cx, cy, cz) & BlockRegistry::PistonStateExtendedFlag) != 0)
-            return false; // ④ 已伸活塞（era f(meta)=meta&8 同判；缩回态活塞可推——era 同）
+            return false; // ④ 已伸活塞（era f(meta)=meta&8 同判；缩回态活塞可推——era 同，
+                          //   活塞本体族材料 J 检查经 era 活塞分支旁路 = J 表缺省 0 编码面）
+        // J=1 Destroy 终止界（era abr.g i()==1 成功界 + abr.h yy.k[id].b dropBlockAsItem 真实掉落
+        //   路径恰一次 + world.g 清空 → 线收进其格；**置于硬度员之前**——era 流体 blockHardness
+        //   100F + J=1 双通道正交，引擎流体 hardness=-1 是不可挖掘哨兵（t148/t343），先判哨兵会把
+        //   era 该毁的流体误判成拒推全单失败[t1135 口径沿用]）。
+        const int pushJ = BlockRegistry::materialPushResponse(id);
+        if (pushJ == 1) {
+            broke = true;
+            boundWritable = pistonCellWritable(cx, cy, cz);
+            termOldId = id;
+            termDestroy = true;
+            break;
+        }
+        if (pushJ == 2) // ⑤ 迁移位 2 = Block 响应拒推（era yy.k[id].i()==2 → false——头块 acu/门体
+            return false; // sc/移动占位 qz 全族；单行完整语句——t1140 NEG-2 摘行面）
         if (BlockRegistry::isStoreBlock(id))
             return false; // ③ 侧存储族（era BlockContainer 派生族对应面——推之丢内容故拒；
                           //   交接单问②定谳：拒推零掉落零破坏，活塞不伸出）
@@ -6983,8 +6994,8 @@ bool World::tryPistonExtend(int x, int y, int z)
     const auto animEntry = [&](int wx, int wy, int wz, quint8 sid, quint8 sst) {
         m_pistonAnims.push_back({wx, wy, wz, sid, sst, animFacing, true, 2});
     };
-    // 线尾向活塞回写：line[i] → line[i+1]（line[N] = 界格——收线尾块；界流体在此被线尾块覆写，
-    //   oldId=流体 id 保 note 钩子见毁流体事实）。**占位写入**：每格落 164 + 侧表存被搬入块原样
+    // 线尾向活塞回写：line[i] → line[i+1]（line[N] = 界格——收线尾块；Destroy 终止格在此被线尾块
+    //   覆写，oldId=被毁块 id 保 note 钩子见毁格事实）。**占位写入**：每格落 164 + 侧表存被搬入块原样
     //   （storedId/state = 该 settle 时实体化的目标形态，era 同构）。
     for (int i = int(line.size()) - 1; i >= 0; --i) {
         const PistonLineCell &dst = (i + 1 < int(line.size()))
@@ -6999,10 +7010,11 @@ bool World::tryPistonExtend(int x, int y, int z)
     //    伸程头格 = 36 占位 tile(storedId=34 头块, dir|sticky?8, dir, extending=true) 字节同构，
     //    settle 两拍后实体化 PistonHead(163)；era settled 头 meta 携粘性构造位 bit8——引擎粘性 =
     //    本体 id 属性，头位冗余不取，登记简化维持。**伸程零 Air 过渡维持**：线块占位前移 + 头格
-    //    占位落首格（原首格块随线搬走）/ 界格流体毁格落头占位 / 界格空气落头占位——era 同面）。
+    //    占位落首格（原首格块随线搬走）/ Destroy 终止格毁格落头占位 / 界格空气落头占位——era 同面）。
     if (line.empty()) {
-        // 零实心线：界即活塞贴脸格。界 = 流体 → 毁格落头占位（era 执行相毁分支 + 头占位置入）；界 =
-        //   空气 → 头占位置入（era 伸入纯空气 = 头块前推占位——t1136 曾瞬时头块，切片三占位化收口）。
+        // 零实心线：界即活塞贴脸格。界 = Destroy 终止格 → 毁格落头占位（era 执行相毁分支 + 头占位
+        //   置入）；界 = 空气 → 头占位置入（era 伸入纯空气 = 头块前推占位——t1136 曾瞬时头块，切片三
+        //   占位化收口）。
         push(cx, cy, cz, termOldId, BlockRegistry::PistonMoving, animFacing);
         animEntry(cx, cy, cz, BlockRegistry::PistonHead, quint8(pst & BlockRegistry::PistonStateFacingMask));
     } else {
@@ -7012,6 +7024,11 @@ bool World::tryPistonExtend(int x, int y, int z)
         animEntry(line.front().x, line.front().y, line.front().z,
                   BlockRegistry::PistonHead, quint8(pst & BlockRegistry::PistonStateFacingMask));
     }
+    // Destroy 真实掉落路径恰一次（era abr.h yy.k[id].b dropBlockAsItem 直译——线尾块覆写 Destroy
+    //   终止格后单发掉落信号；dropId 门 = era 材质掉落量恒 0 面（流体四 id 路径照走、零物品实体——
+    //   切片一附着断裂柱零掉落信号面维持）；**单行完整语句——t1140 NEG-1 摘行面**（摘除 = Destroy
+    //   族零掉落，推进/毁格面不变 → 恰红 = 本单 Destroy 行为柱与结构钉柱）。
+    if (termDestroy && BlockRegistry::dropId(termOldId) > 0) emit blockDroppedAsItem(cx, cy, cz, BlockRegistry::dropId(termOldId));
 
     // 批量 note 钩子 + 流体活动盒（同 destroySphereSilent 逐格 O(1) 口径；爆炸先例 五族索引全族）。
     for (const PistonChange &c : changes) {

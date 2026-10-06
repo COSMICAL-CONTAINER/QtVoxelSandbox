@@ -1513,6 +1513,18 @@ public:
     //   本切片零放置 → 谓词仅作拒推 / 结构面。
     static bool isStoreBlock(quint8 blockId);
 
+    // t1140 材料推动响应 J 三值（era 材料迁移位 yy.k[id].i() 同构——era 材料基类 p 的 m()/n() 置位器：
+    //   0=Normal 搬移 (id,state) 原样 / 1=Destroy 终止推进+真实掉落路径恰一次 / 2=Block 全单拒推零部分
+    //   推动）。**全枚举权威 = build/t1140_jar_material_map.txt**（p.txt static{} 全块 30 链逐链字节定谳：
+    //   J=1 恰 14 材料实例 g,h,i,j,k,n,p,s,u,w,y,z,B,C / J=2 恰 A,D / J=0 恰 14——audit #29 F-1 勘正
+    //   t1135 前置件「恰四方块流体」与「p.p 无 m()」「p.n() 死常量」三处失实，翻案注引
+    //   docs/code-review-handoff-2026-10-05.md F03/F04）。**审读纪律**：J=2 者拒推拒拉（era 拉回拒绝
+    //   J=1、头 J=2）；J=1 者推动终止+掉落、拉回拒绝；J=0 原样搬移——「薄块一概 Destroy」过修禁手
+    //   （雪块/玻璃/玻璃板/冰/羊毛/床/压力板逐类 era 字节定谳均可推，见工件第五节显著非成员清单）。
+    //   活塞本体族（Piston/StickyPiston，era 33/29）**不在本表**：era 活塞分支旁路材料 J 检查（缩回态
+    //   可推可拉、伸出态由既有 extended 位面拒）——表缺省 0 承载该面，零新分支。
+    static int materialPushResponse(quint8 blockId);
+
 
     // t457 床低 3D 模型几何常量（cell-local [0,1]）—— PartialBlockGeometry 渲染 + shapeBoxes 碰撞共用同一组值，
     //   保证「碰撞盒顶 = 渲染床垫顶」（玩家立于床垫顶）。kBedMattressTop=床垫顶高（~0.31 = 5/16，低床，碰撞盒顶）；
