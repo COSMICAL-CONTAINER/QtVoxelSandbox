@@ -555,17 +555,21 @@ Item {
                         .arg(dif22).arg(dif33)
                         .arg(ws.chunkHasUnsavedEdits(3, 3));
 
-        // ⑦ 行面：恰四行、四键全命中（远五块未逐 = 未落盘不增行）。
+        // ⑦ 行面：恰四行、四键全命中（远五块未逐 = 未落盘不增行）。【t1142 lawful 修订】驱逐
+        //    落盘目标 = 会话暂存域（SAVE-02 世代分离本体，契约 = chunkstore.h SAVE-02 段）——
+        //    本行面随缝前移至暂存族（hasStagedChunk/loadStagedChunk），committed 面归保存事务
+        //    晋升拍（r2112c 承重）；路由/恒等/计数各柱零涉不动。
         bool rowsOk = gs.chunkEditsStore() != nullptr
-            && gs.chunkEditsStore()->chunkCount() == 4
-            && gs.chunkEditsStore()->hasChunk(2, 2)
-            && gs.chunkEditsStore()->hasChunk(3, 2) && gs.chunkEditsStore()->hasChunk(2, 3)
-            && gs.chunkEditsStore()->hasChunk(3, 3)
-            && !gs.chunkEditsStore()->hasChunk(1, 1); // 远块未逐未落盘
+            && gs.chunkEditsStore()->stagedChunkCount() == 4
+            && gs.chunkEditsStore()->hasStagedChunk(2, 2)
+            && gs.chunkEditsStore()->hasStagedChunk(3, 2) && gs.chunkEditsStore()->hasStagedChunk(2, 3)
+            && gs.chunkEditsStore()->hasStagedChunk(3, 3)
+            && !gs.chunkEditsStore()->hasStagedChunk(1, 1) // 远块未逐未落盘
+            && gs.chunkEditsStore()->chunkCount() == 0; // committed 零新行（世代分离正面断言）
         ok = ok && rowsOk;
         if (!rowsOk)
             diag += QStringLiteral("[rows n=%1] ")
-                        .arg(gs.chunkEditsStore() ? gs.chunkEditsStore()->chunkCount() : -1);
+                        .arg(gs.chunkEditsStore() ? gs.chunkEditsStore()->stagedChunkCount() : -1);
 
         QFile::remove(db); // 用后即删
 

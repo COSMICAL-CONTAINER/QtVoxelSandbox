@@ -112,6 +112,11 @@ qt_add_executable(voxelsandbox
     #   目标直编——生产零激活面随本单闭合）。
     src/World/chunkstore.cpp
     src/World/chunkstore.h
+    # t1142 SAVE-02/E1 实体卸载暂存域 + 掉落物已提交快照域（chunkstore 同门 additive 值组件；
+    #   Game 层只经 QVariantList/std::function 消费——gamesession「零 Entities 类型依赖」分层
+    #   不变；会话开启截断 + 保存事务晋升/快照拍 = 设计工件 build/t1142_save02_design.txt）。
+    src/World/entitystagestore.cpp
+    src/World/entitystagestore.h
     src/Game/gamesession.h
     src/Game/streamingbridge.cpp
     src/Game/streamingbridge.h
@@ -1395,6 +1400,14 @@ add_executable(redstone_matrix_test
     #   + 关库重开核全表十二面 + 重试恰一次）/ d 结构钉族柱（NEG 双摘面豁免不钉 + 波及钉逐字
     #   幸存复核 + 哨兵 166/213 不动）。
     tools/matrix/section104_review_residual_t1141.cpp
+    # t1142 SAVE-02 设计-实现批探针段（置尾先例沿用，接 section104；filter 词 r2112；矩阵
+    #   994→994+7）：a 驱逐暂存×强退窗口（会话开启拍截断 + committed 零新行 + 恰上一完整代，
+    #   NEG-1 敏感）/ b 同会话回访逐位恒等 + 负坐标/远外环 + 重复驱逐 + 跨区归户 / c 保存晋升
+    #   恰一代恰一次（NEG-2 敏感）/ d 失败保留可重试（NEG-2 敏感）/ e 真桥实体卸载生命周期
+    #   （非驻留冻结门 + 回访恰一次 + 字段保真 + 跨区归户）/ f 死亡不复活 + 期间保存重进恰一
+    #   份（NEG-2 敏感）/ g 结构钉族柱（NEG 双摘面豁免不钉 + 前序 NEG 承重行逐字幸存复核 +
+    #   哨兵 166/213 不动 + CMake 段行 + 源树 filter 词元零命中）。
+    tools/matrix/section105_save02_t1142.cpp
     # t1129 杀进程探针（CLI 模式 TU：--killprobe inject|inject-old|child|child-old|parent|
     #   parent-old——父 spawn 自身子进程 + 标记文件锚定保存窗 + QProcess::kill 真实终止 + 重开
     #   库四面读回。inject-old/child-old/parent-old = 旧协议提交序原语级重放（复现实验面——
@@ -1501,6 +1514,10 @@ add_executable(redstone_matrix_test
     tools/matrix/section31_streaming_ui.cpp
     src/Game/streamingbridge.cpp
     src/Game/streamingbridge.h
+    # t1142 SAVE-02/E1 探针段随段直编（实体卸载暂存域 + 掉落物已提交快照域——section105 腿
+    #   经 EntityStageStore probe 面做归户断言 + 会话绑定；chunkstore 同门 additive 值组件）。
+    src/World/entitystagestore.cpp
+    src/World/entitystagestore.h
     src/Core/blockregistry.cpp
     src/Core/frameprofiler.cpp
     src/Core/resourcepackmanager.cpp

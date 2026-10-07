@@ -38,6 +38,12 @@
 // 时长控制：腿内 sparse 世界 spawnPreGenerateRadius=0 + 半径压小（(1,1,3)：gen 窗 3×3、scan
 //   窗 7×7 给驱逐留 annulus）；收敛轮询 deadline 有界（防 flake 不挂死）；临时库 fresh + 用后
 //   即删（QDir::temp() pid 键名，绝不触 saves/）。
+//【t1142 SAVE-02 波及修订沿革】驱逐缝落盘目标 = 会话暂存域（chunk_staging——世代分离本体，
+//   契约 = chunkstore.h SAVE-02 段）：r2025b/r2025c 的驱逐落盘读面 lawful 前移至暂存族
+//   （hasStagedChunk/loadStagedChunk/stagedChunkCount；代次观测值不变），r2025d persist 缝钉
+//   前移至 persistChunkStaged（W5 遗留非事务冲洗缝专属执行体钉幸存于 section30 段），已提交
+//   面（chunk_edits 晋升/重开恰一代）的承重柱 = t1142 新段（r2112 族）。调用序柱 / 转移 /
+//   擦槽 / 逐位恒等 / 实体移除各柱零涉不动。
 // r2068b 专用：'still in use' 捕获槽（QtMessageHandler 是裸函数指针不可捕获——文件级 static
 // 落账，用后还原 handler；r2029d 同门先例）。
 static QStringList s_r2068bStillInUse;
@@ -346,18 +352,21 @@ void MatrixRun::section28_eviction_persistence()
         if (pokTotal != 1)
             diag += QStringLiteral("[pok-total=%1] ").arg(pokTotal);
 
-        // 附加表读面：恰一行、命中 (3,2)、代次 ≥1。
+        // 附加表读面：恰一行、命中 (3,2)、代次 ≥1。【t1142 lawful 修订】落盘目标 = 会话暂存域
+        //    （chunk_staging——驱逐写不再直触已提交快照域，SAVE-02 世代分离本体；committed 面
+        //    归保存事务晋升拍 = 新 section 段承重），读面随之移至暂存族（观测刻度同式 = 无
+        //    stream_worlds 行盖 1，断言值不变）。
         ChunkStoreBlob blob;
         const bool storeOk = gs.chunkEditsStore() != nullptr
-            && gs.chunkEditsStore()->chunkCount() == 1
-            && gs.chunkEditsStore()->hasChunk(3, 2) && !gs.chunkEditsStore()->hasChunk(2, 2)
-            && gs.chunkEditsStore()->loadChunk(3, 2, blob) && blob.generation >= 1
+            && gs.chunkEditsStore()->stagedChunkCount() == 1
+            && gs.chunkEditsStore()->hasStagedChunk(3, 2) && !gs.chunkEditsStore()->hasChunk(3, 2)
+            && gs.chunkEditsStore()->loadStagedChunk(3, 2, blob) && blob.generation >= 1
             && blob.voxels.size() == 16 * 16 * kH;
         ok = ok && storeOk;
         if (!storeOk)
             diag += QStringLiteral("[store n=%1 has32=%2 gen=%3 sz=%4] ")
-                        .arg(gs.chunkEditsStore() ? gs.chunkEditsStore()->chunkCount() : -1)
-                        .arg(gs.chunkEditsStore() ? gs.chunkEditsStore()->hasChunk(3, 2) : false)
+                        .arg(gs.chunkEditsStore() ? gs.chunkEditsStore()->stagedChunkCount() : -1)
+                        .arg(gs.chunkEditsStore() ? gs.chunkEditsStore()->hasStagedChunk(3, 2) : false)
                         .arg(gs.chunkEditsStore() ? qint64(blob.generation) : qint64(-1))
                         .arg(blob.voxels.size());
 
@@ -436,27 +445,28 @@ void MatrixRun::section28_eviction_persistence()
             diag += QStringLiteral("[unedited parity=%1 clean=%2 leaves=%3] ")
                         .arg(uParity).arg(cleanU).arg(leavesSnapshot);
 
-        // 重载起点 clean（blob 物化不记未落盘编辑）+ 重载后未再触附加表写面。
+        // 重载起点 clean（blob 物化不记未落盘编辑）+ 重载后未再触暂存写面（暂存行保留 =
+        //    会话期事实快照——t1142 语义：行删除只发生在保存事务晋升拍）。
         const bool cleanOk = !ws.chunkHasUnsavedEdits(3, 2)
-            && gs.chunkEditsStore()->chunkCount() == 1;
+            && gs.chunkEditsStore()->stagedChunkCount() == 1;
         ok = ok && cleanOk;
         if (!cleanOk)
             diag += QStringLiteral("[restored-clean dirty=%1 rows=%2] ")
                         .arg(ws.chunkHasUnsavedEdits(3, 2))
-                        .arg(gs.chunkEditsStore()->chunkCount());
+                        .arg(gs.chunkEditsStore()->stagedChunkCount());
 
         // ⑥ 二次驱逐（clean 化重载 chunk）：走离 (3,2)→(5,5) → (3,2) 驱逐零落盘（行数与
         //    代次恒定 = persist 仅 dirty 候选的负向面）。
         gs.notePlayerChunk(5, 5);
         gs.stepTick(0.11);
         const bool secondOk = ws.chunks().lifecycleAt(3, 2) == ChunkLifecycle::Absent
-            && gs.chunkEditsStore()->chunkCount() == 1
-            && gs.chunkEditsStore()->loadChunk(3, 2, blob) && blob.generation == 1;
+            && gs.chunkEditsStore()->stagedChunkCount() == 1
+            && gs.chunkEditsStore()->loadStagedChunk(3, 2, blob) && blob.generation == 1;
         ok = ok && secondOk;
         if (!secondOk)
             diag += QStringLiteral("[second l32=%1 rows=%2 gen=%3] ")
                         .arg(int(ws.chunks().lifecycleAt(3, 2)))
-                        .arg(gs.chunkEditsStore()->chunkCount())
+                        .arg(gs.chunkEditsStore()->stagedChunkCount())
                         .arg(qint64(blob.generation));
 
         QFile::remove(db); // 用后即删
@@ -570,18 +580,20 @@ void MatrixRun::section28_eviction_persistence()
             diag += QStringLiteral("[lock-not-held] ");
 
         // 解锁后重报收敛：变更沿 (5,5)→(4,4)（(3,2) cheb 2 ∈ annulus）→ persist 成功 → 驱逐。
+        //【t1142 lawful 修订】落盘目标 = 会话暂存域（SAVE-02——同 r2025b 段注）；同会话收敛
+        //    断言随之移至暂存族（代次观测值不变）。
         const int traceBefore2 = gs.evictionTrace().size();
         gs.notePlayerChunk(4, 4);
         gs.stepTick(0.11);
         ChunkStoreBlob blob;
         const bool convergeOk = ws.chunks().lifecycleAt(3, 2) == ChunkLifecycle::Absent
-            && ws.chunks().chunk(3, 2) == nullptr && gs.chunkEditsStore()->hasChunk(3, 2)
-            && gs.chunkEditsStore()->loadChunk(3, 2, blob) && blob.generation == 1;
+            && ws.chunks().chunk(3, 2) == nullptr && gs.chunkEditsStore()->hasStagedChunk(3, 2)
+            && gs.chunkEditsStore()->loadStagedChunk(3, 2, blob) && blob.generation == 1;
         ok = ok && convergeOk;
         if (!convergeOk)
             diag += QStringLiteral("[converge l32=%1 has=%2] ")
                         .arg(int(ws.chunks().lifecycleAt(3, 2)))
-                        .arg(gs.chunkEditsStore()->hasChunk(3, 2));
+                        .arg(gs.chunkEditsStore()->hasStagedChunk(3, 2));
         // 收敛拍内 PersistOk 恰 1（重报候选恰一次落盘）。
         int pok2 = 0;
         const QVector<GameSession::EvictionTraceEvent> tr2 = gs.evictionTrace();
@@ -751,7 +763,10 @@ void MatrixRun::section28_eviction_persistence()
             const QStringList missGs = pinSet(
                 srcRoot + QStringLiteral("/Game/gamesession.h"), {
                     SrcPin("dirty query seam", "m_world.chunkHasUnsavedEdits(cx, cz)", 1),
-                    SrcPin("persist seam", "m_chunkStore->persistChunk(cx, cz, *c)", 1),
+                    //【t1142 lawful 修订】驱逐缝落盘目标 = 会话暂存域（SAVE-02 世代分离本体）——
+                    //   本钉随缝前移至暂存执行体（沿革：旧文本 persistChunk(cx, cz, *c) = W5
+                    //   遗留非事务冲洗缝专属执行体，其自身钉幸存于 section30 段）。
+                    SrcPin("persist seam", "m_chunkStore->persistChunkStaged(cx, cz, *c)", 1),
                     SrcPin("edit ledger clear", "m_world.clearChunkUnsavedEdits(cx, cz)", 1),
                     SrcPin("transition seam", "m_world.setChunkLifecycle(cx, cz, target)", 1),
                     SrcPin("entity sink seam", "m_entityEvictSink(cx, cz)", 1),

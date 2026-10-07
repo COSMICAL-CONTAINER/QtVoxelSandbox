@@ -2,6 +2,12 @@
 
 #include "savecoordinator.h" // 被测面：统一保存协议（t1129 单事务原子化）
 #include "worldstore.h"      // 被测面：四面写执行体 + 原子保存域原语
+#include "streamingbridge.h" // t1142：生产进入链真实入口（实体三缝生产装配点——审查 E1 原文）
+#include "entitymanager.h"   // t1142：生物管理器（属性注入读口 + 恢复面）
+#include "itementitymanager.h" // t1142：掉落物管理器（同上）
+#include "worldclock.h"      // t1142：泵拍驱动信号源（probe 直发 ticked——逻辑时间面）
+#include "playercontroller.h" // t1142：位置沿信号源（probe 直发 playerChunkChanged）
+#include "savebridge.h"      // t1142：完整保存 B 的生产链入口（载荷合并 provider 消费面）
 
 #include <QDeadlineTimer>
 #include <QFile>
@@ -345,6 +351,238 @@ int runParent(const QString &db, const QString &marker, bool oldOrder)
     QFile::remove(marker);
     return 0;
 }
+// ── t1142 SAVE-02/E1 强退探针（驱逐暂存 × 完整保存代次；生产链真实入口）────────────────────
+// child-evict     ：存 A（SaveBridge 生产链）→ D3 转换 → StreamingBridge::enterWorld 真实进入
+//                   （实体三缝生产装配）→ 目标 chunk 物化 + 生物/掉落物布防 + 编辑 → 走离驱逐
+//                   （暂存域承载：chunk_staging + entity_staging）→ 阻塞（kill 唯一出口）。
+// child-evictsave ：同上 + 完整保存 B（SaveBridge 生产链——暂存晋升 + 载荷合并 + item 快照
+//                   随 t1129 事务提交）→ 阻塞。
+// parent-evict    ：kill 后重开（新进程 = 新会话）→ 四面/世界内容/两暂存表/实体两族 = 恰上一
+//                   完整保存代 A（未提交暂存随会话开启截断——S1 主命题）。
+// parent-evictsave：kill 后重开 → 恰 B（暂存已晋升：编辑在场 + 卸载实体恰一份恢复——E1 世代
+//                   协调命题）。
+constexpr int kECoreW = 48, kECoreD = 48, kEH = 96, kESeed = 42;
+// 目标 chunk（4,1）与编辑格（x=72, z=24 → chunk (4,1) 局部 (8,8)；y 由 heightmap 现取）。
+constexpr int kETargetCX = 4, kETargetCZ = 1, kEEditX = 72, kEEditZ = 24;
+
+QVariantMap countFaces(const QString &db) // 两暂存表 + 实体两已提交面行数（独立连接 raw 读）。
+{
+    return withProbe(db, [](QSqlDatabase &p) {
+        QVariantMap out;
+        const auto count = [&p](const char *table) -> int {
+            QSqlQuery q(p);
+            if (q.exec(QStringLiteral("SELECT COUNT(*) FROM %1").arg(QLatin1String(table)))
+                && q.next())
+                return q.value(0).toInt();
+            return -1; // 表缺席（旧档）→ -1（调用方按 0 判读——区别于装配失败面）
+        };
+        out.insert(QStringLiteral("stageRows"), count("chunk_staging"));
+        out.insert(QStringLiteral("entityStageRows"), count("entity_staging"));
+        out.insert(QStringLiteral("entityRows"), count("entities"));
+        out.insert(QStringLiteral("itemRows"), count("item_entities"));
+        out.insert(QStringLiteral("editRows"), count("chunk_edits"));
+        return out;
+    });
+}
+
+// A 载荷（t1129 baseRequest 同形——箱空 + 背包 10 + 进度 1）；B 载荷 = movedRequest 同形
+//（物品入箱）。四面对账直接复用 readFaces / printFaces（账本打印口径与 t1129 先例逐列同）。
+int runEvictChild(const QString &db, const QString &marker, bool saveAfter)
+{
+    if (!prepareBase(db))
+        return 2;
+    // D3 转换（真实生产转换面：markStreamingWorld——标志 + core dims + 代次锚）。
+    {
+        ChunkStore meta;
+        meta.bind(db);
+        meta.setStreamWorldId(db);
+        if (!meta.markStreamingWorld(kECoreW, kECoreD))
+            return 2;
+    }
+    World w;
+    w.setWidth(kKW);
+    w.setDepth(kKD);
+    w.setHeight(kKH);
+    w.setSeed(kESeed);
+    WorldStore store;
+    if (!(store.openWorld(db) && store.isOpen()))
+        return 2;
+    store.setWorld(&w); // r2010d：enterWorld 的 rebind 纪律前置（store.world == world）
+    PlayerController pc;
+    EntityManager em;
+    ItemEntityManager iem;
+    pc.setEntityManager(&em); // QML 属性注入的生产镜像（Main.qml itemEntities:/entityManager:）
+    pc.setItemEntities(&iem);
+    WorldClock clk;
+    if (!StreamingBridge::instance()->enterWorld(&w, &store, &clk, &pc, db, kESeed))
+        return 2; // 流式进入失败 = 装配失败（非行为面）
+    // 目标 chunk 同步物化（loadChunkAt 生产入口——r2053c 先例；核心域外 chunk）。
+    if (!w.loadChunkAt(kETargetCX, kETargetCZ))
+        return 2;
+    const int top = w.heightmapAt(kEEditX, kEEditZ);
+    if (top < 1 || top + 2 >= kEH)
+        return 2;
+    // 布防：驯服坐下狼 + 掉落物（目标 chunk 中心域）+ 玩家编辑（顶面放 Stone）。
+    const int mobSlot = em.spawnMobTyped(kEEditX, top + 1, kEEditZ, EntityManager::MobWolf,
+                                         QStringLiteral("#eeeeee"), 10);
+    if (mobSlot < 0)
+        return 2;
+    em.setTameRollOverride(0); // 确定性驯服（必成样本——探针零 RNG 依赖）
+    if (!em.tameWolf(mobSlot))
+        return 2;
+    em.toggleWolfSit(mobSlot); // 已驯服狼 → 坐下留守（属性守恒载荷——回访/重开恢复面）
+    iem.spawnItem(kEEditX, top + 1, kEEditZ, int(BR::Stone), 3);
+    if (!w.setBlock(kEEditX, top + 1, kEEditZ, BR::Stone))
+        return 2;
+    // 位置沿 + 泵拍（probe 直发生产信号——feed 钩/pump 钩的真实消费链；驱动编排全走桥）。
+    emit pc.playerChunkChanged(1, 1);
+    for (int i = 0; i < 4; ++i)
+        emit clk.ticked(0.1); // 初载窗（目标 chunk 已驻留——驱逐沿前的稳态）
+    emit pc.playerChunkChanged(7, 7); // 走离：cheb((4,1),(7,7)) = 6 ∈ (1,3] annulus → 驱逐沿
+    for (int i = 0; i < 4; ++i)
+        emit clk.ticked(0.1); // 驱逐拍（persist 缝 = 暂存域写 → 转移 ⑥⑦ → 实体三缝）
+    const QVariantMap pre = countFaces(db);
+    fprintf(stdout, "KILLPROBE child faces stage=%d estage=%d edits=%d ents=%d items=%d"
+                    " (pre-kill, saveAfter=%d)\n",
+            pre.value(QStringLiteral("stageRows")).toInt(),
+            pre.value(QStringLiteral("entityStageRows")).toInt(),
+            pre.value(QStringLiteral("editRows")).toInt(),
+            pre.value(QStringLiteral("entityRows")).toInt(),
+            pre.value(QStringLiteral("itemRows")).toInt(), saveAfter ? 1 : 0);
+    fflush(stdout);
+    if (saveAfter) {
+        // 完整保存 B（生产链——flush 钩 = 晋升 + 冲洗 + 推进 + item 快照同事务；provider 钩 =
+        // 暂存 mob 行并入 entities 载荷）。载荷 = movedRequest 同形（物品入箱 + 背包空 + 进度 2）。
+        const SaveRequest rb = movedRequest();
+        const bool okB = SaveBridge::instance()->saveViaCoordinator(&store, db, rb.name, rb.chests,
+            rb.furnaces, rb.dispensers, rb.worldTime, rb.bedSpawn, rb.playerData, rb.progress);
+        if (!okB)
+            return 2;
+        const QVariantMap post = countFaces(db);
+        fprintf(stdout, "KILLPROBE child faces stage=%d estage=%d edits=%d ents=%d items=%d"
+                        " (post-save)\n",
+                post.value(QStringLiteral("stageRows")).toInt(),
+                post.value(QStringLiteral("entityStageRows")).toInt(),
+                post.value(QStringLiteral("editRows")).toInt(),
+                post.value(QStringLiteral("entityRows")).toInt(),
+                post.value(QStringLiteral("itemRows")).toInt());
+        fflush(stdout);
+    }
+    store.closeWorld();
+    // 标记 = 「paused <编辑y>」一行双载荷（父进程两读：存在性轮询 + 精确格判据——重开面
+    //   heightmap 随标记本身生长，top+1 读式在 evictsave 向会假阴；验收「SQL 行/游戏状态
+    //   双读」的游戏状态半边由此锚定）。阻塞自旋 = blockForever 同门（kill 唯一出口）。
+    {
+        QFile mf(marker);
+        if (!mf.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            qWarning("killprobe: marker %s unopenable (block degrades to spin)",
+                     qPrintable(marker));
+        else {
+            mf.write(QStringLiteral("paused %1\n").arg(top + 1).toUtf8());
+            mf.close();
+        }
+        fflush(stdout);
+        for (;;)
+            QThread::msleep(100);
+    }
+    return 0;
+}
+
+int runEvictParent(const QString &db, const QString &marker, bool saveAfter)
+{
+    QFile::remove(marker);
+    QProcess child;
+    child.setProgram(QCoreApplication::applicationFilePath());
+    child.setArguments({ QStringLiteral("--killprobe"),
+        saveAfter ? QStringLiteral("child-evictsave") : QStringLiteral("child-evict"),
+        QDir(db).absolutePath(), QDir(marker).absolutePath() });
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
+    env.insert(QStringLiteral("QT_FORCE_STDERR_LOGGING"), QStringLiteral("1"));
+    child.setProcessEnvironment(env);
+    child.start();
+    if (!child.waitForStarted(10000)) {
+        fprintf(stdout, "KILLPROBE parent child-start FAILED\n");
+        fflush(stdout);
+        return 2;
+    }
+    const QDeadlineTimer deadline(60000);
+    bool hit = false;
+    while (!deadline.hasExpired()) {
+        if (QFileInfo::exists(marker)) {
+            hit = true;
+            break;
+        }
+        QThread::msleep(20);
+    }
+    if (!hit) {
+        child.kill();
+        child.waitForFinished(10000);
+        fprintf(stdout, "KILLPROBE parent marker TIMEOUT - child killed unanchored\n");
+        fflush(stdout);
+        return 2;
+    }
+    child.kill(); // 真实终止（无 atexit 无清理无回滚——t1129 parent 先例同面）
+    child.waitForFinished(10000);
+    fprintf(stdout, "KILLPROBE parent killed child at %s window\n",
+            saveAfter ? "post-commit block" : "staged-uncommitted block");
+    fflush(stdout);
+    // 重开（新进程 = 新会话语义的真实承载：会话开启拍 = 暂存截断 + 升格 + 上界守卫）。
+    World w;
+    w.setWidth(kKW);
+    w.setDepth(kKD);
+    w.setHeight(kKH);
+    w.setSeed(kESeed);
+    WorldStore store;
+    if (!(store.openWorld(db) && store.isOpen()))
+        return 2;
+    store.setWorld(&w);
+    PlayerController pc;
+    EntityManager em;
+    ItemEntityManager iem;
+    pc.setEntityManager(&em);
+    pc.setItemEntities(&iem);
+    WorldClock clk;
+    if (!StreamingBridge::instance()->enterWorld(&w, &store, &clk, &pc, db, kESeed))
+        return 2;
+    // QML 进入链镜像（Main.qml 1112-1130 行为级）：清残留 → 已提交快照恢复两族。
+    em.clearAll();
+    iem.clearAll();
+    em.restorePersistedEntities(store.loadEntities());
+    iem.restorePersistedRows(store.loadItemEntities());
+    // 目标 chunk 重物化走**驱动器数据面**（committed 行路由的生产行为面——loadChunkAt 同步
+    //   链 = 确定性重生成，不识已提交行，作重开读面会假阴）。
+    emit pc.playerChunkChanged(kETargetCX, kETargetCZ);
+    for (int i = 0; i < 400 && w.chunks().lifecycleAt(kETargetCX, kETargetCZ)
+                                            != ChunkLifecycle::Loaded; ++i)
+        emit clk.ticked(0.1);
+    if (w.chunks().lifecycleAt(kETargetCX, kETargetCZ) != ChunkLifecycle::Loaded)
+        return 2;
+    QFile mf(marker);
+    const int editY = mf.open(QIODevice::ReadOnly)
+        ? QString::fromUtf8(mf.readAll()).section(QLatin1Char(' '), 1).trimmed().toInt()
+        : -1;
+    if (editY < 0)
+        return 2; // 标记缺 y = 子进程装配面破坏（非行为面）
+    const quint8 cell = w.blockAt(kEEditX, editY, kEEditZ);
+    const QVariantMap faces = countFaces(db);
+    const KFace f = readFaces(db);
+    const bool editGone = cell != quint8(BR::Stone); // 未提交编辑不复活（evict 命题）
+    const bool editKept = cell == quint8(BR::Stone); // 已提交编辑恰在场（evictsave 命题）
+    const bool stagedGone = faces.value(QStringLiteral("stageRows")).toInt() <= 0
+        && faces.value(QStringLiteral("entityStageRows")).toInt() <= 0;
+    fprintf(stdout, "KILLPROBE %s verdict edit=%d stonePresent=%d stagingEmpty=%d"
+                    " mobsLive=%d itemsLive=%d entsRows=%d itemRows=%d\n",
+            saveAfter ? "parent-evictsave" : "parent-evict", editGone ? 1 : 0,
+            editKept ? 1 : 0, stagedGone ? 1 : 0, em.liveCount(), iem.liveCount(),
+            faces.value(QStringLiteral("entityRows")).toInt(),
+            faces.value(QStringLiteral("itemRows")).toInt());
+    fflush(stdout);
+    printFaces(saveAfter ? "parent-evictsave" : "parent-evict", db);
+    QFile::remove(db);
+    QFile::remove(marker);
+    return 0;
+}
 } // namespace
 
 int runKillProbe(int argc, char *argv[])
@@ -365,8 +603,17 @@ int runKillProbe(int argc, char *argv[])
         return runParent(db, marker, false);
     if (mode == QStringLiteral("parent-old") && !db.isEmpty() && !marker.isEmpty())
         return runParent(db, marker, true);
+    if (mode == QStringLiteral("child-evict") && !db.isEmpty() && !marker.isEmpty())
+        return runEvictChild(db, marker, false);
+    if (mode == QStringLiteral("parent-evict") && !db.isEmpty() && !marker.isEmpty())
+        return runEvictParent(db, marker, false);
+    if (mode == QStringLiteral("child-evictsave") && !db.isEmpty() && !marker.isEmpty())
+        return runEvictChild(db, marker, true);
+    if (mode == QStringLiteral("parent-evictsave") && !db.isEmpty() && !marker.isEmpty())
+        return runEvictParent(db, marker, true);
     fprintf(stdout, "KILLPROBE usage: --killprobe inject|inject-old|child|child-old|parent|"
-                    "parent-old <db> [marker]\n");
+                    "parent-old|child-evict|parent-evict|child-evictsave|parent-evictsave"
+                    " <db> [marker]\n");
     fflush(stdout);
     return 2;
 }

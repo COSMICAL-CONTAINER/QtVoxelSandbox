@@ -350,6 +350,14 @@ void MatrixRun::runAll()
     //   不钉 + 波及钉逐字幸存复核]。行为腿 store 级直驱 + 真临时库，零墙钟依赖，rig 世界零接触，
     //   接 section103）
     section104_review_residual_t1141();
+    // t1142 SAVE-02 设计-实现批探针段（置尾先例沿用：r2112 a 驱逐暂存×强退窗口[会话开启拍
+    //   截断 + committed 零新行 + 恰上一完整代，NEG-1 敏感] / b 同会话回访逐位恒等 + 负坐标/
+    //   远外环 + 重复驱逐 + 跨区归户 / c 保存晋升恰一代恰一次[NEG-2 敏感] / d 失败保留可重试
+    //   [NEG-2 敏感] / e 真桥实体卸载生命周期[非驻留冻结门 + 回访恰一次 + 字段保真 + 跨区归户]
+    //   / f 死亡不复活 + 期间保存重进恰一份[NEG-2 敏感] / g 结构钉族柱[NEG 双摘面豁免不钉 +
+    //   前序 NEG 承重行逐字幸存复核 + 哨兵 166/213 不动]。行为腿 fresh sparse 小世界 + 真临时
+    //   库 + 真 StreamingBridge 入口，零墙钟依赖，rig 世界零接触，接 section104）
+    section105_save02_t1142();
     qInfo().noquote() << "=== total FAIL:" << totalFail << "===";
     if (!legFilter.isEmpty()) {
         qInfo().noquote() << "=== total SKIP:" << skipCount << "===";
