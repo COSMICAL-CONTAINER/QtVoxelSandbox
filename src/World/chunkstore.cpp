@@ -32,6 +32,8 @@ static const char *const kChunkStoreConn = "voxelsandbox_chunkstore";
 static const char *const kTable = "chunk_edits";
 // §29.5-W5 流式世界元数据表（D2/D3 域；一库一行，world 列 = 显式世界标识）。
 static const char *const kStreamTable = "stream_worlds";
+// t1142 SAVE-02 会话暂存表（驱逐写目标；行同构 chunk_edits，生命周期 = 会话——类头 SAVE-02 段）。
+static const char *const kStageTable = "chunk_staging";
 // 建代次锚的只读消费源：save_coord 的完整代次键（SaveCoordinator r2015 台账权威——**只读
 // SELECT**，表/键缺席 = 0；台账唯一写点仍是 SaveCoordinator，本类绝不写它）。
 static const char *const kCoordTable = "save_coord";
@@ -65,6 +67,27 @@ bool ensureTable(QSqlDatabase &db)
     qWarning() << "ChunkStore: ensure table failed:" << q.lastError().text();
     return false;
 }
+
+// t1142 SAVE-02：会话暂存表幂等建表（同构同门纯加表；零 bump 零破坏性 SQL——r2025d 反探纪律）。
+bool ensureStageTable(QSqlDatabase &db)
+{
+    QSqlQuery q(db);
+    if (q.exec(QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS %1 (cx INTEGER NOT NULL, cz INTEGER NOT NULL,"
+            " generation TEXT NOT NULL, voxels BLOB NOT NULL, states BLOB NOT NULL,"
+            " light BLOB NOT NULL, PRIMARY KEY (cx, cz))")
+            .arg(QLatin1String(kStageTable))))
+        return true;
+    qWarning() << "ChunkStore: ensure stage table failed:" << q.lastError().text();
+    return false;
+}
+
+// t1142 单行 upsert 的表参数化单一执行体（persistChunkIntoDb 与暂存壳共用——深拷贝 + 建表 +
+//   刻度盖写 + upsert 归一处，两目标表行同构；实现体在 readStreamSaveGen 之后——刻度读取
+//   先声明的翻译单元序）。stamp = save_gen+1 对两表同义（chunk_edits = 本次保存代次；
+//   chunk_staging = 观测刻度，仲裁永不消费）。
+Result<void> upsertChunkRowIntoDb(QSqlDatabase &db, const QString &worldId, const char *table,
+                                  int cx, int cz, const Chunk &chunk);
 
 // §29.5-W5：流式世界元数据表幂等建表（同门纯加表；两表同连接同创建拍）。
 bool ensureStreamTable(QSqlDatabase &db)
@@ -113,16 +136,18 @@ bool readStreamWorldMetaIntoDb(QSqlDatabase &db, const QString &worldId, StreamW
     return false;
 }
 
-// t1129：persist 的单一执行体（自持连接壳 persistChunk 与同事务壳 persistChunkOn 共用——
-//   连接生命周期归壳，深拷贝 + 建表 + 刻度盖写 + upsert 归体）。
-Result<void> persistChunkIntoDb(QSqlDatabase &db, const QString &worldId, int cx, int cz,
-                                const Chunk &chunk)
+// t1142 单行 upsert 的表参数化单一执行体（persistChunkIntoDb 与暂存壳共用——深拷贝 + 建表 +
+//   刻度盖写 + upsert 归一处，两目标表行同构）。stamp = save_gen+1 对两表同义（chunk_edits =
+//   本次保存代次；chunk_staging = 观测刻度，仲裁永不消费）。
+Result<void> upsertChunkRowIntoDb(QSqlDatabase &db, const QString &worldId, const char *table,
+                                  int cx, int cz, const Chunk &chunk)
 {
     if (!db.isOpen()) {
         qWarning() << "ChunkStore: db not open for persist:" << db.lastError().text();
         return Result<void>::fail(kErrChunkStoreSql, "chunk store db not open");
     }
-    if (!ensureTable(db) || !ensureStreamTable(db))
+    const bool staged = QLatin1String(table) == QLatin1String(kStageTable);
+    if (!(staged ? ensureStageTable(db) : ensureTable(db)) || !ensureStreamTable(db))
         return Result<void>::fail(kErrChunkStoreSql, "chunk_edits ensure failed (lock/disk?)");
     const size_t n = chunk.voxelCount();
     // 三数组深拷贝（QByteArray 构造即拷贝——落盘时刻定格，此后活体再变与本次落盘无关）。
@@ -139,7 +164,7 @@ Result<void> persistChunkIntoDb(QSqlDatabase &db, const QString &worldId, int cx
     u.prepare(QStringLiteral(
         "INSERT OR REPLACE INTO %1 (cx, cz, generation, voxels, states, light) VALUES"
         " (?, ?, ?, ?, ?, ?)")
-        .arg(QLatin1String(kTable)));
+        .arg(QLatin1String(table)));
     u.addBindValue(cx);
     u.addBindValue(cz);
     u.addBindValue(QString::number(stamp));
@@ -151,6 +176,15 @@ Result<void> persistChunkIntoDb(QSqlDatabase &db, const QString &worldId, int cx
         return Result<void>::fail(kErrChunkStoreSql, "chunk_edits upsert failed (lock/disk?)");
     }
     return Result<void>::ok();
+}
+
+// t1129：persist 的单一执行体（自持连接壳 persistChunk 与同事务壳 persistChunkOn 共用——
+//   连接生命周期归壳）。t1142 起委托表参数化单一执行体（上方 upsertChunkRowIntoDb——暂存壳
+//   persistChunkStaged 共用同一深拷贝/刻度/upsert 体）。
+Result<void> persistChunkIntoDb(QSqlDatabase &db, const QString &worldId, int cx, int cz,
+                                const Chunk &chunk)
+{
+    return upsertChunkRowIntoDb(db, worldId, kTable, cx, cz, chunk);
 }
 } // namespace
 
@@ -177,6 +211,188 @@ Result<void> ChunkStore::persistChunkOn(QSqlDatabase &db, int cx, int cz, const 
         return Result<void>::fail(kErrChunkStoreNotBound, "chunk store not bound");
     // 外部连接壳：零连接生命周期管理（开/关/摘名全归调用域 = 保存事务持有方）。
     return persistChunkIntoDb(db, m_worldId, cx, cz, chunk);
+}
+
+// ── t1142 SAVE-02 会话暂存域（契约 = chunkstore.h SAVE-02 段；此处不赘）──────────────────
+
+Result<void> ChunkStore::persistChunkStaged(int cx, int cz, const Chunk &chunk)
+{
+    if (!isBound())
+        return Result<void>::fail(kErrChunkStoreNotBound, "chunk store not bound");
+    bool ok = false;
+    {
+        QSqlDatabase db = openStoreConnection(m_dbPath); // t1098 句柄收内层作用域同门
+        ok = upsertChunkRowIntoDb(db, m_worldId, kStageTable, cx, cz, chunk).isOk();
+    }
+    if (QSqlDatabase::contains(kChunkStoreConn))
+        QSqlDatabase::removeDatabase(kChunkStoreConn);
+    if (!ok)
+        return Result<void>::fail(kErrChunkStoreSql, "chunk_staging upsert failed (lock/disk?)");
+    return Result<void>::ok();
+}
+
+bool ChunkStore::hasStagedChunk(int cx, int cz) const
+{
+    if (!isBound())
+        return false;
+    bool hit = false;
+    {
+        QSqlDatabase db = openStoreConnection(m_dbPath);
+        if (db.isOpen()) {
+            // 只读存在性查询；表缺席（旧档）→ SELECT 失败 → miss（hasChunk 同门，不建表不写）。
+            QSqlQuery q(db);
+            q.prepare(QStringLiteral("SELECT 1 FROM %1 WHERE cx = ? AND cz = ?")
+                          .arg(QLatin1String(kStageTable)));
+            q.addBindValue(cx);
+            q.addBindValue(cz);
+            hit = q.exec() && q.next();
+        }
+    }
+    if (QSqlDatabase::contains(kChunkStoreConn))
+        QSqlDatabase::removeDatabase(kChunkStoreConn);
+    return hit;
+}
+
+bool ChunkStore::loadStagedChunk(int cx, int cz, ChunkStoreBlob &out) const
+{
+    if (!isBound())
+        return false;
+    bool ok = false;
+    {
+        QSqlDatabase db = openStoreConnection(m_dbPath);
+        if (db.isOpen()) {
+            QSqlQuery q(db);
+            q.prepare(QStringLiteral(
+                "SELECT generation, voxels, states, light FROM %1 WHERE cx = ? AND cz = ?")
+                .arg(QLatin1String(kStageTable)));
+            q.addBindValue(cx);
+            q.addBindValue(cz);
+            if (q.exec() && q.next()) {
+                out.cx = cx;
+                out.cz = cz;
+                out.generation = q.value(0).toLongLong();
+                out.voxels = q.value(1).toByteArray();
+                out.states = q.value(2).toByteArray();
+                out.light = q.value(3).toByteArray();
+                ok = !out.voxels.isEmpty() && out.voxels.size() == out.states.size()
+                    && out.voxels.size() == out.light.size();
+            }
+        }
+    }
+    if (QSqlDatabase::contains(kChunkStoreConn))
+        QSqlDatabase::removeDatabase(kChunkStoreConn);
+    return ok;
+}
+
+int ChunkStore::promoteStagingOn(QSqlDatabase &db)
+{
+    if (!isBound() || !db.isOpen())
+        return -1;
+    // 晋升 = 同事务 move（类头拍序论证：先晋升后驻留冲洗，同键双态并存时驻留后写胜）。
+    //   重盖代次 = save_gen+1（与同批 persistChunkOn / advance 同刻度——提交后 save_gen 恰等）。
+    if (!ensureTable(db) || !ensureStageTable(db))
+        return -1; // 建表本身是写：失败即挡（marker-first 同构；调用方回滚整事务）
+    const qint64 stamp = readStreamSaveGen(db, m_worldId) + 1;
+    QSqlQuery p(db);
+    p.prepare(QStringLiteral(
+        "INSERT OR REPLACE INTO %1 (cx, cz, generation, voxels, states, light)"
+        " SELECT cx, cz, ?, voxels, states, light FROM %2")
+        .arg(QLatin1String(kTable), QLatin1String(kStageTable)));
+    p.addBindValue(QString::number(stamp));
+    if (!p.exec()) {
+        qWarning() << "ChunkStore: staging promote failed:" << p.lastError().text();
+        return -1;
+    }
+    const int moved = p.numRowsAffected();
+    QSqlQuery d(db);
+    if (!d.exec(QStringLiteral("DELETE FROM %1").arg(QLatin1String(kStageTable)))) {
+        qWarning() << "ChunkStore: staging clear after promote failed:"
+                   << d.lastError().text();
+        return -1; // 同事务回滚 = INSERT..SELECT 一并撤销（move 原子性由事务承载）
+    }
+    return moved < 0 ? 0 : moved;
+}
+
+bool ChunkStore::clearStaging()
+{
+    if (!isBound())
+        return false;
+    bool ok = false;
+    {
+        QSqlDatabase db = openStoreConnection(m_dbPath);
+        if (db.isOpen() && ensureStageTable(db)) {
+            QSqlQuery d(db);
+            ok = d.exec(QStringLiteral("DELETE FROM %1").arg(QLatin1String(kStageTable)));
+            if (!ok)
+                qWarning() << "ChunkStore: staging clear failed:" << d.lastError().text();
+        }
+    }
+    if (QSqlDatabase::contains(kChunkStoreConn))
+        QSqlDatabase::removeDatabase(kChunkStoreConn);
+    return ok;
+}
+
+int ChunkStore::stagedChunkCount() const
+{
+    if (!isBound())
+        return 0;
+    int n = 0;
+    {
+        QSqlDatabase db = openStoreConnection(m_dbPath);
+        if (db.isOpen()) {
+            QSqlQuery q(db);
+            if (q.exec(QStringLiteral("SELECT COUNT(*) FROM %1").arg(QLatin1String(kStageTable)))
+                && q.next())
+                n = q.value(0).toInt();
+        }
+    }
+    if (QSqlDatabase::contains(kChunkStoreConn))
+        QSqlDatabase::removeDatabase(kChunkStoreConn);
+    return n;
+}
+
+qint64 ChunkStore::reconcileCommittedSaveGen()
+{
+    if (!isBound())
+        return 0;
+    qint64 result = 0;
+    {
+        QSqlDatabase db = openStoreConnection(m_dbPath);
+        // 读面（MAX 行代次 + 元数据）；表缺席（旧档无 chunk_edits/stream_worlds）→ 各面 0。
+        qint64 maxRowGen = 0;
+        StreamWorldMeta meta;
+        const bool hasMeta = db.isOpen() && readStreamWorldMetaIntoDb(db, m_worldId, meta);
+        if (db.isOpen()) {
+            QSqlQuery q(db);
+            if (q.exec(QStringLiteral("SELECT MAX(generation) FROM %1").arg(QLatin1String(kTable)))
+                && q.next())
+                maxRowGen = q.value(0).toLongLong();
+        }
+        if (hasMeta) {
+            if (maxRowGen > meta.saveGen) {
+                // 升格（一次性收编旧时代悬挂行——头注迁移段；UPDATE 单语句 autocommit）。
+                meta.saveGen = maxRowGen;
+                QSqlQuery u(db);
+                u.prepare(QStringLiteral("UPDATE %1 SET save_gen = ? WHERE world = ?")
+                              .arg(QLatin1String(kStreamTable)));
+                u.addBindValue(QString::number(meta.saveGen));
+                u.addBindValue(m_worldId);
+                if (u.exec() && u.numRowsAffected() > 0) {
+                    qWarning() << "ChunkStore: legacy save_gen lifted to committed row ceiling"
+                               << meta.saveGen << "(one-time legacy adoption)";
+                    result = meta.saveGen;
+                } else {
+                    qWarning() << "ChunkStore: legacy save_gen lift failed:"
+                               << u.lastError().text(); // 升格失败 → 返回 0（守卫照常生效）
+                }
+            } else {
+                result = meta.saveGen; // 已在刻度内（t1129+ 事务库常态）→ 原样返回
+            }
+        }
+    }
+    if (QSqlDatabase::contains(kChunkStoreConn))
+        QSqlDatabase::removeDatabase(kChunkStoreConn);
+    return result;
 }
 
 bool ChunkStore::hasChunk(int cx, int cz) const

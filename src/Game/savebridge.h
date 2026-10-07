@@ -119,6 +119,15 @@ public:
     //   事务）；commit = 提交成功尾的内存账面收口。逐保存转发给桥内 coordinator（fault 钩同门）。
     void setFlushHook(SaveFlushHook hook) { m_flushHook = std::move(hook); }
     void setFlushCommitHook(SaveFlushCommitHook hook) { m_flushCommitHook = std::move(hook); }
+    // t1142 E1 暂存 mob 行载荷合并 provider（生产装配点 = StreamingBridge::instance 一次性登记
+    //   ——flush 钩同门）：saveViaCoordinator 装配 entities 载荷时追加其产物（卸载中实体随
+    //   t1129 保存事务的 entities 段进已提交快照——与区块暂存晋升同一保存点语义）。缺省空 =
+    //   零追加（fixed 形态/既有腿零扰动）。writeEntitiesPart = DELETE+INSERT 全量快照且步序在
+    //   冲洗钩之后 → 事务内直插会被清掉，故合并只能走载荷装配面（序论证见登记闭包处注）。
+    void setStagedMobProvider(std::function<QVariantList()> provider)
+    {
+        m_stagedMobProvider = std::move(provider);
+    }
     // t1070 件三诊断面（矩阵 r2044c 断言用；C++ only 非 QML）：桥内长活 coordinator 的冻结
     //   缓冲重建计数透传（语义与陈旧防面论证见 m_coord 注 / savecoordinator.h ensureBuffer 注）。
     int frozenBufferRebuildCount() const { return m_coord.bufferRebuildCount(); }
@@ -134,7 +143,8 @@ private:
 
     SaveFaultHook m_faultHook; // 生产恒空（缺省无钩 = 生产形态；逐保存转发给 coordinator）
     SaveFlushHook m_flushHook;             // t1129：生产由 StreamingBridge 登记（缺省空 = fixed 形态）
-    SaveFlushCommitHook m_flushCommitHook; // t1129：提交面账面收口（与 flush 钩成对登记）
+    SaveFlushCommitHook m_flushCommitHook; // t1129：提交面账面收口（与 flush 钩同门成对登记）
+    std::function<QVariantList()> m_stagedMobProvider; // t1142 E1：暂存 mob 行合并 provider（缺省空）
     // **t1070 件三（Review_2026-09-18 #1 清偿）：长活 coordinator**——r2015「冻结缓冲跨保存
     //   复用」的实现前提（旧形态 = 逐保存栈上实例 → 复用被打断，每次保存重付 ≈4 次一次性
     //   worldgen + 4 条统计 qInfo）。桥是进程级 QML 单例（GUI 线程单线程消费），coordinator

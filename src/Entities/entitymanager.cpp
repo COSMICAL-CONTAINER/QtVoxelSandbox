@@ -6778,6 +6778,21 @@ void EntityManager::tick(qreal dt, World *world, const QVector3D &listener,
         Entity &e = m_entities[size_t(idx)];
         if (!e.alive) continue; // t256：跳过已释放的空槽（slot-reuse 残留位；不参与物理 / AI）
 
+        // t1142 E1 非驻留冻结门（review E1「实体 Tick 路径仍继续更新」的正面收口）：sparse 世界
+        //   中所属 chunk（中心格 floorDiv16）非驻留（lifecycle ∉ {Loaded, Active}）→ 整体跳过
+        //   ——物理 / AI / 寿命 / 死亡倒计时全冻（MC「卸载 chunk 不处理任何游戏面向」口径；
+        //   引证三元组 = despawnInChunk 声明注①）。fixed 世界零门 = 零变化墙（isSparse() 谓词
+        //   短路，r2025a 承重墙不扰）。暂存体不在本循环（释放后零 tick = 结构性冻结——四态
+        //   协议 LIVE 态之外零模拟）。
+        if ((e.kind == Mob || e.kind == FallingBlock) && world->isSparse()) { // 活体两族；fixed 零门
+            const ChunkKey pc = ChunkKey::fromWorld(int(std::floor(double(e.pos.x()))),
+                                                    int(std::floor(double(e.pos.z()))),
+                                                    Chunk::kSize);
+            const ChunkLifecycle lc = world->chunks().lifecycleAt(pc.cx, pc.cz);
+            if (lc != ChunkLifecycle::Loaded && lc != ChunkLifecycle::Active)
+                continue; // 非驻留 = 冻结（占位格存在但零模拟——回访物化后解冻恢复）
+        }
+
         // --- Arrow（t283 骷髅弓箭手箭矢）：抛物 + 方块命中 / 玩家命中 / 寿命 / 越界 → 移除（不走 Mob AI / resting）---
         if (e.kind == Arrow) {
             // 任务（弓箭 60s 必 despawn）：**硬墙钟上限** —— 任何箭（玩家 / 骷髅 / 飞行 / 嵌入）自 spawn 起
@@ -9579,6 +9594,47 @@ QVariantList EntityManager::exportPersistedEntities() const
             continue;
         QVariantMap row;
         row.insert(QStringLiteral("kind"), int(Mob));
+        row.insert(QStringLiteral("eid"), e.entityId); // t1142 E1：稳定身份（写表体裸列不解析多键）
+        row.insert(QStringLiteral("type"), e.mobType);
+        row.insert(QStringLiteral("x"), e.pos.x());
+        row.insert(QStringLiteral("y"), e.pos.y());
+        row.insert(QStringLiteral("z"), e.pos.z());
+        row.insert(QStringLiteral("color"), e.color);
+        row.insert(QStringLiteral("mh"), e.maxHealth);
+        row.insert(QStringLiteral("hp"), e.health);
+        row.insert(QStringLiteral("baby"), e.baby);
+        row.insert(QStringLiteral("grow"), e.growTimer);
+        row.insert(QStringLiteral("wt"), e.wolfTamed);
+        row.insert(QStringLiteral("ws"), e.wolfSitting);
+        row.insert(QStringLiteral("ot"), e.ocelotTamed);
+        row.insert(QStringLiteral("os"), e.ocelotSitting);
+        row.insert(QStringLiteral("ov"), e.ocelotVariant);
+        row.insert(QStringLiteral("sw"), e.sheepWool);
+        row.insert(QStringLiteral("swd"), e.sheepWoolDyed);
+        row.insert(QStringLiteral("sh"), e.sheared);
+        row.insert(QStringLiteral("ss"), e.slimeSize);
+        row.insert(QStringLiteral("sd"), e.saddled);
+        out.append(row);
+    }
+    return out;
+}
+
+// ── t1142 E1 卸载序列化（契约 = entitymanager.h exportPersistedInChunk 声明注）────────────
+QVariantList EntityManager::exportPersistedInChunk(int cx, int cz) const
+{
+    QVariantList out;
+    for (size_t i = 0; i < m_entities.size(); ++i) {
+        const Entity &e = m_entities[i];
+        // 门集与 exportPersistedEntities 逐位同（死亡不入档 / 非 Mob kind 不入档 / hp 防御）。
+        if (!e.alive || e.kind != Mob || e.dead || e.health <= 0)
+            continue;
+        const ChunkKey pc = ChunkKey::fromWorld(int(std::floor(double(e.pos.x()))),
+                                                int(std::floor(double(e.pos.z()))), Chunk::kSize);
+        if (pc.cx != cx || pc.cz != cz)
+            continue; // 所有权派生式现算（中心格 floorDiv16——t1142 设计工件贰章）
+        QVariantMap row;
+        row.insert(QStringLiteral("kind"), int(Mob));
+        row.insert(QStringLiteral("eid"), e.entityId);
         row.insert(QStringLiteral("type"), e.mobType);
         row.insert(QStringLiteral("x"), e.pos.x());
         row.insert(QStringLiteral("y"), e.pos.y());
@@ -9654,6 +9710,15 @@ int EntityManager::restorePersistedEntities(const QVariantList &rows)
         e.sheepWoolDyed = row.value(QStringLiteral("swd")).toBool();
         e.sheared = row.value(QStringLiteral("sh")).toBool();
         e.saddled = row.value(QStringLiteral("sd")).toBool();
+        // t1142 E1 身份回填（行带 eid > 0 时恢复体继承身份——跨卸载/回访延续；游标 max 推进
+        //   恒 > 全体在册身份，新配发永不撞已恢复身份；行缺 eid/0 = t1133 旧档形状 → 保留
+        //   acquireSlot 已配身份零扰动）。
+        const quint32 eid = row.value(QStringLiteral("eid")).toUInt();
+        if (eid > 0) {
+            Entity &re = m_entities[size_t(slot)];
+            re.entityId = eid;
+            m_nextEntityId = qMax(m_nextEntityId, eid + 1);
+        }
         // 史莱姆尺寸档恢复（越界落缺省中档 + 盒按档精化——applySlimeSizeBox 单一权威复用）。
         if (type == MobSlime) {
             const int ss = row.value(QStringLiteral("ss")).toInt();

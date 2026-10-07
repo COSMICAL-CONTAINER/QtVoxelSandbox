@@ -433,11 +433,24 @@ void EntityStore::removeAt(int i)
 void EntityStore::tick(qreal dt, World *world)
 {
     // 寿命到期驱逐先于物理（t889：硬暂停期 deferWallClocks 顺延 → 暂停期不老化）。
-    despawnExpired();
+    //   t1142 E1：非驻留冻结 = 寿命同冻（despawnExpired 带世界参逐体判驻留——MC「卸载 chunk
+    //   不处理任何游戏面向」口径；fixed 世界零门）。
+    despawnExpired(world);
     if (!world || m_entities.empty()) return;
     bool dirty = false;
     for (auto &e : m_entities) {
         if (!e.alive) continue;
+        // t1142 E1 非驻留冻结门（EntityManager::tick 同门同款——掉落物族零豁免：物理 / 焚毁 /
+        //   寿命全冻；MC「卸载 chunk 不处理任何游戏面向」口径；fixed 世界零门 = 零变化墙）。
+        //   门置于焚毁/浮水/支撑各读之前——非驻留 chunk 的世界读面整体跳过（未物化域零扰动）。
+        if (world->isSparse()) {
+            const ChunkKey pc = ChunkKey::fromWorld(int(std::floor(double(e.pos.x()))),
+                                                    int(std::floor(double(e.pos.z()))),
+                                                    Chunk::kSize);
+            const ChunkLifecycle lc = world->chunks().lifecycleAt(pc.cx, pc.cz);
+            if (lc != ChunkLifecycle::Loaded && lc != ChunkLifecycle::Active)
+                continue;
+        }
         const int cx = qFloor(e.pos.x());
         const int cz = qFloor(e.pos.z());
         // t1091 域门（ItemEntity tick）两模式分流（Fixed 分支现行语句原样——零变化墙，t1090
@@ -622,14 +635,25 @@ void EntityStore::tick(qreal dt, World *world)
     if (dirty) notifyChanged();
 }
 
-// 自然寿命驱逐（每帧 tick 起始调；age > kDespawnMs → releaseSlot）。
-void EntityStore::despawnExpired()
+// 自然寿命驱逐（每帧 tick 起始调；age > kDespawnMs → releaseSlot）。t1142 E1：非驻留冻结
+//（world sparse 且所属 chunk lifecycle ∉ {Loaded,Active} → 寿命同冻——回访恢复体不被
+// 在场外老化掉，数量守恒面）。
+void EntityStore::despawnExpired(World *world)
 {
     if (m_entities.empty()) return;
     const qint64 now = m_clock.elapsed();
     bool dirty = false;
     for (int i = 0; i < int(m_entities.size()); ++i) {
         if (!m_entities[size_t(i)].alive) continue;
+        if (world && world->isSparse()) {
+            const ItemEntity &ie = m_entities[size_t(i)];
+            const ChunkKey pc = ChunkKey::fromWorld(int(std::floor(double(ie.pos.x()))),
+                                                    int(std::floor(double(ie.pos.z()))),
+                                                    Chunk::kSize);
+            const ChunkLifecycle lc = world->chunks().lifecycleAt(pc.cx, pc.cz);
+            if (lc != ChunkLifecycle::Loaded && lc != ChunkLifecycle::Active)
+                continue; // 非驻留 = 寿命同冻
+        }
         if (now - m_entities[size_t(i)].spawnMs > kDespawnMs) {
             releaseSlot(i);
             dirty = true;
@@ -659,6 +683,106 @@ int EntityStore::despawnInChunk(int cx, int cz)
     if (!doomed.empty())
         notifyChanged(); // 单点收口（revision + 快照重建 + sink 上行）
     return int(doomed.size());
+}
+
+// ── t1142 E1 卸载序列化 / 恢复（契约 = entitystore.h 声明注；mob 族同门禁分叉）────────────
+// 行装配单一执行体（键集 = restoreSlot 消费清单——两侧注释互指钉死）。
+QVariantMap EntityStore::persistedRowOf(const ItemEntity &e) const
+{
+    QVariantMap row;
+    row.insert(QStringLiteral("kind"), 1); // kStageKindItem 同值（entitystagestore.h 常量域；
+                                           //   Entities 层零 World include 的等值声明 + 结构钉互锁）
+    row.insert(QStringLiteral("eid"), e.entityId);
+    row.insert(QStringLiteral("x"), e.pos.x());
+    row.insert(QStringLiteral("y"), e.pos.y());
+    row.insert(QStringLiteral("z"), e.pos.z());
+    row.insert(QStringLiteral("item"), e.itemId);
+    row.insert(QStringLiteral("count"), e.count);
+    row.insert(QStringLiteral("rst"), e.resting);
+    row.insert(QStringLiteral("name"), e.name);
+    row.insert(QStringLiteral("dur"), e.durability);
+    QVariantList ench;
+    for (const int en : e.enchants)
+        ench.append(en);
+    row.insert(QStringLiteral("ench"), ench);
+    return row;
+}
+
+QVariantList EntityStore::exportPersistedInChunk(int cx, int cz) const
+{
+    QVariantList out;
+    for (const ItemEntity &e : m_entities) {
+        if (!e.alive)
+            continue;
+        const ChunkKey pc = ChunkKey::fromWorld(int(std::floor(double(e.pos.x()))),
+                                                int(std::floor(double(e.pos.z()))), Chunk::kSize);
+        if (pc.cx != cx || pc.cz != cz)
+            continue;
+        out.append(persistedRowOf(e));
+    }
+    return out;
+}
+
+QVariantList EntityStore::exportPersistedRows() const
+{
+    QVariantList out;
+    for (const ItemEntity &e : m_entities)
+        if (e.alive)
+            out.append(persistedRowOf(e));
+    return out;
+}
+
+int EntityStore::restorePersistedRows(const QVariantList &rows)
+{
+    int restored = 0;
+    for (const QVariant &v : rows) {
+        const QVariantMap row = v.toMap();
+        // kind 门（EntityManager::restorePersistedEntities 同构——同列表双消费分工：非 Item
+        //   行归 mob 面；kind 键缺 = 损坏行拒收）。
+        bool okKind = false;
+        if (row.value(QStringLiteral("kind")).toInt(&okKind) != 1 || !okKind)
+            continue;
+        if (restoreSlot(row) < 0)
+            break; // 达 kCap 中止（mob 族同门）
+        ++restored;
+    }
+    if (restored > 0)
+        notifyChanged(); // 批量 N 进 1 通知收口（mob 族同门）
+    return restored;
+}
+
+int EntityStore::restoreSlot(const QVariantMap &row)
+{
+    // 防御门（坐标 NaN/Inf → 拒；item/count 门同 spawn 域）。
+    bool okX = false, okY = false, okZ = false;
+    const float x = row.value(QStringLiteral("x")).toFloat(&okX);
+    const float y = row.value(QStringLiteral("y")).toFloat(&okY);
+    const float z = row.value(QStringLiteral("z")).toFloat(&okZ);
+    if (!okX || !okY || !okZ || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z))
+        return -1;
+    if (int(m_liveCount) >= kCap)
+        return -1; // 达 cap 中止（mob 族同门）
+    ItemEntity e;
+    e.pos = QVector3D(x, y, z);
+    e.itemId = row.value(QStringLiteral("item")).toInt();
+    if (e.itemId <= 0)
+        return -1; // 无效物品 = 损坏行拒收（不写残条目）
+    e.count = qMax(1, row.value(QStringLiteral("count")).toInt());
+    e.name = row.value(QStringLiteral("name")).toString();
+    e.durability = row.value(QStringLiteral("dur")).toInt();
+    e.resting = row.value(QStringLiteral("rst")).toBool();
+    const QVariantList ench = row.value(QStringLiteral("ench")).toList();
+    for (int i = 0; i < 4; ++i)
+        e.enchants[i] = i < ench.size() ? ench[i].toInt() : 0;
+    const int slot = acquireSlot(std::move(e)); // 免拾延迟/物理零速度随缺省（回置即静置）
+    if (slot < 0)
+        return -1;
+    const quint32 eid = row.value(QStringLiteral("eid")).toUInt();
+    if (eid > 0) { // 身份回填（mob 族同门：跨卸载/回访延续 + 游标 max 推进）
+        m_entities[size_t(slot)].entityId = eid;
+        m_nextEntityId = qMax(m_nextEntityId, eid + 1);
+    }
+    return slot;
 }
 
 // t1138 swept AABB 实体位移（掉落物面——声明注释见 entitystore.h；ItemEntityManager 逐事件调）。

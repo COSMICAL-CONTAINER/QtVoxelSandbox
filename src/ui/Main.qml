@@ -1124,6 +1124,12 @@ Window {
         if (restoredEntityCount > 0)
             console.info("[t1133] persisted entities restored: " + restoredEntityCount
                          + "/" + persistedEntityRows.length)
+        // t1142 E1：掉落物已提交快照恢复（item_entities 表——卸载暂存的已提交半边随保存事务
+        //   落库，重进经此回置恰一份；旧档无表 → 空列表零注入 = 旧档零迁移面，t1133 同门）。
+        const persistedItemRows = worldStore.loadItemEntities()
+        if (itemEntities.restorePersistedRows(persistedItemRows) > 0)
+            console.info("[t1142] persisted item entities restored: "
+                         + persistedItemRows.length)
         // t1137 活塞动画恢复（PISTON-ANIM）：紧随实体恢复注入存档侧表（存档窗落动画中途 → 重载
         //   后 beats 续倒计时 → 两拍内 settle 实体化 = era TileEntity NBT 随 chunk 档续完真值；
         //   旧档无表 → 空列表零注入 = 旧档零迁移面）。占位格 164 id/state 已随 chunk blob 回填，

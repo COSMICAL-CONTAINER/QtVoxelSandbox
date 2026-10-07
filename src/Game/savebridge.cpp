@@ -79,6 +79,9 @@ bool SaveBridge::saveViaCoordinator(WorldStore *store, const QString &worldFile,
                                        //   探索面与地形同一存档点；缺省空 = 表清空[会话无数据集]）
     req.entities = entities;           // t1133 生物持久化透传（EntityManager::exportPersistedEntities
                                        //   产物——存活生物全档快照，死亡不入档；缺省空 = 表清空）
+    if (m_stagedMobProvider) // t1142 E1：暂存 mob 行并入已提交快照（卸载实体与区块暂存同一保存点；
+                             //   provider 空/无暂存 = 零追加，既有腿零扰动）
+        req.entities += m_stagedMobProvider();
     req.pistonAnims = pistonAnims;     // t1137 活塞两拍动画透传（World::exportPistonAnims 产物——
                                        //   在册占位格全档快照；缺省空 = 表清空）
     req.worldTime = worldTime;

@@ -32,9 +32,23 @@
 //   全族回归绿）。marker-first 等价形态不变：单行 upsert 事务原子 = 「没写进 = 旧行原样保留
 //   在旧代次」（事务本身就是 marker）。
 //
+// ── t1142 SAVE-02 会话暂存域（驱逐写与已提交快照分离；审查 S1 修复的结构主体）────────────
+//   病灶（复核 S1 坐实）：W3 驱逐经 persistChunk 独立连接直写 chunk_edits（已提交快照域）
+//   ——完整保存 A 之后、下一次完整保存之前强退，重开读档对 chunk_edits 无上界约束 →
+//   未提交的世界编辑与上一完整代的玩家/容器同库复活（混代 = 资产复制/丢失）。修法 =
+//   版本行分离（审查「版本行/分表/等价可恢复日志三选一」的分表案）：**驱逐写改落会话暂存
+//   表 chunk_staging**（同会话重载可读）；chunk_edits 从此只被保存事务内写面（persistChunkOn /
+//   晋升拍）触碰 = 「行代次 ≤ 世界已保存代次」成为结构性事实。会话生死 = 暂存生死：
+//   loadStreamingWorld 会话开启拍整体截断（进程死亡 → 未提交编辑随世界一并回退到上一完整
+//   保存代，世界与玩家同一保存点）；完整保存事务首拍晋升（暂存行搬入 chunk_edits 重盖新代次
+//   + 腾空暂存表，同生共死）。回滚面 = 暂存原样 + 快照域恰上一完整代 + 脏账原样 → 同会话
+//   重试收敛。旧档迁移：max(行代次) > save_gen 的悬挂行（旧时代遗产）首开升格收编
+//   （reconcileCommittedSaveGen——不丢任何曾可见内容；零 bump 零破坏性 SQL 零同位替换）。
+//
 // ── 持久化时机（W3 设计依据 + W5 增补，任务书 + §29.5.3 选型 1 (a)）──────────────────────
 //   驱逐候选 dirty 时**即时落盘**（persistFn 缝实现，生产绑定点 = GameSession 流式会话）——
-//   不走整世界 saveAll（fixed 世界的整存 blob 是全量栅格，per-chunk 表与它正交并存）。W5 起
+//   不走整世界 saveAll（fixed 世界的整存 blob 是全量栅格，per-chunk 表与它正交并存）。t1142
+//   起落盘目标 = **会话暂存表**（上方 SAVE-02 段——驱逐写不再直触已提交快照域）。W5 起
 //   增补第二条写路径：**保存时冲洗（flush-all）**——流式世界的持久化形态 = 玩家/进度 blob
 //   （现行走既有链）+ chunk_edits 全量（已生成未编辑的地形块不存，读档按 seed 确定性重生成
 //   ——W1b parity 是正确性根基）；跨会话 blob×附加表 overlay 合并见下方 W5 段。
@@ -140,6 +154,34 @@ public:
     //   拆两壳）。事务回滚面：行随事务回滚 = 零部分写（t1129 四面恰 A/B 保证的流式半边）。
     //   失败 → Result fail（kErrChunkStoreSql 同域），调用方回滚整事务。
     Result<void> persistChunkOn(QSqlDatabase &db, int cx, int cz, const Chunk &chunk);
+
+    // ── t1142 SAVE-02 会话暂存域读/写/晋升/截断面（语义 = 类头 SAVE-02 段）────────────────
+    // W3 驱逐缝落盘目标（会话暂存写）：upsert 进 chunk_staging（键 (cx,cz)；stamp = save_gen+1
+    //   仅为观测刻度，读档仲裁永不消费该值——暂存行不跨会话）。独立连接开-用-关；失败 =
+    //   Result fail（驱逐中止 = 宁驻留不误删，P3 语义不变）。
+    Result<void> persistChunkStaged(int cx, int cz, const Chunk &chunk);
+    // 同会话回访存在性（savedContentQuery 半边：hasChunk || 本谓词）；表缺席（旧档）→ miss。
+    bool hasStagedChunk(int cx, int cz) const;
+    // 同会话回访行读回（收割拍路由暂存先行半边）；未命中 / 读败 / 尺寸不自洽 → false。
+    bool loadStagedChunk(int cx, int cz, ChunkStoreBlob &out) const;
+    // 完整保存事务首拍晋升（外部连接壳；**调用方已 BEGIN**）：暂存行重盖新代次搬入
+    //   chunk_edits + 腾空 chunk_staging（同事务 move——INSERT..SELECT + DELETE，失败 = -1，
+    //   调用方回滚整事务 = 暂存原样）。返回搬动行数（0 = 空表常态）。
+    //   晋升代次 = readStreamSaveGen+1（与 persistChunkOn 同刻度同拍计算——晋升与驻留冲洗
+    //   同批同代，save_gen 推进后恒等）。序契约：晋升**先于**驻留冲洗（同键双态并存时驻留
+    //   内容必新——回访自暂存物化而来；后写胜 = 新者胜，gamesession 冲洗头注拍序论证）。
+    int promoteStagingOn(QSqlDatabase &db);
+    // 会话开启截断（独立连接；DELETE FROM chunk_staging 单语句）。表缺席（旧档）→ 幂等建
+    //   表后 0 行（真 SQL 病才 false——截断失败按保守面处理：调用方 qWarning 继续读档，
+    //   暂存残留面由上界守卫兜底）。
+    bool clearStaging();
+    // 诊断面（矩阵断言用）：暂存表行数（表缺席 = 0）。
+    int stagedChunkCount() const;
+    // 旧档代次升格（会话开启拍，先于仲裁）：max(行代次) > save_gen → save_gen := max
+    //   （一次性收编旧时代悬挂行——W3 时代无 stream_worlds 行盖 1 / W5 时代冲洗成功推进失败
+    //   的遗产；不丢任何曾可见内容）。返回（可能升格后的）save_gen；SQL 病 → 0（调用方
+    //   qWarning 继续——上界守卫在未升格刻度上照常生效）。
+    qint64 reconcileCommittedSaveGen();
 
     // 存在性查询（driver savedContentQuery 的生产绑定点 = Load kind 选择权威）：有行 = 该
     //   chunk 有已落盘内容 → 重载走 blob 物化。查询失败（锁 / 病）按 miss 处理（降级生成路径，

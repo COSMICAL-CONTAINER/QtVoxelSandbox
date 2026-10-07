@@ -169,6 +169,12 @@ public:
     //   转交 entityManager.restorePersistedEntities 注入；行语义门（kind/type 越界 / NaN / 死亡）
     //   归 Entities 层（本类只存取裸列，不解析生物语义——同 chests 的 slots JSON 不解析先例）。
     Q_INVOKABLE QVariantList loadEntities() const;
+    // t1142 E1 读当前库的 item_entities 表为 QVariantList（形状 = EntityStore 序列化行 JSON——
+    //   本类只存取裸载荷不解析实体语义，loadEntities「裸列不解析」同门）。未打开 → 空列表；
+    //   **表缺席（旧档）→ 空列表不崩**（SELECT 失败 qCWarning 降级 = loadEntities 同门硬门）。
+    //   caller（Main.qml enterWorld）转交 ItemEntityManager::restorePersistedRows 注入——掉落物
+    //   已提交快照的恢复面（卸载暂存的已提交半边；行语义门归 Entities 层）。
+    Q_INVOKABLE QVariantList loadItemEntities() const;
     // t1137 读当前库的 piston_anims 表为 QVariantList（形状同 writePistonAnimsPart 入参 = World::
     //   exportPistonAnims 产物形，每项 {x,y,z,id,st,fc,ex,beats}）。未打开 → 空列表；**表缺席
     //   （旧档）→ 空列表不崩**（SELECT 失败 qCWarning 降级 = loadEntities 同门）。caller

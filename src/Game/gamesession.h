@@ -69,9 +69,11 @@
 //   · **保存时冲洗（流式世界持久化主通路）**：flushResidentEditsForSave——保存链（Main.qml
 //     saveAndExitToWorldList → persistWorldState 三同步写 [saveAll/savePlayerData/
 //     saveProgress]）的**前置挂点**（W5b 接线：冲洗成功才续走三写，失败上报不谎报 = r2015
-//     complete 戳同门）。冲洗域 = 全部驻留 dirty chunk 经 W3 persistFn 同缝（persistResidentChunk
-//     ——驱逐与冲洗共用唯一落盘执行体）落 chunk_edits；流式世界的持久化形态 = 玩家/进度
-//     blob（现行走）+ chunk_edits 全量——已生成未编辑的地形块不存，读档按 seed 确定性重生
+//     complete 戳同门）。冲洗域 = 全部驻留 dirty chunk 落已提交域（persistResidentChunk——
+//     【t1142 修订】驱逐缝拆出改落会话暂存域 stageResidentChunk，两缝落盘目标分离 = SAVE-02
+//     世代分离本体；本遗留非事务变体生产零调用，保存事务变体 = flushResidentEditsForSaveOn）
+//     落 chunk_edits；流式世界的持久化形态 = 玩家/进度 blob（现行走）+ chunk_edits 全量——
+//     已生成未编辑的地形块不存，读档按 seed 确定性重生
 //     成（W1b parity 是正确性根基，头注释立证）。冲洗第一拍 = advanceStreamSaveGeneration
 //     （保存代次推进；写不进即失败上报——marker 同门）。
 //   · **读档合并（overlay 语义）**：loadStreamingWorld = sparse 构造（W1）+ 出生半径预生成
@@ -204,6 +206,8 @@
 #include "chunkstreamdriver.h"    // §29.5-W2：ChunkStreamDriver（P2 位置沿编排器——生产通电）
 #include "chunkevictor.h" // §29.5-W3：ChunkEvictor（P3 驱逐编排器——生产实缝三件）
 #include "chunkstore.h"   // §29.5-W3：ChunkStore（D5 选型 (a) per-chunk 附加表——零 bump additive）
+#include "entitystagestore.h" // t1142 E1：EntityStageStore（实体卸载暂存域 + 掉落物已提交
+                              //   快照域——World 层值组件，本壳只经 QVariantList 消费）
 
 // WorldDelta 经信号外发（直接连接无需元类型；声明以备未来跨线程排队连接）。
 Q_DECLARE_METATYPE(WorldDelta)
@@ -376,8 +380,9 @@ public:
     //   证）：行盖写 = save_gen + 1（ChunkStore::persistChunk 统一刻度——驱逐在途写同式），
     //   冲洗后推进 save_gen := 旧值 + 1 = 恰为本批行的盖写代次——「行代次 = 本次保存代次」
     //   精确成立，且推进失败（锁/病）时行已在场（代次锚仲裁只对 base_gen，行不因失号失效，
-    //   marker 同门 = 写不进台账不销数据）；冲洗域 = 全部驻留 dirty chunk 经 W3 persistFn
-    //   同缝落盘（persistResidentChunk 唯一执行体——驱逐与冲洗共用）。任一 chunk 失败或代次
+    //   marker 同门 = 写不进台账不销数据）；冲洗域 = 全部驻留 dirty chunk 落已提交域
+    //   （persistResidentChunk——t1142 起本缝专属执行体；驱逐缝改暂存域执行体 stageResidentChunk，
+    //   两缝落盘目标分离 = SAVE-02 世代分离本体）。任一 chunk 失败或代次
     //   推进失败 = 返回 false（上报不谎报；账不清 = 下次保存重报收敛；已成功行不回滚）。
     bool flushResidentEditsForSave();
     // ── t1129 SAVE-01 同事务冲洗变体（保存链原子化的流式半边）─────────────────────────────
@@ -402,9 +407,59 @@ public:
     int loadBlobChunkCount() const { return m_loadBlobChunkCount; }
     // 驱逐转移前活体移除缝（Entities 层接线方注入：[cx,cz] → 两族 despawnInChunk 的组合；
     // 本壳零 Entities 类型依赖——分层不变[R20.07]。null = 无实体面可移除[驱逐照常进行]）。
+    //   t1142 E1 生产语义修订：接线方（StreamingBridge 生产装配点）在移除前先把该 chunk 活体
+    //   序列化入暂存域（stageEntitiesForChunk——卸载 ≠ 销毁：驯服/坐下/幼体/掉落物走离可回访
+    //   恰一次恢复；review E1「不能只接永久 despawn 会把宠物删除」的正面回应）。缝形不变。
     void setEvictionEntitySink(std::function<void(int cx, int cz)> sink)
     {
         m_entityEvictSink = std::move(sink);
+    }
+    // ── t1142 E1 实体卸载暂存域 + 回访恢复缝（C++ only；fixed 世界恒 null / 空）──────────
+    // 暂存域绑定（ChunkStore 同门：生产 = 流式进入链；矩阵 = fresh 临时库。未 bind = 暂存写
+    //   恒 false = 接线方驱逐缝早退不释放活体——宁驻留不误删同门 fail-safe）。
+    bool bindEntityStageStore(const QString &dbFilePath)
+    {
+        if (!m_entityStage)
+            return false; // fixed 世界无暂存域（连构造都不发生 = D2 零活动墙同门）
+        m_entityStage->bind(dbFilePath);
+        return true;
+    }
+    // 暂存域读面（接线方装配 / 矩阵断言；fixed 恒 null）。
+    const EntityStageStore *entityStageStore() const { return m_entityStage.get(); }
+    // 驱逐沿序列化写（接线方在活体移除前调：rows = 两族 export 行原样，eid/kind 键齐——本壳
+    //   逐行透传暂存域，零实体语义解析）。任一行失败 = false（接线方据此早退不释放活体）。
+    bool stageEntitiesForChunk(int cx, int cz, const QVariantList &rows)
+    {
+        if (!m_entityStage || !m_entityStage->isBound())
+            return false;
+        for (const QVariant &v : rows)
+            if (!m_entityStage->stageEntity(cx, cz, v.toMap()))
+                return false;
+        return true;
+    }
+    // 回访恢复 take（接线方恢复缝调：SELECT+DELETE 同拍 = 恰一次；行注入归 Entities 层恢复面）。
+    QVariantList takeStagedEntitiesForChunk(int cx, int cz)
+    {
+        return m_entityStage ? m_entityStage->takeChunk(cx, cz) : QVariantList();
+    }
+    // 保存载荷合并面（SaveBridge provider 消费——暂存 mob 行并入 entities 段快照，t1129 事务
+    //   内随四面同生共死；消费面非本壳）。返回暂存行全量原样（kind 分派归消费方）。
+    QVariantList stagedEntityRowsForSave() const
+    {
+        return m_entityStage ? m_entityStage->stagedRows() : QVariantList();
+    }
+    // chunk 落位恢复缝（Entities 层接线方注入：[cx,cz] → take 暂存行注入两族恢复面，返回恢复
+    //   数——本壳只在数据面落位后调用，注入语义零泄漏）。null = 无恢复面（暂存行留存待续）。
+    void setEntityRestoreSink(std::function<int(int cx, int cz)> sink)
+    {
+        m_entityRestoreSink = std::move(sink);
+    }
+    // 已提交快照装配的活体导出缝（接线方注入：[] → 掉落物族全量 export 行——掉落物已提交
+    //   快照 = LIVE（本缝）∪ STAGED（暂存域读）两源装配，事务内落 item_entities）。null =
+    //   快照只含暂存源（fixed 世界无本壳零快照——零活动墙）。
+    void setLiveItemExportSink(std::function<QVariantList()> sink)
+    {
+        m_liveItemExportSink = std::move(sink);
     }
     // 观测面：附加表（fixed 恒 null）/ 最近一次驱逐批的 ChunkEvictor 记账 / 调用序逐事件
     // 轨迹（persist 先于转移的调用序柱[r2019b 同款生产面] + 先移除后转移的实体语义面）。
@@ -451,11 +506,16 @@ private:
     // 下一窗，收口单点发布不破（见 runOneTick 注）。
     void noteEdit(int x, int y, int z);
 
-    // ── §29.5-W5 落盘/回灌执行体（私有；冲洗与驱逐共用的唯一 chunk 落盘缝）────────────────
-    // 单 chunk 落盘（W3 persistFn 同体收口——驱逐缝与保存时冲洗两路共用，头注立证）：
-    // chunk 缺席 / store 未 bind → fail（fail-safe 面）；成功 = 清该 chunk 未落盘账（已落盘
-    // 不再 dirty）。代次盖写在 ChunkStore::persistChunk 内（世界保存代次刻度——chunkstore.h
-    // 头注 W5 契约修订段）。
+    // ── §29.5-W5 落盘/回灌执行体（私有；t1142 起两缝分体——落盘目标 = 会话暂存 vs 已提交）──
+    // W3 驱逐缝执行体（persistFn 同体收口——驱逐与遗留非事务冲洗两路共用）：单 chunk 落盘到
+    // **会话暂存域**（chunk_staging——t1142 SAVE-02：驱逐写不直触已提交快照域，强退窗口 =
+    // 暂存域随会话开启截断，世界与玩家同一保存点回退）。chunk 缺席 / store 未 bind → fail
+    //（fail-safe 面）；成功 = 清该 chunk 未落盘账（已落盘不再 dirty）。暂存行盖观测刻度
+    //（save_gen+1，仲裁永不消费）。契约全文 = chunkstore.h SAVE-02 段。
+    Result<void> stageResidentChunk(int cx, int cz);
+    // W5 已提交域执行体（遗留非事务冲洗缝专用——生产保存链走 flushResidentEditsForSaveOn
+    // 同事务变体；committed 独立连接写面为既有矩阵腿语义保留，flushResidentEditsForSave 头注
+    // 登记生产零调用）：成功 = 清该 chunk 未落盘账。
     Result<void> persistResidentChunk(int cx, int cz);
     // 回灌前弃槽（读档 overlay 的「物化内容让位」语义）：已物化（出生预生成占位 / blob 先行
     //  物化）→ ⑥⑦ 合法边到 Absent + 擦槽（数据面闭合，W3 转移缝同门）；未物化 = no-op
@@ -495,6 +555,10 @@ private:
     int m_meshHarvestedCount = 0;             // 收割拍网格交付累计（恰一产出对账锚）
     // ── §29.5-W3 驱逐件（sparse 独占构造；纯值组件零线程——声明序无析构序约束）──────────
     std::unique_ptr<ChunkStore> m_chunkStore; // D5 选型 (a)：per-chunk 编辑附加表（默认未 bind）
+    // ── t1142 E1 实体卸载暂存域（sparse 独占构造；fixed 恒 null = D2 零活动墙同门）────────
+    std::unique_ptr<EntityStageStore> m_entityStage; // 暂存域 + 掉落物已提交快照域载体
+    std::function<int(int cx, int cz)> m_entityRestoreSink; // chunk 落位恢复缝（可空）
+    std::function<QVariantList()> m_liveItemExportSink; // 掉落物快照 LIVE 源导出缝（可空）
     ChunkEvictor m_chunkEvictor;              // P3 驱逐编排器（三缝生产绑定；构造后惰性）
     std::function<void(int cx, int cz)> m_entityEvictSink; // 驱逐转移前活体移除缝（可空）
     ChunkEvictor::Report m_lastEvictionReport;             // 最近一次驱逐批记账（观测面）
@@ -557,17 +621,19 @@ inline GameSession::GameSession(World &world, QObject *parent)
 
         // ── §29.5-W3 驱逐 + Edits-on-evict 生产实缝（三缝绑真实权威；选型论证见类头注）────
         m_chunkStore = std::make_unique<ChunkStore>(); // 默认未 bind（W5 存档入口接线；fail-safe 两面保守）
+        m_entityStage = std::make_unique<EntityStageStore>(); // t1142 E1：默认未 bind（同门 fail-safe）
         // dirtyQuery = World persist 域脏面（chunk 级编辑权威——单漏斗标记面在 ChunkManager）。
         m_chunkEvictor.setDirtyQueryFn([this](int cx, int cz) {
             return m_world.chunkHasUnsavedEdits(cx, cz);
         });
-        // persistFn = per-chunk 附加表即时落盘（驱逐候选 dirty 时；不走整世界 saveAll）。
+        // persistFn = 会话暂存表即时落盘（驱逐候选 dirty 时；不走整世界 saveAll）。t1142
+        //   SAVE-02 落盘目标修订：committed 直写退役改暂存写（强退窗口 = 暂存域随会话开启
+        //   截断——chunkstore.h SAVE-02 段契约；波及钉 lawful 修订见 section28 段注沿革）。
         // 成功 = 清该 chunk 未落盘账；失败 = Result 穿透 → ChunkEvictor 顺序铁律中止驱逐
         //（保持驻留零转移——P3「先落盘后转移」语义的生产执行体在本缝与组件内共同成立）。
-        // §29.5-W5：落盘执行体收口 persistResidentChunk（冲洗同缝共用——唯一落盘执行体），
         // 本 lambda 只补驱逐轨迹（冲洗走独立计数，不污染驱逐沿轨迹语义）。
         m_chunkEvictor.setPersistFn([this](int cx, int cz) -> Result<void> {
-            const Result<void> r = persistResidentChunk(cx, cz);
+            const Result<void> r = stageResidentChunk(cx, cz);
             if (r.isOk()) {
                 m_evictionTrace.append({ 0, cx, cz });  // PersistOk
                 FrameProfiler::instance()->count("streamEvP"); // t1059 F3 stream 行 ev[P] 域
@@ -611,8 +677,11 @@ inline GameSession::GameSession(World &world, QObject *parent)
             m_lastEvictionReport = m_chunkEvictor.evict(cands);
         });
         // savedContentQuery = 附加表存在性（D5 回灌：命中 → Load kind job；未 bind 恒 miss）。
+        //   t1142 SAVE-02：会话暂存域并驾（暂存行在 = 该 chunk 有本会话驱逐内容 → 回访同样走
+        //   Load kind job——两域并查，收割拍路由暂存先行）。
         m_streamDriver->setSavedContentQuery([this](int cx, int cz) {
-            return m_chunkStore && m_chunkStore->isBound() && m_chunkStore->hasChunk(cx, cz);
+            return m_chunkStore && m_chunkStore->isBound()
+                && (m_chunkStore->hasChunk(cx, cz) || m_chunkStore->hasStagedChunk(cx, cz));
         });
 
         // ── §29.5-W4 bake→worker 生产接线（执行器构造 + World 桥提交缝绑定）────────────────
@@ -772,7 +841,22 @@ inline void GameSession::noteEdit(int x, int y, int z)
 
 // ── §29.5-W5 落盘/回灌执行体 + 保存时冲洗 + 读档合并（语义见类头注 W5 段）──────────────────
 
-// 单 chunk 落盘唯一执行体（W3 驱逐缝与 W5 冲洗缝共用——persistFn lambda 只补轨迹）。
+// W3 驱逐缝执行体（t1142 SAVE-02：落盘目标 = 会话暂存域 chunk_staging——语义与契约全文 =
+// chunkstore.h SAVE-02 段 / 类头 stageResidentChunk 注）。
+inline Result<void> GameSession::stageResidentChunk(int cx, int cz)
+{
+    const Chunk *c = m_world.chunks().chunk(cx, cz);
+    if (!c || !m_chunkStore || !m_chunkStore->isBound())
+        return Result<void>::fail(kErrChunkStoreNotBound,
+                                  "stage: store unbound or chunk missing");
+    const Result<void> r = m_chunkStore->persistChunkStaged(cx, cz, *c);
+    if (r.isOk())
+        m_world.clearChunkUnsavedEdits(cx, cz); // 已落盘（暂存域）→ 不再 dirty
+    return r;
+}
+
+// W5 已提交域执行体（遗留非事务冲洗缝专用——生产保存链走 flushResidentEditsForSaveOn；
+// 语义 = 旧「唯一执行体」原样，chunk_edits 直写面为既有矩阵腿保留）。
 inline Result<void> GameSession::persistResidentChunk(int cx, int cz)
 {
     const Chunk *c = m_world.chunks().chunk(cx, cz);
@@ -795,9 +879,11 @@ inline void GameSession::discardStreamingChunkForRestore(int cx, int cz)
     m_world.releaseStreamingChunk(cx, cz); // 擦槽（数据面闭合——W3 转移缝同门）
 }
 
-// 保存时冲洗（主通路）：驻留 dirty 逐 chunk 落盘（盖写 = save_gen + 1）→ 代次推进（旧值 + 1
-// = 恰为本批行盖写代次）。失败面逐 chunk 原子，聚合返回不谎报（任一失败或推进失败 = false；
-// 账不清 = 下次保存重报收敛）。
+// 保存时冲洗（遗留非事务变体；生产保存链 = flushResidentEditsForSaveOn 同事务变体——t1129
+// 起生产零调用，矩阵腿消费面）：驻留 dirty 逐 chunk 落已提交域（persistResidentChunk——
+// t1142 起本缝专属；驱逐缝走 stageResidentChunk 暂存域，两缝落盘目标分离）→ 代次推进（旧值
+// + 1 = 恰为本批行盖写代次）。失败面逐 chunk 原子，聚合返回不谎报（任一失败或推进失败 =
+// false；账不清 = 下次保存重报收敛）。
 inline bool GameSession::flushResidentEditsForSave()
 {
     if (!m_chunkStore || !m_chunkStore->isBound() || !m_world.isSparse())
@@ -836,6 +922,30 @@ inline bool GameSession::flushResidentEditsForSaveOn(QSqlDatabase &db)
         return true; // 未登记流式世界：放行（fixed 零标志零活动同门）
     m_lastFlushKeys.clear(); // 每批重置（提交面只清本批——跨保存无残留键集）
     bool allOk = true;
+    // ── t1142 SAVE-02 晋升拍（同事务 move；序契约 = 晋升先于驻留冲洗——同键双态并存时驻留
+    //    内容必新（回访自暂存物化而来），后写胜 = 新者胜；拍序论证 = chunkstore.h SAVE-02 段）。
+    //    搬动行数 -1 = 失败 → 上报（调用方回滚整事务 = 暂存原样重试收敛）。
+    if (m_chunkStore->promoteStagingOn(db) < 0) {
+        allOk = false;
+        qWarning() << "GameSession: staging promote failed in save transaction";
+    }
+    // ── t1142 E1 掉落物已提交快照拍（同事务；LIVE 源 = 接线方导出缝 ∪ STAGED 源 = 暂存域
+    //    掉落物行——全档快照 DELETE+INSERT，「死亡/被拾取后保存不复活」同门）。快照写失败 =
+    //    上报回滚（与四面同生共死——实体暂存面与区块暂存同一保存点语义）。mob 已提交面 =
+    //    entities 段（载荷合并 provider 在协调层装配，非本壳）。
+    if (m_entityStage && m_entityStage->isBound()) {
+        QVariantList itemRows;
+        if (m_liveItemExportSink)
+            itemRows += m_liveItemExportSink();
+        const QVariantList stagedAll = m_entityStage->stagedRows();
+        for (const QVariant &v : stagedAll)
+            if (v.toMap().value(QStringLiteral("kind")).toInt() == kStageKindItem)
+                itemRows.append(v);
+        if (!m_entityStage->commitItemSnapshotOn(db, itemRows)) {
+            allOk = false;
+            qWarning() << "GameSession: item entity snapshot failed in save transaction";
+        }
+    }
     // 驻留集枚举（flushResidentEditsForSave 同序：cz 外 cx 内；dirtyQuery 同驱逐缝）。
     const QVector<QPair<int, int>> resident = m_world.chunks().sparseResidentKeysOrdered();
     for (const auto &k : resident) {
@@ -882,6 +992,17 @@ inline bool GameSession::loadStreamingWorld(WorldStore &store)
     StreamWorldMeta meta;
     if (!m_chunkStore->readStreamWorldMeta(meta) || !meta.streaming)
         return false; // 非流式世界：caller 走既有 fixed 读档链
+
+    // ── t1142 SAVE-02 会话开启拍（先于一切仲裁；语义 = chunkstore.h SAVE-02 段状态 C）────
+    // ① 旧档代次升格（悬挂行一次性收编——迁移段；返回 0 = SQL 病/无行 → 刻度原样，
+    //    上界守卫在未升格刻度上照常生效）；② 两暂存域截断（会话生死线——进程死亡后未提交
+    //    编辑随世界一并回退到上一完整保存代；跨进程只见完整保存代）。
+    const qint64 committedScale = m_chunkStore->reconcileCommittedSaveGen();
+    if (committedScale > meta.saveGen)
+        meta.saveGen = committedScale; // 升格结果并入本次仲裁刻度
+    if (m_entityStage && (!m_chunkStore->clearStaging() || !m_entityStage->clearStaging()))
+        qWarning() << "GameSession::loadStreamingWorld: session staging clear failed"
+                   << "- committed-scale guard stays authoritative (honest degradation)";
     // ── t1061 物化批口（读档突发整批收口）────────────────────────────────────────────
     // 行回灌 + D3 blob 物化整批 = 一次同步物化突发 → 批口收口恰一条驻留沿（enterWorld 主
     // 线程内逐行发沿只放大呈现层 O(池) 重建，无稳态观察价值——world.h ResidentSetBatch 契约）。
@@ -893,12 +1014,14 @@ inline bool GameSession::loadStreamingWorld(WorldStore &store)
 
     // D3 blob 存在面（现有只读 Q_INVOKABLE 消费）→ 仲裁：行代次 ≥ base_gen（锚）→ 行胜
     //（新者胜；同代 = 表胜）；< → blob 胜（再转换锚让位的老时代行）。无 blob = 无对手方，
-    // 行全胜（原生流式世界，chunks 表恒空）。
+    // 行全胜（原生流式世界，chunks 表恒空）。t1142 上界守卫：行代次 ≤ save_gen（会话开启拍
+    // 升格后的已提交刻度）——「不得超过已完成代次」（review S1 原文；超刻度行 = 升格失败的
+    // 悬挂/外部篡改面 → 不入胜者集，纵深防御非主承重——主承重 = 暂存域结构分离）。
     const bool hasBlob = store.hasChunks();
     QSet<quint64> winners;
     for (const ChunkStoreBlob &row : rows) {
         const bool winsAgainstBlob = !hasBlob || row.generation >= meta.baseGen;
-        if (winsAgainstBlob)
+        if (winsAgainstBlob && row.generation <= meta.saveGen)
             winners.insert(ChunkKey{ row.cx, row.cz }.packed());
     }
 
@@ -1026,6 +1149,7 @@ inline void GameSession::pumpStreamingTick()
     //    hasChunk 注。
     std::unique_ptr<GeneratedChunkData> data;
     qint64 adoptedDrained = 0; // t1059 F3 stream 行 adopt 域的本拍增量
+    // （t1142 暂存先行路由的承重读面在下方 while 循环内——loadStagedChunk || loadChunk 两域并查）
     // t1124 数据面单拍时间预算（#7 契约修订兑现点——修订语义全文见函数头注）：预算计时
     //   原点 = 数据面入口；每**完整落位**恰 1 条后查预算（adopt 原子不可拆——半条不停，单拍
     //   上界 = 预算 + 1×adopt 成本）。耗尽即 break 早退，余量留 m_data 下拍续排（自持缓冲
@@ -1038,8 +1162,13 @@ inline void GameSession::pumpStreamingTick()
     while (m_streamWorker->takeResultData(data)) {
         if (data) {
             ChunkStoreBlob blob;
+            // t1142 SAVE-02 路由（暂存先行）：回访物化读面 = 会话暂存域 || 已提交快照域两域
+            //   并查（暂存行优先——同键双域并存时暂存 = 本会话较新事实；savedContentQuery 两域
+            //   并查的读面对偶）。波及钉幸存面 = section28 r2025d「blob restore route」钉文本
+            //   （restoreChunkFromBlob(data->key.cx...) 原样）。
             const bool stored = m_chunkStore && m_chunkStore->isBound()
-                && m_chunkStore->loadChunk(data->key.cx, data->key.cz, blob);
+                && (m_chunkStore->loadStagedChunk(data->key.cx, data->key.cz, blob)
+                    || m_chunkStore->loadChunk(data->key.cx, data->key.cz, blob));
             bool restored = false;
             if (stored) {
                 restored = m_world.restoreChunkFromBlob(data->key.cx, data->key.cz, blob.voxels,
@@ -1055,6 +1184,11 @@ inline void GameSession::pumpStreamingTick()
                     m_world.adoptGeneratedChunk(data->key.cx, data->key.cz, *data);
             }
         }
+        // t1142 E1 回访恢复：数据面落位后取回该 chunk 暂存实体（SELECT+DELETE 同拍 = 恰一次；
+        // 三路落位[暂存物化 / 确定性重生成 / 生成采纳]一律——chunk 在 ⇒ 其实体在）。注入语义
+        // 归接线方恢复缝（本壳零 Entities 类型依赖——分层不变）；缝 null = 暂存行留存待续。
+        if (data && m_entityRestoreSink)
+            m_entityRestoreSink(data->key.cx, data->key.cz);
         ++m_streamAdoptedCount;
         ++adoptedDrained;
         if (adoptBudgetClock.elapsed() >= m_streamPumpBudgetMs) break; // t1124：预算耗尽早退——余量下拍续排

@@ -1332,6 +1332,29 @@ bool WorldStore::writeEntitiesPart(const QVariantList &entities)
     return true;
 }
 
+// t1142 E1 读 item_entities 表为 QVariantList（形状 = EntityStore 序列化行 JSON；裸载荷不解析
+//   ——loadEntities「裸列不解析」同门）。未打开 → 空列表；SELECT 失败（旧档表缺席 = 首要形态
+//   / 库病）→ qCWarning + 空列表（loadChests 同门——旧档无表读入不丢不崩硬门）。行语义门
+//  （kind/eid/坐标）归 Entities 层 restorePersistedRows。
+QVariantList WorldStore::loadItemEntities() const
+{
+    QVariantList out;
+    if (!m_open) return out;
+    QSqlQuery q(QSqlDatabase::database(kConn));
+    if (!q.exec(QStringLiteral("SELECT data FROM item_entities ORDER BY oid"))) {
+        qCWarning(lcSave) << "loadItemEntities: select failed (legacy save without table?):"
+                          << q.lastError().text();
+        return out; // 旧档无表 → 空列表（恢复面零注入 = t1133 同门）
+    }
+    while (q.next()) {
+        const QVariantMap row = QJsonDocument::fromJson(q.value(0).toString().toUtf8())
+                                    .toVariant().toMap();
+        if (!row.isEmpty())
+            out.append(row);
+    }
+    return out;
+}
+
 // t1133 读 entities 表为 QVariantList（形状同 writeEntitiesPart 入参 = exportPersistedEntities
 //   产物形）。未打开 → 空列表；SELECT 失败（旧档表缺席 = 首要形态 / 库病）→ qCWarning + 空列表
 //   （loadChests 同门——旧档无表读入不丢不崩硬门）。行语义门（kind/type 越界 / NaN / 死亡）归

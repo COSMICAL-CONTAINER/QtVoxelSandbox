@@ -1012,7 +1012,12 @@ public:
     //   Q_INVOKABLE（QML 编排：enterWorld 恢复注入 / runExitSave 导出载荷——同 chests/signs 裸
     //   原语边界先例，WorldStore 不解析本层语义）。
     // 导出：活体 Mob 槽 → QVariantList<QVariantMap>（键集 = 上表持久面；消费方 = WorldStore 写表体）。
+    //   t1142 E1：行加 "eid" 稳定身份键（写表体裸列不解析多键 = 加性安全；暂存/恢复链消费）。
     Q_INVOKABLE QVariantList exportPersistedEntities() const;
+    // t1142 E1 卸载序列化（驱逐沿接线方消费）：同上形状（含 eid），只收中心格 floorDiv16 落在
+    //   (cx,cz) 的活体 Mob 槽——死亡/非 Mob 门同 exportPersistedEntities。非 Q_INVOKABLE
+    //   （生命周期决策零 QML，despawnInChunk 同门）。暂存写 + 活体释放的配对面 = despawnInChunk。
+    QVariantList exportPersistedInChunk(int cx, int cz) const;
     // 恢复：逐行注入存档生物，返回成功恢复数（QML 据它 >0 决定跳过自然入口生成——era 去重口径）。
     Q_INVOKABLE int restorePersistedEntities(const QVariantList &rows);
     // t284 Stalker 蓄力膨胀进度（0..1）：fuseTimer>0（正在蓄力）时返 clamp(fuseTimer/kFuseTime,0,1)，供 QML
@@ -1914,10 +1919,20 @@ private:
         //   （压过求偶寻偶 / 食物引诱 / 幼崽跟随 / wander 选向 / 羊吃草）。放 struct 末尾区保聚合初始化
         //   不错位（t256 元教训）；DMI 兜底 + spawnMobCore 整体 move 入槽 → 槽复用自动清回 0。
         float panicTimer = 0.0f;       // 惊逃剩余秒数（>0 惊逃；仅被动五型用——狼全族 t1047 O-3 起不入集）
+        // t1142 E1 实体稳定身份（放 struct 末尾区保聚合初始化不错位——上方 t256 元教训同门；
+        //   acquireSlot 单漏斗配发 = 全 kind 恒有身份，0 = 空/未配哨兵与 EntityStore::entityId
+        //   同域同纪律：自 1 单调、永不复用、与槽位双轨解耦[R20.14 验收①先例]）。消费面 =
+        //   卸载暂存行键（同体重驱逐替换不重复）+ 恢复回填（跨卸载/回访身份延续）；跨进程
+        //   不延续（已提交快照全量重写语义——t1142 设计工件如实登记）。
+        quint32 entityId = 0;
     };
     std::vector<Entity> m_entities;
-    // rv-low-batch1 全局 spawn 单调序号：acquireSlot 每次分配 +1（写成新实体 spawnSerial）。见 Entity 注释。
+    // rv-low-batch1 全局 spawn 单调序号：acquireSlot 每次分配 +1（写成新实体 entityId —— 写入点
+    //   在 acquireSlot 单漏斗内，move 之后写覆盖被 move 的旧实体默认 0（spawnSerial 同门）。
     quint32 m_spawnSerialCounter = 0;
+    // t1142 E1 稳定身份分配游标（acquireSlot 单漏斗配发；自 1 单调永不复用；restore 回填时
+    //   max 推进——游标恒 > 全体在册身份，新配发永不撞已恢复身份）。
+    quint32 m_nextEntityId = 1;
     // t1112 骑乘推挤豁免快照（setRideExclusion 写 / resolvePlayerPush 读）：骑乘中玩家钉在猪背，无豁免
     //   则推解逐帧把猪顶飞（骑乘不可持续）。槽位 + 代际双键（同 spawnSerial 快照语义，槽复用自动失效）。
     int     m_rideExcludeIdx = -1;       // 豁免槽位（-1 = 无豁免）
@@ -2041,6 +2056,8 @@ private:
         }
         // rv-low-batch1：写入全局单调 spawn 序号（槽代际；move 之后写 —— 覆盖被 move 的旧实体的默认 0）。
         m_entities[size_t(slot)].spawnSerial = ++m_spawnSerialCounter;
+        // t1142 E1：稳定身份配发（单漏斗——全 kind 全 spawn 路径恒有身份；0 哨兵只活在空槽）。
+        m_entities[size_t(slot)].entityId = m_nextEntityId++;
         ++m_liveCount;
         // t1007：高水位随占槽更新（历史峰值；clearAll 释放不回撤，见 slotHighWater() 注释）。
         if (m_liveCount > m_slotHighWater) m_slotHighWater = m_liveCount;

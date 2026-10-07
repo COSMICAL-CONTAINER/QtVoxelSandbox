@@ -144,6 +144,20 @@ public:
     //    的全部活体槽，走既有 releaseSlot（LIFO 复用 + EntityId 永不复用语义不动），
     //    notifyChanged 单点收口。返回移除数（诊断面）。
     int despawnInChunk(int cx, int cz);
+
+    // ── t1142 E1 卸载序列化 / 恢复（掉落物族持久化最小面；mob 族同门 =
+    //    EntityManager::exportPersistedInChunk/restorePersistedEntities，禁两份语义分叉）────
+    // 行形状（本类单一权威）：{kind: kStageKindItem 同值 1, eid, x, y, z, item, count,
+    //   rst, name, dur, ench[4]}——JSON 可携（暂存域 data 列原样），键集 = 恢复面全量消费。
+    //   序列化（驱逐沿接线方消费）：per-chunk（卸载域）/ 全量（保存快照 LIVE 源）两形。
+    //   门集与 despawnInChunk 同（alive 中心格归属）；cap 满不截断序列化（读面）。
+    QVariantList exportPersistedInChunk(int cx, int cz) const;
+    QVariantList exportPersistedRows() const;
+    // 恢复（回访/进入链消费面）：逐行精确回置（**绕过就近合并**——回物化是恢复非新生，
+    //   merge 会改堆叠面；pos/count/item/name/durability/enchants/resting 全保真）+ 身份
+    //   回填（eid > 0 继承 + 游标 max 推进）。达 kCap 中止（mob 族同门，返回已恢复数）。
+    //   kind 门 = 非 Item 行跳过（mob 行归 EntityManager 恢复面——同列表双消费分工）。
+    int restorePersistedRows(const QVariantList &rows);
     // 重置语义：释放全部活体槽 + **无条件**通知（不经批——同旧 clearAll 直 emit）。
     void clearAll();
 
@@ -206,7 +220,13 @@ private:
 
     int acquireSlot(ItemEntity &&e); // 获配槽位（LIFO 复用优先）+ EntityId；返回槽下标
     void releaseSlot(int idx);
-    void despawnExpired();
+    // t1142 E1：带世界参（sparse 非驻留冻结 = 寿命同冻——数量守恒面；null/fixed = 零门）。
+    void despawnExpired(World *world);
+    // t1142 E1 恢复落槽（restorePersistedRows 专用：绕过合并/免拾延迟的精确回置——行 → 槽
+    //   字段映射归一处；id 回填 + 游标 max 推进）。达 kCap → -1（调用方中止）。
+    int restoreSlot(const QVariantMap &row);
+    // t1142 E1 序列化行装配单一执行体（两导出形共用；键集 = restoreSlot 消费清单——互指钉死）。
+    QVariantMap persistedRowOf(const ItemEntity &e) const;
     // 变更收口单点：++revision + 快照重建（验收③沿）+ 按批态上行（非批即 sink / 批内标脏）。
     void notifyChanged();
     void rebuildVisibleSnapshot();

@@ -6,7 +6,11 @@
 #include <QStandardPaths>
 
 #include "chunkstore.h" // stream_worlds 元数据域载体（独立命名连接开-用-关；worldstore 零涉）
+#include "entitystagestore.h" // t1142 E1：暂存域行族常量（kStageKindMob——Game→World 向下合规）
 #include "savebridge.h" // t1129：生产冲洗缝登记宿主（Game 层同域——桥间单点装配）
+#include "entitymanager.h" // t1142 E1 生产装配：entityManager 属性注入读口（QML 注入的运行期
+                           //   依赖——PLAN §2 Game→Entities 向下合规，PlayerController 同门先例）
+#include "itementitymanager.h" // t1142 E1 生产装配：itemEntities 属性注入读口（同上）
 
 // ── §29.5-W5b 流式 UI 桥实现（r2028；语义与选型立证见头文件类头注）────────────────────────
 
@@ -28,6 +32,22 @@ StreamingBridge *StreamingBridge::instance()
         sb->setFlushCommitHook([]() {
             if (instance()->m_session)
                 instance()->m_session->commitFlushResidentEditsOn();
+        });
+        // t1142 E1：暂存 mob 行载荷合并 provider（审查「实体暂存面与区块暂存同一保存点语义」
+        //   ——卸载中实体随保存事务的 entities 段进已提交快照；writeEntitiesPart DELETE+INSERT
+        //   全量快照序 = 步⑥b 在冲洗钩后，故合并只能走载荷装配面，事务内直插会被全量重写清掉）。
+        //   钩空（非流式会话/无暂存）= 零追加，既有腿零扰动。kind 门 = mob 行归 entities 段
+        //   （掉落物行走冲洗钩内 item_entities 快照拍——行族分派单一权威 = kStageKind* 常量）。
+        sb->setStagedMobProvider([]() {
+            StreamingBridge *b = instance();
+            QVariantList out;
+            if (!b->m_session || !b->m_session->isStreamingWorld())
+                return out;
+            const QVariantList staged = b->m_session->stagedEntityRowsForSave();
+            for (const QVariant &v : staged)
+                if (v.toMap().value(QStringLiteral("kind")).toInt() == kStageKindMob)
+                    out.append(v);
+            return out;
         });
     }
     return &inst;
@@ -158,9 +178,45 @@ bool StreamingBridge::enterWorld(World *world, WorldStore *store, WorldClock *cl
         qWarning() << "StreamingBridge::enterWorld: chunk-edits store bind failed for" << file
                    << "- continuing without persist domain (fail-safe: eviction aborts,"
                    << " all-generate reload)"; // 无冲洗域 fail-safe 两面保守（W3 语义承接）
+    if (!m_session->bindEntityStageStore(savePath))
+        qWarning() << "StreamingBridge::enterWorld: entity stage store bind failed for" << file
+                   << "- entity unload staging disabled (fail-safe: live entities stay)"; // t1142 E1
     store->setWorld(world);                    // r2010d rebind（幂等——QML 装配恒同，防御面）
     m_session->loadStreamingWorld(*store);     // overlay 合并（行回灌 + blob 物化 + 代次仲裁；
-                                               //   返回值入会话观测账面，失败诚实降级可玩）
+                                               //   返回值入会话观测账面，失败诚实降级可玩）。
+                                               //   t1142：会话开启拍（暂存域截断 + 代次升格 +
+                                               //   上界守卫）在此一并生效。
+
+    // ── t1142 E1 实体卸载生命周期生产装配（审查 E1 原文「用真实 StreamingBridge 入口，不在
+    //    测试中手动补生产缺钩」的接线点）────────────────────────────────────────────────────
+    // 两管理器经 player 的 QML 属性注入读口取得（Main.qml itemEntities:/entityManager: 注入——
+    //   运行期依赖零构造序耦合，PlayerController 同门）。三缝：驱逐沿 = 先序列化入暂存域后
+    //   释放活体（卸载 ≠ 销毁——暂存行随会话回访恰一次恢复 / 随保存事务进已提交快照；暂存写
+    //   失败 = 早退不释放 = 宁驻留不误删同门）；落位恢复 = take 暂存行注入两族恢复面（恰一次
+    //   = SELECT+DELETE 同拍）；快照 LIVE 源 = 掉落物族全量导出（保存事务内 item_entities 拍）。
+    //   管理器缺席（无 QML 注入的裸会话）= 三缝不装配 = 旧 despawnless 语义（诚实降级面）。
+    EntityManager *prodMobs = player ? player->entityManager() : nullptr;
+    ItemEntityManager *prodItems = player ? player->itemEntities() : nullptr;
+    if (prodMobs && prodItems) {
+        GameSession *sess = m_session.get();
+        sess->setEvictionEntitySink([prodMobs, prodItems, sess](int cx, int cz) {
+            const QVariantList mobRows = prodMobs->exportPersistedInChunk(cx, cz);
+            const QVariantList itemRows = prodItems->exportPersistedInChunk(cx, cz);
+            QVariantList rows = mobRows;
+            rows += itemRows;
+            if (!sess->stageEntitiesForChunk(cx, cz, rows))
+                return; // 暂存域写失败：活体留守驻留 chunk（驱逐沿此刻已被 persist 中止，双保守）
+            prodMobs->despawnInChunk(cx, cz);
+            prodItems->despawnInChunk(cx, cz);
+        });
+        sess->setEntityRestoreSink([prodMobs, prodItems, sess](int cx, int cz) -> int {
+            const QVariantList rows = sess->takeStagedEntitiesForChunk(cx, cz);
+            return prodMobs->restorePersistedEntities(rows)
+                + prodItems->restorePersistedRows(rows);
+        });
+        sess->setLiveItemExportSink([prodItems]() { return prodItems->exportPersistedRows(); });
+    }
+
     ensurePumpHook(clock);                     // ticked → pumpTick（与 QML tick 桥同拍同源）
     ensureFeedHook(player);                    // playerChunkChanged → notePlayerChunk（W2 生产链）
     return true;

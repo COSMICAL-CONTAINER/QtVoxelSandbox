@@ -146,6 +146,16 @@ public:
     //   逻辑并存」纪律；选型与 MC 引证全录 = EntityStore::despawnInChunk 声明注释）。
     //   非 Q_INVOKABLE（生命周期决策零 QML）。
     int despawnInChunk(int cx, int cz) { return m_store.despawnInChunk(cx, cz); }
+    // ── t1142 E1 卸载序列化 / 恢复（一行委托同门——契约全录 = EntityStore 声明注）────────
+    QVariantList exportPersistedInChunk(int cx, int cz) const
+    {
+        return m_store.exportPersistedInChunk(cx, cz);
+    }
+    QVariantList exportPersistedRows() const { return m_store.exportPersistedRows(); }
+    int restorePersistedRows(const QVariantList &rows)
+    {
+        return m_store.restorePersistedRows(rows);
+    }
 
     // t60 掉落物重力 / t271 水冲走 / t343-t445 焚毁 / t320 寿命驱逐（每帧由
     //   PlayerController::tick 调；C++ 直调非 Q_INVOKABLE——避开 moc 对 World* 前向类型的
