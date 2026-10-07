@@ -2,6 +2,7 @@
 
 > 设计权威：`docs/PLAN.md`（§2 不变量 A–M + §4 Phase 1.0 范围/验收）。本文件把 Phase 1.0 拆成可独立验证的任务，供 voxel-dev 子 Agent 顺序开工。
 > 现状以实际 `src`（根目录扁平结构：`world.*` / `chunkgeometry.*` / `playercontroller.*` / `main.cpp` / `Main.qml` / `CMakeLists.txt`）为准。
+> **哈希口径（2026-10-07）**：本账本 2026-10-07 全历史身份重写前的全部提交哈希引用=重写前历史标识符（树内容不变唯哈希全变），喂 git 前先查 `build/identity_rewrite_commit_map.txt`（2104 行旧→新全表）；git 提交正文内嵌哈希已被自动改写为有效新值；新账目一律写新哈希。t1142 批对照：525052b1→c689973c / 820db6ee→8ccbcd12 / ea6b89ff→4351a8b9 / cbf666ef→b9d9f7cb / 28920004→fd87eb5a。
 
 ---
 
