@@ -14,7 +14,8 @@
 
 // 附加域连接名（独立于 worldstore / savecoordinator / chunkstore 三域——四域四连接互不占用）。
 static const char *const kEntityStageConn = "voxelsandbox_entitystagestore";
-// 会话暂存表（键 = eid 唯一；cx/cz = 派生所有权列；data = 序列化行 JSON）。
+// 会话暂存表（键 = (kind, eid) 复合主键——建表注全论证；cx/cz = 派生所有权列；data = 序列化
+// 行 JSON。头注初版「eid 唯一」为复合键修正前残留，t1142 验收勘正）。
 static const char *const kStageTable = "entity_staging";
 // 掉落物已提交快照表（oid = 行序主键——快照全量重写语义，非稳定 id；eid 列仅暂存域对账位）。
 static const char *const kItemTable = "item_entities";
