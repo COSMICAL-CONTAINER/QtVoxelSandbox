@@ -553,9 +553,14 @@ int runEvictParent(const QString &db, const QString &marker, bool saveAfter)
     // 目标 chunk 重物化走**驱动器数据面**（committed 行路由的生产行为面——loadChunkAt 同步
     //   链 = 确定性重生成，不识已提交行，作重开读面会假阴）。
     emit pc.playerChunkChanged(kETargetCX, kETargetCZ);
+    // 主控勘正（t1142 验收复采抓出）：泵拍须带真实时间让渡——异步装载作业交付需要真实毫秒
+    //   （convergeLoaded1142 msleep(2) 同门；紧循环零让渡 = 作业饥饿 → 恒超时静默 return 2，
+    //   提交态复采两连现）。上限 400×5ms = 2s 有界防挂死不变。
     for (int i = 0; i < 400 && w.chunks().lifecycleAt(kETargetCX, kETargetCZ)
-                                            != ChunkLifecycle::Loaded; ++i)
+                                            != ChunkLifecycle::Loaded; ++i) {
         emit clk.ticked(0.1);
+        QThread::msleep(5);
+    }
     if (w.chunks().lifecycleAt(kETargetCX, kETargetCZ) != ChunkLifecycle::Loaded)
         return 2;
     QFile mf(marker);
